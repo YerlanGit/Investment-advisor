@@ -489,12 +489,12 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
     StateFilter(Onboarding.Q1, Onboarding.Q2, Onboarding.Q3, Onboarding.Q4),
 )
 async def cb_question_answer(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
     _, q_part, pts_str = callback.data.split(":")
     q_num = int(q_part[1])
     pts   = int(pts_str)
     await state.update_data(**{f"q{q_num}": pts})
     await send_question(callback, state, q_num)
-    await callback.answer()
 
 
 # ── Universe toggle ───────────────────────────────────────────────────────────
@@ -505,6 +505,7 @@ async def cb_question_answer(callback: CallbackQuery, state: FSMContext) -> None
     StateFilter(Onboarding.Universe),
 )
 async def cb_universe_toggle(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
     asset_key = callback.data[len("ob:uni:"):]
     data      = await state.get_data()
     universe: list[str] = list(data.get("universe", []))
@@ -514,7 +515,6 @@ async def cb_universe_toggle(callback: CallbackQuery, state: FSMContext) -> None
         universe.append(asset_key)
     await state.update_data(universe=universe)
     await callback.message.edit_reply_markup(reply_markup=kb_universe(set(universe)))
-    await callback.answer()
 
 
 # ── Universe confirm ──────────────────────────────────────────────────────────
@@ -531,6 +531,7 @@ async def cb_universe_confirm(callback: CallbackQuery, state: FSMContext) -> Non
         await callback.answer("⚠️ Выберите хотя бы один класс активов.", show_alert=True)
         return
 
+    await callback.answer()
     score   = sum(data.get(f"q{i}", 0) for i in range(1, 5))
     profile = RiskProfileManager.score_to_profile(score)
     limits  = RiskProfileManager.apply_universe(profile, universe)
@@ -545,7 +546,6 @@ async def cb_universe_confirm(callback: CallbackQuery, state: FSMContext) -> Non
     })
     await state.set_state(Onboarding.MandateReview)
     await _edit_or_answer(callback, state, summary, kb_mandate_review())
-    await callback.answer()
 
 
 # ── Mandate approve ───────────────────────────────────────────────────────────
@@ -555,6 +555,7 @@ async def cb_universe_confirm(callback: CallbackQuery, state: FSMContext) -> Non
     StateFilter(Onboarding.MandateReview),
 )
 async def cb_mandate_approve(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
     user_id  = callback.from_user.id
     data     = await state.get_data()
     prof     = data["profile_data"]
@@ -591,7 +592,6 @@ async def cb_mandate_approve(callback: CallbackQuery, state: FSMContext) -> None
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=kb_connect_choice(),
     )
-    await callback.answer()
 
 
 # ── Mandate edit ──────────────────────────────────────────────────────────────
@@ -601,6 +601,7 @@ async def cb_mandate_approve(callback: CallbackQuery, state: FSMContext) -> None
     StateFilter(Onboarding.MandateReview),
 )
 async def cb_mandate_edit(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
     data     = await state.get_data()
     universe = set(data.get("universe", []))
     await state.set_state(Onboarding.Universe)
@@ -609,7 +610,6 @@ async def cb_mandate_edit(callback: CallbackQuery, state: FSMContext) -> None:
         "🌍 *Выбор классов активов*\n\nОтметьте классы активов для вашего портфеля:",
         kb_universe(universe),
     )
-    await callback.answer()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -621,6 +621,7 @@ portfolio_router = Router(name="portfolio_connection")
 
 @portfolio_router.callback_query(F.data.startswith("connect:"))
 async def cb_connect_choice(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
     _, mode  = callback.data.split(":", 1)
     user_id  = callback.from_user.id
     fsm_data = await state.get_data()
@@ -648,8 +649,6 @@ async def cb_connect_choice(callback: CallbackQuery, state: FSMContext) -> None:
             "🔐 Введите ваш *Логин* в Freedom Broker:",
             parse_mode=ParseMode.MARKDOWN,
         )
-
-    await callback.answer()
 
 
 @portfolio_router.message(StateFilter(PortfolioConnection.Login))
@@ -725,6 +724,7 @@ async def _send_pdf(
 
 
 async def cb_analysis_choice(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
     _, tier  = callback.data.split(":", 1)
     cost     = TIER_COST[tier]
     balance  = await get_balance(callback.from_user.id)
@@ -742,7 +742,6 @@ async def cb_analysis_choice(callback: CallbackQuery, state: FSMContext) -> None
         reply_markup=kb_confirm(tier, context_slug),
     )
     await state.set_state(AnalysisFlow.awaiting_approval)
-    await callback.answer()
 
 
 async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
@@ -789,9 +788,9 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
 
 
 async def cb_cancel(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
     await state.clear()
     await callback.message.edit_text("❌ Анализ отменён. Токены не списаны.")
-    await callback.answer()
 
 
 # ── Utility commands ──────────────────────────────────────────────────────────

@@ -28,10 +28,10 @@ TRADERNET_URL    = os.getenv("TRADERNET_URL", "https://tradernet.kz/api/")
 REQUEST_TIMEOUT  = 30   # seconds
 DEMO_KEY         = "demo"
 
-# Commands to try, in priority order.  The Tradernet public API uses
-# "getPositionJson"; older / regional endpoints may still accept
-# "getPortfolio".  We attempt each until one succeeds.
-_PORTFOLIO_CMDS = ("getPositionJson", "getPortfolio")
+# Commands to try, in priority order.  The Freedom Broker / Tradernet API
+# currently uses "getPortfolio" as the primary command; "getPositionJson"
+# is retained as a fallback for older account types.
+_PORTFOLIO_CMDS = ("getPortfolio", "getPositionJson")
 
 
 class FreedomConnector:
