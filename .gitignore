@@ -1,0 +1,35 @@
+__pycache__/
+archive/
+.omx/
+.clawd-agents/
+# Claude Code local artifacts
+.claude/settings.local.json
+.claude/sessions/
+
+# Secrets & credentials — NEVER commit
+.env
+*.env
+ANTHROPIC_API_KEY.env
+data/chroma_db/
+data/reports/
+data/user_reports/
+data/portfolio.csv
+users_vault.db
+*.db
+
+# Python
+*.py[cod]
+*.egg-info/
+dist/
+build/
+venv/
+.venv/
+
+# Rust build artifacts
+rust/target/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

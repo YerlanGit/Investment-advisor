@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <title>RAMP — Portfolio Report</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+
+  <style>
+    /* ── CSS Custom Properties ─────────────────────────────────────────────── */
+    :root {
+      --bg-0:       #0D1117;   /* page background */
+      --bg-1:       #161B22;   /* card surface */
+      --bg-2:       #1C2333;   /* table header / nested */
+      --border:     #30363D;
+      --border-sub: #21262D;
+      --text-1:     #E6EDF3;   /* primary text */
+      --text-2:     #8B949E;   /* muted / labels */
+      --text-3:     #3D444D;   /* footer */
+      --gold:       #C9A84C;
+      --gold-hi:    #E8C96E;
+      --positive:   #3FB950;
+      --negative:   #F85149;
+      --neutral:    #F0C000;
+      --accent:     #58A6FF;
+    }
+
+    /* ── Reset & Base ──────────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      background: var(--bg-0);
+      color: var(--text-1);
+      font-family: 'Inter', -apple-system, sans-serif;
+      font-size: 11px;
+      line-height: 1.65;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── Page Wrapper ──────────────────────────────────────────────────────── */
+    .page {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 36px 44px 44px;
+    }
+
+    /* ── Header ────────────────────────────────────────────────────────────── */
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      padding-bottom: 22px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 26px;
+    }
+
+    .brand-wordmark {
+      font-size: 30px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      background: linear-gradient(135deg, var(--gold) 0%, var(--gold-hi) 60%, var(--gold) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .brand-tagline {
+      font-size: 9px;
+      font-weight: 500;
+      color: var(--text-2);
+      letter-spacing: 0.20em;
+      text-transform: uppercase;
+      margin-top: 3px;
+    }
+
+    .header-meta {
+      text-align: right;
+    }
+
+    .report-badge {
+      display: inline-block;
+      background: linear-gradient(135deg, var(--gold) 0%, #A07820 100%);
+      color: #0D1117;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      padding: 3px 10px;
+      border-radius: 3px;
+      margin-bottom: 6px;
+    }
+
+    .header-meta .meta-line {
+      font-size: 9.5px;
+      color: var(--text-2);
+      line-height: 1.8;
+    }
+
+    /* ── Disclaimer ────────────────────────────────────────────────────────── */
+    .disclaimer {
+      background: linear-gradient(135deg, #1A1F2E 0%, #0F1319 100%);
+      border-left: 3px solid var(--gold);
+      border-radius: 6px;
+      padding: 13px 18px;
+      margin-bottom: 32px;
+      font-size: 10px;
+      color: var(--text-2);
+      line-height: 1.75;
+    }
+
+    .disclaimer strong { color: var(--gold-hi); }
+
+    /* ── Section Title ─────────────────────────────────────────────────────── */
+    .section-title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.20em;
+      text-transform: uppercase;
+      color: var(--gold);
+      margin: 30px 0 14px;
+    }
+
+    .section-title::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: linear-gradient(90deg, var(--border) 0%, transparent 100%);
+    }
+
+    /* ── KPI Strip ─────────────────────────────────────────────────────────── */
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+    }
+
+    .kpi-card {
+      background: var(--bg-1);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 18px 20px 16px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .kpi-card::before {
+      content: '';
+      position: absolute;
+      inset: 0 0 auto 0;
+      height: 2px;
+      background: linear-gradient(90deg, var(--gold) 0%, transparent 70%);
+    }
+
+    .kpi-label {
+      font-size: 9px;
+      font-weight: 600;
+      color: var(--text-2);
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      margin-bottom: 10px;
+    }
+
+    .kpi-value {
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      line-height: 1;
+    }
+
+    .kpi-value.neg  { color: var(--negative); }
+    .kpi-value.pos  { color: var(--positive); }
+    .kpi-value.neu  { color: var(--text-1);   }
+
+    /* ── Risk Gauge ────────────────────────────────────────────────────────── */
+    .risk-panel {
+      background: var(--bg-1);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px 20px;
+      margin-top: 12px;
+    }
+
+    .risk-panel-label {
+      font-size: 9px;
+      font-weight: 600;
+      color: var(--text-2);
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      margin-bottom: 10px;
+    }
+
+    .risk-track {
+      background: var(--border-sub);
+      border-radius: 99px;
+      height: 9px;
+      position: relative;
+      overflow: hidden;
+      margin-bottom: 6px;
+    }
+
+    .risk-fill {
+      height: 100%;
+      border-radius: 99px;
+      background: linear-gradient(90deg, var(--positive) 0%, var(--neutral) 50%, var(--negative) 100%);
+    }
+
+    .risk-scale {
+      display: flex;
+      justify-content: space-between;
+      font-size: 9px;
+      color: var(--text-3);
+    }
+
+    /* ── Tables ────────────────────────────────────────────────────────────── */
+    .table-wrap {
+      background: var(--bg-1);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    thead tr {
+      background: var(--bg-2);
+    }
+
+    thead th {
+      padding: 10px 16px;
+      text-align: left;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--text-2);
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+
+    tbody tr { border-bottom: 1px solid var(--border-sub); }
+    tbody tr:last-child { border-bottom: none; }
+
+    tbody td {
+      padding: 10px 16px;
+      color: #CDD9E5;
+      font-size: 11px;
+      vertical-align: middle;
+    }
+
+    /* Ticker badge — monospaced, accent blue */
+    .ticker {
+      display: inline-block;
+      background: #1A2233;
+      border: 1px solid #2D3748;
+      border-radius: 4px;
+      padding: 2px 9px;
+      font-family: 'Courier New', 'Consolas', monospace;
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--accent);
+      letter-spacing: 0.06em;
+    }
+
+    /* Weight / Euler bars inside cells */
+    .bar-cell { white-space: nowrap; }
+    .bar-inline {
+      display: inline-block;
+      height: 5px;
+      background: var(--gold);
+      border-radius: 2px;
+      margin-right: 6px;
+      vertical-align: middle;
+      opacity: 0.7;
+    }
+
+    /* PnL colouring */
+    .pos   { color: var(--positive); font-weight: 600; }
+    .neg   { color: var(--negative); font-weight: 600; }
+    .neut  { color: var(--neutral);  font-weight: 600; }
+    .muted { color: var(--text-2); }
+
+    /* ── Scenario / Benchmark section ──────────────────────────────────────── */
+    .scenario-highlight {
+      background: linear-gradient(135deg, #1C2233, #111827);
+      border-left: 3px solid var(--gold);
+    }
+
+    /* ── Footer ────────────────────────────────────────────────────────────── */
+    .footer {
+      margin-top: 48px;
+      padding-top: 14px;
+      border-top: 1px solid var(--border-sub);
+      display: flex;
+      justify-content: space-between;
+      font-size: 9px;
+      color: var(--text-3);
+    }
+
+    /* ── Print / PDF overrides ─────────────────────────────────────────────── */
+    @media print {
+      body { background: var(--bg-0); }
+      .page { padding: 0; }
+    }
+  </style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ═══════════════════════════════ HEADER ════════════════════════════════ -->
+  <div class="header">
+    <div>
+      <div class="brand-wordmark">RAMP</div>
+      <div class="brand-tagline">Risk &amp; Asset Management Platform</div>
+    </div>
+    <div class="header-meta">
+      <div class="report-badge">{{ report_type }}</div>
+      <div class="meta-line">Клиент ID: {{ user_id }}</div>
+      <div class="meta-line">Дата: {{ generated_at }}</div>
+      <div class="meta-line" style="color: var(--text-3);">Конфиденциально</div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════ DISCLAIMER ═══════════════════════════════ -->
+  <div class="disclaimer">
+    <strong>🛡 Ваш ИИ-Ассистент, а не диктатор.</strong>
+    Данный отчёт — это мощный компас, но штурвал всегда остаётся у вас.
+    Все представленные данные носят исключительно информационный характер
+    и не являются инвестиционной рекомендацией или офертой.
+    Принятие решений остаётся за инвестором. <strong>Не является ИИИ.</strong>
+  </div>
+
+  <!-- ══════════════════════════ KPI METRICS ═══════════════════════════════ -->
+  <div class="section-title">Ключевые метрики риска</div>
+
+  <div class="kpi-grid">
+    <div class="kpi-card">
+      <div class="kpi-label">CVaR 95% · 1д</div>
+      <div class="kpi-value neg">{{ data.cvar }}</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Sharpe Ratio</div>
+      <div class="kpi-value {% if data.sharpe | string | float(0) >= 1 %}pos{% elif data.sharpe == '—' %}neu{% else %}neg{% endif %}">
+        {{ data.sharpe }}
+      </div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">VaR 95% · 1д</div>
+      <div class="kpi-value neg">{{ data.max_drawdown }}</div>
+    </div>
+  </div>
+
+  <!-- Risk Gauge -->
+  <div class="risk-panel">
+    <div class="risk-panel-label">Общий профиль риска портфеля</div>
+    <div class="risk-track">
+      <div class="risk-fill" style="width: {{ data.risk_pct | default(50) }}%;"></div>
+    </div>
+    <div class="risk-scale">
+      <span>Консервативный</span>
+      <span>Умеренный</span>
+      <span>Агрессивный</span>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════ ASSET TABLE ════════════════════════════════ -->
+  <div class="section-title">Структура портфеля</div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th style="width:4%">#</th>
+          <th>Тикер</th>
+          <th>Класс актива</th>
+          <th>Вес</th>
+          <th>Euler Risk</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for a in data.assets %}
+        <tr>
+          <td class="muted">{{ loop.index }}</td>
+          <td><span class="ticker">{{ a.ticker }}</span></td>
+          <td>{{ a.asset_class }}</td>
+          <td class="bar-cell">
+            {% set w = a.weight | replace('%','') | float(0) %}
+            <span class="bar-inline" style="width:{{ [w * 1.4, 60] | min }}px;"></span>
+            {{ a.weight }}
+          </td>
+          <td class="bar-cell">
+            {% set e = a.euler_risk | replace('%','') | float(0) %}
+            <span class="bar-inline" style="width:{{ [e * 0.8, 50] | min }}px; background:var(--negative); opacity:0.65;"></span>
+            {{ a.euler_risk }}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ═════════════════════ SCENARIO / BENCHMARK TABLE ═════════════════════ -->
+  {% if data.scenarios %}
+  <div class="section-title">Сравнение с бенчмарками</div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Бенчмарк</th>
+          <th>Information Ratio</th>
+          <th>Excess Return</th>
+          <th>Статус</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in data.scenarios %}
+        <tr {% if loop.first %}class="scenario-highlight"{% endif %}>
+          <td style="font-weight:600; {% if loop.first %}color:var(--gold-hi);{% endif %}">
+            {% if loop.first %}⭐ {% endif %}{{ s.name }}
+          </td>
+          <td>{{ s.probability }}</td>
+          <td class="{% if s.pnl.startswith('+') %}pos{% elif s.pnl.startswith('-') %}neg{% else %}neut{% endif %}">
+            {{ s.pnl }}
+          </td>
+          <td>{{ s.driver }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  <!-- ═══════════════════════════════ FOOTER ════════════════════════════════ -->
+  <div class="footer">
+    <span>RAMP Analytics © 2026 — Конфиденциально. Только для внутреннего использования.</span>
+    <span>Документ создан автоматически. Не подлежит тиражированию.</span>
+  </div>
+
+</div>
+</body>
+</html>

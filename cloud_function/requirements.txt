@@ -1,0 +1,5 @@
+functions-framework==3.*
+google-cloud-storage>=2.16.0
+pymupdf4llm>=0.0.10
+chromadb>=0.5.0
+pandas>=2.1.0

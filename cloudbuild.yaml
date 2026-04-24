@@ -1,0 +1,72 @@
+# ────────────────────────────────────────────────────────────────────────────
+# Google Cloud Build — RAMP Bot CI/CD pipeline
+#
+# Triggered automatically on every git push (configure trigger in GCP Console
+# or via: gcloud beta builds triggers create github ...)
+#
+# One-shot manual run:
+#   gcloud builds submit --config cloudbuild.yaml --project YOUR_PROJECT_ID .
+#
+# Substitution variables (override via --substitutions flag or Build Trigger UI):
+#   _REGION   — GCP region for Artifact Registry + Cloud Run
+#   _REPO     — Artifact Registry repository name
+#   _SERVICE  — Cloud Run service name
+# ────────────────────────────────────────────────────────────────────────────
+
+substitutions:
+  _REGION:  us-central1
+  _REPO:    ramp
+  _SERVICE: ramp-bot
+
+steps:
+  # ── Step 1: Build Docker image ──────────────────────────────────────────────
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --tag=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:$SHORT_SHA
+      - --tag=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:latest
+      - --cache-from=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:latest
+      - .
+
+  # ── Step 2: Push both tags ──────────────────────────────────────────────────
+  - id: push
+    name: gcr.io/cloud-builders/docker
+    waitFor: [build]
+    args:
+      - push
+      - --all-tags
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}
+
+  # ── Step 3: Deploy to Cloud Run ─────────────────────────────────────────────
+  - id: deploy
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    waitFor: [push]
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_SERVICE}
+      - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:$SHORT_SHA
+      - --region=${_REGION}
+      - --platform=managed
+      - --min-instances=1        # keep bot alive between polls
+      - --max-instances=1        # single instance — SQLite is not multi-writer safe
+      - --memory=2Gi             # yfinance + sklearn need headroom
+      - --cpu=1
+      - --timeout=3600           # max request timeout (health probe)
+      - --concurrency=1
+      - --no-allow-unauthenticated
+      # Secrets injected from Secret Manager — values never touch image layers
+      - --set-secrets=RAMP_BOT_TOKEN=RAMP_BOT_TOKEN:latest,FINTECH_MASTER_KEY=FINTECH_MASTER_KEY:latest,ANTHROPIC_API_KEY=ANTHROPIC_API_KEY:latest
+
+# Images promoted to Artifact Registry after a successful build
+images:
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:$SHORT_SHA
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:latest
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: E2_MEDIUM   # faster builds for dependency compilation
+
+timeout: 1200s  # 20 min build timeout — pip install sklearn/yfinance is slow
