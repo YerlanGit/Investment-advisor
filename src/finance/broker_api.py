@@ -67,38 +67,28 @@ class FreedomConnector:
         self.api_key    = (api_key    or FREEDOM_API_KEY).strip()
         self.secret_key = (secret_key or FREEDOM_API_SECRET).strip()
 
-    # ── HMAC-SHA256 request signing ──────────────────────────────────────────
-
-    def _generate_signature(self, payload: dict) -> tuple[str, str]:
-        """
-        Tradernet signing: HMAC-SHA256(secret_key, q_bytes).
-        q is compact JSON — separators=(',',':') guarantees no spaces.
-        Returns (q_string, hex_digest).
-        """
-        q_str = json.dumps(payload, separators=(',', ':'))
-        sig   = hmac.new(
-            self.secret_key.encode('utf-8'),
-            q_str.encode('utf-8'),
-            hashlib.sha256,
-        ).hexdigest()
-        logger.debug("DEBUG: Final q_str used for signing: %r", q_str)
-        return q_str, sig
-
     # ── Internal request helper ──────────────────────────────────────────────
 
     def _post(self, cmd: str, extra_params: dict | None = None) -> dict:
         """
-        Send a signed command to the Tradernet API and return the parsed JSON.
-        Raises ``BrokerAuthError`` on credential rejection.
-        Raises ``RuntimeError`` on other API-level errors.
+        Send a signed command to the Freedom Finance API v2 and return parsed JSON.
+
+        v2 format (differs from v1):
+          - 'cmd' is a top-level form field, NOT nested inside 'q'
+          - 'q'   contains only the params JSON  (e.g. '{}')
+          - HMAC-SHA256 is computed over the params JSON string only
         """
         params = {}
         if extra_params:
             params.update(extra_params)
 
-        # Official API spec requires "params":{} even when empty.
-        cmd_payload = {"cmd": cmd, "params": params}
-        q_str, sig  = self._generate_signature(cmd_payload)
+        # v2: q = compact JSON of params only; cmd sent as a separate field.
+        q_str = json.dumps(params, separators=(',', ':'))
+        sig   = hmac.new(
+            self.secret_key.encode('utf-8'),
+            q_str.encode('utf-8'),
+            hashlib.sha256,
+        ).hexdigest()
 
         headers = {
             "Content-Type":  "application/x-www-form-urlencoded",
@@ -106,7 +96,7 @@ class FreedomConnector:
             "X-Nt-Api-Sig":  sig,
         }
 
-        form_data = {"q": q_str}
+        form_data = {"cmd": cmd, "q": q_str}
 
         logger.info("POST %s  [cmd=%s]", TRADERNET_URL, cmd)
         logger.info(
@@ -115,12 +105,6 @@ class FreedomConnector:
             len(self.secret_key),
             self.secret_key[:4] if self.secret_key else "EMPTY",
             q_str,
-        )
-        logger.info(
-            "HEADERS Content-Type=%s X-Nt-Api-Key=%s… X-Nt-Api-Sig=…%s",
-            headers.get("Content-Type", "MISSING"),
-            headers.get("X-Nt-Api-Key", "MISSING")[:6],
-            headers.get("X-Nt-Api-Sig", "MISSING")[-8:],
         )
 
         resp = requests.post(
