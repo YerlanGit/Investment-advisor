@@ -274,11 +274,20 @@ async def _build_analysis_payload(user_id: int, tier: str) -> dict:
     if conn_mode == "freedom":
         keys = await loop.run_in_executor(None, _get_keys_sync, user_id)
         if keys is None:
-            # Fall back to service-level env var credentials when vault has no keys.
             api_key    = os.getenv("FREEDOM_API_KEY", "demo")
             secret_key = os.getenv("FREEDOM_API_SECRET", "")
+            logger.info(
+                "KEY SOURCE: env-vars  user=%s  key_prefix=%s  secret_len=%d",
+                user_id, api_key[:6] if api_key else "EMPTY", len(secret_key),
+            )
         else:
             _, api_key, secret_key = keys
+            api_key    = api_key.strip()
+            secret_key = secret_key.strip()
+            logger.info(
+                "KEY SOURCE: vault  user=%s  key_prefix=%s  secret_len=%d",
+                user_id, api_key[:6] if api_key else "EMPTY", len(secret_key),
+            )
     else:
         api_key    = "demo"
         secret_key = ""
