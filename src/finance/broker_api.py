@@ -2,9 +2,10 @@
 FreedomConnector — live Tradernet/Freedom Broker API client.
 
 Authentication uses HMAC-SHA256 signing:
-  - Header ``X-Nt-Api-Key``:       Public API key
-  - Header ``X-Nt-Api-Timestamp``: Unix epoch seconds
-  - Header ``X-Nt-Api-Sig``:       HMAC-SHA256(payload + timestamp, secret_key)
+  - Header ``X-Nt-Api-Key``: Public API key
+  - Header ``X-Nt-Api-Sig``: HMAC-SHA256(q, secret_key)  — q is the JSON body
+
+The signature is computed over the raw ``q`` string only (no timestamp).
 
 Demo mode: when api_key == 'demo', returns a hardcoded mock portfolio so
 the MAC3 engine can run without real credentials.
@@ -19,7 +20,6 @@ import hmac
 import json
 import logging
 import os
-import time
 
 import pandas as pd
 import requests
@@ -27,21 +27,31 @@ import requests
 logger = logging.getLogger("BrokerAPI")
 
 # Configurable via env var; defaults to the Kazakhstan regional endpoint.
-# tradernet.com returns 403 for KZ accounts — use tradernet.kz instead.
-TRADERNET_URL    = os.getenv("TRADERNET_URL", "https://tradernet.kz/api/")
-REQUEST_TIMEOUT  = 30   # seconds
-DEMO_KEY         = "demo"
+TRADERNET_URL   = os.getenv("TRADERNET_URL", "https://tradernet.kz/api/")
+REQUEST_TIMEOUT = 30   # seconds
+DEMO_KEY        = "demo"
 
 # Service-level Freedom Broker credentials (injected via Secret Manager).
-# Used as a fallback when no per-user vault keys are available.
 FREEDOM_API_KEY    = os.getenv("FREEDOM_API_KEY", "")
 FREEDOM_API_SECRET = os.getenv("FREEDOM_API_SECRET", "")
 
-# Commands to try, in priority order.  The Freedom Broker / Tradernet API
-# currently uses "getPortfolio" as the primary command; "getPositionJson"
-# is retained as a fallback for older account types.
+# Commands to try in priority order.
 _PORTFOLIO_CMDS = ("getPortfolio", "getPositionJson")
 _BALANCE_CMDS   = ("getBalance", "getClientInfo")
+
+# API error substrings that indicate credential/auth rejection.
+_AUTH_ERROR_PHRASES = (
+    "invalid credentials",
+    "unauthorized",
+    "access denied",
+    "forbidden",
+    "bad credentials",
+    "authentication",
+)
+
+
+class BrokerAuthError(RuntimeError):
+    """Raised when Freedom Broker API rejects the request due to bad credentials."""
 
 
 class FreedomConnector:
@@ -52,46 +62,46 @@ class FreedomConnector:
 
     # ── HMAC-SHA256 request signing ──────────────────────────────────────────
 
-    @staticmethod
-    def _sign(payload_str: str, timestamp: int, secret_key: str) -> str:
-        """Tradernet signing: HMAC-SHA256(payload + str(timestamp), secret_key)"""
-        message = (payload_str + str(timestamp)).encode("utf-8")
-        return hmac.new(
-            secret_key.encode("utf-8"),
-            message,
+    def _generate_signature(self, payload: dict) -> tuple[str, str]:
+        """
+        Reference implementation: sign the JSON q-string with the secret key.
+        Message = q bytes only (no timestamp concatenation).
+        Returns (q_string, hex_digest).
+        """
+        q = json.dumps(payload, separators=(',', ':'))
+        sig = hmac.new(
+            self.secret_key.encode(),
+            q.encode(),
             hashlib.sha256,
         ).hexdigest()
+        return q, sig
 
     # ── Internal request helper ──────────────────────────────────────────────
 
     def _post(self, cmd: str, extra_params: dict | None = None) -> dict:
         """
         Send a signed command to the Tradernet API and return the parsed JSON.
-        Raises ``RuntimeError`` on API-level errors.
+        Raises ``BrokerAuthError`` on credential rejection.
+        Raises ``RuntimeError`` on other API-level errors.
         """
         params = {}
         if extra_params:
             params.update(extra_params)
 
-        cmd_payload  = {"cmd": cmd, "params": params}
-        payload_str  = json.dumps(cmd_payload, separators=(",", ":"), ensure_ascii=False)
-        timestamp    = int(time.time())
+        cmd_payload = {"cmd": cmd, "params": params}
+        q, sig      = self._generate_signature(cmd_payload)
 
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
 
         if self.secret_key:
-            sig = self._sign(payload_str, timestamp, self.secret_key)
-            headers.update({
-                "X-Nt-Api-Key":       self.api_key,
-                "X-Nt-Api-Timestamp": str(timestamp),
-                "X-Nt-Api-Sig":       sig,
-            })
+            headers["X-Nt-Api-Key"] = self.api_key
+            headers["X-Nt-Api-Sig"] = sig
 
-        form_data = {"q": payload_str}
+        form_data = {"q": q}
 
         logger.info("POST %s  [cmd=%s]", TRADERNET_URL, cmd)
-        logger.debug("Request form_data: %s", form_data)
-        logger.debug("Headers: X-Nt-Api-Key=%s, ts=%s", self.api_key, timestamp)
+        logger.debug("q=%s", q)
+        logger.debug("X-Nt-Api-Key=%s", self.api_key)
 
         resp = requests.post(
             TRADERNET_URL,
@@ -103,7 +113,14 @@ class FreedomConnector:
         raw = resp.json()
 
         if "error" in raw:
-            raise RuntimeError(raw["error"])
+            err_msg = str(raw["error"])
+            if any(p in err_msg.lower() for p in _AUTH_ERROR_PHRASES):
+                logger.error(
+                    "Freedom API отклонил запрос (auth) [cmd=%s]: status=%s body=%s",
+                    cmd, resp.status_code, resp.text[:500],
+                )
+                raise BrokerAuthError(err_msg)
+            raise RuntimeError(err_msg)
 
         return raw
 
@@ -112,8 +129,9 @@ class FreedomConnector:
     def fetch_portfolio(self) -> pd.DataFrame:
         """
         Fetch live positions from Freedom Broker Tradernet API.
-        Falls back to a mock portfolio when running in demo mode or when
-        the broker is unreachable.
+        Raises ``BrokerAuthError`` on credential rejection — does NOT silently
+        fall back to mock data in that case.
+        Falls back to mock only for non-auth network/command errors.
         """
         if self.api_key == DEMO_KEY:
             logger.info("Демо-режим: используется шаблонный портфель.")
@@ -125,6 +143,8 @@ class FreedomConnector:
             try:
                 raw = self._post(cmd)
                 return self._parse(raw)
+            except BrokerAuthError:
+                raise  # Never fall back to mock on credential rejection
             except RuntimeError as exc:
                 logger.warning("Команда '%s' не поддерживается: %s", cmd, exc)
                 last_error = exc
@@ -143,7 +163,8 @@ class FreedomConnector:
         """
         Fetch account cash balance from Freedom Broker Tradernet API.
         Returns a dict with ``available``, ``blocked``, and ``currency`` keys.
-        Falls back to an empty dict in demo mode or on API error.
+        Falls back to an empty dict on error (non-auth).
+        Raises ``BrokerAuthError`` on credential rejection.
         """
         if self.api_key == DEMO_KEY:
             logger.info("Демо-режим: возвращается фиктивный баланс.")
@@ -160,6 +181,8 @@ class FreedomConnector:
                     "available": float(data.get("equity", data.get("available", 0))),
                     "blocked":   float(data.get("blocked", 0)),
                 }
+            except BrokerAuthError:
+                raise
             except RuntimeError as exc:
                 logger.warning("Команда баланса '%s' не поддерживается: %s", cmd, exc)
                 last_error = exc

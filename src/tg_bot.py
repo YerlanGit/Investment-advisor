@@ -52,7 +52,7 @@ from db_tokenomics import (
     save_connection_mode,
     save_profile,
 )
-from finance.broker_api import FreedomConnector
+from finance.broker_api import BrokerAuthError, FreedomConnector
 from finance.investment_logic import UniversalPortfolioManager
 from finance.security import SecureVault
 from agent.gatekeeper import run_gatekeeper
@@ -282,6 +282,8 @@ async def _build_analysis_payload(user_id: int, tier: str) -> dict:
         results = await loop.run_in_executor(
             None, _fetch_and_analyze_sync, api_key, secret_key, bench_tick
         )
+    except BrokerAuthError:
+        raise  # Propagate as-is so cb_confirm can show the specific auth message
     except RuntimeError as exc:
         logger.error("Freedom Broker API ошибка для %s: %s", user_id, exc)
         raise RuntimeError(
@@ -772,9 +774,15 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
     try:
         payload = await _build_analysis_payload(user_id, tier)
         await _send_pdf(callback.message.bot, callback.message.chat.id, user_id, tier, payload)
+    except BrokerAuthError as exc:
+        logger.error("Freedom Broker аутентификация не прошла для %s: %s", user_id, exc)
+        await callback.message.answer(
+            "⚠️ Не удалось получить данные портфеля. "
+            "Проблема на стороне брокера — попробуйте позже."
+        )
     except Exception as exc:
         logger.exception("Ошибка генерации PDF для %s: %s", user_id, exc)
-        error_detail = str(exc)[:200]  # Truncate very long errors
+        error_detail = str(exc)[:200]
         await callback.message.answer(
             f"⚠️ *Ошибка при анализе портфеля:*\n\n"
             f"`{error_detail}`\n\n"
@@ -845,23 +853,36 @@ def build_dispatcher() -> Dispatcher:
     return dp
 
 
+_CONFLICT_MAX_RETRIES = 5
+_CONFLICT_RETRY_DELAY = 10  # seconds
+
+
 async def main() -> None:
     await init_db()
     bot = Bot(token=BOT_TOKEN)
     dp  = build_dispatcher()
     logger.info("RAMP Bot запущен.")
-    try:
-        await dp.start_polling(
-            bot,
-            allowed_updates=dp.resolve_used_update_types(),
-            drop_pending_updates=True,
-        )
-    except TelegramConflictError:
-        logger.error(
-            "TelegramConflictError: другой экземпляр уже занял polling. "
-            "Завершаю процесс — Cloud Run перезапустит контейнер."
-        )
-        raise SystemExit(1)
+    for attempt in range(_CONFLICT_MAX_RETRIES):
+        try:
+            await dp.start_polling(
+                bot,
+                allowed_updates=dp.resolve_used_update_types(),
+                drop_pending_updates=True,
+            )
+            break
+        except TelegramConflictError:
+            if attempt < _CONFLICT_MAX_RETRIES - 1:
+                logger.warning(
+                    "Конфликт (409), жду %ds перед попыткой %d/%d",
+                    _CONFLICT_RETRY_DELAY, attempt + 2, _CONFLICT_MAX_RETRIES,
+                )
+                await asyncio.sleep(_CONFLICT_RETRY_DELAY)
+            else:
+                logger.error(
+                    "Конфликт не разрешился за %d попыток. Завершение.",
+                    _CONFLICT_MAX_RETRIES,
+                )
+                raise
 
 
 if __name__ == "__main__":
