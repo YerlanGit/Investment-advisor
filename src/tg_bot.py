@@ -65,8 +65,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger("ramp_bot")
 
-BOT_TOKEN: str = os.environ["RAMP_BOT_TOKEN"]
-logger.info("RAMP_BOT_TOKEN loaded — prefix: %s…", BOT_TOKEN[:4])
+BOT_TOKEN: str = os.environ["RAMP_BOT_TOKEN"].strip()
+if not BOT_TOKEN or ":" not in BOT_TOKEN:
+    raise ValueError(
+        f"Invalid RAMP_BOT_TOKEN format — expected 'id:secret', got prefix: {BOT_TOKEN[:10]!r}"
+    )
+logger.info("Starting bot with token prefix: %s…", BOT_TOKEN[:10])
 VAULT_DB: str  = str(Path(__file__).parent.parent / "data" / "users_vault.db")
 
 # ── FSM ───────────────────────────────────────────────────────────────────────

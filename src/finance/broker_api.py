@@ -60,8 +60,9 @@ class BrokerAuthError(RuntimeError):
 class FreedomConnector:
     def __init__(self, api_key: str = "", secret_key: str = ""):
         # Fall back to service-level env var credentials when not explicitly supplied.
-        self.api_key    = api_key    or FREEDOM_API_KEY
-        self.secret_key = secret_key or FREEDOM_API_SECRET
+        # .strip() removes hidden newlines/spaces injected by Secret Manager.
+        self.api_key    = (api_key    or FREEDOM_API_KEY).strip()
+        self.secret_key = (secret_key or FREEDOM_API_SECRET).strip()
 
     # ── HMAC-SHA256 request signing ──────────────────────────────────────────
 
