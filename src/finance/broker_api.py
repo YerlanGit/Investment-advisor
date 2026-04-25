@@ -33,8 +33,10 @@ REQUEST_TIMEOUT = 30   # seconds
 DEMO_KEY        = "demo"
 
 # Service-level Freedom Broker credentials (injected via Secret Manager).
-FREEDOM_API_KEY    = os.getenv("FREEDOM_API_KEY", "")
-FREEDOM_API_SECRET = os.getenv("FREEDOM_API_SECRET", "")
+# .strip() at source prevents hidden newlines from Secret Manager corrupting
+# HMAC signatures or being passed into per-user vault comparisons.
+FREEDOM_API_KEY    = os.getenv("FREEDOM_API_KEY", "").strip()
+FREEDOM_API_SECRET = os.getenv("FREEDOM_API_SECRET", "").strip()
 
 # Commands to try in priority order.
 # getPortfolioFull / getPositions are the current Tradernet API names;
@@ -104,8 +106,13 @@ class FreedomConnector:
         form_data = {"q": q}
 
         logger.info("POST %s  [cmd=%s]", TRADERNET_URL, cmd)
-        # Diagnostic: log full q and key prefix so Cloud Run logs show exactly what was signed
-        logger.info("SIGN q=%s  key_prefix=%s", q, self.api_key[:6] if self.api_key else "EMPTY")
+        logger.info(
+            "SIGN key=%s… secret_len=%d secret_prefix=%s… q=%s",
+            self.api_key[:6]    if self.api_key    else "EMPTY",
+            len(self.secret_key),
+            self.secret_key[:4] if self.secret_key else "EMPTY",
+            q,
+        )
 
         resp = requests.post(
             TRADERNET_URL,
