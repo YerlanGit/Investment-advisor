@@ -83,11 +83,13 @@ class FreedomConnector:
         if extra_params:
             params.update(extra_params)
 
-        # Full command payload in q — signature covers the complete {cmd, params} JSON.
-        q_str = json.dumps({"cmd": cmd, "params": params}, separators=(',', ':'))
-        sig   = hmac.new(
+        # v2 signing: HMAC over cmd+params_json concatenated (e.g. 'getPositionJson{}').
+        # q field in the body contains params only (not full cmd+params).
+        params_json = json.dumps(params, separators=(',', ':'))
+        sig_input   = cmd + params_json
+        sig = hmac.new(
             self.secret_key.encode('utf-8'),
-            q_str.encode('utf-8'),
+            sig_input.encode('utf-8'),
             hashlib.sha256,
         ).hexdigest()
 
@@ -97,16 +99,15 @@ class FreedomConnector:
             "X-NtApi-Sig":       sig,
         }
 
-        # cmd sent as a separate field for v2 routing; q carries the full payload.
-        form_data = {"cmd": cmd, "q": q_str}
+        form_data = {"cmd": cmd, "q": params_json}
 
         logger.info("POST %s  [cmd=%s]", TRADERNET_URL, cmd)
         logger.info(
-            "SIGN key=%s… secret_len=%d secret_prefix=%s… q=%r",
+            "SIGN key=%s… secret_len=%d secret_prefix=%s… sig_input=%r",
             self.api_key[:6]    if self.api_key    else "EMPTY",
             len(self.secret_key),
             self.secret_key[:4] if self.secret_key else "EMPTY",
-            q_str,
+            sig_input,
         )
 
         resp = requests.post(
