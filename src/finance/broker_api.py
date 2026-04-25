@@ -39,9 +39,9 @@ FREEDOM_API_KEY    = os.getenv("FREEDOM_API_KEY", "").strip()
 FREEDOM_API_SECRET = os.getenv("FREEDOM_API_SECRET", "").strip()
 
 # Commands to try in priority order.
-# getPortfolioFull / getPositions are the current Tradernet API names;
-# getPortfolio / getPositionJson are legacy fallbacks kept for compatibility.
-_PORTFOLIO_CMDS = ("getPortfolioFull", "getPositions", "getPortfolio", "getPositionJson")
+# getPositions is the confirmed working command for this account/API version.
+# getPortfolioFull is tried as a second option; legacy names follow.
+_PORTFOLIO_CMDS = ("getPositions", "getPortfolio", "getPortfolioFull", "getPositionJson")
 _BALANCE_CMDS   = ("getBalance", "getClientInfo")
 
 # API error substrings that indicate credential/auth rejection.
@@ -113,6 +113,12 @@ class FreedomConnector:
             self.secret_key[:4] if self.secret_key else "EMPTY",
             q,
         )
+        logger.info(
+            "HEADERS Content-Type=%s X-Nt-Api-Key=%s… X-Nt-Api-Sig=…%s",
+            headers.get("Content-Type", "MISSING"),
+            headers.get("X-Nt-Api-Key", "MISSING")[:6],
+            headers.get("X-Nt-Api-Sig", "MISSING")[-8:],
+        )
 
         resp = requests.post(
             TRADERNET_URL,
@@ -125,11 +131,11 @@ class FreedomConnector:
 
         if "error" in raw:
             err_msg = str(raw["error"])
+            logger.error(
+                "Freedom API error [cmd=%s]: status=%s raw_body=%s",
+                cmd, resp.status_code, resp.text[:500],
+            )
             if any(p in err_msg.lower() for p in _AUTH_ERROR_PHRASES):
-                logger.error(
-                    "Freedom API отклонил запрос (auth) [cmd=%s]: status=%s body=%s",
-                    cmd, resp.status_code, resp.text[:500],
-                )
                 raise BrokerAuthError(err_msg)
             raise RuntimeError(err_msg)
 
