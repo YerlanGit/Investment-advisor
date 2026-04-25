@@ -66,6 +66,7 @@ logging.basicConfig(
 logger = logging.getLogger("ramp_bot")
 
 BOT_TOKEN: str = os.environ["RAMP_BOT_TOKEN"]
+logger.info("RAMP_BOT_TOKEN loaded — prefix: %s…", BOT_TOKEN[:4])
 VAULT_DB: str  = str(Path(__file__).parent.parent / "data" / "users_vault.db")
 
 # ── FSM ───────────────────────────────────────────────────────────────────────
