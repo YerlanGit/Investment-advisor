@@ -18,7 +18,6 @@ import asyncio
 import logging
 import math
 import os
-import random
 from pathlib import Path
 
 import numpy as np
@@ -851,17 +850,18 @@ async def main() -> None:
     bot = Bot(token=BOT_TOKEN)
     dp  = build_dispatcher()
     logger.info("RAMP Bot запущен.")
-    while True:
-        try:
-            await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
-            break
-        except TelegramConflictError:
-            delay = random.uniform(3, 6)
-            logger.warning(
-                "TelegramConflictError: другой экземпляр занял polling. "
-                "Повтор через %.1f сек...", delay
-            )
-            await asyncio.sleep(delay)
+    try:
+        await dp.start_polling(
+            bot,
+            allowed_updates=dp.resolve_used_update_types(),
+            drop_pending_updates=True,
+        )
+    except TelegramConflictError:
+        logger.error(
+            "TelegramConflictError: другой экземпляр уже занял polling. "
+            "Завершаю процесс — Cloud Run перезапустит контейнер."
+        )
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

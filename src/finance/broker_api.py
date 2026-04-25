@@ -45,9 +45,10 @@ _BALANCE_CMDS   = ("getBalance", "getClientInfo")
 
 
 class FreedomConnector:
-    def __init__(self, api_key: str, secret_key: str = ""):
-        self.api_key    = api_key
-        self.secret_key = secret_key
+    def __init__(self, api_key: str = "", secret_key: str = ""):
+        # Fall back to service-level env var credentials when not explicitly supplied.
+        self.api_key    = api_key    or FREEDOM_API_KEY
+        self.secret_key = secret_key or FREEDOM_API_SECRET
 
     # ── HMAC-SHA256 request signing ──────────────────────────────────────────
 
