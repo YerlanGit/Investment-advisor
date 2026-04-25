@@ -95,12 +95,8 @@ class FreedomConnector:
         if extra_params:
             params.update(extra_params)
 
-        # Omit "params" key entirely when empty: {"cmd":"..."} vs {"cmd":"...","params":{}}.
-        # The two forms produce different HMAC signatures; some Tradernet commands require
-        # the shorter form for the server-side signature verification to match.
-        cmd_payload: dict = {"cmd": cmd}
-        if params:
-            cmd_payload["params"] = params
+        # Official API spec requires "params":{} even when empty.
+        cmd_payload = {"cmd": cmd, "params": params}
         q_str, sig  = self._generate_signature(cmd_payload)
 
         headers = {
