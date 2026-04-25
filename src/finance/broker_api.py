@@ -2,12 +2,16 @@
 FreedomConnector — live Tradernet/Freedom Broker API client.
 
 Authentication uses HMAC-SHA256 signing:
-  - Header ``X-NtApi-Key``:       Public API key
-  - Header ``X-NtApi-Timestamp``: Unix epoch seconds
-  - Header ``X-NtApi-Sig``:       HMAC-SHA256(payload + timestamp, secret_key)
+  - Header ``X-Nt-Api-Key``:       Public API key
+  - Header ``X-Nt-Api-Timestamp``: Unix epoch seconds
+  - Header ``X-Nt-Api-Sig``:       HMAC-SHA256(payload + timestamp, secret_key)
 
 Demo mode: when api_key == 'demo', returns a hardcoded mock portfolio so
 the MAC3 engine can run without real credentials.
+
+Service-level credentials can be set via FREEDOM_API_KEY / FREEDOM_API_SECRET
+environment variables and are used as a fallback when no per-user vault keys
+are present.
 """
 
 import hashlib
@@ -28,10 +32,16 @@ TRADERNET_URL    = os.getenv("TRADERNET_URL", "https://tradernet.kz/api/")
 REQUEST_TIMEOUT  = 30   # seconds
 DEMO_KEY         = "demo"
 
+# Service-level Freedom Broker credentials (injected via Secret Manager).
+# Used as a fallback when no per-user vault keys are available.
+FREEDOM_API_KEY    = os.getenv("FREEDOM_API_KEY", "")
+FREEDOM_API_SECRET = os.getenv("FREEDOM_API_SECRET", "")
+
 # Commands to try, in priority order.  The Freedom Broker / Tradernet API
 # currently uses "getPortfolio" as the primary command; "getPositionJson"
 # is retained as a fallback for older account types.
 _PORTFOLIO_CMDS = ("getPortfolio", "getPositionJson")
+_BALANCE_CMDS   = ("getBalance", "getClientInfo")
 
 
 class FreedomConnector:
@@ -43,9 +53,7 @@ class FreedomConnector:
 
     @staticmethod
     def _sign(payload_str: str, timestamp: int, secret_key: str) -> str:
-        """
-        Tradernet signing:  HMAC-SHA256(payload + str(timestamp), secret_key)
-        """
+        """Tradernet signing: HMAC-SHA256(payload + str(timestamp), secret_key)"""
         message = (payload_str + str(timestamp)).encode("utf-8")
         return hmac.new(
             secret_key.encode("utf-8"),
@@ -71,19 +79,18 @@ class FreedomConnector:
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
 
         if self.secret_key:
-            # Signed request — Tradernet official auth
             sig = self._sign(payload_str, timestamp, self.secret_key)
             headers.update({
-                "X-NtApi-Key":       self.api_key,
-                "X-NtApi-Timestamp": str(timestamp),
-                "X-NtApi-Sig":       sig,
+                "X-Nt-Api-Key":       self.api_key,
+                "X-Nt-Api-Timestamp": str(timestamp),
+                "X-Nt-Api-Sig":       sig,
             })
 
         form_data = {"q": payload_str}
 
         logger.info("POST %s  [cmd=%s]", TRADERNET_URL, cmd)
         logger.debug("Request form_data: %s", form_data)
-        logger.debug("Headers (sans sig): X-NtApi-Key=%s, ts=%s", self.api_key, timestamp)
+        logger.debug("Headers: X-Nt-Api-Key=%s, ts=%s", self.api_key, timestamp)
 
         resp = requests.post(
             TRADERNET_URL,
@@ -106,9 +113,6 @@ class FreedomConnector:
         Fetch live positions from Freedom Broker Tradernet API.
         Falls back to a mock portfolio when running in demo mode or when
         the broker is unreachable.
-
-        Tries multiple command names (``getPositionJson``, ``getPortfolio``)
-        because different Tradernet endpoints support different names.
         """
         if self.api_key == DEMO_KEY:
             logger.info("Демо-режим: используется шаблонный портфель.")
@@ -121,14 +125,12 @@ class FreedomConnector:
                 raw = self._post(cmd)
                 return self._parse(raw)
             except RuntimeError as exc:
-                # API returned an error (e.g. "Command not found") — try next
                 logger.warning("Команда '%s' не поддерживается: %s", cmd, exc)
                 last_error = exc
             except requests.RequestException as exc:
                 logger.error("Freedom API недоступен [cmd=%s]: %s", cmd, exc)
                 last_error = exc
 
-        # All commands failed — fall back to mock with a warning
         logger.error(
             "Все команды API не сработали (последняя ошибка: %s) — "
             "переключаюсь на mock-портфель.",
@@ -136,11 +138,41 @@ class FreedomConnector:
         )
         return self._mock_portfolio()
 
+    def fetch_balance(self) -> dict:
+        """
+        Fetch account cash balance from Freedom Broker Tradernet API.
+        Returns a dict with ``available``, ``blocked``, and ``currency`` keys.
+        Falls back to an empty dict in demo mode or on API error.
+        """
+        if self.api_key == DEMO_KEY:
+            logger.info("Демо-режим: возвращается фиктивный баланс.")
+            return {"currency": "USD", "available": 10_000.0, "blocked": 0.0}
+
+        last_error: Exception | None = None
+
+        for cmd in _BALANCE_CMDS:
+            try:
+                raw  = self._post(cmd)
+                data = raw.get("result", raw)
+                return {
+                    "currency":  data.get("currency", "USD"),
+                    "available": float(data.get("equity", data.get("available", 0))),
+                    "blocked":   float(data.get("blocked", 0)),
+                }
+            except RuntimeError as exc:
+                logger.warning("Команда баланса '%s' не поддерживается: %s", cmd, exc)
+                last_error = exc
+            except (requests.RequestException, ValueError) as exc:
+                logger.error("Ошибка получения баланса [cmd=%s]: %s", cmd, exc)
+                last_error = exc
+
+        logger.error("Не удалось получить баланс: %s", last_error)
+        return {}
+
     # ── Parsers ───────────────────────────────────────────────────────────────
 
     def _parse(self, raw_json: dict) -> pd.DataFrame:
         """Map Tradernet portfolio JSON → MAC3 DataFrame (Ticker / Quantity / Purchase_Price)."""
-        # The response may nest data under "result", "pos", or "portfolio".
         data_root = raw_json.get("result", raw_json)
         items = (
             data_root.get("pos")
@@ -174,9 +206,7 @@ class FreedomConnector:
             })
 
         if not positions:
-            logger.warning(
-                "Freedom API вернул пустой портфель, переключаюсь на mock."
-            )
+            logger.warning("Freedom API вернул пустой портфель, переключаюсь на mock.")
             return self._mock_portfolio()
 
         df = pd.DataFrame(positions)

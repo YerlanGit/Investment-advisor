@@ -270,11 +270,11 @@ async def _build_analysis_payload(user_id: int, tier: str) -> dict:
     if conn_mode == "freedom":
         keys = await loop.run_in_executor(None, _get_keys_sync, user_id)
         if keys is None:
-            raise RuntimeError(
-                "Ключи Freedom Broker не найдены. "
-                "Переподключите аккаунт командой /start."
-            )
-        _, api_key, secret_key = keys
+            # Fall back to service-level env var credentials when vault has no keys.
+            api_key    = os.getenv("FREEDOM_API_KEY", "demo")
+            secret_key = os.getenv("FREEDOM_API_SECRET", "")
+        else:
+            _, api_key, secret_key = keys
     else:
         api_key    = "demo"
         secret_key = ""
@@ -524,14 +524,14 @@ async def cb_universe_toggle(callback: CallbackQuery, state: FSMContext) -> None
     StateFilter(Onboarding.Universe),
 )
 async def cb_universe_confirm(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
     data     = await state.get_data()
     universe = data.get("universe", [])
 
     if not universe:
-        await callback.answer("⚠️ Выберите хотя бы один класс активов.", show_alert=True)
+        await callback.message.answer("⚠️ Выберите хотя бы один класс активов.")
         return
 
-    await callback.answer()
     score   = sum(data.get(f"q{i}", 0) for i in range(1, 5))
     profile = RiskProfileManager.score_to_profile(score)
     limits  = RiskProfileManager.apply_universe(profile, universe)
