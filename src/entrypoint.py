@@ -9,6 +9,7 @@ long-polling, not webhooks, so this thin stdlib-only server handles the probe.
 import asyncio
 import logging
 import os
+import sys
 
 # Fix yfinance cache location for Cloud Run (read-only /root/.cache)
 os.makedirs("/tmp/yf_cache", exist_ok=True)
@@ -63,4 +64,10 @@ if __name__ == "__main__":
         level=logging.INFO,
         format="%(asctime)s | %(levelname)-8s | %(name)s — %(message)s",
     )
+    # Playwright spawns child processes via asyncio subprocess.
+    # On Linux/Cloud Run (Python 3.10+), the default child watcher raises
+    # NotImplementedError in non-main threads. ThreadedChildWatcher is safe
+    # in all environments including multi-threaded asyncio.gather() contexts.
+    if sys.platform != "win32":
+        asyncio.set_child_watcher(asyncio.ThreadedChildWatcher())
     asyncio.run(_main())

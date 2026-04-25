@@ -37,7 +37,9 @@ FREEDOM_API_KEY    = os.getenv("FREEDOM_API_KEY", "")
 FREEDOM_API_SECRET = os.getenv("FREEDOM_API_SECRET", "")
 
 # Commands to try in priority order.
-_PORTFOLIO_CMDS = ("getPortfolio", "getPositionJson")
+# getPortfolioFull / getPositions are the current Tradernet API names;
+# getPortfolio / getPositionJson are legacy fallbacks kept for compatibility.
+_PORTFOLIO_CMDS = ("getPortfolioFull", "getPositions", "getPortfolio", "getPositionJson")
 _BALANCE_CMDS   = ("getBalance", "getClientInfo")
 
 # API error substrings that indicate credential/auth rejection.
@@ -147,7 +149,8 @@ class FreedomConnector:
             except BrokerAuthError:
                 raise  # Never fall back to mock on credential rejection
             except RuntimeError as exc:
-                logger.warning("Команда '%s' не поддерживается: %s", cmd, exc)
+                # Log at DEBUG — trying the next command is expected fallback behavior
+                logger.debug("Команда '%s' не поддерживается API, пробую следующую: %s", cmd, exc)
                 last_error = exc
             except requests.RequestException as exc:
                 logger.error("Freedom API недоступен [cmd=%s]: %s", cmd, exc)

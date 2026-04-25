@@ -777,8 +777,11 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
     except BrokerAuthError as exc:
         logger.error("Freedom Broker аутентификация не прошла для %s: %s", user_id, exc)
         await callback.message.answer(
-            "⚠️ Не удалось получить данные портфеля. "
-            "Проблема на стороне брокера — попробуйте позже."
+            "⚠️ *Ошибка: Ваши API-ключи брокера неверны или отозваны.*\n\n"
+            "Пожалуйста, проверьте их в настройках вашего аккаунта Freedom Broker "
+            "и введите заново через /start → 🔗 Freedom Broker API.\n\n"
+            "Токены не были списаны.",
+            parse_mode=ParseMode.MARKDOWN,
         )
     except Exception as exc:
         logger.exception("Ошибка генерации PDF для %s: %s", user_id, exc)
