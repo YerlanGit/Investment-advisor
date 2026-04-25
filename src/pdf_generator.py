@@ -93,6 +93,10 @@ def _render_pdf_sync(html_string: str, output_path: str) -> None:
                 "--no-sandbox",
                 "--disable-setuid-sandbox",
                 "--disable-dev-shm-usage",
+                "--disable-gpu",
+                "--no-zygote",        # disable pre-forked zygote (requires NETLINK)
+                "--single-process",   # renderer runs in browser process (Cloud Run safe)
+                "--disable-extensions",
             ],
         )
         page = browser.new_page()
