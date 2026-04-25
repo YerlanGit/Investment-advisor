@@ -8,11 +8,12 @@ Output path: data/user_reports/<user_id>_report.pdf
 
 import asyncio
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
-from playwright.async_api import async_playwright
+from playwright.sync_api import sync_playwright
 
 logger = logging.getLogger(__name__)
 
@@ -72,23 +73,34 @@ async def generate_portfolio_pdf(
     output_path = OUTPUT_DIR / f"{user_id}_report.pdf"
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    async with async_playwright() as pw:
-        browser = await pw.chromium.launch(
+    # Run Playwright synchronously inside a ThreadPoolExecutor.
+    # async_playwright uses asyncio.create_subprocess_exec which calls
+    # get_child_watcher() — not implemented in aiogram's event loop policy.
+    # The sync API launched from a thread bypasses this entirely.
+    loop = asyncio.get_running_loop()
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        await loop.run_in_executor(pool, _render_pdf_sync, html_string, str(output_path))
+
+    logger.info("PDF сгенерирован: %s", output_path)
+    return str(output_path)
+
+
+def _render_pdf_sync(html_string: str, output_path: str) -> None:
+    """Blocking Playwright render — must be called from a thread, not the event loop."""
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(
             args=[
                 "--no-sandbox",
                 "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage",   # needed inside Docker / Cloud Run
+                "--disable-dev-shm-usage",
             ],
         )
-        page = await browser.new_page()
-
-        # set_content waits for DOM, networkidle waits for Google Fonts
-        await page.set_content(html_string, wait_until="networkidle", timeout=30_000)
-
-        await page.pdf(
-            path             = str(output_path),
+        page = browser.new_page()
+        page.set_content(html_string, wait_until="networkidle", timeout=30_000)
+        page.pdf(
+            path             = output_path,
             format           = "A4",
-            print_background = True,          # required for dark-mode backgrounds
+            print_background = True,
             margin           = {
                 "top":    "14mm",
                 "bottom": "14mm",
@@ -96,16 +108,13 @@ async def generate_portfolio_pdf(
                 "right":  "12mm",
             },
         )
-        await browser.close()
-
-    logger.info("PDF сгенерирован: %s", output_path)
-    return str(output_path)
+        browser.close()
 
 
 # ── CLI smoke-test ────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     async def _smoke() -> None:
         path = await generate_portfolio_pdf(None, user_id="test_user")
-        print(f"✓ PDF сохранён: {path}")
+        print(f"PDF: {path}")
 
     asyncio.run(_smoke())
