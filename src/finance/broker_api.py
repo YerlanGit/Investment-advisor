@@ -160,12 +160,13 @@ class FreedomConnector:
         for cmd in _PORTFOLIO_CMDS:
             try:
                 raw = self._post(cmd)
-                return self._parse(raw)
+                df  = self._parse(raw)
+                logger.info("Команда '%s' выполнена успешно.", cmd)
+                return df
             except BrokerAuthError:
                 raise  # Never fall back to mock on credential rejection
             except RuntimeError as exc:
-                # Log at DEBUG — trying the next command is expected fallback behavior
-                logger.debug("Команда '%s' не поддерживается API, пробую следующую: %s", cmd, exc)
+                logger.info("Команда '%s' не поддерживается (code 5), пробую следующую: %s", cmd, exc)
                 last_error = exc
             except requests.RequestException as exc:
                 logger.error("Freedom API недоступен [cmd=%s]: %s", cmd, exc)
