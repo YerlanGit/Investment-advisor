@@ -71,16 +71,17 @@ class FreedomConnector:
     def _generate_signature(self, payload: dict) -> tuple[str, str]:
         """
         Tradernet signing: HMAC-SHA256(secret_key, q_bytes).
-        q is compact JSON with no extra spaces (separators=(',', ':')).
+        q is compact JSON — separators=(',',':') guarantees no spaces.
         Returns (q_string, hex_digest).
         """
-        q   = json.dumps(payload, separators=(',', ':'))
-        sig = hmac.new(
-            self.secret_key.encode(),
-            q.encode(),
+        q_str = json.dumps(payload, separators=(',', ':'))
+        sig   = hmac.new(
+            self.secret_key.encode('utf-8'),
+            q_str.encode('utf-8'),
             hashlib.sha256,
         ).hexdigest()
-        return q, sig
+        logger.debug("DEBUG: Final q_str used for signing: %r", q_str)
+        return q_str, sig
 
     # ── Internal request helper ──────────────────────────────────────────────
 
@@ -95,23 +96,23 @@ class FreedomConnector:
             params.update(extra_params)
 
         cmd_payload = {"cmd": cmd, "params": params}
-        q, sig      = self._generate_signature(cmd_payload)
+        q_str, sig  = self._generate_signature(cmd_payload)
 
-        headers = {"Content-Type": "application/x-www-form-urlencoded"}
+        headers = {
+            "Content-Type":  "application/x-www-form-urlencoded",
+            "X-Nt-Api-Key":  self.api_key,
+            "X-Nt-Api-Sig":  sig,
+        }
 
-        if self.secret_key:
-            headers["X-Nt-Api-Key"] = self.api_key
-            headers["X-Nt-Api-Sig"] = sig
-
-        form_data = {"q": q}
+        form_data = {"q": q_str}
 
         logger.info("POST %s  [cmd=%s]", TRADERNET_URL, cmd)
         logger.info(
-            "SIGN key=%s… secret_len=%d secret_prefix=%s… q=%s",
+            "SIGN key=%s… secret_len=%d secret_prefix=%s… q=%r",
             self.api_key[:6]    if self.api_key    else "EMPTY",
             len(self.secret_key),
             self.secret_key[:4] if self.secret_key else "EMPTY",
-            q,
+            q_str,
         )
         logger.info(
             "HEADERS Content-Type=%s X-Nt-Api-Key=%s… X-Nt-Api-Sig=…%s",
