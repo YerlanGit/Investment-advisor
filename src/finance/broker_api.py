@@ -91,9 +91,9 @@ class FreedomConnector:
         ).hexdigest()
 
         headers = {
-            "Content-Type":  "application/x-www-form-urlencoded",
-            "X-Nt-Api-Key":  self.api_key,
-            "X-Nt-Api-Sig":  sig,
+            "Content-Type":    "application/x-www-form-urlencoded",
+            "X-NtApi-PublicKey": self.api_key,
+            "X-NtApi-Sig":     sig,
         }
 
         form_data = {"cmd": cmd, "q": q_str}
