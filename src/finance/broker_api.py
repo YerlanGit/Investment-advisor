@@ -73,17 +73,18 @@ class FreedomConnector:
         """
         Send a signed command to the Freedom Finance API v2 and return parsed JSON.
 
-        v2 format (differs from v1):
-          - 'cmd' is a top-level form field, NOT nested inside 'q'
-          - 'q'   contains only the params JSON  (e.g. '{}')
-          - HMAC-SHA256 is computed over the params JSON string only
+        v2 format:
+          - 'cmd' is a top-level form field (required for routing)
+          - 'q'   contains the full {"cmd":...,"params":{}} JSON (same as v1)
+          - HMAC-SHA256 is computed over the full q JSON (same as v1)
+          - Headers use v2 names: X-NtApi-PublicKey / X-NtApi-Sig
         """
         params = {}
         if extra_params:
             params.update(extra_params)
 
-        # v2: q = compact JSON of params only; cmd sent as a separate field.
-        q_str = json.dumps(params, separators=(',', ':'))
+        # Full command payload in q — signature covers the complete {cmd, params} JSON.
+        q_str = json.dumps({"cmd": cmd, "params": params}, separators=(',', ':'))
         sig   = hmac.new(
             self.secret_key.encode('utf-8'),
             q_str.encode('utf-8'),
@@ -91,11 +92,12 @@ class FreedomConnector:
         ).hexdigest()
 
         headers = {
-            "Content-Type":    "application/x-www-form-urlencoded",
+            "Content-Type":      "application/x-www-form-urlencoded",
             "X-NtApi-PublicKey": self.api_key,
-            "X-NtApi-Sig":     sig,
+            "X-NtApi-Sig":       sig,
         }
 
+        # cmd sent as a separate field for v2 routing; q carries the full payload.
         form_data = {"cmd": cmd, "q": q_str}
 
         logger.info("POST %s  [cmd=%s]", TRADERNET_URL, cmd)
