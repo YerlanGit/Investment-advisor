@@ -1,13 +1,12 @@
 """
 FreedomConnector — live Tradernet/Freedom Broker API client.
 
-Authentication uses HMAC-SHA256 signing (official Tradernet protocol):
-  - Header ``X-NtApi-PublicKey``: Public API key
-  - Header ``X-NtApi-Timestamp``: Unix timestamp as string
-  - Header ``X-NtApi-Sig``:       HMAC-SHA256(q + timestamp, secret_key).hexdigest()
+Authentication uses HMAC-SHA256 signing:
+  - Header ``X-Nt-Api-Key``:  Public API key
+  - Header ``X-Nt-Api-Sig``:  HMAC-SHA256(secret_key, q).hexdigest()
 
-The signature message = raw q JSON string + timestamp string (concatenated).
-This matches the official Tradernet Python SDK.
+The ``q`` parameter is a compact JSON string (no extra spaces) of the
+command payload. The signature is computed over the raw ``q`` bytes only.
 
 Demo mode: when api_key == 'demo', returns a hardcoded mock portfolio so
 the MAC3 engine can run without real credentials.
@@ -22,7 +21,6 @@ import hmac
 import json
 import logging
 import os
-import time
 
 import pandas as pd
 import requests
@@ -65,22 +63,19 @@ class FreedomConnector:
 
     # ── HMAC-SHA256 request signing ──────────────────────────────────────────
 
-    def _generate_signature(self, payload: dict) -> tuple[str, str, str]:
+    def _generate_signature(self, payload: dict) -> tuple[str, str]:
         """
-        Official Tradernet signing protocol:
-          message = (q_string + timestamp_string).encode()
-          sig     = HMAC-SHA256(secret_key, message).hexdigest()
-        Returns (q_string, timestamp_string, hex_digest).
+        Tradernet signing: HMAC-SHA256(secret_key, q_bytes).
+        q is compact JSON with no extra spaces (separators=(',', ':')).
+        Returns (q_string, hex_digest).
         """
-        q         = json.dumps(payload, separators=(',', ':'))
-        timestamp = str(int(time.time()))
-        message   = (q + timestamp).encode()
-        sig       = hmac.new(
+        q   = json.dumps(payload, separators=(',', ':'))
+        sig = hmac.new(
             self.secret_key.encode(),
-            message,
+            q.encode(),
             hashlib.sha256,
         ).hexdigest()
-        return q, timestamp, sig
+        return q, sig
 
     # ── Internal request helper ──────────────────────────────────────────────
 
@@ -94,21 +89,20 @@ class FreedomConnector:
         if extra_params:
             params.update(extra_params)
 
-        cmd_payload       = {"cmd": cmd, "params": params}
-        q, timestamp, sig = self._generate_signature(cmd_payload)
+        cmd_payload = {"cmd": cmd, "params": params}
+        q, sig      = self._generate_signature(cmd_payload)
 
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
 
         if self.secret_key:
-            # Official header names from Tradernet API docs
-            headers["X-NtApi-PublicKey"] = self.api_key
-            headers["X-NtApi-Timestamp"] = timestamp
-            headers["X-NtApi-Sig"]       = sig
+            headers["X-Nt-Api-Key"] = self.api_key
+            headers["X-Nt-Api-Sig"] = sig
 
         form_data = {"q": q}
 
         logger.info("POST %s  [cmd=%s]", TRADERNET_URL, cmd)
-        logger.debug("q=%s  timestamp=%s  key=%s", q, timestamp, self.api_key)
+        # Diagnostic: log full q and key prefix so Cloud Run logs show exactly what was signed
+        logger.info("SIGN q=%s  key_prefix=%s", q, self.api_key[:6] if self.api_key else "EMPTY")
 
         resp = requests.post(
             TRADERNET_URL,
