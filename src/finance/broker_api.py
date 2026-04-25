@@ -27,8 +27,9 @@ import requests
 
 logger = logging.getLogger("BrokerAPI")
 
-# Configurable via env var; defaults to the Kazakhstan regional endpoint.
-TRADERNET_URL   = os.getenv("TRADERNET_URL", "https://tradernet.kz/api/")
+# Freedom Finance public API v2 endpoint (getPositionJson and all current commands
+# live on v2; v1 at /api/ returns code 5 "Command not found" for these commands).
+TRADERNET_URL   = os.getenv("TRADERNET_URL", "https://tradernet.kz/api/v2/")
 REQUEST_TIMEOUT = 30   # seconds
 DEMO_KEY        = "demo"
 
