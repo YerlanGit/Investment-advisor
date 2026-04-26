@@ -1,26 +1,30 @@
 """
 FreedomConnector — live Tradernet/Freedom Broker API client.
 
-Authentication (tn-crypto.js algorithm):
-  sig = HMAC-SHA256(secret_key, preSign({cmd, params}))
+Three authentication methods are tried in order:
 
-  preSign(obj): sort keys alphabetically, format each as "key=value"
-  (recursing into nested objects), join with "&".
+  Phase 1 — HMAC-signed v2  (POST /api/v2/)
+    sig = HMAC-SHA256(secret_key, preSign({cmd, params}))
+    Headers: X-NtApi-PublicKey + X-NtApi-Sig
+    Requires a *private key pair* generated in broker account settings.
+    Most retail accounts never get this — they get a single API key instead.
 
-  Example for getPositionJson (no params):
-    preSign({"cmd": "getPositionJson", "params": {}})
-    → "cmd=getPositionJson&params="   (empty dict → empty string)
-    sig = HMAC-SHA256(secret, "cmd=getPositionJson&params=")
+  Phase 2 — Unsigned v1  (POST /api/)
+    Embeds apiKey inside the params JSON — no signing needed.
+    Works with the standard 'Public API Key' available to all accounts.
+    Confirmed pattern from test_live_api.py (getPortfolio + apiKey in params).
 
-  Header X-NtApi-PublicKey carries the public key; X-NtApi-Sig carries sig.
-  q (the JSON-serialised full payload) is sent as a form field for routing.
+  Phase 3 — Session login  (POST /api/ cmd=login → sid)
+    Uses account username (login) + password (secret_key) to obtain a session.
+    This is the standard retail auth flow for Freedom Finance accounts that
+    have neither an HMAC key pair nor a standalone Public API key.
+    The 'login' stored in the vault is used as the username; 'secret_key'
+    is treated as the account password for this phase only.
 
-Demo mode: when api_key == 'demo', returns a hardcoded mock portfolio so
-the MAC3 engine can run without real credentials.
+Demo mode: when api_key == 'demo', returns a hardcoded mock portfolio.
 
-Service-level credentials can be set via FREEDOM_API_KEY / FREEDOM_API_SECRET
-environment variables and are used as a fallback when no per-user vault keys
-are present.
+Service-level credentials: FREEDOM_API_KEY / FREEDOM_API_SECRET / FREEDOM_LOGIN
+environment variables are used when no per-user vault keys are present.
 """
 
 import hashlib
@@ -72,14 +76,19 @@ DEMO_KEY        = "demo"
 # Service-level Freedom Broker credentials (injected via Secret Manager).
 # .strip() at source prevents hidden newlines from Secret Manager corrupting
 # HMAC signatures or being passed into per-user vault comparisons.
-FREEDOM_API_KEY    = os.getenv("FREEDOM_API_KEY", "").strip()
+FREEDOM_API_KEY    = os.getenv("FREEDOM_API_KEY",    "").strip()
 FREEDOM_API_SECRET = os.getenv("FREEDOM_API_SECRET", "").strip()
+FREEDOM_LOGIN      = os.getenv("FREEDOM_LOGIN",      "").strip()
 
-# getPositionJson is the only confirmed-working command on standard Freedom accounts.
-# getPositions / getPortfolio / getPortfolioFull all return code 5 on standard tiers
-# and were removed to avoid 90 s of pointless timeout before the mock fallback.
-_PORTFOLIO_CMDS = ("getPositionJson",)
-_BALANCE_CMDS   = ("getBalance", "getClientInfo")
+# Commands tried per authentication phase.
+# Phase 1 HMAC: getPositionJson is the confirmed v2 command.
+# Phase 2 unsigned: getPortfolio first (confirmed in test_live_api.py pattern),
+#   then getPositionJson as fallback.
+# Phase 3 session: same order.
+_PORTFOLIO_CMDS_HMAC     = ("getPositionJson",)
+_PORTFOLIO_CMDS_UNSIGNED = ("getPortfolio", "getPositionJson")
+_PORTFOLIO_CMDS_SESSION  = ("getPositionJson", "getPortfolio")
+_BALANCE_CMDS            = ("getBalance", "getClientInfo")
 
 # API error substrings that indicate credential/auth rejection.
 # "invalid signature" / code=12 means the HMAC is wrong — treat as auth failure
@@ -113,11 +122,12 @@ class RealPortfolioRequired(RuntimeError):
 
 
 class FreedomConnector:
-    def __init__(self, api_key: str = "", secret_key: str = ""):
+    def __init__(self, api_key: str = "", secret_key: str = "", login: str = ""):
         # Fall back to service-level env var credentials when not explicitly supplied.
         # .strip() removes hidden newlines/spaces injected by Secret Manager.
         self.api_key    = (api_key    or FREEDOM_API_KEY).strip()
         self.secret_key = (secret_key or FREEDOM_API_SECRET).strip()
+        self.login      = (login      or FREEDOM_LOGIN).strip()
 
     # ── Internal request helper ──────────────────────────────────────────────
 
@@ -248,14 +258,107 @@ class FreedomConnector:
 
         return raw
 
+    def _get_session(self) -> str:
+        """
+        Phase-3 auth: POST cmd=login with account username + password → session SID.
+
+        'login' (vault field) is used as the Freedom Finance account username.
+        Falls back to api_key as username if login is not stored.
+        'secret_key' is treated as the account PASSWORD for this phase only
+        (not as an HMAC secret).
+
+        This is the standard retail auth flow for accounts that have neither
+        an HMAC key pair nor a standalone Public API key.
+        """
+        username = self.login or self.api_key
+        password = self.secret_key
+        if not username or not password:
+            raise BrokerAuthError(
+                "Session login requires account username (login) and password (secret_key)"
+            )
+
+        q_payload = json.dumps(
+            {"cmd": "login", "params": {"login": username, "password": password}},
+            separators=(',', ':'),
+        )
+        logger.info(
+            "POST (session/login) %s  [username=%s…]",
+            TRADERNET_URL_V1,
+            username[:6],
+        )
+
+        resp = requests.post(
+            TRADERNET_URL_V1,
+            data={"q": q_payload},
+            timeout=REQUEST_TIMEOUT,
+        )
+        resp.raise_for_status()
+        raw = resp.json()
+
+        err_msg  = raw.get("errMsg") or raw.get("error") or raw.get("err")
+        err_code = raw.get("code")
+        if err_msg or (isinstance(err_code, int) and err_code != 0):
+            err_text = str(err_msg) if err_msg else f"Login error code {err_code}"
+            logger.error("Session login failed: %s (code=%s) raw=%s", err_text, err_code, resp.text[:300])
+            raise BrokerAuthError(f"Авторизация в Freedom Broker не прошла: {err_text}")
+
+        result = raw.get("result", raw)
+        sid = (
+            result.get("sid")
+            or result.get("token")
+            or result.get("sessionId")
+            or result.get("session")
+        )
+        if not sid:
+            raise BrokerAuthError(f"Сервер не вернул session ID. Ответ: {str(raw)[:200]}")
+
+        logger.info("Session login OK — SID prefix: %s…", str(sid)[:8])
+        return str(sid)
+
+    def _post_with_session(self, cmd: str, sid: str) -> dict:
+        """Send a portfolio command authenticated with a session SID."""
+        q_payload = json.dumps(
+            {"cmd": cmd, "params": {"sid": sid}},
+            separators=(',', ':'),
+        )
+        logger.info("POST (session/v1) %s  [cmd=%s]", TRADERNET_URL_V1, cmd)
+
+        resp = requests.post(
+            TRADERNET_URL_V1,
+            data={"q": q_payload},
+            timeout=REQUEST_TIMEOUT,
+        )
+        resp.raise_for_status()
+        raw = resp.json()
+
+        err_msg  = raw.get("errMsg") or raw.get("error") or raw.get("err")
+        err_code = raw.get("code")
+        if err_msg or (isinstance(err_code, int) and err_code != 0):
+            err_text = str(err_msg) if err_msg else f"API error code {err_code}"
+            logger.error(
+                "Freedom API error (session) [cmd=%s]: %s (code=%s) raw=%s",
+                cmd, err_text, err_code, resp.text[:500],
+            )
+            if any(p in err_text.lower() for p in _AUTH_ERROR_PHRASES):
+                raise BrokerAuthError(err_text)
+            raise RuntimeError(err_text)
+
+        return raw
+
     # ── Public API ────────────────────────────────────────────────────────────
 
     def fetch_portfolio(self) -> pd.DataFrame:
         """
         Fetch live positions from Freedom Broker Tradernet API.
-        Raises ``BrokerAuthError`` on credential rejection — does NOT silently
-        fall back to mock data in that case.
-        Falls back to mock only for non-auth network/command errors.
+
+        Three auth phases tried in order — first success wins:
+          1. HMAC-signed v2    (X-NtApi-PublicKey + signature)
+          2. Unsigned v1       (apiKey embedded in params JSON)
+          3. Session login v1  (login + password → SID → portfolio command)
+
+        Raises BrokerAuthError when all three phases confirm bad credentials.
+        Falls back to a marked mock DataFrame only on network/command errors
+        so the MAC3 gate in analyze_all() halts before yfinance.
         """
         if self.api_key == DEMO_KEY:
             logger.info("Демо-режим: используется шаблонный портфель.")
@@ -265,56 +368,80 @@ class FreedomConnector:
 
         last_error: Exception | None = None
 
-        for cmd in _PORTFOLIO_CMDS:
-            # ── Step 1: HMAC-signed v2 (private key pair accounts) ──────────
+        # ── Phase 1: HMAC-signed v2 ──────────────────────────────────────────
+        _hmac_rejected = False
+        for cmd in _PORTFOLIO_CMDS_HMAC:
             try:
                 raw = self._post(cmd)
                 df  = self._parse(raw)
                 logger.info("'%s' via HMAC/v2 — успешно.", cmd)
                 return df
-            except BrokerAuthError as hmac_err:
-                # code=12 "Invalid signature" — this account uses the unsigned
-                # Public API, not the private-key-pair HMAC API.  Try v1 next.
+            except BrokerAuthError as exc:
                 logger.warning(
-                    "HMAC/v2 подпись отклонена [cmd=%s]: %s — "
-                    "переключаюсь на unsigned/v1 Public API.",
-                    cmd, hmac_err,
+                    "HMAC/v2 отклонён [cmd=%s]: %s — переходим к unsigned/v1.",
+                    cmd, exc,
                 )
+                last_error     = exc
+                _hmac_rejected = True
+                break   # auth rejected — no point trying other HMAC commands
             except BrokerEmptyPortfolioError:
                 raise
-            except RuntimeError as exc:
-                logger.warning("HMAC/v2 [cmd=%s] не поддерживается: %s", cmd, exc)
+            except (RuntimeError, requests.RequestException) as exc:
+                logger.warning("HMAC/v2 ошибка [cmd=%s]: %s", cmd, exc)
                 last_error = exc
-                continue
-            except requests.RequestException as exc:
-                logger.error("Freedom API недоступен (HMAC) [cmd=%s]: %s", cmd, exc)
-                last_error = exc
-                continue
 
-            # ── Step 2: unsigned v1 (standard Public API key) ───────────────
+        # ── Phase 2: unsigned v1 (apiKey in params) ──────────────────────────
+        _unsigned_rejected = False
+        for cmd in _PORTFOLIO_CMDS_UNSIGNED:
             try:
                 raw = self._post_unsigned(cmd)
                 df  = self._parse(raw)
                 logger.info("'%s' via unsigned/v1 — успешно.", cmd)
                 return df
-            except BrokerAuthError:
-                raise  # Bad API key — surface immediately, do not fall back to mock
+            except BrokerAuthError as exc:
+                logger.warning(
+                    "unsigned/v1 отклонён [cmd=%s]: %s — переходим к session/v1.",
+                    cmd, exc,
+                )
+                last_error         = exc
+                _unsigned_rejected = True
+                break   # auth rejected — try session login instead
             except BrokerEmptyPortfolioError:
                 raise
-            except RuntimeError as exc:
-                logger.warning("unsigned/v1 [cmd=%s] ошибка: %s", cmd, exc)
-                last_error = exc
-            except requests.RequestException as exc:
-                logger.error("Freedom API недоступен (unsigned) [cmd=%s]: %s", cmd, exc)
+            except (RuntimeError, requests.RequestException) as exc:
+                logger.warning("unsigned/v1 ошибка [cmd=%s]: %s", cmd, exc)
                 last_error = exc
 
+        # ── Phase 3: session login (account username + password) ─────────────
+        try:
+            sid = self._get_session()
+            for cmd in _PORTFOLIO_CMDS_SESSION:
+                try:
+                    raw = self._post_with_session(cmd, sid)
+                    df  = self._parse(raw)
+                    logger.info("'%s' via session/v1 — успешно.", cmd)
+                    return df
+                except BrokerAuthError:
+                    raise   # session expired mid-request — surface immediately
+                except BrokerEmptyPortfolioError:
+                    raise
+                except (RuntimeError, requests.RequestException) as exc:
+                    logger.warning("session/v1 ошибка [cmd=%s]: %s", cmd, exc)
+                    last_error = exc
+        except BrokerAuthError:
+            raise   # login itself failed (bad username/password) — surface to user
+        except Exception as exc:
+            logger.error("Phase 3 session auth недоступна: %s", exc)
+            last_error = exc
+
+        # All three phases failed — return marked fallback; MAC3 gate blocks analysis
         logger.error(
-            "Все команды API не сработали (последняя ошибка: %s) — "
+            "Все три фазы аутентификации не сработали (последняя ошибка: %s) — "
             "возвращаю помеченный fallback-портфель; MAC3 движок заблокирует анализ.",
             last_error,
         )
         df = self._mock_portfolio()
-        df.attrs['_ramp_is_fallback'] = True   # signals RealPortfolioRequired in analyze_all
+        df.attrs['_ramp_is_fallback'] = True
         return df
 
     def fetch_balance(self) -> dict:

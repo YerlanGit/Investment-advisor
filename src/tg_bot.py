@@ -189,12 +189,13 @@ def _save_keys_sync(user_id: int, login: str, api_key: str, secret_key: str) -> 
 
 
 def _fetch_and_analyze_sync(api_key: str, secret_key: str = "",
+                            login: str = "",
                             bench_ticker: str | None = None) -> dict:
     """
     Blocking: fetches portfolio from broker, runs MAC3 engine.
     Must be run in a thread executor.
     """
-    df = FreedomConnector(api_key, secret_key).fetch_portfolio()
+    df = FreedomConnector(api_key, secret_key, login).fetch_portfolio()
     return UniversalPortfolioManager().analyze_all(df, profile_benchmark=bench_ticker)
 
 
@@ -282,27 +283,36 @@ async def _build_analysis_payload(user_id: int, tier: str) -> dict:
     if conn_mode == "freedom":
         keys = await loop.run_in_executor(None, _get_keys_sync, user_id)
         if keys is None:
-            api_key    = os.getenv("FREEDOM_API_KEY", "demo")
+            api_key    = os.getenv("FREEDOM_API_KEY",    "demo")
             secret_key = os.getenv("FREEDOM_API_SECRET", "")
+            login      = os.getenv("FREEDOM_LOGIN",      "")
             logger.info(
-                "KEY SOURCE: env-vars  user=%s  key_prefix=%s  secret_len=%d",
-                user_id, api_key[:6] if api_key else "EMPTY", len(secret_key),
+                "KEY SOURCE: env-vars  user=%s  key_prefix=%s  secret_len=%d  login=%s…",
+                user_id,
+                api_key[:6] if api_key else "EMPTY",
+                len(secret_key),
+                login[:6]   if login   else "EMPTY",
             )
         else:
-            _, api_key, secret_key = keys
-            api_key    = api_key.strip()
-            secret_key = secret_key.strip()
+            login, api_key, secret_key = keys
+            login      = (login      or "").strip()
+            api_key    = (api_key    or "").strip()
+            secret_key = (secret_key or "").strip()
             logger.info(
-                "KEY SOURCE: vault  user=%s  key_prefix=%s  secret_len=%d",
-                user_id, api_key[:6] if api_key else "EMPTY", len(secret_key),
+                "KEY SOURCE: vault  user=%s  key_prefix=%s  secret_len=%d  login=%s…",
+                user_id,
+                api_key[:6] if api_key else "EMPTY",
+                len(secret_key),
+                login[:6]   if login   else "EMPTY",
             )
     else:
         api_key    = "demo"
         secret_key = ""
+        login      = ""
 
     try:
         results = await loop.run_in_executor(
-            None, _fetch_and_analyze_sync, api_key, secret_key, bench_tick
+            None, _fetch_and_analyze_sync, api_key, secret_key, login, bench_tick
         )
     except BrokerAuthError:
         raise  # Propagate as-is so cb_confirm can show the specific auth message
