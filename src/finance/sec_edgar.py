@@ -18,8 +18,8 @@ try:
     from edgar import set_identity, Company
     set_identity("RAMP Advisory ramp-advisory@project.com")
     _edgar_available = True
-except ImportError:
-    logger.warning("edgartools не установлен. pip install edgartools")
+except Exception as _edgar_exc:
+    logger.warning("edgartools недоступен: %s", _edgar_exc)
 
 
 def _safe_call(func, default=None):

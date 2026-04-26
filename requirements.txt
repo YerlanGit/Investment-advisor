@@ -12,6 +12,7 @@ yfinance>=0.2.36
 scikit-learn>=1.4.0
 requests>=2.31.0
 edgartools>=3.0.0
+pyrate-limiter>=2.10.0,<3.0.0
 
 # ── Security / Encryption ────────────────────────────────────────────────────
 cryptography>=42.0.0
