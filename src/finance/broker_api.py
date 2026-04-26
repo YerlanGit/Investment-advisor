@@ -1,12 +1,19 @@
 """
 FreedomConnector — live Tradernet/Freedom Broker API client.
 
-Authentication uses HMAC-SHA256 signing:
-  - Header ``X-Nt-Api-Key``:  Public API key
-  - Header ``X-Nt-Api-Sig``:  HMAC-SHA256(secret_key, q).hexdigest()
+Authentication (tn-crypto.js algorithm):
+  sig = HMAC-SHA256(secret_key, preSign({cmd, params}))
 
-The ``q`` parameter is a compact JSON string (no extra spaces) of the
-command payload. The signature is computed over the raw ``q`` bytes only.
+  preSign(obj): sort keys alphabetically, format each as "key=value"
+  (recursing into nested objects), join with "&".
+
+  Example for getPositionJson (no params):
+    preSign({"cmd": "getPositionJson", "params": {}})
+    → "cmd=getPositionJson&params="   (empty dict → empty string)
+    sig = HMAC-SHA256(secret, "cmd=getPositionJson&params=")
+
+  Header X-NtApi-PublicKey carries the public key; X-NtApi-Sig carries sig.
+  q (the JSON-serialised full payload) is sent as a form field for routing.
 
 Demo mode: when api_key == 'demo', returns a hardcoded mock portfolio so
 the MAC3 engine can run without real credentials.
@@ -93,41 +100,61 @@ class FreedomConnector:
 
     # ── Internal request helper ──────────────────────────────────────────────
 
+    @staticmethod
+    def _pre_sign(data: dict) -> str:
+        """
+        Port of tn-crypto.js preSign(): sort keys alphabetically, join as
+        "key=value" pairs with "&", recursing into nested dicts.
+        Empty dicts produce an empty string for their value.
+        """
+        parts = []
+        for key in sorted(data.keys()):
+            value = data[key]
+            if isinstance(value, dict):
+                value = FreedomConnector._pre_sign(value)
+            else:
+                value = "" if value is None else str(value)
+            parts.append(f"{key}={value}")
+        return "&".join(parts)
+
     def _post(self, cmd: str, extra_params: dict | None = None) -> dict:
         """
-        Send a signed command to the Freedom Finance / Tradernet API and return parsed JSON.
+        Send a signed command to the Freedom Finance / Tradernet API.
 
-        Signing format (standard Tradernet v1/v2):
-          q       = compact JSON string {"cmd": <cmd>, "params": <params>}
-          sig     = HMAC-SHA256(secret_key, q).hexdigest()
-          POST body fields: cmd, q, apiKey, sig
+        Signing (tn-crypto.js algorithm):
+          sign_input = preSign({"cmd": cmd, "params": params})
+          sig        = HMAC-SHA256(secret_key, sign_input).hexdigest()
+
+        For getPositionJson with empty params:
+          sign_input = "cmd=getPositionJson&params="
         """
         params = extra_params or {}
 
-        q_payload = json.dumps({"cmd": cmd, "params": params}, separators=(',', ':'))
+        sign_input = self._pre_sign({"cmd": cmd, "params": params})
         sig = hmac.new(
             self.secret_key.encode('utf-8'),
-            q_payload.encode('utf-8'),
+            sign_input.encode('utf-8'),
             hashlib.sha256,
         ).hexdigest()
 
-        # v2 endpoint uses header-based auth — form-body auth returns HTTP 403.
-        # X-NtApi-Key is the documented header name (not X-NtApi-PublicKey).
+        # q is the full JSON payload sent as a form field for server-side routing.
+        q_payload = json.dumps({"cmd": cmd, "params": params}, separators=(',', ':'))
+
         headers = {
-            "Content-Type": "application/x-www-form-urlencoded",
-            "X-NtApi-Key":  self.api_key,
-            "X-NtApi-Sig":  sig,
+            "Content-Type":      "application/x-www-form-urlencoded",
+            "X-NtApi-PublicKey": self.api_key,
+            "X-NtApi-Sig":       sig,
         }
 
         form_data = {"cmd": cmd, "q": q_payload}
 
         logger.info("POST %s  [cmd=%s]", TRADERNET_URL, cmd)
         logger.info(
-            "SIGN key=%s… secret_len=%d secret_prefix=%s… q=%r",
+            "SIGN key=%s… secret_len=%d secret_prefix=%s… sign_input=%r",
             self.api_key[:6]    if self.api_key    else "EMPTY",
             len(self.secret_key),
             self.secret_key[:4] if self.secret_key else "EMPTY",
-            q_payload,
+            sign_input,
         )
 
         resp = requests.post(
