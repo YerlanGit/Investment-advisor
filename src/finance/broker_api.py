@@ -219,7 +219,12 @@ class FreedomConnector:
         params = {**(extra_params or {}), "apiKey": self.api_key}
         q_payload = json.dumps({"cmd": cmd, "params": params}, separators=(',', ':'))
 
-        logger.info("POST (unsigned/v1) %s  [cmd=%s]", TRADERNET_URL_V1, cmd)
+        logger.info(
+            "POST (unsigned/v1) %s  [cmd=%s]  key_prefix=%s…  key_len=%d",
+            TRADERNET_URL_V1, cmd,
+            self.api_key[:8] if self.api_key else "EMPTY",
+            len(self.api_key),
+        )
 
         resp = requests.post(
             TRADERNET_URL_V1,
