@@ -52,10 +52,21 @@ def _coerce_float(value) -> "float | None":
     except (ValueError, TypeError):
         return None
 
-# Freedom Finance public API v2 endpoint (getPositionJson and all current commands
-# live on v2; v1 at /api/ returns code 5 "Command not found" for these commands).
-TRADERNET_URL   = os.getenv("TRADERNET_URL", "https://tradernet.kz/api/v2/")
-REQUEST_TIMEOUT = 30   # seconds
+# Two Freedom Finance API modes:
+#
+#   v2 HMAC-signed  — POST /api/v2/ with X-NtApi-PublicKey + X-NtApi-Sig headers.
+#                     Requires a *private* key pair issued via the broker's
+#                     "API access" settings — most retail accounts never get this.
+#
+#   v1 unsigned     — POST /api/ with {"cmd":…,"params":{"apiKey":…}} inside the
+#                     form field `q`.  Works with the standard "Public API key"
+#                     that every Freedom Broker account can generate.
+#
+# fetch_portfolio() tries v2 first; on code=12 "Invalid signature" it falls back
+# to v1 automatically so both account types work without user reconfiguration.
+TRADERNET_URL    = os.getenv("TRADERNET_URL",    "https://tradernet.kz/api/v2/")
+TRADERNET_URL_V1 = os.getenv("TRADERNET_URL_V1", "https://tradernet.kz/api/")
+REQUEST_TIMEOUT  = 30   # seconds
 DEMO_KEY        = "demo"
 
 # Service-level Freedom Broker credentials (injected via Secret Manager).
@@ -192,6 +203,46 @@ class FreedomConnector:
 
         return raw
 
+    def _post_unsigned(self, cmd: str, extra_params: dict | None = None) -> dict:
+        """
+        Unsigned POST to the v1 endpoint — Freedom Broker 'Public API' style.
+
+        The API key is embedded inside the params JSON (no HMAC, no special headers).
+        This is the authentication method for standard retail accounts that generate
+        a single 'API Key' in account settings without a separate private/secret key.
+
+        Request shape:
+            POST /api/
+            Content-Type: application/x-www-form-urlencoded
+            Body: q={"cmd":"getPositionJson","params":{"apiKey":"<key>"}}
+        """
+        params = {**(extra_params or {}), "apiKey": self.api_key}
+        q_payload = json.dumps({"cmd": cmd, "params": params}, separators=(',', ':'))
+
+        logger.info("POST (unsigned/v1) %s  [cmd=%s]", TRADERNET_URL_V1, cmd)
+
+        resp = requests.post(
+            TRADERNET_URL_V1,
+            data={"q": q_payload},
+            timeout=REQUEST_TIMEOUT,
+        )
+        resp.raise_for_status()
+        raw = resp.json()
+
+        err_msg  = raw.get("errMsg") or raw.get("error") or raw.get("err")
+        err_code = raw.get("code")
+        if err_msg or (isinstance(err_code, int) and err_code != 0):
+            err_text = str(err_msg) if err_msg else f"API error code {err_code}"
+            logger.error(
+                "Freedom API error (unsigned) [cmd=%s]: %s (code=%s) raw=%s",
+                cmd, err_text, err_code, resp.text[:500],
+            )
+            if any(p in err_text.lower() for p in _AUTH_ERROR_PHRASES):
+                raise BrokerAuthError(err_text)
+            raise RuntimeError(err_text)
+
+        return raw
+
     # ── Public API ────────────────────────────────────────────────────────────
 
     def fetch_portfolio(self) -> pd.DataFrame:
@@ -210,20 +261,46 @@ class FreedomConnector:
         last_error: Exception | None = None
 
         for cmd in _PORTFOLIO_CMDS:
+            # ── Step 1: HMAC-signed v2 (private key pair accounts) ──────────
             try:
                 raw = self._post(cmd)
                 df  = self._parse(raw)
-                logger.info("Команда '%s' выполнена успешно.", cmd)
+                logger.info("'%s' via HMAC/v2 — успешно.", cmd)
+                return df
+            except BrokerAuthError as hmac_err:
+                # code=12 "Invalid signature" — this account uses the unsigned
+                # Public API, not the private-key-pair HMAC API.  Try v1 next.
+                logger.warning(
+                    "HMAC/v2 подпись отклонена [cmd=%s]: %s — "
+                    "переключаюсь на unsigned/v1 Public API.",
+                    cmd, hmac_err,
+                )
+            except BrokerEmptyPortfolioError:
+                raise
+            except RuntimeError as exc:
+                logger.warning("HMAC/v2 [cmd=%s] не поддерживается: %s", cmd, exc)
+                last_error = exc
+                continue
+            except requests.RequestException as exc:
+                logger.error("Freedom API недоступен (HMAC) [cmd=%s]: %s", cmd, exc)
+                last_error = exc
+                continue
+
+            # ── Step 2: unsigned v1 (standard Public API key) ───────────────
+            try:
+                raw = self._post_unsigned(cmd)
+                df  = self._parse(raw)
+                logger.info("'%s' via unsigned/v1 — успешно.", cmd)
                 return df
             except BrokerAuthError:
-                raise  # Never fall back to mock on credential rejection
+                raise  # Bad API key — surface immediately, do not fall back to mock
             except BrokerEmptyPortfolioError:
-                raise  # Real account with no positions — propagate, do not fall back to mock
+                raise
             except RuntimeError as exc:
-                logger.info("Команда '%s' не поддерживается (code 5), пробую следующую: %s", cmd, exc)
+                logger.warning("unsigned/v1 [cmd=%s] ошибка: %s", cmd, exc)
                 last_error = exc
             except requests.RequestException as exc:
-                logger.error("Freedom API недоступен [cmd=%s]: %s", cmd, exc)
+                logger.error("Freedom API недоступен (unsigned) [cmd=%s]: %s", cmd, exc)
                 last_error = exc
 
         logger.error(
