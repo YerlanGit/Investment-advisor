@@ -58,9 +58,11 @@ FREEDOM_API_KEY    = os.getenv("FREEDOM_API_KEY", "").strip()
 FREEDOM_API_SECRET = os.getenv("FREEDOM_API_SECRET", "").strip()
 
 # Commands to try in priority order.
-# getPositions is the confirmed working command for this account/API version.
-# getPortfolioFull is tried as a second option; legacy names follow.
-_PORTFOLIO_CMDS = ("getPositions", "getPortfolio", "getPortfolioFull", "getPositionJson")
+# getPositionJson is the confirmed working command — it is a classic Tradernet v1 command
+# that is still supported on the v2 endpoint and uses the standard q-JSON signing format.
+# The pure v2 commands (getPositions, getPortfolio, getPortfolioFull) are kept as fallbacks
+# for accounts on newer API tiers, but they return code 5 "Command not found" on most accounts.
+_PORTFOLIO_CMDS = ("getPositionJson", "getPositions", "getPortfolio", "getPortfolioFull")
 _BALANCE_CMDS   = ("getBalance", "getClientInfo")
 
 # API error substrings that indicate credential/auth rejection.
@@ -93,25 +95,25 @@ class FreedomConnector:
 
     def _post(self, cmd: str, extra_params: dict | None = None) -> dict:
         """
-        Send a signed command to the Freedom Finance API v2 and return parsed JSON.
+        Send a signed command to the Freedom Finance / Tradernet API and return parsed JSON.
 
-        v2 format:
-          - 'cmd' is a top-level form field (required for routing)
-          - 'q'   contains the full {"cmd":...,"params":{}} JSON (same as v1)
-          - HMAC-SHA256 is computed over the full q JSON (same as v1)
-          - Headers use v2 names: X-NtApi-PublicKey / X-NtApi-Sig
+        Signing format (standard Tradernet — works on both v1 and v2 endpoints):
+          q        = JSON string of {"cmd": <cmd>, "params": <params>}
+          sig      = HMAC-SHA256(secret_key, q)   ← HMAC is over the full q string
+          cmd      = separate form field for server-side routing
+          headers  = X-NtApi-PublicKey / X-NtApi-Sig (v2 header names)
+
+        Previous implementation incorrectly used HMAC(secret, cmd + params_json)
+        which produces code 12 "Invalid signature" from the server.
         """
-        params = {}
-        if extra_params:
-            params.update(extra_params)
+        params = extra_params or {}
 
-        # v2 signing: HMAC over cmd+params_json concatenated (e.g. 'getPositionJson{}').
-        # q field in the body contains params only (not full cmd+params).
-        params_json = json.dumps(params, separators=(',', ':'))
-        sig_input   = cmd + params_json
+        # q must be the full {"cmd": ..., "params": ...} JSON — the HMAC is over this
+        # entire string, not a concatenation of cmd and params separately.
+        q_payload = json.dumps({"cmd": cmd, "params": params}, separators=(',', ':'))
         sig = hmac.new(
             self.secret_key.encode('utf-8'),
-            sig_input.encode('utf-8'),
+            q_payload.encode('utf-8'),
             hashlib.sha256,
         ).hexdigest()
 
@@ -121,15 +123,15 @@ class FreedomConnector:
             "X-NtApi-Sig":       sig,
         }
 
-        form_data = {"cmd": cmd, "q": params_json}
+        form_data = {"cmd": cmd, "q": q_payload}
 
         logger.info("POST %s  [cmd=%s]", TRADERNET_URL, cmd)
         logger.info(
-            "SIGN key=%s… secret_len=%d secret_prefix=%s… sig_input=%r",
+            "SIGN key=%s… secret_len=%d secret_prefix=%s… q=%r",
             self.api_key[:6]    if self.api_key    else "EMPTY",
             len(self.secret_key),
             self.secret_key[:4] if self.secret_key else "EMPTY",
-            sig_input,
+            q_payload,
         )
 
         resp = requests.post(
