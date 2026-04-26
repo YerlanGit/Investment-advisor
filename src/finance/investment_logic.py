@@ -23,6 +23,21 @@ class MAC3RiskEngine:
     # Инструменты нулевого риска (или которые не прогоняются через регрессию)
     NON_RISK_ASSETS = ['USD', 'EUR', 'CASH', 'RUB', 'KZT']
 
+    # Proxy-индексы для облигаций (зафиксированные, протестированные)
+    BOND_PROXIES = {
+        'RF': 'BIL',   # Risk Free (1-3 Month T-Bill ETF)
+        'IG': 'LQD',   # Investment Grade (Corporate Bond ETF)
+        'HY': 'HYG'    # High Yield (Junk Bond ETF)
+    }
+
+    # Маппинг известных облигаций к категориям (для автоопределения)
+    BOND_CLASSIFICATION_MAP = {
+        'KZ_GOV_BOND': 'RF',
+        'US_TREASURY': 'RF',
+        'KASPI_BOND': 'IG',
+        # Можно добавлять тикеры Freedom Broker сюда
+    }
+
     def __init__(self, trading_days=252, ewma_halflife=63):
         self.trading_days = trading_days
         self.ewma_halflife = ewma_halflife  # 63 дней ≈ λ=0.94 (RiskMetrics)
@@ -44,6 +59,20 @@ class MAC3RiskEngine:
             t_str = str(t).upper().strip()
             if t_str in self.NON_RISK_ASSETS:
                 continue # Cash goes naturally out of equity fetch
+                
+            # --- НОВАЯ ЛОГИКА ДЛЯ ОБЛИГАЦИЙ ---
+            # 1. Проверка по словарю известных облигаций
+            if t_str in self.BOND_CLASSIFICATION_MAP:
+                category = self.BOND_CLASSIFICATION_MAP[t_str]
+                proxy = self.BOND_PROXIES.get(category, 'BIL') # По умолчанию RF
+                resolved.append(proxy)
+                continue
+            # 2. Эвристика по названию тикера
+            if 'BOND' in t_str or 'OVD' in t_str:
+                resolved.append(self.BOND_PROXIES['IG']) # По умолчанию IG для неизвестных корпоративных
+                continue
+            # ----------------------------------
+
             if t_str in self.TICKER_MAP: resolved.append(self.TICKER_MAP[t_str])
             elif 'KSPI' in t_str: resolved.append('KSPI')
             elif t_str in ['BTC', 'ETH', 'SOL', 'BNB']: resolved.append(f"{t_str}-USD")
@@ -283,8 +312,13 @@ class UniversalPortfolioManager:
         # Установка Current Price (Для Кэша цена всегда 1.0)
         current_prices = {}
         for orig, res in zip(df.index, resolved_indices):
-            if orig in self.engine.NON_RISK_ASSETS:
+            orig_str = str(orig).upper().strip()
+            if orig_str in self.engine.NON_RISK_ASSETS:
                 current_prices[orig] = 1.0
+            elif orig_str in self.engine.BOND_CLASSIFICATION_MAP or 'BOND' in orig_str or 'OVD' in orig_str:
+                # Облигация: защищаем от dropna. Берем Purchase_Price (удержание до погашения).
+                p_price = df.loc[orig, 'Purchase_Price']
+                current_prices[orig] = p_price if pd.notna(p_price) else 100.0
             elif res in all_data.columns:
                 current_prices[orig] = all_data[res].iloc[-1]
                 
