@@ -111,16 +111,15 @@ class FreedomConnector:
             hashlib.sha256,
         ).hexdigest()
 
-        headers = {"Content-Type": "application/x-www-form-urlencoded"}
-
-        # apiKey and sig MUST be POST form fields — the server looks up the user's
-        # secret by apiKey from the body; passing them only in headers yields code 12.
-        form_data = {
-            "cmd":    cmd,
-            "q":      q_payload,
-            "apiKey": self.api_key,
-            "sig":    sig,
+        # v2 endpoint uses header-based auth — form-body auth returns HTTP 403.
+        # X-NtApi-Key is the documented header name (not X-NtApi-PublicKey).
+        headers = {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "X-NtApi-Key":  self.api_key,
+            "X-NtApi-Sig":  sig,
         }
+
+        form_data = {"cmd": cmd, "q": q_payload}
 
         logger.info("POST %s  [cmd=%s]", TRADERNET_URL, cmd)
         logger.info(
