@@ -163,7 +163,10 @@ def _classify_asset(ticker: str) -> str:
         return "Ден. средства"
     if any(x in t for x in ("KAP", "KSPI", "HSBK", "KZTK")):
         return "Акции KZ"
-    if any(x in t for x in ("TLT", "AGG", "BND", "TNX", "BOND")):
+    if any(x in t for x in ("TLT", "AGG", "BND", "TNX", "BOND", "LQD", "HYG", "BIL", "IEF", "SHY")):
+        return "Облигации"
+    # KZ / international bond ISIN patterns from Freedom Finance
+    if t.startswith(("KZ2P", "KZ1P", "XS", "US912")):
         return "Облигации"
     return "Акции"
 

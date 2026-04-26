@@ -299,29 +299,57 @@ class UniversalPortfolioManager:
         else: raise ValueError("Неверный источник данных.")
 
         df = self._standardize_columns(raw_df).set_index('Ticker')
-        
+
+        # Extract broker-provided current prices before any further processing.
+        # Used as fallback for instruments with no yfinance data
+        # (KZ bonds with ISIN tickers, cash balances from Freedom API "acc").
+        broker_current_prices: dict = {}
+        if "Broker_Current_Price" in df.columns:
+            broker_current_prices = df["Broker_Current_Price"].dropna().to_dict()
+            df = df.drop(columns=["Broker_Current_Price"])
+
         # Скачиваем цены на Рисковые активы
         risky_tickers = [t for t in df.index if t not in self.engine.NON_RISK_ASSETS]
-        
+
         all_data = self.engine.get_market_data(risky_tickers)
         fund_df = self.engine.get_fundamental_metrics(risky_tickers)
         df = df.join(fund_df)
 
-        resolved_indices = self.engine.resolve_tickers(df.index.tolist())
-        
-        # Установка Current Price (Для Кэша цена всегда 1.0)
+        # Установка Current Price.
+        # Приоритет:
+        #   (1) NON_RISK_ASSETS (кэш) → 1.0
+        #   (2) yfinance или proxy-ETF (для облигаций через BOND_PROXIES)
+        #   (3) Цена брокера (Freedom API mkt_price) — fallback для КЗ облигаций без данных
+        #   (4) Purchase_Price — крайний fallback для облигаций с известным паттерном имени
+        #
+        # ВАЖНО: resolve_tickers() пропускает NON_RISK_ASSETS → список короче df.index.
+        # Используем per-ticker резолюцию вместо zip, чтобы избежать сдвига индексов.
         current_prices = {}
-        for orig, res in zip(df.index, resolved_indices):
+        broker_priced_only: set = set()  # тикеры, оцениваемые только через брокера (без фактор-модели)
+        for orig in df.index:
             orig_str = str(orig).upper().strip()
             if orig_str in self.engine.NON_RISK_ASSETS:
                 current_prices[orig] = 1.0
+                continue
+            resolved_list = self.engine.resolve_tickers([orig])
+            res = resolved_list[0] if resolved_list else orig_str
+            if res in all_data.columns:
+                # Включает облигации, разрешённые в proxy-ETF (BIL, LQD, HYG)
+                current_prices[orig] = all_data[res].iloc[-1]
+            elif orig in broker_current_prices:
+                # KZ облигации с ISIN-тикером: используем mkt_price от Freedom API
+                current_prices[orig] = broker_current_prices[orig]
+                broker_priced_only.add(orig)
+                logger.info(
+                    "Используется цена брокера для %s = %.4f (нет данных yfinance)",
+                    orig, broker_current_prices[orig],
+                )
             elif orig_str in self.engine.BOND_CLASSIFICATION_MAP or 'BOND' in orig_str or 'OVD' in orig_str:
-                # Облигация: защищаем от dropna. Берем Purchase_Price (удержание до погашения).
+                # Облигация без брокерской цены — удержание до погашения по цене покупки
                 p_price = df.loc[orig, 'Purchase_Price']
                 current_prices[orig] = p_price if pd.notna(p_price) else 100.0
-            elif res in all_data.columns:
-                current_prices[orig] = all_data[res].iloc[-1]
-                
+                broker_priced_only.add(orig)
+
         df['Current_Price'] = pd.Series(current_prices)
         df = df.dropna(subset=['Current_Price'])
 
@@ -330,12 +358,21 @@ class UniversalPortfolioManager:
         df['Current_Value'] = df['Quantity'] * df['Current_Price']
         df['PnL'] = df['Current_Value'] - df['Total_Cost']
         df['Return_Pct'] = (df['PnL'] / df['Total_Cost'])
-        
+
         total_portfolio_value = df['Current_Value'].sum()
         weights_dict = (df['Current_Value'] / total_portfolio_value).to_dict()
 
-        # MAC3 Structural Risk (Только для акций)
-        actual_risky = [t for t in df.index if t not in self.engine.NON_RISK_ASSETS]
+        # MAC3 Structural Risk.
+        # Исключены из факторной модели:
+        #   • NON_RISK_ASSETS (кэш) — нулевая волатильность по определению
+        #   • broker_priced_only — КЗ облигации без ценовой истории в yfinance;
+        #     их веса в weights_dict корректно разбавляют риск акций.
+        # Облигации, разрешённые в proxy-ETF (BIL/LQD/HYG), ОСТАЮТСЯ в actual_risky —
+        # у них есть ценовая история и они корректно обрабатываются Rates-фактором.
+        actual_risky = [
+            t for t in df.index
+            if t not in self.engine.NON_RISK_ASSETS and t not in broker_priced_only
+        ]
         cov_matrix, factor_df, port_metrics = self.engine.calculate_structural_risk(all_data, actual_risky, weights_dict)
         
         # ATR (Intraday Margin Standard — SEC 34-105226)

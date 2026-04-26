@@ -281,20 +281,50 @@ class FreedomConnector:
                 0.0,
             )
 
+            # Broker-provided current market price — used as fallback for instruments
+            # (e.g. KZ bonds with ISIN tickers) that have no yfinance history.
+            broker_current = next(
+                (
+                    f
+                    for key in ("mkt_price", "close_price")
+                    if (f := _coerce_float(item.get(key))) is not None and f > 0
+                ),
+                None,
+            )
+
             positions.append({
-                "Ticker":         ticker,
-                "Quantity":       qty,
-                "Purchase_Price": price,
+                "Ticker":               ticker,
+                "Quantity":             qty,
+                "Purchase_Price":       price,
+                "Broker_Current_Price": broker_current,
             })
+
+        # Cash balances from "acc" section (Freedom API).
+        # "s" = свободные средства (available cash) in the account currency.
+        # Each currency account is added as a separate cash position.
+        for acc in data_root.get("acc", []):
+            curr = str(acc.get("curr", "")).upper().strip()
+            if not curr:
+                continue
+            cash_qty = _coerce_float(acc.get("s"))
+            if not cash_qty:  # None or 0 — skip empty/zero balances
+                continue
+            positions.append({
+                "Ticker":               curr,      # "USD", "EUR", "KZT", etc.
+                "Quantity":             cash_qty,
+                "Purchase_Price":       1.0,
+                "Broker_Current_Price": 1.0,
+            })
+            logger.info("Добавлен кэш: %s = %.2f", curr, cash_qty)
 
         if not positions:
             raise BrokerEmptyPortfolioError(
-                "Брокерский счёт не содержит открытых позиций. "
+                "Брокерский счёт не содержит открытых позиций и свободных средств. "
                 "Откройте позиции в Freedom Broker или переключитесь на демо-режим (/start)."
             )
 
         df = pd.DataFrame(positions)
-        logger.info("Загружено %d позиций из Freedom Broker.", len(df))
+        logger.info("Загружено %d позиций из Freedom Broker (включая кэш).", len(df))
         return df
 
     @staticmethod
