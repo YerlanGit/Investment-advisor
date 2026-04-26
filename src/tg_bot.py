@@ -52,7 +52,12 @@ from db_tokenomics import (
     save_connection_mode,
     save_profile,
 )
-from finance.broker_api import BrokerAuthError, BrokerEmptyPortfolioError, FreedomConnector
+from finance.broker_api import (
+    BrokerAuthError,
+    BrokerEmptyPortfolioError,
+    FreedomConnector,
+    RealPortfolioRequired,
+)
 from finance.investment_logic import UniversalPortfolioManager
 from finance.security import SecureVault
 from agent.gatekeeper import run_gatekeeper
@@ -303,6 +308,8 @@ async def _build_analysis_payload(user_id: int, tier: str) -> dict:
         raise  # Propagate as-is so cb_confirm can show the specific auth message
     except BrokerEmptyPortfolioError:
         raise  # Propagate as-is so cb_confirm can show the empty-portfolio message
+    except RealPortfolioRequired:
+        raise  # MAC3 gate fired — broker API failed, no live data; cb_confirm handles UI
     except RuntimeError as exc:
         logger.error("Freedom Broker API ошибка для %s: %s", user_id, exc)
         raise RuntimeError(
@@ -806,6 +813,19 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
         logger.warning("Пустой портфель для пользователя %s", user_id)
         await callback.message.answer(
             f"📭 *Портфель пуст*\n\n{exc}\n\n"
+            "Токены не потеряны — обратитесь в поддержку /support.",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+    except RealPortfolioRequired as exc:
+        logger.error(
+            "MAC3 gate: real portfolio required but unavailable for user %s: %s",
+            user_id, exc,
+        )
+        await callback.message.answer(
+            "⚠️ *Анализ невозможен: нет реальных данных портфеля.*\n\n"
+            f"{exc}\n\n"
+            "Если хотите проверить работу системы — переключитесь на "
+            "«Демо-режим» через /start → 📋 Демо-режим.\n\n"
             "Токены не потеряны — обратитесь в поддержку /support.",
             parse_mode=ParseMode.MARKDOWN,
         )

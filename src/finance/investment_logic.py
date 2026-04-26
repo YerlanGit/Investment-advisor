@@ -5,6 +5,8 @@ import logging
 from sklearn.linear_model import Ridge
 from sklearn.covariance import LedoitWolf
 
+from finance.broker_api import RealPortfolioRequired
+
 # Настройка логирования
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger("Antigravity_RiskEngine")
@@ -297,6 +299,39 @@ class UniversalPortfolioManager:
         """
         if isinstance(source, pd.DataFrame): raw_df = source
         else: raise ValueError("Неверный источник данных.")
+
+        # ── MAC3 GATE: portfolio source verification ──────────────────────────
+        # Detect the three possible DataFrame origins stamped by FreedomConnector:
+        #   _ramp_is_mock=True, _ramp_is_fallback=True  → broker API failed, fallback mock
+        #   _ramp_is_mock=True, _ramp_source='demo'     → user explicitly chose template/demo
+        #   (no attrs)                                  → live broker data
+        _is_fallback = raw_df.attrs.get('_ramp_is_fallback', False)
+        _is_mock     = raw_df.attrs.get('_ramp_is_mock',     False)
+
+        if _is_fallback:
+            logger.error(
+                "MAC3 ENGINE GATE ▸ FALLBACK mock portfolio detected "
+                "(broker API returned no live data). "
+                "Halting immediately — skipping yfinance fetch and all MAC3 calculations."
+            )
+            raise RealPortfolioRequired(
+                "Не удалось получить данные портфеля от Freedom Broker. "
+                "Проверьте ваши API-ключи и попробуйте снова.\n\n"
+                "Если хотите запустить анализ на шаблонном портфеле, "
+                "выберите «Демо-режим» в настройках подключения."
+            )
+
+        if _is_mock:
+            logger.info(
+                "MAC3 ENGINE ▸ Portfolio source: DEMO (template). "
+                "Running analysis on synthetic mock positions."
+            )
+        else:
+            logger.info(
+                "MAC3 ENGINE ▸ Portfolio source: REAL (live Freedom Broker data). "
+                "Initiating full MAC3 Risk Engine pipeline."
+            )
+        # ─────────────────────────────────────────────────────────────────────
 
         df = self._standardize_columns(raw_df).set_index('Ticker')
 

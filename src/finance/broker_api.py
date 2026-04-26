@@ -64,17 +64,19 @@ DEMO_KEY        = "demo"
 FREEDOM_API_KEY    = os.getenv("FREEDOM_API_KEY", "").strip()
 FREEDOM_API_SECRET = os.getenv("FREEDOM_API_SECRET", "").strip()
 
-# Commands to try in priority order.
-# getPositionJson is the confirmed working command — it is a classic Tradernet v1 command
-# that is still supported on the v2 endpoint and uses the standard q-JSON signing format.
-# The pure v2 commands (getPositions, getPortfolio, getPortfolioFull) are kept as fallbacks
-# for accounts on newer API tiers, but they return code 5 "Command not found" on most accounts.
-_PORTFOLIO_CMDS = ("getPositionJson", "getPositions", "getPortfolio", "getPortfolioFull")
+# getPositionJson is the only confirmed-working command on standard Freedom accounts.
+# getPositions / getPortfolio / getPortfolioFull all return code 5 on standard tiers
+# and were removed to avoid 90 s of pointless timeout before the mock fallback.
+_PORTFOLIO_CMDS = ("getPositionJson",)
 _BALANCE_CMDS   = ("getBalance", "getClientInfo")
 
 # API error substrings that indicate credential/auth rejection.
+# "invalid signature" / code=12 means the HMAC is wrong — treat as auth failure
+# so the bot surfaces the error immediately rather than falling back to mock data.
 _AUTH_ERROR_PHRASES = (
     "invalid credentials",
+    "invalid signature",
+    "invalid sig",
     "unauthorized",
     "access denied",
     "forbidden",
@@ -89,6 +91,14 @@ class BrokerAuthError(RuntimeError):
 
 class BrokerEmptyPortfolioError(RuntimeError):
     """Raised when Freedom Broker returns an authenticated account with no open positions."""
+
+
+class RealPortfolioRequired(RuntimeError):
+    """
+    Raised by the MAC3 engine gate when the portfolio DataFrame is a
+    fallback-mock produced by broker API failure (code=5 / network error).
+    Distinct from intentional demo mode (api_key == 'demo').
+    """
 
 
 class FreedomConnector:
@@ -193,7 +203,9 @@ class FreedomConnector:
         """
         if self.api_key == DEMO_KEY:
             logger.info("Демо-режим: используется шаблонный портфель.")
-            return self._mock_portfolio()
+            df = self._mock_portfolio()
+            df.attrs['_ramp_source'] = 'demo'
+            return df
 
         last_error: Exception | None = None
 
@@ -216,10 +228,12 @@ class FreedomConnector:
 
         logger.error(
             "Все команды API не сработали (последняя ошибка: %s) — "
-            "переключаюсь на mock-портфель.",
+            "возвращаю помеченный fallback-портфель; MAC3 движок заблокирует анализ.",
             last_error,
         )
-        return self._mock_portfolio()
+        df = self._mock_portfolio()
+        df.attrs['_ramp_is_fallback'] = True   # signals RealPortfolioRequired in analyze_all
+        return df
 
     def fetch_balance(self) -> dict:
         """
@@ -355,8 +369,10 @@ class FreedomConnector:
     @staticmethod
     def _mock_portfolio() -> pd.DataFrame:
         """Deterministic template portfolio for demo / offline mode."""
-        return pd.DataFrame([
+        df = pd.DataFrame([
             {"Ticker": "AAPL",    "Quantity": 10,  "Purchase_Price": 150.0},
             {"Ticker": "KSPI",    "Quantity": 100, "Purchase_Price": 12.5},
             {"Ticker": "BTC-USD", "Quantity": 0.5, "Purchase_Price": 45_000.0},
         ])
+        df.attrs['_ramp_is_mock'] = True
+        return df
