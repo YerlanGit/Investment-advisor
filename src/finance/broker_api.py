@@ -27,6 +27,24 @@ import requests
 
 logger = logging.getLogger("BrokerAPI")
 
+# Known stock-exchange suffixes that Freedom Finance appends to tickers.
+# "AAPL.US" → "AAPL", "KSPI.KZ" → "KSPI", "KAP.IL" → "KAP".
+# Compound tickers like "BRK.B" are not affected because "B" is not in this set.
+_EXCHANGE_SUFFIXES = frozenset({
+    "US", "KZ", "ME", "LN", "GR", "PA", "HK", "TO", "AX",
+    "DE", "JP", "CN", "SG", "IL", "SW", "AS", "MI",
+})
+
+
+def _coerce_float(value) -> "float | None":
+    """Convert *value* to float; return None if absent or unconvertible."""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return None
+
 # Freedom Finance public API v2 endpoint (getPositionJson and all current commands
 # live on v2; v1 at /api/ returns code 5 "Command not found" for these commands).
 TRADERNET_URL   = os.getenv("TRADERNET_URL", "https://tradernet.kz/api/v2/")
@@ -58,6 +76,10 @@ _AUTH_ERROR_PHRASES = (
 
 class BrokerAuthError(RuntimeError):
     """Raised when Freedom Broker API rejects the request due to bad credentials."""
+
+
+class BrokerEmptyPortfolioError(RuntimeError):
+    """Raised when Freedom Broker returns an authenticated account with no open positions."""
 
 
 class FreedomConnector:
@@ -119,15 +141,19 @@ class FreedomConnector:
         resp.raise_for_status()
         raw = resp.json()
 
-        if "error" in raw:
-            err_msg = str(raw["error"])
+        # Freedom Finance API signals errors via "errMsg" + "code", not "error".
+        # Also handle legacy "error" key for defensive coverage.
+        err_msg  = raw.get("errMsg") or raw.get("error") or raw.get("err")
+        err_code = raw.get("code")
+        if err_msg or (isinstance(err_code, int) and err_code != 0):
+            err_text = str(err_msg) if err_msg else f"API error code {err_code}"
             logger.error(
-                "Freedom API error [cmd=%s]: status=%s raw_body=%s",
-                cmd, resp.status_code, resp.text[:500],
+                "Freedom API error [cmd=%s]: %s (code=%s) raw=%s",
+                cmd, err_text, err_code, resp.text[:500],
             )
-            if any(p in err_msg.lower() for p in _AUTH_ERROR_PHRASES):
-                raise BrokerAuthError(err_msg)
-            raise RuntimeError(err_msg)
+            if any(p in err_text.lower() for p in _AUTH_ERROR_PHRASES):
+                raise BrokerAuthError(err_text)
+            raise RuntimeError(err_text)
 
         return raw
 
@@ -154,6 +180,8 @@ class FreedomConnector:
                 return df
             except BrokerAuthError:
                 raise  # Never fall back to mock on credential rejection
+            except BrokerEmptyPortfolioError:
+                raise  # Real account with no positions — propagate, do not fall back to mock
             except RuntimeError as exc:
                 logger.info("Команда '%s' не поддерживается (code 5), пробую следующую: %s", cmd, exc)
                 last_error = exc
@@ -216,31 +244,54 @@ class FreedomConnector:
 
         positions = []
         for item in items:
-            ticker = (
+            # Freedom API canonical ticker field is "i"; others are legacy/alternate commands.
+            ticker_raw = (
                 item.get("i")
                 or item.get("t")
                 or item.get("ticker")
                 or item.get("symbol")
             )
-            qty = item.get("q") or item.get("quantity") or 0
-            price = (
-                item.get("price_a")
-                or item.get("avg_price")
-                or item.get("mkt_p")
-                or item.get("price")
-                or 0
-            )
-            if not ticker or float(qty) == 0:
+            if not ticker_raw:
                 continue
+
+            ticker = str(ticker_raw).upper().strip()
+            # Strip exchange suffix: "AAPL.US" → "AAPL", "KSPI.KZ" → "KSPI".
+            # rpartition on the rightmost "." so "BRK.B" stays intact when "B"
+            # is not a known exchange code.
+            if "." in ticker:
+                base, _, suffix = ticker.rpartition(".")
+                if suffix in _EXCHANGE_SUFFIXES:
+                    ticker = base
+
+            # Quantity — "q" is the canonical Freedom field.
+            qty = _coerce_float(item.get("q"))
+            if qty is None:
+                qty = _coerce_float(item.get("quantity"))
+            if not qty:  # None or 0 — skip zero-quantity rows
+                continue
+
+            # Purchase price — "price_a" / "bal_price_a" = entry price (preferred).
+            # Falls back to market price fields when no entry price is present.
+            price = next(
+                (
+                    f
+                    for key in ("price_a", "bal_price_a", "avg_price", "mkt_p", "mkt_price", "price")
+                    if (f := _coerce_float(item.get(key))) is not None
+                ),
+                0.0,
+            )
+
             positions.append({
-                "Ticker":         str(ticker).upper().strip(),
-                "Quantity":       float(qty),
-                "Purchase_Price": float(price),
+                "Ticker":         ticker,
+                "Quantity":       qty,
+                "Purchase_Price": price,
             })
 
         if not positions:
-            logger.warning("Freedom API вернул пустой портфель, переключаюсь на mock.")
-            return self._mock_portfolio()
+            raise BrokerEmptyPortfolioError(
+                "Брокерский счёт не содержит открытых позиций. "
+                "Откройте позиции в Freedom Broker или переключитесь на демо-режим (/start)."
+            )
 
         df = pd.DataFrame(positions)
         logger.info("Загружено %d позиций из Freedom Broker.", len(df))

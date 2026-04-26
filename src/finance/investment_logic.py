@@ -91,7 +91,8 @@ class MAC3RiskEngine:
                     'Forward_PE': info.get('forwardPE', 0),
                     'Market_Cap_Log': np.log(info.get('marketCap', 1)) if info.get('marketCap') else 0
                 }
-            except:
+            except Exception as exc:
+                logger.debug("Фундаментальные данные для %s недоступны: %s", resolved, exc)
                 fundamental_data[t] = {k: 0 for k in ['ROE_Quality', 'Debt_to_Equity', 'Forward_PE', 'Market_Cap_Log']}
         return pd.DataFrame(fundamental_data).T
 
