@@ -97,19 +97,13 @@ class FreedomConnector:
         """
         Send a signed command to the Freedom Finance / Tradernet API and return parsed JSON.
 
-        Signing format (standard Tradernet — works on both v1 and v2 endpoints):
-          q        = JSON string of {"cmd": <cmd>, "params": <params>}
-          sig      = HMAC-SHA256(secret_key, q)   ← HMAC is over the full q string
-          cmd      = separate form field for server-side routing
-          headers  = X-NtApi-PublicKey / X-NtApi-Sig (v2 header names)
-
-        Previous implementation incorrectly used HMAC(secret, cmd + params_json)
-        which produces code 12 "Invalid signature" from the server.
+        Signing format (standard Tradernet v1/v2):
+          q       = compact JSON string {"cmd": <cmd>, "params": <params>}
+          sig     = HMAC-SHA256(secret_key, q).hexdigest()
+          POST body fields: cmd, q, apiKey, sig
         """
         params = extra_params or {}
 
-        # q must be the full {"cmd": ..., "params": ...} JSON — the HMAC is over this
-        # entire string, not a concatenation of cmd and params separately.
         q_payload = json.dumps({"cmd": cmd, "params": params}, separators=(',', ':'))
         sig = hmac.new(
             self.secret_key.encode('utf-8'),
@@ -117,13 +111,16 @@ class FreedomConnector:
             hashlib.sha256,
         ).hexdigest()
 
-        headers = {
-            "Content-Type":      "application/x-www-form-urlencoded",
-            "X-NtApi-PublicKey": self.api_key,
-            "X-NtApi-Sig":       sig,
-        }
+        headers = {"Content-Type": "application/x-www-form-urlencoded"}
 
-        form_data = {"cmd": cmd, "q": q_payload}
+        # apiKey and sig MUST be POST form fields — the server looks up the user's
+        # secret by apiKey from the body; passing them only in headers yields code 12.
+        form_data = {
+            "cmd":    cmd,
+            "q":      q_payload,
+            "apiKey": self.api_key,
+            "sig":    sig,
+        }
 
         logger.info("POST %s  [cmd=%s]", TRADERNET_URL, cmd)
         logger.info(
