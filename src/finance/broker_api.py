@@ -3,16 +3,17 @@ FreedomConnector — live Tradernet/Freedom Broker API client.
 
 Three authentication methods are tried in order:
 
-  Phase 1 — HMAC-signed v2  (POST /api/v2/)
-    sig = HMAC-SHA256(secret_key, preSign({cmd, params}))
-    Headers: X-NtApi-PublicKey + X-NtApi-Sig
+  Phase 1 — HMAC-signed v2  (POST /api/v2/cmd/{cmd})
+    Body:    url-form-encoded  apiKey=&cmd=&nonce=&params[...]=
+    Sig:     HMAC-SHA256(secret_key, convert_to_query_string(body_dict))
+    Header:  X-NtApi-Sig  (no X-NtApi-PublicKey — apiKey goes in body)
     Requires a *private key pair* generated in broker account settings.
     Most retail accounts never get this — they get a single API key instead.
 
   Phase 2 — Unsigned v1  (POST /api/)
-    Embeds apiKey inside the params JSON — no signing needed.
+    Embeds apiKey inside the params JSON (q field) — no signing needed.
     Works with the standard 'Public API Key' available to all accounts.
-    Confirmed pattern from test_live_api.py (getPortfolio + apiKey in params).
+    Uses getPositionJson command (getPortfolio does not exist on tradernet.kz).
 
   Phase 3 — Session login  (POST /api/ cmd=login → sid)
     Uses account username (login) + password (secret_key) to obtain a session.
@@ -32,6 +33,7 @@ import hmac
 import json
 import logging
 import os
+import time
 
 import pandas as pd
 import requests
@@ -58,20 +60,27 @@ def _coerce_float(value) -> "float | None":
 
 # Two Freedom Finance API modes:
 #
-#   v2 HMAC-signed  — POST /api/v2/ with X-NtApi-PublicKey + X-NtApi-Sig headers.
-#                     Requires a *private* key pair issued via the broker's
-#                     "API access" settings — most retail accounts never get this.
+#   v2 HMAC-signed  — POST /api/v2/cmd/{cmd}
+#                     Body: form-encoded  apiKey=&cmd=&nonce=&params[...]=
+#                     Sig:  HMAC-SHA256(secret, convert_to_query_string(body_dict))
+#                     Header: X-NtApi-Sig (no X-NtApi-PublicKey — apiKey goes in body)
+#                     Requires a *private* key pair issued via broker "API access" settings.
 #
-#   v1 unsigned     — POST /api/ with {"cmd":…,"params":{"apiKey":…}} inside the
+#   v1 unsigned     — POST /api/ with {"cmd":…,"params":{"apiKey":…}} inside
 #                     form field `q`.  Works with the standard "Public API key"
 #                     that every Freedom Broker account can generate.
 #
 # fetch_portfolio() tries v2 first; on code=12 "Invalid signature" it falls back
 # to v1 automatically so both account types work without user reconfiguration.
-TRADERNET_URL    = os.getenv("TRADERNET_URL",    "https://tradernet.kz/api/v2/")
+TRADERNET_URL_V2 = os.getenv("TRADERNET_URL_V2", "https://tradernet.kz/api/v2")
 TRADERNET_URL_V1 = os.getenv("TRADERNET_URL_V1", "https://tradernet.kz/api/")
 REQUEST_TIMEOUT  = 30   # seconds
 DEMO_KEY        = "demo"
+
+# Keep for backwards-compat with any env override that set TRADERNET_URL
+_TRADERNET_URL_LEGACY = os.getenv("TRADERNET_URL", "")
+if _TRADERNET_URL_LEGACY:
+    TRADERNET_URL_V2 = _TRADERNET_URL_LEGACY.rstrip("/").removesuffix("/v2/cmd").removesuffix("/v2")
 
 # Service-level Freedom Broker credentials (injected via Secret Manager).
 # .strip() at source prevents hidden newlines from Secret Manager corrupting
@@ -82,12 +91,12 @@ FREEDOM_LOGIN      = os.getenv("FREEDOM_LOGIN",      "").strip()
 
 # Commands tried per authentication phase.
 # Phase 1 HMAC: getPositionJson is the confirmed v2 command.
-# Phase 2 unsigned: getPortfolio first (confirmed in test_live_api.py pattern),
-#   then getPositionJson as fallback.
-# Phase 3 session: same order.
+# Phase 2 unsigned: getPositionJson only — getPortfolio returns code=5 "Command not found"
+#   at tradernet.kz/api/; it does not exist on that endpoint.
+# Phase 3 session: getPositionJson first.
 _PORTFOLIO_CMDS_HMAC     = ("getPositionJson",)
-_PORTFOLIO_CMDS_UNSIGNED = ("getPortfolio", "getPositionJson")
-_PORTFOLIO_CMDS_SESSION  = ("getPositionJson", "getPortfolio")
+_PORTFOLIO_CMDS_UNSIGNED = ("getPositionJson",)
+_PORTFOLIO_CMDS_SESSION  = ("getPositionJson",)
 _BALANCE_CMDS            = ("getBalance", "getClientInfo")
 
 # API error substrings that indicate credential/auth rejection.
@@ -129,71 +138,99 @@ class FreedomConnector:
         self.secret_key = (secret_key or FREEDOM_API_SECRET).strip()
         self.login      = (login      or FREEDOM_LOGIN).strip()
 
-    # ── Internal request helper ──────────────────────────────────────────────
+    # ── Internal request helpers ─────────────────────────────────────────────
 
     @staticmethod
-    def _pre_sign(data: dict) -> str:
+    def _convert_to_query_string(data: dict) -> str:
         """
-        Port of tn-crypto.js preSign(): sort keys alphabetically, join as
-        "key=value" pairs with "&", recursing into nested dicts.
-        Empty dicts produce an empty string for their value.
+        Tradernet v2 signing serialiser (port of the Python reference client).
+
+        Sorts keys alphabetically, joins as "key=value" pairs with "&",
+        recursing into nested dicts so that nested values become the inner
+        serialised string (e.g. params={} → "params=").
+        This output is what is HMAC-SHA256-signed.
         """
-        parts = []
+        result = []
         for key in sorted(data.keys()):
             value = data[key]
             if isinstance(value, dict):
-                value = FreedomConnector._pre_sign(value)
+                value = FreedomConnector._convert_to_query_string(value)
             else:
                 value = "" if value is None else str(value)
-            parts.append(f"{key}={value}")
-        return "&".join(parts)
+            result.append(f"{key}={value}")
+        return "&".join(result)
+
+    @staticmethod
+    def _url_form_encoded(data: dict, root_name: str = "") -> str:
+        """
+        Tradernet v2 body serialiser — produces bracket-notation form encoding.
+
+        Top-level scalar fields → "key=value".
+        Nested dict fields     → "parentKey[childKey]=value".
+        Empty nested dicts are omitted (no output for that key).
+        This is sent as the POST body (Content-Type: application/x-www-form-urlencoded).
+        """
+        result = []
+        for key in sorted(data.keys()):
+            value = data[key]
+            if isinstance(value, dict):
+                inner = FreedomConnector._url_form_encoded(value, key)
+                if inner:
+                    result.append(inner)
+            else:
+                if root_name:
+                    result.append(f"{root_name}[{key}]={value}")
+                else:
+                    result.append(f"{key}={value}")
+        return "&".join(result)
 
     def _post(self, cmd: str, extra_params: dict | None = None) -> dict:
         """
-        Send a signed command to the Freedom Finance / Tradernet API.
+        Send a HMAC-signed v2 command to the Freedom Finance / Tradernet API.
 
-        Signing (tn-crypto.js algorithm):
-          sign_input = preSign({"cmd": cmd, "params": params})
-          sig        = HMAC-SHA256(secret_key, sign_input).hexdigest()
+        Correct v2 format (from official Python reference client):
+          URL:     POST /api/v2/cmd/{cmd}
+          Body:    url-form-encoded  apiKey=&cmd=&nonce=&params[...]=
+          Signing: HMAC-SHA256(secret_key, _convert_to_query_string(body_dict))
+          Header:  X-NtApi-Sig (no X-NtApi-PublicKey — apiKey is in body)
 
-        For getPositionJson with empty params:
-          sign_input = "cmd=getPositionJson&params="
+        For getPositionJson with empty params, the signed string is:
+          "apiKey=<key>&cmd=getPositionJson&nonce=<ts>&params="
         """
         params = extra_params or {}
+        nonce  = int(time.time() * 10000)
 
-        sign_input = self._pre_sign({"cmd": cmd, "params": params})
+        request_dict = {
+            "apiKey": self.api_key,
+            "cmd":    cmd,
+            "nonce":  nonce,
+            "params": params,
+        }
+
+        sign_input = self._convert_to_query_string(request_dict)
         sig = hmac.new(
             self.secret_key.encode('utf-8'),
             sign_input.encode('utf-8'),
             hashlib.sha256,
         ).hexdigest()
 
-        # q is the full JSON payload sent as a form field for server-side routing.
-        q_payload = json.dumps({"cmd": cmd, "params": params}, separators=(',', ':'))
+        body = self._url_form_encoded(request_dict)
+        url  = f"{TRADERNET_URL_V2}/cmd/{cmd}"
 
         headers = {
-            "Content-Type":      "application/x-www-form-urlencoded",
-            "X-NtApi-PublicKey": self.api_key,
-            "X-NtApi-Sig":       sig,
+            "Content-Type": "application/x-www-form-urlencoded",
+            "X-NtApi-Sig":  sig,
         }
 
-        form_data = {"cmd": cmd, "q": q_payload}
-
-        logger.info("POST %s  [cmd=%s]", TRADERNET_URL, cmd)
         logger.info(
-            "SIGN key=%s… secret_len=%d secret_prefix=%s… sign_input=%r",
-            self.api_key[:6]    if self.api_key    else "EMPTY",
+            "POST (HMAC/v2) %s  apiKey_prefix=%s…  secret_len=%d  sign_input=%r",
+            url,
+            self.api_key[:8]    if self.api_key    else "EMPTY",
             len(self.secret_key),
-            self.secret_key[:4] if self.secret_key else "EMPTY",
-            sign_input,
+            sign_input[:120],
         )
 
-        resp = requests.post(
-            TRADERNET_URL,
-            data=form_data,
-            headers=headers,
-            timeout=REQUEST_TIMEOUT,
-        )
+        resp = requests.post(url, data=body, headers=headers, timeout=REQUEST_TIMEOUT)
         resp.raise_for_status()
         raw = resp.json()
 
@@ -204,7 +241,7 @@ class FreedomConnector:
         if err_msg or (isinstance(err_code, int) and err_code != 0):
             err_text = str(err_msg) if err_msg else f"API error code {err_code}"
             logger.error(
-                "Freedom API error [cmd=%s]: %s (code=%s) raw=%s",
+                "Freedom API error (HMAC/v2) [cmd=%s]: %s (code=%s) raw=%s",
                 cmd, err_text, err_code, resp.text[:500],
             )
             if any(p in err_text.lower() for p in _AUTH_ERROR_PHRASES):
