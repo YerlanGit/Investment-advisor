@@ -65,12 +65,18 @@ def test_signed_path_used_when_secret_present():
     client = TradernetClient("pub", "sec", session=session)
     client.get_portfolio()
 
-    # Signed path posts JSON body; unsigned posts form-encoded data.
+    # Both signed and unsigned paths send `data={"q": <json>}` form-encoded —
+    # the difference is whether apiKey/nonce/sig appear at the top level of the
+    # JSON (signed) or only inside params (unsigned).
     call_kwargs = session.post.call_args.kwargs
-    assert "json" in call_kwargs
-    assert call_kwargs["json"]["apiKey"] == "pub"
-    assert call_kwargs["json"]["cmd"]    == "getPositionJson"
-    assert "sig" in call_kwargs["json"]
+    assert "data" in call_kwargs
+    assert "json" not in call_kwargs
+
+    payload = json.loads(call_kwargs["data"]["q"])
+    assert payload["apiKey"] == "pub"
+    assert payload["cmd"]    == "getPositionJson"
+    assert "sig" in payload
+    assert "nonce" in payload
 
 
 def test_unsigned_path_used_when_secret_missing():

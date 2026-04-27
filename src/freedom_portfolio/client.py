@@ -143,6 +143,12 @@ class TradernetClient:
 
     def _post_signed(self, cmd: str, params: dict) -> dict:
         body = build_request(cmd, params, self.public_key, self.secret_key)
+        # Tradernet /api/ ALWAYS expects the request body in the `q` form field —
+        # both signed and unsigned modes.  Sending the JSON directly as the
+        # request body produces "Invalid 'q' provided" (code=5).  The signed
+        # payload (apiKey/cmd/nonce/params/sig) is JSON-encoded and dropped
+        # into a single form parameter.
+        q_payload = json.dumps(body, separators=(",", ":"))
         logger.info(
             "Tradernet POST (signed) %s [cmd=%s key_prefix=%s… secret_len=%d]",
             self.base_url, cmd,
@@ -151,7 +157,7 @@ class TradernetClient:
         )
         resp = self._session.post(
             self.base_url,
-            json=body,
+            data={"q": q_payload},
             timeout=self.timeout,
         )
         return self._decode(resp)
