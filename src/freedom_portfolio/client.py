@@ -110,21 +110,51 @@ class TradernetClient:
 
     def get_portfolio(self) -> Portfolio:
         """
-        Fetch the user's portfolio.  Tries ``getPositionJson`` first (works on
-        every Tradernet deployment) and falls back to ``getPortfolio`` for
-        backwards compatibility.
+        Fetch the user's portfolio using a two-phase auth strategy.
+
+        Phase 1 — Signed (when ``secret_key`` is set):
+            Tries ``getPositionJson`` then ``getPortfolio`` with MD5 signature.
+            On auth rejection (code=12) falls through to Phase 2 — the secret
+            may be incorrect while the public key is still valid for unsigned access.
+
+        Phase 2 — Unsigned (primary when no secret; fallback when signed rejected):
+            Embeds ``apiKey`` inside the params JSON.  Auth rejection here is
+            truly fatal — there is nothing more to try.
         """
         last_exc: Exception | None = None
+
+        # ── Phase 1: signed ──────────────────────────────────────────────────
+        if self.secret_key:
+            for cmd in ("getPositionJson", "getPortfolio"):
+                try:
+                    raw = self._post_signed(cmd, {})
+                    return self._parse_portfolio(raw)
+                except (InvalidSignatureError, AuthenticationError) as exc:
+                    logger.warning(
+                        "Tradernet signed auth rejected [cmd=%s key_prefix=%s… secret_len=%d]: %s "
+                        "— falling back to unsigned",
+                        cmd,
+                        self.public_key[:8] if self.public_key else "EMPTY",
+                        len(self.secret_key),
+                        exc,
+                    )
+                    last_exc = exc
+                    break   # signed definitely broken for this key pair
+                except BrokerAPIError as exc:
+                    last_exc = exc
+                    logger.warning("Tradernet '%s' (signed) failed: %s — trying next", cmd, exc)
+
+        # ── Phase 2: unsigned ────────────────────────────────────────────────
         for cmd in ("getPositionJson", "getPortfolio"):
             try:
-                raw = self._call(cmd, {})
+                raw = self._post_unsigned(cmd, {})
                 return self._parse_portfolio(raw)
             except (InvalidSignatureError, AuthenticationError):
-                # Auth errors are fatal — no point trying alternate commands
+                # Unsigned also rejected — credentials are definitely wrong.
                 raise
             except BrokerAPIError as exc:
                 last_exc = exc
-                logger.warning("Tradernet '%s' failed: %s — trying next command", cmd, exc)
+                logger.warning("Tradernet '%s' (unsigned) failed: %s — trying next", cmd, exc)
 
         assert last_exc is not None
         raise last_exc
@@ -150,10 +180,12 @@ class TradernetClient:
         # into a single form parameter.
         q_payload = json.dumps(body, separators=(",", ":"))
         logger.info(
-            "Tradernet POST (signed) %s [cmd=%s key_prefix=%s… secret_len=%d]",
+            "Tradernet POST (signed) %s [cmd=%s apiKey=%s… key_len=%d secret_len=%d sig_prefix=%s…]",
             self.base_url, cmd,
-            self.public_key[:8] if self.public_key else "EMPTY",
+            self.public_key[:12] if self.public_key else "EMPTY",
+            len(self.public_key),
             len(self.secret_key),
+            body.get("sig", "")[:8],
         )
         resp = self._session.post(
             self.base_url,

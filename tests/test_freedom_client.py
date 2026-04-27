@@ -111,3 +111,49 @@ def test_portfolio_response_parsed_into_pydantic_model():
     portfolio = client.get_portfolio()
     assert portfolio.pos[0].i == "AAPL.US"
     assert portfolio.acc[0].s == 100
+
+
+def test_signed_falls_back_to_unsigned_on_auth_error():
+    """
+    When signed auth returns code=12 (wrong secret), the client must retry
+    via unsigned before raising.  If unsigned succeeds, the portfolio is returned.
+    """
+    success_payload = {"ps": {"key": "X", "acc": [], "pos": [{"i": "TSLA.US", "q": 2, "s": 400, "mkt_price": 200, "open_bal": 350}]}}
+
+    call_count = 0
+
+    session = MagicMock()
+    response_auth_error = MagicMock()
+    response_auth_error.status_code = 200
+    response_auth_error.raise_for_status.return_value = None
+    response_auth_error.json.return_value = {"code": 12, "errMsg": "Invalid credentials"}
+    response_auth_error.text = '{"code":12,"errMsg":"Invalid credentials"}'
+
+    response_ok = MagicMock()
+    response_ok.status_code = 200
+    response_ok.raise_for_status.return_value = None
+    response_ok.json.return_value = success_payload
+    response_ok.text = json.dumps(success_payload)
+
+    def _side_effect(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        # First call: signed → auth error; second call: unsigned → success
+        return response_auth_error if call_count == 1 else response_ok
+
+    session.post.side_effect = _side_effect
+
+    client = TradernetClient("pub", "sec", session=session)
+    portfolio = client.get_portfolio()
+
+    assert portfolio.pos[0].i == "TSLA.US"
+    assert session.post.call_count == 2  # signed attempt + unsigned attempt
+
+    # First call must have the signed payload (sig field present inside q)
+    first_payload = json.loads(session.post.call_args_list[0].kwargs["data"]["q"])
+    assert "sig" in first_payload
+
+    # Second call must be unsigned (apiKey inside params, no top-level sig)
+    second_payload = json.loads(session.post.call_args_list[1].kwargs["data"]["q"])
+    assert "sig" not in second_payload
+    assert second_payload["params"]["apiKey"] == "pub"
