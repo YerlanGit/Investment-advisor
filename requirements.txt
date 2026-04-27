@@ -14,6 +14,13 @@ requests>=2.31.0
 edgartools>=3.0.0
 pyrate-limiter>=2.10.0,<3.0.0
 
+# ── Freedom Broker (Tradernet) connector ─────────────────────────────────────
+pydantic>=2.0
+# Optional extras for the standalone CLI (`python -m freedom_portfolio`).
+# Uncomment if you want the live WebSocket feed or the rich-rendered table:
+# python-socketio[client]>=5.10
+# rich>=13.0
+
 # ── Security / Encryption ────────────────────────────────────────────────────
 cryptography>=42.0.0
 
