@@ -163,6 +163,12 @@ class FreedomConnector:
             df = self._mock_portfolio()
             df.attrs["_ramp_is_fallback"] = True
             return df
+        except Exception as exc:
+            # Catches pydantic.ValidationError if the API response is malformed.
+            logger.error("Unexpected error parsing Tradernet response: %s — returning fallback mock.", exc)
+            df = self._mock_portfolio()
+            df.attrs["_ramp_is_fallback"] = True
+            return df
 
         df = self._to_dataframe(portfolio)
         if df.empty:
