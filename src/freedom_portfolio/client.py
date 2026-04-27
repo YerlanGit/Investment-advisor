@@ -25,10 +25,15 @@ from freedom_portfolio.models import Portfolio
 
 logger = logging.getLogger(__name__)
 
-# Per spec: use the international endpoint (Freedom Broker KZ clients route here).
-BASE_URL_LIVE = "https://tradernet.com/api/"
-BASE_URL_DEMO = "https://tradernet.com/api/"   # Tradernet has no public demo endpoint
-DEFAULT_TIMEOUT = 30
+# Two known Tradernet endpoints:
+#   tradernet.com  — international gateway; official spec target.
+#   tradernet.kz   — Kazakhstan-specific deployment; retail KZ accounts may have
+#                    keys that only authenticate here, not on tradernet.com.
+# get_portfolio() tries .com first; on "Invalid credentials" it retries on .kz.
+BASE_URL_LIVE    = "https://tradernet.com/api/"
+BASE_URL_LIVE_KZ = "https://tradernet.kz/api/"
+BASE_URL_DEMO    = "https://tradernet.com/api/"
+DEFAULT_TIMEOUT  = 30
 
 
 # ── Typed exceptions ──────────────────────────────────────────────────────────
@@ -110,20 +115,22 @@ class TradernetClient:
 
     def get_portfolio(self) -> Portfolio:
         """
-        Fetch the user's portfolio using a two-phase auth strategy.
+        Fetch the user's portfolio.  Tries multiple auth modes and endpoints.
 
-        Phase 1 — Signed (when ``secret_key`` is set):
-            Tries ``getPositionJson`` then ``getPortfolio`` with MD5 signature.
-            On auth rejection (code=12) falls through to Phase 2 — the secret
-            may be incorrect while the public key is still valid for unsigned access.
+        Phase 1 — Signed on primary URL (``tradernet.com``):
+            MD5-signed request.  Falls through to Phase 2 on auth rejection.
 
-        Phase 2 — Unsigned (primary when no secret; fallback when signed rejected):
-            Embeds ``apiKey`` inside the params JSON.  Auth rejection here is
-            truly fatal — there is nothing more to try.
+        Phase 2 — Unsigned on primary URL:
+            ``apiKey`` in params JSON.  Falls through to Phase 3 on auth rejection.
+
+        Phase 3 — Unsigned on KZ endpoint (``tradernet.kz``):
+            Retail Freedom Finance Kazakhstan accounts issue keys that only
+            authenticate on the KZ deployment, not the international gateway.
+            Auth rejection here is truly fatal.
         """
         last_exc: Exception | None = None
 
-        # ── Phase 1: signed ──────────────────────────────────────────────────
+        # ── Phase 1: signed on primary URL ───────────────────────────────────
         if self.secret_key:
             for cmd in ("getPositionJson", "getPortfolio"):
                 try:
@@ -131,30 +138,59 @@ class TradernetClient:
                     return self._parse_portfolio(raw)
                 except (InvalidSignatureError, AuthenticationError) as exc:
                     logger.warning(
-                        "Tradernet signed auth rejected [cmd=%s key_prefix=%s… secret_len=%d]: %s "
+                        "Tradernet signed auth rejected on %s [cmd=%s key_prefix=%s… secret_len=%d]: %s "
                         "— falling back to unsigned",
-                        cmd,
+                        self.base_url, cmd,
                         self.public_key[:8] if self.public_key else "EMPTY",
                         len(self.secret_key),
                         exc,
                     )
                     last_exc = exc
-                    break   # signed definitely broken for this key pair
+                    break
                 except BrokerAPIError as exc:
                     last_exc = exc
                     logger.warning("Tradernet '%s' (signed) failed: %s — trying next", cmd, exc)
 
-        # ── Phase 2: unsigned ────────────────────────────────────────────────
+        # ── Phase 2: unsigned on primary URL ─────────────────────────────────
+        _com_rejected = False
         for cmd in ("getPositionJson", "getPortfolio"):
             try:
                 raw = self._post_unsigned(cmd, {})
                 return self._parse_portfolio(raw)
-            except (InvalidSignatureError, AuthenticationError):
-                # Unsigned also rejected — credentials are definitely wrong.
-                raise
+            except (InvalidSignatureError, AuthenticationError) as exc:
+                logger.warning(
+                    "Tradernet unsigned auth rejected on %s [cmd=%s]: %s "
+                    "— trying tradernet.kz endpoint",
+                    self.base_url, cmd, exc,
+                )
+                last_exc = exc
+                _com_rejected = True
+                break
             except BrokerAPIError as exc:
                 last_exc = exc
-                logger.warning("Tradernet '%s' (unsigned) failed: %s — trying next", cmd, exc)
+                logger.warning("Tradernet '%s' (unsigned/%s) failed: %s — trying next",
+                               cmd, self.base_url, exc)
+
+        # ── Phase 3: unsigned on KZ endpoint ─────────────────────────────────
+        # Only try if the primary URL rejected credentials — KZ keys are only
+        # valid on tradernet.kz, not tradernet.com.
+        if _com_rejected and self.base_url.rstrip("/") != BASE_URL_LIVE_KZ.rstrip("/"):
+            kz_client = TradernetClient(
+                self.public_key, "",   # unsigned — only public key
+                base_url=BASE_URL_LIVE_KZ,
+                timeout=self.timeout,
+                session=self._session,
+            )
+            for cmd in ("getPositionJson", "getPortfolio"):
+                try:
+                    raw = kz_client._post_unsigned(cmd, {})
+                    logger.info("Tradernet '%s' succeeded on tradernet.kz fallback.", cmd)
+                    return self._parse_portfolio(raw)
+                except (InvalidSignatureError, AuthenticationError):
+                    raise   # KZ also rejected — nothing more to try
+                except BrokerAPIError as exc:
+                    last_exc = exc
+                    logger.warning("Tradernet '%s' (unsigned/kz) failed: %s — trying next", cmd, exc)
 
         assert last_exc is not None
         raise last_exc
