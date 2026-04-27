@@ -25,15 +25,19 @@ from freedom_portfolio.models import Portfolio
 
 logger = logging.getLogger(__name__)
 
-# Two known Tradernet endpoints:
-#   tradernet.com  — international gateway; official spec target.
-#   tradernet.kz   — Kazakhstan-specific deployment; retail KZ accounts may have
-#                    keys that only authenticate here, not on tradernet.com.
-# get_portfolio() tries .com first; on "Invalid credentials" it retries on .kz.
-BASE_URL_LIVE    = "https://tradernet.com/api/"
-BASE_URL_LIVE_KZ = "https://tradernet.kz/api/"
-BASE_URL_DEMO    = "https://tradernet.com/api/"
-DEFAULT_TIMEOUT  = 30
+# Known Tradernet / Freedom Finance endpoints.
+# get_portfolio() tries BASE_URL_LIVE first; if that rejects credentials it
+# cycles through _FALLBACK_KZ_URLS in order until one succeeds or all fail.
+BASE_URL_LIVE = "https://tradernet.com/api/"
+BASE_URL_DEMO = "https://tradernet.com/api/"
+DEFAULT_TIMEOUT = 30
+
+# KZ-registered accounts may have keys that only authenticate on one of these
+# Kazakhstan-specific deployments.  Both use the same /api/ + q= protocol.
+_FALLBACK_KZ_URLS: tuple[str, ...] = (
+    "https://tradernet.kz/api/",
+    "https://freedombroker.kz/api/",
+)
 
 
 # ── Typed exceptions ──────────────────────────────────────────────────────────
@@ -123,10 +127,11 @@ class TradernetClient:
         Phase 2 — Unsigned on primary URL:
             ``apiKey`` in params JSON.  Falls through to Phase 3 on auth rejection.
 
-        Phase 3 — Unsigned on KZ endpoint (``tradernet.kz``):
+        Phase 3 — Unsigned on KZ fallback endpoints:
+            Tried in order: ``tradernet.kz``, ``freedombroker.kz``.
             Retail Freedom Finance Kazakhstan accounts issue keys that only
-            authenticate on the KZ deployment, not the international gateway.
-            Auth rejection here is truly fatal.
+            authenticate on one of these KZ deployments.
+            Auth rejection on all endpoints is truly fatal.
         """
         last_exc: Exception | None = None
 
@@ -152,7 +157,7 @@ class TradernetClient:
                     logger.warning("Tradernet '%s' (signed) failed: %s — trying next", cmd, exc)
 
         # ── Phase 2: unsigned on primary URL ─────────────────────────────────
-        _com_rejected = False
+        _primary_rejected = False
         for cmd in ("getPositionJson", "getPortfolio"):
             try:
                 raw = self._post_unsigned(cmd, {})
@@ -160,37 +165,48 @@ class TradernetClient:
             except (InvalidSignatureError, AuthenticationError) as exc:
                 logger.warning(
                     "Tradernet unsigned auth rejected on %s [cmd=%s]: %s "
-                    "— trying tradernet.kz endpoint",
+                    "— trying KZ fallback endpoints",
                     self.base_url, cmd, exc,
                 )
                 last_exc = exc
-                _com_rejected = True
+                _primary_rejected = True
                 break
             except BrokerAPIError as exc:
                 last_exc = exc
                 logger.warning("Tradernet '%s' (unsigned/%s) failed: %s — trying next",
                                cmd, self.base_url, exc)
 
-        # ── Phase 3: unsigned on KZ endpoint ─────────────────────────────────
-        # Only try if the primary URL rejected credentials — KZ keys are only
-        # valid on tradernet.kz, not tradernet.com.
-        if _com_rejected and self.base_url.rstrip("/") != BASE_URL_LIVE_KZ.rstrip("/"):
-            kz_client = TradernetClient(
-                self.public_key, "",   # unsigned — only public key
-                base_url=BASE_URL_LIVE_KZ,
-                timeout=self.timeout,
-                session=self._session,
-            )
-            for cmd in ("getPositionJson", "getPortfolio"):
-                try:
-                    raw = kz_client._post_unsigned(cmd, {})
-                    logger.info("Tradernet '%s' succeeded on tradernet.kz fallback.", cmd)
-                    return self._parse_portfolio(raw)
-                except (InvalidSignatureError, AuthenticationError):
-                    raise   # KZ also rejected — nothing more to try
-                except BrokerAPIError as exc:
-                    last_exc = exc
-                    logger.warning("Tradernet '%s' (unsigned/kz) failed: %s — trying next", cmd, exc)
+        # ── Phase 3: unsigned on KZ fallback endpoints ────────────────────────
+        # KZ-registered accounts may have keys that only work on tradernet.kz
+        # or freedombroker.kz, not on the international tradernet.com gateway.
+        if _primary_rejected:
+            primary = self.base_url.rstrip("/")
+            for fallback_url in _FALLBACK_KZ_URLS:
+                if fallback_url.rstrip("/") == primary:
+                    continue   # skip if this IS the primary URL
+                logger.info("Trying KZ fallback endpoint: %s", fallback_url)
+                for cmd in ("getPositionJson", "getPortfolio"):
+                    try:
+                        fb_client = TradernetClient(
+                            self.public_key, "",
+                            base_url=fallback_url,
+                            timeout=self.timeout,
+                            session=self._session,
+                        )
+                        raw = fb_client._post_unsigned(cmd, {})
+                        logger.info("'%s' succeeded on KZ fallback %s.", cmd, fallback_url)
+                        return self._parse_portfolio(raw)
+                    except (InvalidSignatureError, AuthenticationError) as exc:
+                        logger.warning(
+                            "KZ fallback %s rejected credentials [cmd=%s]: %s — trying next endpoint",
+                            fallback_url, cmd, exc,
+                        )
+                        last_exc = exc
+                        break   # move to next fallback URL
+                    except BrokerAPIError as exc:
+                        last_exc = exc
+                        logger.warning("'%s' (unsigned/%s) failed: %s — trying next cmd",
+                                       cmd, fallback_url, exc)
 
         assert last_exc is not None
         raise last_exc
