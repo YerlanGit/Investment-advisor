@@ -1,20 +1,26 @@
 """
-Tradernet request signing (md5+secret).
+Tradernet request signing.
 
-Algorithm (per official Tradernet docs, https://github.com/Tradernet/tn.api):
-    1. Sort top-level keys alphabetically (ascending).
-    2. Render each pair as "key=value", recursing into nested dicts.
-    3. Concatenate pairs WITHOUT separator.
-    4. Append the raw API secret string at the very end.
-    5. md5(utf8 bytes of the full string) — hex digest is the signature.
+Two algorithms exist on the same host:
 
-Note: this is NOT HMAC. The "HMAC-MD5" wording sometimes used in the wild is
-a misnomer — there is no HMAC keying schedule, just plain md5 of (data + secret).
+  Legacy /api/   — md5( sorted("k=v")_concat_no_separator + secret_key ).
+                   Designed for uid-based authentication where ``uid`` is the
+                   user's account number.  apiKey-based credentials are NOT
+                   accepted on this path — the server interprets the ``apiKey``
+                   field as a uid and returns ``code=12 Invalid credentials``.
+                   Kept here for backwards compatibility and tests.
+
+  Modern /api/v2/cmd/{cmd} — HMAC-SHA256(secret, sorted("k=v") joined by "&").
+                   Designed for apiKey-based authentication.  Requires both
+                   ``X-NtApi-Sig`` and ``X-NtApi-PublicKey`` headers.
+                   This is the path that retail Freedom Broker keys (32-char
+                   public + 40-char secret) authenticate against.
 """
 
 from __future__ import annotations
 
 import hashlib
+import hmac
 import time
 
 
@@ -79,3 +85,75 @@ def build_request(
     }
     body["sig"] = build_signature(body, secret_key)
     return body
+
+
+# ── Modern /api/v2/cmd/ HMAC-SHA256 signing ──────────────────────────────────
+
+
+def _serialize_v2(data: dict) -> str:
+    """
+    Serialize *data* into the v2 sign-input format: sorted "key=value" pairs
+    joined by "&".  Nested dicts are serialized recursively so nested values
+    become the inner serialized string (matching kofeinstyle/tradernet-sdk).
+    """
+    parts: list[str] = []
+    for key in sorted(data.keys()):
+        value = data[key]
+        if isinstance(value, dict):
+            rendered = _serialize_v2(value)
+        elif value is None:
+            rendered = ""
+        elif isinstance(value, bool):
+            rendered = "1" if value else "0"
+        else:
+            rendered = str(value)
+        parts.append(f"{key}={rendered}")
+    return "&".join(parts)
+
+
+def build_v2_signature(params: dict, secret_key: str) -> str:
+    """
+    Compute the v2 ``X-NtApi-Sig`` value: hex-encoded HMAC-SHA256 of the
+    "&"-joined sorted "key=value" pairs.
+    """
+    pre = _serialize_v2(params)
+    return hmac.new(
+        secret_key.encode("utf-8"),
+        pre.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def build_v2_request(
+    cmd: str,
+    params: dict,
+    public_key: str,
+    secret_key: str,
+    *,
+    nonce: int | None = None,
+) -> tuple[dict, str]:
+    """
+    Build a v2 request payload + HMAC-SHA256 signature.
+
+    ``nonce`` follows the JS SDK convention ``Math.floor(Date.now() * 10000)``
+    which equals ``int(time.time() * 1e7)`` — a 100-ns-resolution monotonic
+    counter that the server uses for replay protection.
+
+    Returns
+    -------
+    (payload, sig)
+        The dict {apiKey, cmd, nonce, params} and the corresponding signature.
+        The caller submits the payload form-urlencoded with ``X-NtApi-Sig`` and
+        ``X-NtApi-PublicKey`` headers.
+    """
+    if nonce is None:
+        nonce = int(time.time() * 1e7)
+
+    payload: dict = {
+        "apiKey": public_key,
+        "cmd":    cmd,
+        "nonce":  nonce,
+        "params": params or {},
+    }
+    sig = build_v2_signature(payload, secret_key)
+    return payload, sig

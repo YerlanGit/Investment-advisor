@@ -60,23 +60,73 @@ def test_generic_error_maps_to_broker_api_error():
         client.get_portfolio()
 
 
-def test_signed_path_used_when_secret_present():
+def test_v2_signed_path_used_when_secret_present():
+    """
+    Phase 1 — v2 signed.  The client must hit /v2/cmd/{cmd}, send a
+    form-urlencoded body (no `q` wrapper), and set BOTH X-NtApi-Sig and
+    X-NtApi-PublicKey headers.
+    """
     session = _mock_session({"result": {"ps": {"key": "X", "acc": [], "pos": []}}})
     client = TradernetClient("pub", "sec", session=session)
     client.get_portfolio()
 
-    # Both signed and unsigned paths send `data={"q": <json>}` form-encoded —
-    # the difference is whether apiKey/nonce/sig appear at the top level of the
-    # JSON (signed) or only inside params (unsigned).
-    call_kwargs = session.post.call_args.kwargs
-    assert "data" in call_kwargs
-    assert "json" not in call_kwargs
+    call_args   = session.post.call_args
+    call_url    = call_args.args[0] if call_args.args else call_args.kwargs.get("url", "")
+    call_kwargs = call_args.kwargs
 
-    payload = json.loads(call_kwargs["data"]["q"])
-    assert payload["apiKey"] == "pub"
-    assert payload["cmd"]    == "getPositionJson"
-    assert "sig" in payload
-    assert "nonce" in payload
+    # URL targets /v2/cmd/{cmd}, not the bare /api/.
+    assert call_url.endswith("/v2/cmd/getPositionJson"), call_url
+
+    # Body is form-urlencoded plain string (not a dict-with-`q`).
+    assert isinstance(call_kwargs["data"], str)
+    assert call_kwargs["data"].startswith("apiKey=") or "apiKey=" in call_kwargs["data"]
+
+    # Both auth headers must be set.
+    headers = call_kwargs["headers"]
+    assert headers["X-NtApi-Sig"]
+    assert headers["X-NtApi-PublicKey"] == "pub"
+    assert headers["Content-Type"] == "application/x-www-form-urlencoded"
+
+
+def test_v1_signed_path_attempted_after_v2_rejection():
+    """
+    When v2 returns code=12, the client falls back to legacy v1 md5 signing.
+    """
+    session = MagicMock()
+    response_auth_error = MagicMock()
+    response_auth_error.status_code = 200
+    response_auth_error.raise_for_status.return_value = None
+    response_auth_error.json.return_value = {"code": 12, "errMsg": "Invalid credentials"}
+    response_auth_error.text = '{"code":12,"errMsg":"Invalid credentials"}'
+
+    response_ok = MagicMock()
+    response_ok.status_code = 200
+    response_ok.raise_for_status.return_value = None
+    response_ok.json.return_value = {"ps": {"key": "X", "acc": [], "pos": []}}
+    response_ok.text = '{"ps":{}}'
+
+    call_count = 0
+
+    def _side_effect(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        # v2 attempt(s) → auth error; v1 md5 attempt → success
+        return response_auth_error if call_count == 1 else response_ok
+
+    session.post.side_effect = _side_effect
+    client = TradernetClient("pub", "sec", session=session)
+    client.get_portfolio()
+
+    # First call is v2 (URL contains /v2/cmd/)
+    first_url = session.post.call_args_list[0].args[0]
+    assert "/v2/cmd/" in first_url
+
+    # Second call is v1 (legacy /api/ with q= form field)
+    second_call = session.post.call_args_list[1]
+    second_url  = second_call.args[0] if second_call.args else second_call.kwargs.get("url", "")
+    assert "/v2/cmd/" not in second_url
+    assert "data" in second_call.kwargs
+    assert "q" in second_call.kwargs["data"]
 
 
 def test_unsigned_path_used_when_secret_missing():
@@ -138,8 +188,10 @@ def test_signed_falls_back_to_unsigned_on_auth_error():
     def _side_effect(*args, **kwargs):
         nonlocal call_count
         call_count += 1
-        # First call: signed → auth error; second call: unsigned → success
-        return response_auth_error if call_count == 1 else response_ok
+        # Calls 1+2: v2 signed (errors), call 3: v1 md5 signed (errors),
+        # call 4: unsigned (succeeds).  v2 and v1 each break their cmd loop
+        # on the first auth rejection, so each contributes one call.
+        return response_auth_error if call_count <= 2 else response_ok
 
     session.post.side_effect = _side_effect
 
@@ -147,13 +199,14 @@ def test_signed_falls_back_to_unsigned_on_auth_error():
     portfolio = client.get_portfolio()
 
     assert portfolio.pos[0].i == "TSLA.US"
-    assert session.post.call_count == 2  # signed attempt + unsigned attempt
 
-    # First call must have the signed payload (sig field present inside q)
-    first_payload = json.loads(session.post.call_args_list[0].kwargs["data"]["q"])
-    assert "sig" in first_payload
+    # The full fallback chain: v2 signed → v1 md5 signed → unsigned (success).
+    urls = [c.args[0] for c in session.post.call_args_list]
+    assert "/v2/cmd/" in urls[0]                       # Phase 1 — v2 signed
+    assert "/v2/cmd/" not in urls[1]                   # Phase 2 — v1 md5 signed
+    assert "/v2/cmd/" not in urls[-1]                  # Phase 3 — unsigned
 
-    # Second call must be unsigned (apiKey inside params, no top-level sig)
-    second_payload = json.loads(session.post.call_args_list[1].kwargs["data"]["q"])
-    assert "sig" not in second_payload
-    assert second_payload["params"]["apiKey"] == "pub"
+    # The succeeding call must be the unsigned q= form-encoded payload.
+    final_payload = json.loads(session.post.call_args_list[-1].kwargs["data"]["q"])
+    assert "sig" not in final_payload
+    assert final_payload["params"]["apiKey"] == "pub"

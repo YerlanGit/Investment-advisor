@@ -11,7 +11,12 @@ _SRC = Path(__file__).resolve().parent.parent / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from freedom_portfolio.auth import build_request, build_signature  # noqa: E402
+from freedom_portfolio.auth import (  # noqa: E402
+    build_request,
+    build_signature,
+    build_v2_request,
+    build_v2_signature,
+)
 
 
 def test_signature_known_vector():
@@ -71,3 +76,46 @@ def test_signature_does_not_include_sig_field():
     # Re-derive the signature without the "sig" key — must match.
     derived = build_signature({k: v for k, v in body.items() if k != "sig"}, "sec")
     assert body["sig"] == derived
+
+
+# ── v2 (HMAC-SHA256) signing — modern /api/v2/cmd/ path ──────────────────────
+
+
+def test_v2_signature_known_vector():
+    """
+    v2 reference vector: HMAC-SHA256 of "&"-joined sorted "k=v" pairs.
+    Cross-checked against the Node SDK (kofeinstyle/tradernet-sdk).
+    """
+    payload = {"apiKey": "testkey", "cmd": "getPortfolio", "nonce": 17000000000000000}
+    expected = "cb50fa1321a1574c9564e4441a00429171567b3c05b6b9130edf27955e9ed0e8"
+    assert build_v2_signature(payload, "mysecret") == expected
+
+
+def test_v2_signature_handles_nested_params():
+    """Nested dicts recurse — booleans coerce to 1/0 for PHP backend parity."""
+    payload = {
+        "apiKey": "testkey",
+        "cmd":    "getPortfolio",
+        "nonce":  17000000000000000,
+        "params": {"is_re_eval": True},
+    }
+    expected = "580c3eebb13823f60062b64b30068d1910e87a83586d5e792de6cc82e9997555"
+    assert build_v2_signature(payload, "mysecret") == expected
+
+
+def test_v2_signature_uses_ampersand_separator():
+    """Distinguishing test vs legacy md5 path — v2 joins with '&', legacy doesn't."""
+    payload = {"a": "1", "b": "2"}
+    legacy = build_signature(payload, "k")        # md5("a=1b=2k")
+    modern = build_v2_signature(payload, "k")     # HMAC-SHA256("k", "a=1&b=2")
+    assert legacy != modern
+
+
+def test_build_v2_request_returns_payload_and_sig():
+    payload, sig = build_v2_request("getPortfolio", {}, "pubk", "sec", nonce=1)
+    assert payload["apiKey"] == "pubk"
+    assert payload["cmd"]    == "getPortfolio"
+    assert payload["nonce"]  == 1
+    assert payload["params"] == {}
+    assert len(sig) == 64   # HMAC-SHA256 hex
+    assert "sig" not in payload   # sig stays out of the form body — it goes in headers
