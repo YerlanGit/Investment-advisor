@@ -1,15 +1,23 @@
 """
 Tradernet REST client (read-only).
 
-Two transport modes:
+Three transport modes are tried in order:
 
-  Signed   — primary path.  POST JSON {apiKey, cmd, nonce, params, sig} to /api/.
-             ``sig`` is built by ``auth.build_signature`` (md5 of sorted concat
-             with secret appended).  Use this when you have an apiKey/secret pair.
+  v2 signed (primary)  — POST form-urlencoded to /api/v2/cmd/{cmd} with
+                         X-NtApi-Sig (HMAC-SHA256) + X-NtApi-PublicKey headers.
+                         This is the path that modern apiKey/apiSecret retail
+                         keys (32-char public + 40-char secret) authenticate
+                         against.  Mirrors kofeinstyle/tradernet-sdk exactly.
 
-  Unsigned — fallback for accounts that only expose a single "Public API key"
-             (no separate secret).  POST form-encoded ``q={cmd, params:{apiKey}}``.
-             This is the legacy /api/ flow used by the Tradernet web UI.
+  v1 signed (fallback) — POST q=<json> to /api/ with md5(...) signature.
+                         Used by legacy uid-based authentication where the
+                         server reads ``uid`` (account number) instead of
+                         ``apiKey``.  Almost never the right answer for retail
+                         keys, but kept for completeness.
+
+  v1 unsigned (fallback) — POST q={cmd, params:{apiKey}} form-encoded to /api/.
+                         Works for accounts that only expose a single Public
+                         API key without a separate secret.
 """
 
 from __future__ import annotations
@@ -17,10 +25,11 @@ from __future__ import annotations
 import json
 import logging
 from typing import Any
+from urllib.parse import quote
 
 import requests
 
-from freedom_portfolio.auth import build_request
+from freedom_portfolio.auth import build_request, build_v2_request
 from freedom_portfolio.models import Portfolio
 
 logger = logging.getLogger(__name__)
@@ -121,13 +130,18 @@ class TradernetClient:
         """
         Fetch the user's portfolio.  Tries multiple auth modes and endpoints.
 
-        Phase 1 — Signed on primary URL (``tradernet.com``):
-            MD5-signed request.  Falls through to Phase 2 on auth rejection.
+        Phase 1 — v2 signed on primary URL:
+            POST /api/v2/cmd/{cmd} with HMAC-SHA256 sig + X-NtApi-PublicKey.
+            This is the path retail apiKey/apiSecret pairs authenticate on.
 
-        Phase 2 — Unsigned on primary URL:
-            ``apiKey`` in params JSON.  Falls through to Phase 3 on auth rejection.
+        Phase 2 — v1 md5-signed on primary URL:
+            Legacy uid-based path; almost never matches apiKey credentials but
+            tried for backwards compatibility.
 
-        Phase 3 — Unsigned on KZ fallback endpoints:
+        Phase 3 — Unsigned on primary URL:
+            ``apiKey`` in params JSON.  Falls through to Phase 4 on auth rejection.
+
+        Phase 4 — Unsigned on KZ fallback endpoints:
             Tried in order: ``tradernet.kz``, ``freedombroker.kz``.
             Retail Freedom Finance Kazakhstan accounts issue keys that only
             authenticate on one of these KZ deployments.
@@ -135,17 +149,17 @@ class TradernetClient:
         """
         last_exc: Exception | None = None
 
-        # ── Phase 1: signed on primary URL ───────────────────────────────────
+        # ── Phase 1: v2 signed on primary URL (HMAC-SHA256, /v2/cmd/) ────────
         if self.secret_key:
             for cmd in ("getPositionJson", "getPortfolio"):
                 try:
-                    raw = self._post_signed(cmd, {})
+                    raw = self._post_v2_signed(cmd, {})
                     return self._parse_portfolio(raw)
                 except (InvalidSignatureError, AuthenticationError) as exc:
                     logger.warning(
-                        "Tradernet signed auth rejected on %s [cmd=%s key_prefix=%s… secret_len=%d]: %s "
-                        "— falling back to unsigned",
-                        self.base_url, cmd,
+                        "Tradernet v2 signed auth rejected [cmd=%s apiKey_prefix=%s… secret_len=%d]: %s "
+                        "— falling back to v1 md5 signing",
+                        cmd,
                         self.public_key[:8] if self.public_key else "EMPTY",
                         len(self.secret_key),
                         exc,
@@ -154,7 +168,24 @@ class TradernetClient:
                     break
                 except BrokerAPIError as exc:
                     last_exc = exc
-                    logger.warning("Tradernet '%s' (signed) failed: %s — trying next", cmd, exc)
+                    logger.warning("Tradernet '%s' (v2 signed) failed: %s — trying next", cmd, exc)
+
+        # ── Phase 2: v1 md5-signed on primary URL ────────────────────────────
+        if self.secret_key:
+            for cmd in ("getPositionJson", "getPortfolio"):
+                try:
+                    raw = self._post_signed(cmd, {})
+                    return self._parse_portfolio(raw)
+                except (InvalidSignatureError, AuthenticationError) as exc:
+                    logger.warning(
+                        "Tradernet v1 md5 auth rejected [cmd=%s]: %s — falling back to unsigned",
+                        cmd, exc,
+                    )
+                    last_exc = exc
+                    break
+                except BrokerAPIError as exc:
+                    last_exc = exc
+                    logger.warning("Tradernet '%s' (v1 signed) failed: %s — trying next", cmd, exc)
 
         # ── Phase 2: unsigned on primary URL ─────────────────────────────────
         _primary_rejected = False
@@ -223,6 +254,34 @@ class TradernetClient:
             return self._post_signed(cmd, params)
         return self._post_unsigned(cmd, params)
 
+    def _post_v2_signed(self, cmd: str, params: dict) -> dict:
+        """
+        v2 signed POST to ``/api/v2/cmd/{cmd}`` with HMAC-SHA256.
+
+        Headers ``X-NtApi-Sig`` AND ``X-NtApi-PublicKey`` are both required —
+        previous attempts in this project that used only ``X-NtApi-Sig`` were
+        silently rejected by the server.  Body is form-urlencoded with bracket
+        notation for nested params (matches kofeinstyle/tradernet-sdk).
+        """
+        payload, sig = build_v2_request(cmd, params, self.public_key, self.secret_key)
+        body = self._to_form_urlencoded(payload)
+        url  = f"{self.base_url.rstrip('/')}/v2/cmd/{cmd}"
+        headers = {
+            "Content-Type":     "application/x-www-form-urlencoded",
+            "X-NtApi-Sig":      sig,
+            "X-NtApi-PublicKey": self.public_key,
+        }
+        logger.info(
+            "Tradernet POST (v2 signed) %s [cmd=%s apiKey_prefix=%s… key_len=%d secret_len=%d sig_prefix=%s…]",
+            url, cmd,
+            self.public_key[:8] if self.public_key else "EMPTY",
+            len(self.public_key),
+            len(self.secret_key),
+            sig[:8],
+        )
+        resp = self._session.post(url, data=body, headers=headers, timeout=self.timeout)
+        return self._decode(resp)
+
     def _post_signed(self, cmd: str, params: dict) -> dict:
         body = build_request(cmd, params, self.public_key, self.secret_key)
         # Tradernet /api/ ALWAYS expects the request body in the `q` form field —
@@ -261,6 +320,35 @@ class TradernetClient:
             timeout=self.timeout,
         )
         return self._decode(resp)
+
+    @staticmethod
+    def _to_form_urlencoded(data: dict, prefix: str = "") -> str:
+        """
+        Serialize *data* to ``application/x-www-form-urlencoded`` with bracket
+        notation for nested dicts.  Matches the JS reference implementation
+        (kofeinstyle/tradernet-sdk).  Booleans become 1/0 to match the PHP
+        backend's serialisation expectations.
+        """
+        parts: list[str] = []
+        for key, value in data.items():
+            encoded_key = f"{prefix}[{quote(str(key), safe='')}]" if prefix else quote(str(key), safe='')
+            if isinstance(value, dict):
+                # Empty nested dicts are still sent as "params=" — server expects the field.
+                if not value:
+                    parts.append(f"{encoded_key}=")
+                else:
+                    parts.append(TradernetClient._to_form_urlencoded(value, encoded_key))
+            else:
+                if value is True:
+                    rendered = "1"
+                elif value is False:
+                    rendered = "0"
+                elif value is None:
+                    rendered = ""
+                else:
+                    rendered = str(value)
+                parts.append(f"{encoded_key}={quote(rendered, safe='')}")
+        return "&".join(parts)
 
     @staticmethod
     def _decode(resp: requests.Response) -> dict:
