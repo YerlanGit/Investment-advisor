@@ -17,12 +17,14 @@ from freedom_portfolio.client import (
     InvalidSignatureError,
     TradernetClient,
 )
+from freedom_portfolio.history import Candle, get_candles, get_history_frame
 from freedom_portfolio.models import AccountBalance, Portfolio, Position
 
 __all__ = [
     "AccountBalance",
     "AuthenticationError",
     "BrokerAPIError",
+    "Candle",
     "EmptyPortfolioError",
     "InvalidSignatureError",
     "Portfolio",
@@ -30,4 +32,6 @@ __all__ = [
     "TradernetClient",
     "build_request",
     "build_signature",
+    "get_candles",
+    "get_history_frame",
 ]

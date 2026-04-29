@@ -6,9 +6,11 @@ python-dotenv>=1.0.0
 aiosqlite>=0.20.0
 
 # ── Finance / MAC3 Risk Engine ───────────────────────────────────────────────
+# Цены и история: Tradernet (Freedom Broker) API — см. freedom_portfolio.history.
+# yfinance удалён 2026-04 (нестабилен из Cloud Run, не покрывает AIX/KZ).
+# Фундаменталка: SEC EDGAR через edgartools (10-K/10-Q филинги).
 pandas>=2.1.0
 numpy>=1.26.0
-yfinance>=0.2.36
 scikit-learn>=1.4.0
 requests>=2.31.0
 edgartools>=3.0.0

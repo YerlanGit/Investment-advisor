@@ -199,6 +199,49 @@ def _fetch_and_analyze_sync(api_key: str, secret_key: str = "",
     return UniversalPortfolioManager().analyze_all(df, profile_benchmark=bench_ticker)
 
 
+def _fetch_portfolio_sync(api_key: str, secret_key: str = "", login: str = ""):
+    """Blocking: только подключение к брокеру и загрузка позиций (без анализа)."""
+    return FreedomConnector(api_key, secret_key, login).fetch_portfolio()
+
+
+def _analyze_existing_portfolio_sync(df, bench_ticker: str | None = None) -> dict:
+    """Blocking: только MAC3 анализ уже загруженного DataFrame."""
+    return UniversalPortfolioManager().analyze_all(df, profile_benchmark=bench_ticker)
+
+
+def _format_portfolio_preview(df) -> str:
+    """
+    Сжатая Markdown-таблица портфеля для Telegram-сообщения.
+    Возвращает 9-15 строк, форматированных моноширинным блоком.
+    """
+    import pandas as _pd
+
+    if df is None or df.empty:
+        return "_(портфель пуст)_"
+
+    rows = []
+    rows.append("```")
+    rows.append(f"{'Тикер':<10} {'Кол-во':>10} {'Сумма $':>10}")
+    rows.append("─" * 32)
+
+    df2 = df.copy()
+    if "Quantity" in df2.columns and "Purchase_Price" in df2.columns:
+        df2["_value"] = df2["Quantity"] * df2["Purchase_Price"]
+    else:
+        df2["_value"] = df2.get("Quantity", 0)
+    df2 = df2.sort_values("_value", ascending=False)
+
+    for ticker, row in df2.iterrows():
+        qty   = row.get("Quantity", 0)
+        value = row.get("_value", 0)
+        rows.append(f"{str(ticker)[:10]:<10} {qty:>10.2f} {value:>10.2f}")
+
+    rows.append("─" * 32)
+    rows.append(f"{'Всего':<10} {len(df2):>10} {df2['_value'].sum():>10.2f}")
+    rows.append("```")
+    return "\n".join(rows)
+
+
 # ── PDF payload mapping ───────────────────────────────────────────────────────
 
 def _safe_float(val, default: float = 0.0) -> float:
@@ -782,7 +825,16 @@ async def cb_analysis_choice(callback: CallbackQuery, state: FSMContext) -> None
 
 
 async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()  # acknowledge immediately to prevent "query is too old"
+    """
+    Flow:
+      1. Списать токены.
+      2. Получить портфель из брокера (5-10 сек).
+      3. Отправить превью-таблицу + сообщить, что анализ займёт 5-10 минут.
+      4. Запустить MAC3 анализ как фоновую задачу — handler возвращается СРАЗУ,
+         чтобы aiogram long-poll не таймаутил.
+      5. По завершении задачи отправить PDF отдельным сообщением.
+    """
+    await callback.answer()
     _, tier, context_slug = callback.data.split(":", 2)
     user_id = callback.from_user.id
     cost    = TIER_COST[tier]
@@ -801,56 +853,130 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
 
     balance_after = await get_balance(user_id)
     await callback.message.edit_text(
-        f"⚙️ Генерирую *{TIER_LABEL[tier]}*…\n"
-        "⏳ Загружаю рыночные данные и запускаю MAC3 движок...\n\n"
+        f"⏳ Подключаюсь к Freedom Broker и загружаю портфель…\n\n"
         f"Остаток баланса: *{balance_after} токен(а)*.",
         parse_mode=ParseMode.MARKDOWN,
     )
 
+    # ── Шаг 1 — подгружаем портфель (быстрая часть) ──────────────────────
+    loop = asyncio.get_running_loop()
+    profile    = await get_profile(user_id)
+    bench_tick = PROFILE_BENCH_TICKER.get(profile["profile_name"]) if profile else None
+    conn_mode  = await get_connection_mode(user_id)
+
+    if conn_mode == "freedom":
+        keys = await loop.run_in_executor(None, _get_keys_sync, user_id)
+        if keys is None:
+            api_key    = os.getenv("FREEDOM_API_KEY",    "demo")
+            secret_key = os.getenv("FREEDOM_API_SECRET", "")
+            login      = os.getenv("FREEDOM_LOGIN",      "")
+        else:
+            login, api_key, secret_key = keys
+            login      = (login      or "").strip()
+            api_key    = (api_key    or "").strip()
+            secret_key = (secret_key or "").strip()
+    else:
+        api_key, secret_key, login = "demo", "", ""
+
     try:
-        payload = await _build_analysis_payload(user_id, tier)
-        await _send_pdf(callback.message.bot, callback.message.chat.id, user_id, tier, payload)
+        df = await loop.run_in_executor(
+            None, _fetch_portfolio_sync, api_key, secret_key, login
+        )
     except BrokerAuthError as exc:
-        logger.error("Freedom Broker аутентификация не прошла для %s: %s", user_id, exc)
+        logger.error("Freedom Broker auth failed for %s: %s", user_id, exc)
         await callback.message.answer(
             "⚠️ *Ошибка: Ваши API-ключи брокера неверны или отозваны.*\n\n"
-            "Пожалуйста, проверьте их в настройках вашего аккаунта Freedom Broker "
-            "и введите заново через /start → 🔗 Freedom Broker API.\n\n"
-            "Токены не потеряны — обратитесь в поддержку /support.",
+            "Проверьте их в /start → 🔗 Freedom Broker API.\n\n"
+            "Токены не потеряны — обратитесь в /support.",
             parse_mode=ParseMode.MARKDOWN,
         )
+        await state.clear()
+        return
     except BrokerEmptyPortfolioError as exc:
-        logger.warning("Пустой портфель для пользователя %s", user_id)
         await callback.message.answer(
             f"📭 *Портфель пуст*\n\n{exc}\n\n"
-            "Токены не потеряны — обратитесь в поддержку /support.",
+            "Токены не потеряны — обратитесь в /support.",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        await state.clear()
+        return
+    except Exception as exc:
+        logger.exception("Не удалось загрузить портфель для %s: %s", user_id, exc)
+        await callback.message.answer(
+            f"⚠️ *Не удалось получить портфель:*\n`{str(exc)[:200]}`\n\n"
+            "Токены не потеряны — обратитесь в /support.",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        await state.clear()
+        return
+
+    # ── Шаг 2 — отправляем превью + уведомление о длительности ──────────
+    preview_md = _format_portfolio_preview(df)
+    await callback.message.answer(
+        "✅ *Портфель загружен:*\n\n"
+        f"{preview_md}\n\n"
+        f"⚙️ Запускаю анализ *{TIER_LABEL[tier]}*. "
+        "Это займёт *5–10 минут* — я пришлю PDF-отчёт сюда сразу как он будет готов.\n\n"
+        "Можно продолжать пользоваться ботом — анализ работает в фоне.",
+        parse_mode=ParseMode.MARKDOWN,
+    )
+
+    # ── Шаг 3 — запускаем анализ как background task ────────────────────
+    asyncio.create_task(_run_analysis_background(
+        bot       = callback.message.bot,
+        chat_id   = callback.message.chat.id,
+        user_id   = user_id,
+        tier      = tier,
+        df        = df,
+        bench_tick= bench_tick,
+    ))
+    await state.clear()
+
+
+async def _run_analysis_background(
+    *,
+    bot,
+    chat_id: int,
+    user_id: int,
+    tier: str,
+    df,
+    bench_tick: str | None,
+) -> None:
+    """Фоновая задача: считает MAC3 + отправляет PDF либо ошибку."""
+    loop = asyncio.get_running_loop()
+    try:
+        results = await loop.run_in_executor(
+            None, _analyze_existing_portfolio_sync, df, bench_tick,
+        )
+        if (await get_profile(user_id)) is not None:
+            profile = await get_profile(user_id)
+            gate_limits = {"max_portfolio_volatility": profile["target_volatility"] * 1.2}
+            gate = run_gatekeeper(results, user_limits=gate_limits)
+            if not gate["passed"]:
+                logger.warning("Gatekeeper нарушения: %s", gate["critical"])
+
+        payload = _build_pdf_payload(results, tier)
+        await _send_pdf(bot, chat_id, user_id, tier, payload)
+        await bot.send_message(
+            chat_id,
+            "✅ *Отчёт готов.* Скачайте PDF выше — там полный анализ MAC3.",
             parse_mode=ParseMode.MARKDOWN,
         )
     except RealPortfolioRequired as exc:
-        logger.error(
-            "MAC3 gate: real portfolio required but unavailable for user %s: %s",
-            user_id, exc,
-        )
-        await callback.message.answer(
+        await bot.send_message(
+            chat_id,
             "⚠️ *Анализ невозможен: нет реальных данных портфеля.*\n\n"
-            f"{exc}\n\n"
-            "Если хотите проверить работу системы — переключитесь на "
-            "«Демо-режим» через /start → 📋 Демо-режим.\n\n"
-            "Токены не потеряны — обратитесь в поддержку /support.",
+            f"{exc}\n\nТокены не потеряны — обратитесь в /support.",
             parse_mode=ParseMode.MARKDOWN,
         )
     except Exception as exc:
-        logger.exception("Ошибка генерации PDF для %s: %s", user_id, exc)
-        error_detail = str(exc)[:200]
-        await callback.message.answer(
-            f"⚠️ *Ошибка при анализе портфеля:*\n\n"
-            f"`{error_detail}`\n\n"
-            "Проверьте настройки API-ключа или попробуйте позже.\n"
-            "Токены не потеряны — обратитесь в поддержку /support.",
+        logger.exception("MAC3 анализ упал для %s: %s", user_id, exc)
+        await bot.send_message(
+            chat_id,
+            f"⚠️ *Ошибка при анализе портфеля:*\n`{str(exc)[:200]}`\n\n"
+            "Токены не потеряны — обратитесь в /support.",
             parse_mode=ParseMode.MARKDOWN,
         )
-
-    await state.clear()
 
 
 async def cb_cancel(callback: CallbackQuery, state: FSMContext) -> None:
