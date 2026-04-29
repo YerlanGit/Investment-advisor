@@ -134,13 +134,30 @@ class MAC3RiskEngine:
         Но weights_dict содержит их доли от ОБЩЕГО портфеля, поэтому сумма весов asset_tickers < 1.0.
         """
         resolved_assets = self.resolve_tickers(asset_tickers)
-        
+
+        # Restrict to columns we actually need and drop all-NaN columns BEFORE
+        # the row-level dropna. Without this, a single broker-only ticker that
+        # yfinance can't price (e.g. FFSPC6.1028.AIX on Astana exchange) leaves
+        # an all-NaN column whose NaNs propagate through the row-level dropna
+        # and erase every row — Ridge then gets shape (0, K) and raises.
+        needed_cols = [*self.factor_tickers.values(), *resolved_assets]
+        available = [c for c in needed_cols if c in data.columns]
+        data = data[available].dropna(axis=1, how='all')
+
         # Логарифмические доходности для агрегации факторов
         returns = np.log(data / data.shift(1)).dropna()
-        
+
+        if returns.empty:
+            logger.warning("Нет общих ценовых данных для факторной модели — пропускаем структурный риск.")
+            return pd.DataFrame(), pd.DataFrame(), {}
+
         # 1. Выделяем факторы и активы
-        f_data = returns[list(self.factor_tickers.values())]
-        f_data.columns = list(self.factor_tickers.keys())
+        present_factors = {k: v for k, v in self.factor_tickers.items() if v in returns.columns}
+        if not present_factors:
+            logger.warning("Ни одна фактор-серия не доступна — пропускаем структурный риск.")
+            return pd.DataFrame(), pd.DataFrame(), {}
+        f_data = returns[list(present_factors.values())]
+        f_data.columns = list(present_factors.keys())
         
         # Защита от отсутствующих тикеров:
         existing_resolved = [r for r in resolved_assets if r in returns.columns]
