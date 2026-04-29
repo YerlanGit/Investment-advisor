@@ -1,11 +1,12 @@
+import os
 import pandas as pd
-import yfinance as yf
 import numpy as np
 import logging
 from sklearn.linear_model import Ridge
 from sklearn.covariance import LedoitWolf
 
 from finance.broker_api import RealPortfolioRequired
+from freedom_portfolio import TradernetClient, get_history_frame
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
@@ -16,116 +17,176 @@ class MAC3RiskEngine:
     Институциональный движок рисков (RAMP Style).
     Внедрены: Структурная ковариация (Barra/MAC3), Euler Risk Decomposition, CVaR.
     """
+    # Все тикеры используют формат Tradernet "SYMBOL.EXCHANGE".
+    # KSPI → KSPI.KZ потому что Tradernet нативно котирует KZ-биржу.
+    # KAP/HSBK → .IL (Лондон) — там их основная ликвидность.
     TICKER_MAP = {
-        'KAZATOMPROM': 'KAP.IL', 'KASPI': 'KSPI', 'HALYK': 'HSBK.IL',
+        'KAZATOMPROM':   'KAP.IL',
+        'KASPI':         'KSPI.KZ',
+        'KSPI':          'KSPI.KZ',
+        'HALYK':         'HSBK.IL',
+        'HSBK':          'HSBK.IL',
         'KAZAKHTELECOM': 'KZTK.KZ',
-        'BITCOIN': 'BTC-USD', 'ETHEREUM': 'ETH-USD'
+        'BITCOIN':       'BTC-USD',
+        'ETHEREUM':      'ETH-USD',
     }
 
     # Инструменты нулевого риска (или которые не прогоняются через регрессию)
     NON_RISK_ASSETS = ['USD', 'EUR', 'CASH', 'RUB', 'KZT']
 
-    # Proxy-индексы для облигаций (зафиксированные, протестированные)
+    # Proxy-ETF для облигаций (формат Tradernet — все .US).
     BOND_PROXIES = {
-        'RF': 'BIL',   # Risk Free (1-3 Month T-Bill ETF)
-        'IG': 'LQD',   # Investment Grade (Corporate Bond ETF)
-        'HY': 'HYG'    # High Yield (Junk Bond ETF)
+        'RF': 'BIL.US',   # Risk Free (1-3 Month T-Bill ETF)
+        'IG': 'LQD.US',   # Investment Grade (Corporate Bond ETF)
+        'HY': 'HYG.US',   # High Yield (Junk Bond ETF)
     }
 
     # Маппинг известных облигаций к категориям (для автоопределения)
     BOND_CLASSIFICATION_MAP = {
         'KZ_GOV_BOND': 'RF',
         'US_TREASURY': 'RF',
-        'KASPI_BOND': 'IG',
-        # Можно добавлять тикеры Freedom Broker сюда
+        'KASPI_BOND':  'IG',
+    }
+
+    # Прокси для инструментов, у которых либо нет ценовой истории, либо
+    # история слишком короткая/иллквидная для надёжного факторного анализа.
+    # Применяется ТОЛЬКО к ковариации/корреляции — текущая цена и P&L
+    # берутся из реального тикера (брокера).
+    #
+    # Логика подбора прокси: похожая duration + кредит-рейтинг + валюта.
+    INSTRUMENT_PROXY_MAP = {
+        # Astana Exchange Special Purpose Companies (структурные ноты Freedom).
+        # Обычно — короткая duration USD/KZT corporate, аналог LQD.
+        'AIX_SPC':           'LQD.US',
+        # Любой ISIN-тикер с .AIX суффиксом (пример: FFSPC6.1028.AIX).
+        # Если префикс другой — fallback к консервативному T-Bill.
+        'AIX_DEFAULT':       'BIL.US',
+        # KZ корпоративные бонды без yfinance-маппинга.
+        'KZ_CORPORATE_BOND': 'LQD.US',
+        # Развивающиеся рынки — KAP.IL/HSBK.IL/KSPI.KZ если основная серия слишком короткая.
+        'EM_EQUITY_FALLBACK': 'EEM.US',
     }
 
     def __init__(self, trading_days=252, ewma_halflife=63):
         self.trading_days = trading_days
         self.ewma_halflife = ewma_halflife  # 63 дней ≈ λ=0.94 (RiskMetrics)
-        # Факторные прокси (Time-Series)
+        # Факторные прокси (формат Tradernet — все .US ETF).
+        # Замены относительно legacy yfinance-формата:
+        #   ^GSPC → SPY.US   (тот же фактор-сигнал, более ликвидный, есть на Tradernet)
+        #   ^TNX  → IEF.US   (ETF на 7-10y Treasury — движется обратно к доходности,
+        #                     знак коэффициента в Ridge инвертируется автоматически)
         self.factor_tickers = {
-            'Market': '^GSPC', 'Momentum': 'MTUM', 'Value': 'VLUE',
-            'Quality': 'QUAL', 'Size': 'IWM', 'Commodities': 'DBC', 
-            'Rates': '^TNX'
+            'Market':      'SPY.US',
+            'Momentum':    'MTUM.US',
+            'Value':       'VLUE.US',
+            'Quality':     'QUAL.US',
+            'Size':        'IWM.US',
+            'Commodities': 'DBC.US',
+            'Rates':       'IEF.US',
         }
-        self.current_rfr_annual = 0.04 # Хардкод на случай падения API
+        self.current_rfr_annual = 0.04  # Хардкод на случай падения API
+        # Кешируемый клиент Tradernet — переиспользуется между запусками одного
+        # запроса (внутри analyze_all). Keys читаются из env (Cloud Run secret).
+        self._tradernet_client: TradernetClient | None = None
 
     def math_firewall(self, df):
         """Защита от 'битых' данных (галлюцинаций API)."""
         return df.ffill().bfill()
 
+    def _get_tradernet_client(self) -> TradernetClient:
+        """Lazy-init Tradernet client.  Reused across calls inside analyze_all."""
+        if self._tradernet_client is None:
+            api_key    = (os.getenv("FREEDOM_API_KEY")    or "").strip()
+            secret_key = (os.getenv("FREEDOM_API_SECRET") or "").strip()
+            self._tradernet_client = TradernetClient(api_key, secret_key)
+        return self._tradernet_client
+
     def resolve_tickers(self, tickers):
+        """
+        Преобразует пользовательский тикер в формат Tradernet ("SYMBOL.EXCHANGE").
+
+        Спецслучаи:
+          - cash currencies → пропускаются (NON_RISK_ASSETS)
+          - известные KZ облигации → ETF-прокси (BOND_PROXIES)
+          - крипто → '*-USD' (исторический формат, для совместимости с
+            форком CCXT/Yahoo, не Tradernet — но если тикер известен через
+            Tradernet, его можно подменить позже)
+          - AIX-инструменты (FFSPC*.AIX) → INSTRUMENT_PROXY_MAP['AIX_SPC'] для
+            фактор-моделирования.  Ценообразование остаётся через брокера.
+        """
         resolved = []
         for t in tickers:
             t_str = str(t).upper().strip()
             if t_str in self.NON_RISK_ASSETS:
-                continue # Cash goes naturally out of equity fetch
-                
-            # --- НОВАЯ ЛОГИКА ДЛЯ ОБЛИГАЦИЙ ---
-            # 1. Проверка по словарю известных облигаций
+                continue   # Cash отдельно
+
+            # 1. Известные облигации → ETF-прокси
             if t_str in self.BOND_CLASSIFICATION_MAP:
                 category = self.BOND_CLASSIFICATION_MAP[t_str]
-                proxy = self.BOND_PROXIES.get(category, 'BIL') # По умолчанию RF
+                resolved.append(self.BOND_PROXIES.get(category, self.BOND_PROXIES['RF']))
+                continue
+            # 2. Эвристика по имени тикера
+            if 'BOND' in t_str or 'OVD' in t_str:
+                resolved.append(self.BOND_PROXIES['IG'])
+                continue
+
+            # 3. AIX (Astana International Exchange) — структурные ноты Freedom
+            if t_str.endswith('.AIX') or 'FFSPC' in t_str:
+                proxy = self.INSTRUMENT_PROXY_MAP.get('AIX_SPC',
+                          self.INSTRUMENT_PROXY_MAP['AIX_DEFAULT'])
+                logger.info("AIX-инструмент %s → прокси %s для фактор-модели", t_str, proxy)
                 resolved.append(proxy)
                 continue
-            # 2. Эвристика по названию тикера
-            if 'BOND' in t_str or 'OVD' in t_str:
-                resolved.append(self.BOND_PROXIES['IG']) # По умолчанию IG для неизвестных корпоративных
-                continue
-            # ----------------------------------
 
-            if t_str in self.TICKER_MAP: resolved.append(self.TICKER_MAP[t_str])
-            elif 'KSPI' in t_str: resolved.append('KSPI')
-            elif t_str in ['BTC', 'ETH', 'SOL', 'BNB']: resolved.append(f"{t_str}-USD")
-            elif t_str in ['KAP', 'HSBK']: resolved.append(f"{t_str}.IL")
-            else: resolved.append(t_str)
+            # 4. Явный маппинг → формат Tradernet
+            if t_str in self.TICKER_MAP:
+                resolved.append(self.TICKER_MAP[t_str])
+                continue
+
+            # 5. Крипто (Tradernet их не торгует — оставляем yfinance-формат
+            #    как маркер; код-выше пропустит NaN-колонку без падения)
+            if t_str in ('BTC', 'ETH', 'SOL', 'BNB'):
+                resolved.append(f"{t_str}-USD")
+                continue
+
+            # 6. Если уже в формате SYM.EXCHANGE — оставляем
+            if '.' in t_str:
+                resolved.append(t_str)
+                continue
+
+            # 7. Голый US-тикер → добавить .US
+            resolved.append(f"{t_str}.US")
         return resolved
 
-    def get_market_data(self, tickers, period="2y"):
-        """Загрузка сырых котировок (Источник: Yahoo Finance API)."""
+    def get_market_data(self, tickers, period_days: int = 730):
+        """
+        Загрузка дневных закрытий через Tradernet API (replaces yfinance).
+
+        Параллельный fetch (ThreadPoolExecutor inside get_history_frame), кеш
+        на диске на 1 час, split-detection защита от падения ковариации.
+
+        Параметр period сохранён в днях (730 ≈ 2y) — переход с yfinance period="2y".
+        """
         valid_tickers = self.resolve_tickers(tickers)
-        all_req = list(set(valid_tickers + list(self.factor_tickers.values())))
-        
-        logger.info(f"Загрузка цен для {len(all_req)} инструментов...")
-        data = yf.download(all_req, period=period, progress=False, auto_adjust=True)['Close']
-        
-        if isinstance(data, pd.Series): 
-            data = data.to_frame()
-            
-        # Обновляем безрисковую ставку через гособлигации (если подгрузились)
-        if '^TNX' in data.columns and not data['^TNX'].dropna().empty:
-            # ^TNX приходит в процентах (напр. 4.3 => 4.3%)
-            self.current_rfr_annual = data['^TNX'].dropna().iloc[-1] / 100.0
+        all_req = list(dict.fromkeys(valid_tickers + list(self.factor_tickers.values())))
 
-        # Заполнение пропусков (Forward Fill)
+        logger.info("Загрузка цен через Tradernet для %d инструментов: %s",
+                    len(all_req), ", ".join(all_req))
+
+        client = self._get_tradernet_client()
+        data = get_history_frame(client, all_req, days=period_days)
+
+        if data.empty:
+            logger.error("Tradernet вернул пустой набор цен — все тикеры провалились")
+            return data
+
+        # Безрисковая ставка через IEF.US — используем yield-аппроксимацию.
+        # IEF tracks 7-10y Treasury bonds; применяем стандартную bond-ETF→yield
+        # обратную связь: rfr ≈ 0.04 (хардкод, IEF не даёт явный yield в свечах).
+        # Для production-точности можно подтянуть getSecurityInfo по IEF.
+        # Здесь оставляем дефолт self.current_rfr_annual = 0.04.
+
         return self.math_firewall(data)
-
-    def get_fundamental_metrics(self, tickers):
-        """Слой Quality и Leverage."""
-        fundamental_data = {}
-        for t in tickers:
-            t_str = str(t).upper().strip()
-            if t_str in self.NON_RISK_ASSETS:
-                continue
-                
-            resolved_list = self.resolve_tickers([t_str])
-            if not resolved_list: continue
-            resolved = resolved_list[0]
-            
-            try:
-                stock = yf.Ticker(resolved)
-                info = stock.info
-                fundamental_data[t] = {
-                    'ROE_Quality': info.get('returnOnEquity', 0),
-                    'Debt_to_Equity': info.get('debtToEquity', 0) / 100,
-                    'Forward_PE': info.get('forwardPE', 0),
-                    'Market_Cap_Log': np.log(info.get('marketCap', 1)) if info.get('marketCap') else 0
-                }
-            except Exception as exc:
-                logger.debug("Фундаментальные данные для %s недоступны: %s", resolved, exc)
-                fundamental_data[t] = {k: 0 for k in ['ROE_Quality', 'Debt_to_Equity', 'Forward_PE', 'Market_Cap_Log']}
-        return pd.DataFrame(fundamental_data).T
 
     def calculate_structural_risk(self, data, asset_tickers, weights_dict):
         """
@@ -364,8 +425,9 @@ class UniversalPortfolioManager:
         risky_tickers = [t for t in df.index if t not in self.engine.NON_RISK_ASSETS]
 
         all_data = self.engine.get_market_data(risky_tickers)
-        fund_df = self.engine.get_fundamental_metrics(risky_tickers)
-        df = df.join(fund_df)
+        # Фундаментальные метрики берутся ТОЛЬКО из SEC EDGAR (см. ниже,
+        # batch_fundamental_scan). yfinance-источник (ROE/D-E/Forward_PE/MarketCap)
+        # удалён — SEC EDGAR покрывает то же и точнее (10-K/10-Q филинги).
 
         # Установка Current Price.
         # Приоритет:
@@ -450,9 +512,17 @@ class UniversalPortfolioManager:
             df['Euler_Risk_Contribution_Pct'] = df['Euler_Risk_Contribution_Pct'].fillna(0)
 
         # Ожидаемая доходность (ЕДИНАЯ ШКАЛА: log-returns)
-        f_data = all_data[list(self.engine.factor_tickers.values())]
+        # Берём только те фактор-столбцы, которые реально пришли из Tradernet
+        # — пропуски (например IEF.US недоступен) больше не валят расчёт.
+        present_factor_tickers = [
+            v for v in self.engine.factor_tickers.values() if v in all_data.columns
+        ]
+        f_data = all_data[present_factor_tickers] if present_factor_tickers else pd.DataFrame()
         # Log-returns факторов за период (согласовано с calculate_structural_risk)
-        factor_returns_log = np.log(f_data.ffill().iloc[-1] / f_data.bfill().iloc[0])
+        factor_returns_log = (
+            np.log(f_data.ffill().iloc[-1] / f_data.bfill().iloc[0])
+            if not f_data.empty else pd.Series(dtype=float)
+        )
         beta_cols = [c for c in df.columns if str(c).startswith('Beta_')]
         if beta_cols:
             # Expected Return в log-шкале, конвертируем в simple для сравнения с Return_Pct
@@ -466,10 +536,11 @@ class UniversalPortfolioManager:
         if profile_benchmark:
             benchmarks["Профильный бенчмарк"] = profile_benchmark
 
+        # Бенчмарки в формате Tradernet (.US ETF-прокси для индексов).
         benchmarks.update({
-            'S&P 500':     '^GSPC',
-            'Nasdaq 100':  '^NDX',
-            'Russell 2000': '^RUT',
+            'S&P 500':      'SPY.US',   # ETF-прокси на ^GSPC
+            'Nasdaq 100':   'QQQ.US',   # ETF-прокси на ^NDX
+            'Russell 2000': 'IWM.US',   # ETF-прокси на ^RUT
         })
         benchmark_results = {}
         

@@ -11,13 +11,8 @@ import logging
 import os
 import sys
 
-# Fix yfinance cache location for Cloud Run (read-only /root/.cache)
-os.makedirs("/tmp/yf_cache", exist_ok=True)
-try:
-    import yfinance as yf
-    yf.set_tz_cache_location("/tmp/yf_cache")
-except Exception:
-    pass  # yfinance not yet installed or import order issue — handled later
+# yfinance был удалён 2026-04. Цены теперь берутся через Tradernet
+# (freedom_portfolio.history); кеш истории живёт в /tmp/freedom_history_cache.
 
 logger = logging.getLogger("ramp.entrypoint")
 
