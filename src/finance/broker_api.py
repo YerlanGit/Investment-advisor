@@ -40,7 +40,7 @@ logger = logging.getLogger("BrokerAPI")
 # Compound tickers like "BRK.B" are not affected because "B" is not in this set.
 _EXCHANGE_SUFFIXES = frozenset({
     "US", "KZ", "ME", "LN", "GR", "PA", "HK", "TO", "AX",
-    "DE", "JP", "CN", "SG", "IL", "SW", "AS", "MI",
+    "DE", "JP", "CN", "SG", "IL", "SW", "AS", "MI", "AIX",
 })
 
 DEMO_KEY = "demo"
