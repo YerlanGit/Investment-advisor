@@ -167,81 +167,145 @@ def get_history_frame(
 
 def _fetch_hloc(client, ticker: str, *, days: int, timeframe: str) -> list[Candle]:
     """
-    POST /api/getHloc — wire-format verified against the OFFICIAL Tradernet
-    Python SDK (``tradernet-sdk`` on PyPI, ``tradernet/client.py:get_candles``).
+    Fetch historical candles via the Tradernet ``getHloc`` command.
 
-    Wire details (verbatim from SDK):
-      URL:     https://freedom24.com/api/getHloc   (NOT tradernet.com, NOT /v2/cmd/)
-      Body:    application/json
-      Headers: X-NtApi-PublicKey + X-NtApi-Timestamp + X-NtApi-Sig
-      Sign:    HMAC-SHA256(secret, json_body + unix_timestamp)
-      Params:
-        id            — ticker (e.g. "AAPL.US")
-        count         — -1 = unlimited
-        timeframe     — minutes: 1440 = daily, 60 = H1
-        date_from/to  — '%d.%m.%Y %H:%M'  (NOT ISO!)
-        intervalMode  — 'OpenRay'         (NOT 'ClosedRay')
+    Tradernet exposes the same command through MULTIPLE wire schemes; the
+    one that works depends on the user's broker region and subscription
+    tier.  We try them in the order most likely to succeed for KZ-registered
+    Freedom Broker accounts (which is what this bot targets).
 
-    Tries ``freedom24.com`` first (official SDK default), falls back to
-    ``tradernet.com`` if that's blocked or returns command-not-found.
+    Order of attempts:
+
+      1. **V2 form-encoded on tradernet.kz** — ``/api/v2/cmd/getHloc``
+         with ``ticker``+``timeframe="D"``+ISO ``from``/``to`` dates.
+         This is the form documented at tradernet.kz/tradernet-api/quotes-get-hloc.
+
+      2. **V1 signed q={…} on tradernet.kz** — ``/api/`` with md5-signed
+         ``q={"cmd":"getHloc",...}`` form field.  Original pre-v2 API
+         scheme; works as fallback when v2 isn't enabled for the account.
+
+      3. **V3 JSON on freedom24.com** — ``/api/getHloc`` with HMAC-SHA256
+         body+timestamp signing (matches the official Python SDK).  Last
+         resort because it requires a freedom24.com market-data subscription
+         which most KZ accounts don't have.
+
+    All three are stopped as soon as one returns a parseable candle list.
+    Connection-drop signals (SSL EOF / RemoteDisconnected) fall through to
+    the next attempt; only after ALL fail do we raise — and the caller
+    surfaces a "no market-data subscription" hint to the user.
     """
     today = datetime.utcnow()
     start = today - timedelta(days=days)
 
-    timeframe_minutes = {"D": 1440, "H1": 60, "M5": 5}.get(timeframe, 1440)
+    # Documented on tradernet.kz: timeframe is either an integer of minutes
+    # (1, 5, 10, 15, 30, 60) or the string "D" for daily bars.
+    tf_kz: int | str = {"D": "D", "H1": 60, "M5": 5, "M1": 1}.get(timeframe, "D")
 
-    params = {
-        "id":           ticker,
-        "count":        -1,
-        "timeframe":    timeframe_minutes,
-        "date_from":    start.strftime("%d.%m.%Y %H:%M"),
-        "date_to":      today.strftime("%d.%m.%Y %H:%M"),
-        "intervalMode": "OpenRay",
+    # Per-scheme parameter sets — Tradernet's wire format is fragmented
+    # across regions, so we try the spelling each scheme expects.
+    kz_params = {
+        "ticker":    ticker,                                # NOT "id"
+        "timeframe": tf_kz,                                 # "D" for daily
+        "count":     min(days, 5000),                       # bar count cap
+        "from":      start.strftime("%Y-%m-%d"),            # ISO date
+        "to":        today.strftime("%Y-%m-%d"),
+    }
+    sdk_params = {
+        "id":            ticker,                            # SDK uses "id"
+        "count":         -1,
+        "timeframe":     1440,                              # minutes (daily)
+        "date_from":     start.strftime("%d.%m.%Y %H:%M"),  # Russian fmt
+        "date_to":       today.strftime("%d.%m.%Y %H:%M"),
+        "intervalMode":  "OpenRay",
     }
 
+    attempts: list[tuple[str, callable]] = [
+        ("v2-form/tradernet.kz",
+         lambda: client._post_v2_signed("getHloc", kz_params, base_override="https://tradernet.kz")),
+        ("v1-signed-q/tradernet.kz",
+         lambda: client._post_signed("getHloc", kz_params, base_override="https://tradernet.kz")),
+        ("v2-form/tradernet.com",
+         lambda: client._post_v2_signed("getHloc", kz_params)),
+        ("v3-json/freedom24.com",
+         lambda: client._post_json_v2("getHloc", sdk_params, base_override="https://freedom24.com")),
+    ]
+
     last_exc: Exception | None = None
-    # freedom24.com is the SDK-native host for history; tradernet.com is the
-    # fallback in case that host is blocked or rate-limits us.
-    for base in ("https://freedom24.com", "https://tradernet.com"):
+    for label, call in attempts:
         try:
-            raw = client._post_json_v2("getHloc", params, base_override=base)
-            return _parse_hloc_response(raw, ticker)
+            raw = call()
+            candles = _parse_hloc_response(raw, ticker)
+            if candles:
+                logger.info("getHloc OK для %s через %s (%d свечей)", ticker, label, len(candles))
+                return candles
+            logger.debug("getHloc через %s вернул пустой ответ для %s", label, ticker)
         except Exception as exc:
-            # Tag connection-level failures (SSL EOF, RemoteDisconnected) so
-            # the caller can distinguish them from JSON-level errors and
-            # surface the right diagnostic to the user.
             err_str = str(exc).lower()
             is_connection_drop = any(token in err_str for token in (
                 "ssl", "remotedisconnected", "connection aborted",
                 "connection reset", "max retries exceeded",
             ))
-            if is_connection_drop:
-                logger.warning(
-                    "getHloc на %s оборвал соединение для %s — возможно нет подписки на market data: %s",
-                    base, ticker, exc,
-                )
-            else:
-                logger.debug("getHloc на %s вернул ошибку для %s: %s", base, ticker, exc)
+            log_fn = logger.warning if is_connection_drop else logger.debug
+            log_fn("getHloc через %s упал для %s: %s", label, ticker, exc)
             last_exc = exc
 
-    raise last_exc if last_exc else RuntimeError("getHloc failed on all hosts")
+    if last_exc:
+        raise last_exc
+    return []
 
 
 def _parse_hloc_response(raw: dict, ticker: str = "") -> list[Candle]:
     """
-    Parse a Tradernet ``getHloc`` response.  Format A is verified against the
-    official Python SDK (``tradernet/symbols/tradernet_symbol.py:97-110``):
+    Parse a Tradernet ``getHloc`` response.
 
-      A. Parallel arrays keyed by symbol (canonical SDK shape)
-         {"hloc":    {"AAPL.US": [[h,l,o,c], [h,l,o,c], ...]},   # ← 2-D!  index = h,l,o,c
-          "xSeries": {"AAPL.US": [t1, t2, ...]},                 # timestamps (sec or ms)
-          "vl":      {"AAPL.US": [v1, v2, ...]}}
+    Tradernet's REST surface returns one of THREE candle response shapes
+    depending on which command alias / region / API version answers:
 
-    Legacy/alternative shapes still supported as fallback:
-      B. ``{"hloc": [{t,o,h,l,c,v}, ...]}``                     — flat dicts
-      C. Top-level list of candle dicts
+      A. **Official SDK shape** (verified against
+         ``tradernet/symbols/tradernet_symbol.py:97-110``):
+         ::
+            {"hloc":    {"AAPL.US": [[h,l,o,c], [h,l,o,c], ...]},   # 2-D
+             "xSeries": {"AAPL.US": [t1, t2, ...]},
+             "vl":      {"AAPL.US": [v1, v2, ...]}}
+
+      B. **tradernet.kz docs shape** (per quotes-get-hloc page):
+         ::
+            {"hloc": {"AAPL.US": {"xSeries": [t1, t2, ...],
+                                   "yPrices": [{o,h,l,c,v}, ...]}}}
+
+      C. **Flat list shape** (legacy fallback):
+         ``{"hloc": [{t,o,h,l,c,v}, ...]}``  or top-level list.
     """
     body = raw.get("result", raw)
+
+    # ── Shape B — tradernet.kz nested xSeries+yPrices under hloc[ticker] ─
+    if (isinstance(body, dict)
+            and isinstance(body.get("hloc"), dict)
+            and ticker
+            and isinstance(body["hloc"].get(ticker), dict)
+            and "xSeries" in body["hloc"][ticker]
+            and "yPrices" in body["hloc"][ticker]):
+        per = body["hloc"][ticker]
+        timestamps = per.get("xSeries", [])
+        candles    = per.get("yPrices", [])
+        result: list[Candle] = []
+        for i in range(min(len(timestamps), len(candles))):
+            c = candles[i]
+            if not isinstance(c, dict):
+                continue
+            ts_int = int(timestamps[i])
+            if ts_int > 10**12:
+                ts_int //= 1000
+            result.append(Candle(
+                t=ts_int,
+                o=float(c.get("o", c.get("open", 0))),
+                h=float(c.get("h", c.get("high", 0))),
+                l=float(c.get("l", c.get("low",  0))),
+                c=float(c.get("c", c.get("close", 0))),
+                v=c.get("v") or c.get("vol") or c.get("volume"),
+            ))
+        if result:
+            return result
 
     # ── Shape A — official SDK: parallel arrays keyed by ticker ──────────
     if (isinstance(body, dict)
