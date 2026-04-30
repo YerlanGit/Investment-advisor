@@ -282,6 +282,55 @@ class TradernetClient:
         resp = self._session.post(url, data=body, headers=headers, timeout=self.timeout)
         return self._decode(resp)
 
+    def _post_json_v2(self, cmd: str, params: dict, *, base_override: str | None = None) -> dict:
+        """
+        v2 JSON-body signed POST — used by ``getHloc``, ``get_trades_history``,
+        ``get_orders_history`` etc.  This is the transport implemented by the
+        official Tradernet Python SDK (``tradernet-sdk`` on PyPI, file
+        ``tradernet/core.py:authorized_request``).
+
+        Differences from ``_post_v2_signed``:
+          * URL is ``{base}/api/{cmd}``  — NO ``/v2/cmd/`` segment.
+          * Body is ``application/json`` (params object), NOT form-urlencoded.
+          * Signature is ``HMAC-SHA256(secret, json_body + unix_timestamp)``.
+          * Required header ``X-NtApi-Timestamp`` (unix seconds string).
+
+        ``base_override`` lets callers target ``freedom24.com`` instead of the
+        default ``tradernet.com`` — the official SDK hardcodes ``freedom24.com``
+        for these commands, so callers should try it first and fall back to
+        ``tradernet.com``.
+        """
+        import hashlib
+        import hmac as _hmac
+        import time as _time
+
+        base = (base_override or self.base_url).rstrip("/")
+        # Strip trailing /api/ if the base URL already includes it.
+        if base.endswith("/api"):
+            base = base[: -len("/api")]
+        url = f"{base}/api/{cmd}"
+
+        body      = json.dumps(params, separators=(",", ":"))
+        timestamp = str(int(_time.time()))
+        sig       = _hmac.new(
+            self.secret_key.encode("utf-8"),
+            (body + timestamp).encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+
+        headers = {
+            "Content-Type":      "application/json",
+            "X-NtApi-PublicKey": self.public_key,
+            "X-NtApi-Timestamp": timestamp,
+            "X-NtApi-Sig":       sig,
+        }
+        logger.info(
+            "Tradernet POST (v2 JSON) %s [cmd=%s ts=%s sig_prefix=%s…]",
+            url, cmd, timestamp, sig[:8],
+        )
+        resp = self._session.post(url, data=body, headers=headers, timeout=self.timeout)
+        return self._decode(resp)
+
     def _post_signed(self, cmd: str, params: dict) -> dict:
         body = build_request(cmd, params, self.public_key, self.secret_key)
         # Tradernet /api/ ALWAYS expects the request body in the `q` form field —
