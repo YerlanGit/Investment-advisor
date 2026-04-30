@@ -212,19 +212,14 @@ def _analyze_existing_portfolio_sync(df, bench_ticker: str | None = None) -> dic
 def _format_portfolio_preview(df) -> str:
     """
     Сжатая Markdown-таблица портфеля для Telegram-сообщения.
-    Возвращает 9-15 строк, форматированных моноширинным блоком.
 
-    ВАЖНО: DataFrame от FreedomConnector хранит тикер в колонке "Ticker"
-    с дефолтным RangeIndex (0, 1, 2…).  Если итерироваться через iterrows()
-    и распаковывать как (idx, row), то idx — это число, а не тикер.
+    Колонки: Тикер | Тип | Кол-во | Сумма $.
+
+    Тип инструмента берётся из ``df["Asset_Type"]`` если он есть (поставлен
+    ``broker_api._classify_instrument``); иначе вычисляется на лету.
     """
     if df is None or df.empty:
         return "_(портфель пуст)_"
-
-    rows = []
-    rows.append("```")
-    rows.append(f"{'Тикер':<12} {'Кол-во':>10} {'Сумма $':>12}")
-    rows.append("─" * 36)
 
     df2 = df.copy()
     if "Quantity" in df2.columns and "Purchase_Price" in df2.columns:
@@ -234,21 +229,36 @@ def _format_portfolio_preview(df) -> str:
 
     df2 = df2.sort_values("_value", ascending=False)
 
-    # Source of ticker: either the "Ticker" column, or the index when it's named.
+    # Source of ticker: column "Ticker" (RangeIndex case) or index when named.
     if "Ticker" in df2.columns:
-        ticker_iter = df2["Ticker"].astype(str).tolist()
+        tickers = df2["Ticker"].astype(str).tolist()
     else:
-        ticker_iter = [str(i) for i in df2.index.tolist()]
+        tickers = [str(i) for i in df2.index.tolist()]
+
+    # Source of type: column "Asset_Type" if present, else heuristic on ticker.
+    if "Asset_Type" in df2.columns:
+        types = df2["Asset_Type"].astype(str).tolist()
+    else:
+        try:
+            from finance.broker_api import _classify_instrument
+            types = [_classify_instrument(t) for t in tickers]
+        except Exception:
+            types = ["—"] * len(tickers)
+
+    rows = ["```",
+            f"{'Тикер':<12} {'Тип':<12} {'Кол-во':>10} {'Сумма $':>12}",
+            "─" * 50]
 
     for i, (_, row) in enumerate(df2.iterrows()):
-        ticker = ticker_iter[i] if i < len(ticker_iter) else "?"
+        ticker = tickers[i] if i < len(tickers) else "?"
+        kind   = types[i]   if i < len(types)   else "—"
         qty    = row.get("Quantity", 0) or 0
         value  = row.get("_value", 0) or 0
-        rows.append(f"{ticker[:12]:<12} {qty:>10.2f} {value:>12.2f}")
+        rows.append(f"{ticker[:12]:<12} {kind[:12]:<12} {qty:>10.2f} {value:>12.2f}")
 
-    rows.append("─" * 36)
+    rows.append("─" * 50)
     total_value = df2["_value"].sum() if "_value" in df2.columns else 0
-    rows.append(f"{'Всего':<12} {len(df2):>10} {total_value:>12.2f}")
+    rows.append(f"{'Всего':<12} {'':<12} {len(df2):>10} {total_value:>12.2f}")
     rows.append("```")
     return "\n".join(rows)
 

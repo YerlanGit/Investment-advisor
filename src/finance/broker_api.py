@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 
 import pandas as pd
 
@@ -96,6 +97,67 @@ def _strip_exchange_suffix(ticker: str) -> str:
     if suffix in _EXCHANGE_SUFFIXES:
         return base
     return ticker
+
+
+_ISIN_PATTERN = re.compile(r"^[A-Z]{2}[A-Z0-9]{9}\d$")
+
+
+def _classify_instrument(ticker: str, t_field: int | None = None) -> str:
+    """
+    Определяет тип инструмента: 'Облигация' | 'Акция' | 'ETF' | 'Кэш'
+                                | 'Крипто' | 'Структ.нота'
+
+    Tradernet ``t`` field (security type, where reliably set):
+      1 → Stock
+      2 → Bond
+      3 → Future
+      4 → Option
+      9 → Bond (alt encoding seen on KZ accounts)
+
+    When ``t_field`` is missing or ambiguous, falls back to ticker heuristics.
+    """
+    t = ticker.upper().strip()
+
+    # 1. Trust the broker's classification when present.
+    if t_field in (2, 9):
+        return "Облигация"
+    if t_field in (3,):
+        return "Фьючерс"
+    if t_field in (4,):
+        return "Опцион"
+
+    # 2. Cash currencies first (always).
+    if t in ("USD", "EUR", "RUB", "RUR", "KZT", "GBP", "CHF", "CNY", "JPY", "CASH"):
+        return "Кэш"
+
+    # 3. Crypto markers.
+    if t.endswith("-USD") or t in ("BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOT"):
+        return "Крипто"
+
+    # 4. AIX structured products (Freedom Securities Special Purpose Companies).
+    if t.endswith(".AIX") or "FFSPC" in t:
+        return "Структ.нота"
+
+    # 5. Bond keywords.
+    if any(token in t for token in ("BOND", "OVD", "T-BILL", "TBILL", "TREASURY", "EUROBOND")):
+        return "Облигация"
+
+    # 6. ISIN-format ticker → almost always a bond (rare for stocks).
+    if _ISIN_PATTERN.match(t.replace(".KZ", "").replace(".US", "")):
+        return "Облигация"
+
+    # 7. Known ETF tickers (broad heuristic — could be made exhaustive).
+    # Match against bare symbol AND .US-suffixed form because the broker may
+    # report either (e.g. "LQD" vs "LQD.US").
+    bare = t.split(".")[0]
+    if bare in {"SPY", "QQQ", "IWM", "DIA", "VOO", "VTI", "EEM", "EFA",
+                "GLD", "SLV", "DBC", "USO",
+                "TLT", "IEF", "BIL", "SHV", "LQD", "HYG", "AGG", "BND",
+                "MTUM", "VLUE", "QUAL", "SIZE", "USMV"}:
+        return "ETF"
+
+    # 8. Default — stock.
+    return "Акция"
 
 
 # ── FreedomConnector ─────────────────────────────────────────────────────────
@@ -245,6 +307,8 @@ class FreedomConnector:
                 "Quantity":             qty,
                 "Purchase_Price":       purchase_price,
                 "Broker_Current_Price": broker_current,
+                "Asset_Type":           _classify_instrument(p.i, t_field=p.t),
+                "Raw_Ticker":           p.i,    # untouched broker ticker for history fetch
             })
 
         # Cash positions from the ``acc`` array.  Each currency line becomes a
@@ -261,10 +325,16 @@ class FreedomConnector:
                 "Quantity":             cash_qty,
                 "Purchase_Price":       1.0,
                 "Broker_Current_Price": 1.0,
+                "Asset_Type":           "Кэш",
+                "Raw_Ticker":           curr,
             })
             logger.info("Добавлен кэш: %s = %.2f", curr, cash_qty)
 
-        return pd.DataFrame(rows, columns=["Ticker", "Quantity", "Purchase_Price", "Broker_Current_Price"])
+        return pd.DataFrame(
+            rows,
+            columns=["Ticker", "Quantity", "Purchase_Price", "Broker_Current_Price",
+                     "Asset_Type", "Raw_Ticker"],
+        )
 
     @staticmethod
     def _mock_portfolio() -> pd.DataFrame:

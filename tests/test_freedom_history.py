@@ -29,6 +29,24 @@ from freedom_portfolio.history import (  # noqa: E402
 # ── Parser ────────────────────────────────────────────────────────────────────
 
 
+def test_parse_hloc_tradernet_kz_nested_shape():
+    """
+    tradernet.kz docs shape (per quotes-get-hloc): xSeries + yPrices nested
+    UNDER hloc[ticker].  Different from the SDK 2-D shape.
+    """
+    raw = {"hloc": {"FRHC.US": {
+        "xSeries": [1700000000, 1700086400],
+        "yPrices": [
+            {"o": 100, "h": 101, "l": 99, "c": 100.5, "v": 1000},
+            {"o": 100.5, "h": 102, "l": 100, "c": 101.0, "v": 1500},
+        ],
+    }}}
+    candles = _parse_hloc_response(raw, "FRHC.US")
+    assert len(candles) == 2
+    assert candles[0].c == 100.5 and candles[0].v == 1000
+    assert candles[1].c == 101.0
+
+
 def test_parse_hloc_official_sdk_shape():
     """
     Canonical Tradernet response per official Python SDK
@@ -172,26 +190,27 @@ def _mock_tradernet_client(response: dict) -> MagicMock:
     return client
 
 
-def _mock_tradernet_client_json(response: dict) -> MagicMock:
-    """Mock with the new _post_json_v2 method (used for getHloc)."""
+def _mock_tradernet_client_v2_form(response: dict) -> MagicMock:
+    """Mock that answers on v2-form transport (the first attempt path)."""
     client = MagicMock()
-    client._post_json_v2 = MagicMock(return_value=response)
+    client._post_v2_signed = MagicMock(return_value=response)
+    # Other transports raise so we know the first one was used.
+    client._post_signed   = MagicMock(side_effect=RuntimeError("should not be called"))
+    client._post_json_v2  = MagicMock(side_effect=RuntimeError("should not be called"))
     return client
 
 
-def test_get_candles_returns_clean_series_from_official_sdk_shape(tmp_path, monkeypatch):
-    """End-to-end: SDK-shape raw response → parsed → cached → Series."""
+def test_get_candles_returns_series_from_v2_form_kz(tmp_path, monkeypatch):
+    """End-to-end: tradernet.kz v2-form transport (first in attempt list)."""
     from freedom_portfolio import history as hist_mod
     monkeypatch.setattr(hist_mod, "_CACHE_DIR", tmp_path)
 
     t1 = int(datetime(2024, 1, 1, tzinfo=timezone.utc).timestamp())
     t2 = int(datetime(2024, 1, 2, tzinfo=timezone.utc).timestamp())
     t3 = int(datetime(2024, 1, 3, tzinfo=timezone.utc).timestamp())
-    response = {"result": {
-        "hloc":    {"AAPL.US": [[101, 99, 100, 100.0], [102, 100, 100.5, 101.0], [103, 101, 101.5, 102.0]]},
-        "xSeries": {"AAPL.US": [t1, t2, t3]},
-    }}
-    client = _mock_tradernet_client_json(response)
+    response = {"hloc":    {"AAPL.US": [[101, 99, 100, 100.0], [102, 100, 100.5, 101.0], [103, 101, 101.5, 102.0]]},
+                "xSeries": {"AAPL.US": [t1, t2, t3]}}
+    client = _mock_tradernet_client_v2_form(response)
     s = get_candles(client, "AAPL.US", days=10)
     assert len(s) == 3
     assert s.iloc[-1] == 102.0
@@ -205,10 +224,32 @@ def test_get_candles_uses_cache_on_second_call(tmp_path, monkeypatch):
 
     response = {"hloc": {"AAPL.US": [[101, 99, 100, 100.0]]},
                 "xSeries": {"AAPL.US": [1700000000]}}
-    client = _mock_tradernet_client_json(response)
+    client = _mock_tradernet_client_v2_form(response)
 
     get_candles(client, "AAPL.US", days=10)
-    first_call_count = client._post_json_v2.call_count
+    first_call_count = client._post_v2_signed.call_count
 
     get_candles(client, "AAPL.US", days=10)
-    assert client._post_json_v2.call_count == first_call_count, "second call must hit cache"
+    assert client._post_v2_signed.call_count == first_call_count, "second call must hit cache"
+
+
+def test_get_candles_falls_back_to_v1_signed_when_v2_fails(tmp_path, monkeypatch):
+    """If the v2-form transport raises, _fetch_hloc must try v1 signed q={...}."""
+    from freedom_portfolio import history as hist_mod
+    monkeypatch.setattr(hist_mod, "_CACHE_DIR", tmp_path)
+
+    client = MagicMock()
+    client._post_v2_signed = MagicMock(side_effect=RuntimeError("Command not found"))
+    response_v1 = {"hloc": {"AAPL.US": {
+        "xSeries": [1700000000, 1700086400],
+        "yPrices": [{"o": 100, "h": 101, "l": 99, "c": 100.0},
+                    {"o": 100, "h": 102, "l": 99, "c": 101.0}],
+    }}}
+    client._post_signed = MagicMock(return_value=response_v1)
+    client._post_json_v2 = MagicMock(side_effect=RuntimeError("not called"))
+
+    s = get_candles(client, "AAPL.US", days=10)
+    assert len(s) == 2
+    # v2 was tried twice (kz, then com), v1 succeeded.
+    assert client._post_v2_signed.called
+    assert client._post_signed.called

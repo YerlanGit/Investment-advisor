@@ -254,7 +254,7 @@ class TradernetClient:
             return self._post_signed(cmd, params)
         return self._post_unsigned(cmd, params)
 
-    def _post_v2_signed(self, cmd: str, params: dict) -> dict:
+    def _post_v2_signed(self, cmd: str, params: dict, *, base_override: str | None = None) -> dict:
         """
         v2 signed POST to ``/api/v2/cmd/{cmd}`` with HMAC-SHA256.
 
@@ -262,10 +262,17 @@ class TradernetClient:
         previous attempts in this project that used only ``X-NtApi-Sig`` were
         silently rejected by the server.  Body is form-urlencoded with bracket
         notation for nested params (matches kofeinstyle/tradernet-sdk).
+
+        ``base_override`` lets callers route to a different regional host
+        (e.g. ``https://tradernet.kz`` for KZ-registered accounts whose
+        market-data subscription lives on the .kz endpoint).
         """
         payload, sig = build_v2_request(cmd, params, self.public_key, self.secret_key)
         body = self._to_form_urlencoded(payload)
-        url  = f"{self.base_url.rstrip('/')}/v2/cmd/{cmd}"
+        base = (base_override or self.base_url).rstrip("/")
+        if base.endswith("/api"):
+            base = base[: -len("/api")]
+        url  = f"{base}/api/v2/cmd/{cmd}"
         headers = {
             "Content-Type":     "application/x-www-form-urlencoded",
             "X-NtApi-Sig":      sig,
@@ -331,7 +338,7 @@ class TradernetClient:
         resp = self._session.post(url, data=body, headers=headers, timeout=self.timeout)
         return self._decode(resp)
 
-    def _post_signed(self, cmd: str, params: dict) -> dict:
+    def _post_signed(self, cmd: str, params: dict, *, base_override: str | None = None) -> dict:
         body = build_request(cmd, params, self.public_key, self.secret_key)
         # Tradernet /api/ ALWAYS expects the request body in the `q` form field —
         # both signed and unsigned modes.  Sending the JSON directly as the
@@ -339,36 +346,45 @@ class TradernetClient:
         # payload (apiKey/cmd/nonce/params/sig) is JSON-encoded and dropped
         # into a single form parameter.
         q_payload = json.dumps(body, separators=(",", ":"))
+        url = self._url_with_override(base_override)
         logger.info(
             "Tradernet POST (signed) %s [cmd=%s apiKey=%s… key_len=%d secret_len=%d sig_prefix=%s…]",
-            self.base_url, cmd,
+            url, cmd,
             self.public_key[:12] if self.public_key else "EMPTY",
             len(self.public_key),
             len(self.secret_key),
             body.get("sig", "")[:8],
         )
         resp = self._session.post(
-            self.base_url,
+            url,
             data={"q": q_payload},
             timeout=self.timeout,
         )
         return self._decode(resp)
 
-    def _post_unsigned(self, cmd: str, params: dict) -> dict:
+    def _post_unsigned(self, cmd: str, params: dict, *, base_override: str | None = None) -> dict:
         params_with_key = {**params, "apiKey": self.public_key}
         q_payload = json.dumps({"cmd": cmd, "params": params_with_key}, separators=(",", ":"))
+        url = self._url_with_override(base_override)
         logger.info(
             "Tradernet POST (unsigned) %s [cmd=%s key_prefix=%s… key_len=%d]",
-            self.base_url, cmd,
+            url, cmd,
             self.public_key[:8] if self.public_key else "EMPTY",
             len(self.public_key),
         )
         resp = self._session.post(
-            self.base_url,
+            url,
             data={"q": q_payload},
             timeout=self.timeout,
         )
         return self._decode(resp)
+
+    def _url_with_override(self, base_override: str | None) -> str:
+        """Resolve the v1 ``/api/`` URL, honouring an optional regional override."""
+        base = (base_override or self.base_url).rstrip("/")
+        if not base.endswith("/api"):
+            base = base + "/api"
+        return base + "/"
 
     @staticmethod
     def _to_form_urlencoded(data: dict, prefix: str = "") -> str:
