@@ -29,16 +29,33 @@ from freedom_portfolio.history import (  # noqa: E402
 # ── Parser ────────────────────────────────────────────────────────────────────
 
 
-def test_parse_hloc_shape_dict_keyed_by_ticker():
-    """MasyaSmv-style: {"hloc": {"AAPL.US": [{t,o,h,l,c,v}, ...]}}."""
-    raw = {"hloc": {"AAPL.US": [
-        {"t": 1700000000, "o": 100, "h": 101, "l": 99, "c": 100.5, "v": 1000},
-        {"t": 1700086400, "o": 100.5, "h": 102, "l": 100, "c": 101.0, "v": 1500},
-    ]}}
+def test_parse_hloc_official_sdk_shape():
+    """
+    Canonical Tradernet response per official Python SDK
+    (tradernet/symbols/tradernet_symbol.py:97-110): parallel arrays keyed
+    by symbol, ``hloc`` is 2-D where each row is [high, low, open, close].
+    """
+    raw = {"result": {
+        "hloc":    {"AAPL.US": [[101, 99, 100, 100.5], [102, 100, 100.5, 101.0]]},
+        "xSeries": {"AAPL.US": [1700000000, 1700086400]},
+        "vl":      {"AAPL.US": [1000, 1500]},
+    }}
     candles = _parse_hloc_response(raw, "AAPL.US")
     assert len(candles) == 2
-    assert candles[0].c == 100.5
+    assert candles[0].h == 101 and candles[0].l == 99 and candles[0].o == 100 and candles[0].c == 100.5
+    assert candles[0].v == 1000
     assert candles[1].c == 101.0
+
+
+def test_parse_hloc_handles_millisecond_timestamps():
+    """Some Tradernet endpoints return timestamps in ms; we auto-detect."""
+    raw = {
+        "hloc":    {"AAPL.US": [[101, 99, 100, 100.5]]},
+        "xSeries": {"AAPL.US": [1700000000000]},  # ms
+    }
+    candles = _parse_hloc_response(raw, "AAPL.US")
+    assert len(candles) == 1
+    assert candles[0].t == 1700000000  # auto-converted to seconds
 
 
 def test_parse_hloc_shape_flat_list():
@@ -46,16 +63,6 @@ def test_parse_hloc_shape_flat_list():
     candles = _parse_hloc_response(raw, "AAPL.US")
     assert len(candles) == 1
     assert candles[0].c == 100.0
-
-
-def test_parse_hloc_shape_xseries_yseries():
-    raw = {
-        "xSeries": [1700000000, 1700086400],
-        "ySeries": [{"c": [100.0, 101.0], "o": [99, 100], "h": [101, 102], "l": [98, 99]}],
-    }
-    candles = _parse_hloc_response(raw, "AAPL.US")
-    assert len(candles) == 2
-    assert candles[1].c == 101.0
 
 
 def test_parse_hloc_unknown_shape_returns_empty():
@@ -165,18 +172,26 @@ def _mock_tradernet_client(response: dict) -> MagicMock:
     return client
 
 
-def test_get_candles_returns_clean_series_from_modern_response(tmp_path, monkeypatch):
-    """End-to-end: raw response → parsed → cached → returned as Series."""
-    # Redirect cache to a tmp dir to avoid polluting /tmp.
+def _mock_tradernet_client_json(response: dict) -> MagicMock:
+    """Mock with the new _post_json_v2 method (used for getHloc)."""
+    client = MagicMock()
+    client._post_json_v2 = MagicMock(return_value=response)
+    return client
+
+
+def test_get_candles_returns_clean_series_from_official_sdk_shape(tmp_path, monkeypatch):
+    """End-to-end: SDK-shape raw response → parsed → cached → Series."""
     from freedom_portfolio import history as hist_mod
     monkeypatch.setattr(hist_mod, "_CACHE_DIR", tmp_path)
 
-    response = {"result": {"hloc": {"AAPL.US": [
-        {"t": int(datetime(2024, 1, 1, tzinfo=timezone.utc).timestamp()), "c": 100.0},
-        {"t": int(datetime(2024, 1, 2, tzinfo=timezone.utc).timestamp()), "c": 101.0},
-        {"t": int(datetime(2024, 1, 3, tzinfo=timezone.utc).timestamp()), "c": 102.0},
-    ]}}}
-    client = _mock_tradernet_client(response)
+    t1 = int(datetime(2024, 1, 1, tzinfo=timezone.utc).timestamp())
+    t2 = int(datetime(2024, 1, 2, tzinfo=timezone.utc).timestamp())
+    t3 = int(datetime(2024, 1, 3, tzinfo=timezone.utc).timestamp())
+    response = {"result": {
+        "hloc":    {"AAPL.US": [[101, 99, 100, 100.0], [102, 100, 100.5, 101.0], [103, 101, 101.5, 102.0]]},
+        "xSeries": {"AAPL.US": [t1, t2, t3]},
+    }}
+    client = _mock_tradernet_client_json(response)
     s = get_candles(client, "AAPL.US", days=10)
     assert len(s) == 3
     assert s.iloc[-1] == 102.0
@@ -188,11 +203,12 @@ def test_get_candles_uses_cache_on_second_call(tmp_path, monkeypatch):
     from freedom_portfolio import history as hist_mod
     monkeypatch.setattr(hist_mod, "_CACHE_DIR", tmp_path)
 
-    response = {"hloc": [{"t": 1700000000, "c": 100.0}]}
-    client = _mock_tradernet_client(response)
+    response = {"hloc": {"AAPL.US": [[101, 99, 100, 100.0]]},
+                "xSeries": {"AAPL.US": [1700000000]}}
+    client = _mock_tradernet_client_json(response)
 
     get_candles(client, "AAPL.US", days=10)
-    first_call_count = client._post_v2_signed.call_count
+    first_call_count = client._post_json_v2.call_count
 
     get_candles(client, "AAPL.US", days=10)
-    assert client._post_v2_signed.call_count == first_call_count, "second call must hit cache"
+    assert client._post_json_v2.call_count == first_call_count, "second call must hit cache"

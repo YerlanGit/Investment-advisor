@@ -167,88 +167,103 @@ def get_history_frame(
 
 def _fetch_hloc(client, ticker: str, *, days: int, timeframe: str) -> list[Candle]:
     """
-    POST /api/v2/cmd/getHloc — wire-format verified against MasyaSmv/freedom-broker-api
-    PHP SDK (src/Core/Service/StockHistoryService.php).
+    POST /api/getHloc — wire-format verified against the OFFICIAL Tradernet
+    Python SDK (``tradernet-sdk`` on PyPI, ``tradernet/client.py:get_candles``).
 
-    Параметры:
-      id            — тикер (НЕ "ticker")
-      timeframe     — в минутах: 1440 = D, 60 = H1, 5 = M5
-      intervalMode  — 'ClosedRay' (стандарт для исторических хвостов)
-      count         — -1 = без лимита
-      date_from/to  — формат 'YYYY-MM-DD'
+    Wire details (verbatim from SDK):
+      URL:     https://freedom24.com/api/getHloc   (NOT tradernet.com, NOT /v2/cmd/)
+      Body:    application/json
+      Headers: X-NtApi-PublicKey + X-NtApi-Timestamp + X-NtApi-Sig
+      Sign:    HMAC-SHA256(secret, json_body + unix_timestamp)
+      Params:
+        id            — ticker (e.g. "AAPL.US")
+        count         — -1 = unlimited
+        timeframe     — minutes: 1440 = daily, 60 = H1
+        date_from/to  — '%d.%m.%Y %H:%M'  (NOT ISO!)
+        intervalMode  — 'OpenRay'         (NOT 'ClosedRay')
+
+    Tries ``freedom24.com`` first (official SDK default), falls back to
+    ``tradernet.com`` if that's blocked or returns command-not-found.
     """
-    today      = datetime.utcnow().date()
-    start_date = today - timedelta(days=days)
+    today = datetime.utcnow()
+    start = today - timedelta(days=days)
 
     timeframe_minutes = {"D": 1440, "H1": 60, "M5": 5}.get(timeframe, 1440)
 
     params = {
         "id":           ticker,
-        "timeframe":    timeframe_minutes,
-        "intervalMode": "ClosedRay",
         "count":        -1,
-        "date_from":    start_date.isoformat(),
-        "date_to":      today.isoformat(),
+        "timeframe":    timeframe_minutes,
+        "date_from":    start.strftime("%d.%m.%Y %H:%M"),
+        "date_to":      today.strftime("%d.%m.%Y %H:%M"),
+        "intervalMode": "OpenRay",
     }
 
-    try:
-        raw = client._post_v2_signed("getHloc", params)
-    except Exception as exc:
-        logger.info("getHloc не удался для %s (%s) — пробуем legacy getQuotesHistory", ticker, exc)
-        # Legacy команда принимает другие имена полей.
-        legacy_params = {
-            "ticker":   ticker,
-            "interval": timeframe_minutes,
-            "from":     start_date.isoformat(),
-            "to":       today.isoformat(),
-        }
-        raw = client._post_v2_signed("getQuotesHistory", legacy_params)
+    last_exc: Exception | None = None
+    # freedom24.com is the SDK-native host for history; tradernet.com is the
+    # fallback in case that host is blocked or rate-limits us.
+    for base in ("https://freedom24.com", "https://tradernet.com"):
+        try:
+            raw = client._post_json_v2("getHloc", params, base_override=base)
+            return _parse_hloc_response(raw, ticker)
+        except Exception as exc:
+            logger.debug("getHloc на %s не удался для %s: %s", base, ticker, exc)
+            last_exc = exc
 
-    return _parse_hloc_response(raw, ticker)
+    raise last_exc if last_exc else RuntimeError("getHloc failed on all hosts")
 
 
 def _parse_hloc_response(raw: dict, ticker: str = "") -> list[Candle]:
     """
-    Tradernet returns one of several shapes; we handle them all.
+    Parse a Tradernet ``getHloc`` response.  Format A is verified against the
+    official Python SDK (``tradernet/symbols/tradernet_symbol.py:97-110``):
 
-    Reference shapes (per MasyaSmv/freedom-broker-api PHP SDK):
-      A1. ``{"hloc": {"AAPL.US": [{t,o,h,l,c,v}, ...]}}``  — modern, keyed by ticker
-      A2. ``{"hloc": [{t,o,h,l,c,v}, ...]}``               — flat list
-      B.  ``{"xSeries": {"AAPL.US": [t, t, ...]}, "ySeries": {"AAPL.US": {c:[...]}}}``
-      C.  Top-level list of candles
+      A. Parallel arrays keyed by symbol (canonical SDK shape)
+         {"hloc":    {"AAPL.US": [[h,l,o,c], [h,l,o,c], ...]},   # ← 2-D!  index = h,l,o,c
+          "xSeries": {"AAPL.US": [t1, t2, ...]},                 # timestamps (sec or ms)
+          "vl":      {"AAPL.US": [v1, v2, ...]}}
+
+    Legacy/alternative shapes still supported as fallback:
+      B. ``{"hloc": [{t,o,h,l,c,v}, ...]}``                     — flat dicts
+      C. Top-level list of candle dicts
     """
     body = raw.get("result", raw)
 
-    # Shape A1 — keyed by ticker
-    if isinstance(body, dict) and isinstance(body.get("hloc"), dict):
-        per_ticker = body["hloc"].get(ticker) or next(iter(body["hloc"].values()), [])
-        if isinstance(per_ticker, list):
-            return [Candle(**c) for c in per_ticker if isinstance(c, dict)]
+    # ── Shape A — official SDK: parallel arrays keyed by ticker ──────────
+    if (isinstance(body, dict)
+            and isinstance(body.get("hloc"), dict)
+            and isinstance(body.get("xSeries"), dict)):
+        hloc_map = body["hloc"]
+        x_map    = body["xSeries"]
+        v_map    = body.get("vl") if isinstance(body.get("vl"), dict) else {}
 
-    # Shape A2 — flat list
+        candles_2d = hloc_map.get(ticker) or next(iter(hloc_map.values()), [])
+        timestamps = x_map.get(ticker)    or next(iter(x_map.values()), [])
+        volumes    = v_map.get(ticker)    or (next(iter(v_map.values()), []) if v_map else [])
+
+        if isinstance(candles_2d, list) and isinstance(timestamps, list):
+            result: list[Candle] = []
+            for i in range(min(len(candles_2d), len(timestamps))):
+                row = candles_2d[i]
+                if not isinstance(row, list) or len(row) < 4:
+                    continue
+                # Order verified from SDK get_data() docstring: high, low, open, close.
+                h, l, o, c = float(row[0]), float(row[1]), float(row[2]), float(row[3])
+                ts = timestamps[i]
+                # Auto-detect ms vs s — 2024 in ms ≈ 1.7e12, in s ≈ 1.7e9.
+                ts_int = int(ts)
+                if ts_int > 10**12:
+                    ts_int //= 1000
+                vol = volumes[i] if i < len(volumes) else None
+                result.append(Candle(t=ts_int, o=o, h=h, l=l, c=c, v=vol))
+            if result:
+                return result
+
+    # ── Shape B — flat list of candle dicts ──────────────────────────────
     if isinstance(body, dict) and isinstance(body.get("hloc"), list):
         return [Candle(**c) for c in body["hloc"] if isinstance(c, dict)]
 
-    # Shape B — parallel-arrays
-    if isinstance(body, dict) and "xSeries" in body and "ySeries" in body:
-        x = body["xSeries"]
-        y = body["ySeries"]
-        # Could be dict-keyed or single list
-        if isinstance(x, dict):
-            x = x.get(ticker) or next(iter(x.values()), [])
-        if isinstance(y, dict):
-            y = y.get(ticker) or next(iter(y.values()), [])
-        if isinstance(y, list) and y and isinstance(y[0], dict):
-            closes = y[0].get("c", [])
-            opens  = y[0].get("o", closes)
-            highs  = y[0].get("h", closes)
-            lows   = y[0].get("l", closes)
-            return [
-                Candle(t=int(x[i]), o=opens[i], h=highs[i], l=lows[i], c=closes[i])
-                for i in range(min(len(x), len(closes)))
-            ]
-
-    # Shape C — top-level list
+    # ── Shape C — top-level list ─────────────────────────────────────────
     if isinstance(body, list):
         return [Candle(**c) for c in body if isinstance(c, dict)]
 
