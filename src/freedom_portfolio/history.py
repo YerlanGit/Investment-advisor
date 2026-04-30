@@ -207,7 +207,21 @@ def _fetch_hloc(client, ticker: str, *, days: int, timeframe: str) -> list[Candl
             raw = client._post_json_v2("getHloc", params, base_override=base)
             return _parse_hloc_response(raw, ticker)
         except Exception as exc:
-            logger.debug("getHloc на %s не удался для %s: %s", base, ticker, exc)
+            # Tag connection-level failures (SSL EOF, RemoteDisconnected) so
+            # the caller can distinguish them from JSON-level errors and
+            # surface the right diagnostic to the user.
+            err_str = str(exc).lower()
+            is_connection_drop = any(token in err_str for token in (
+                "ssl", "remotedisconnected", "connection aborted",
+                "connection reset", "max retries exceeded",
+            ))
+            if is_connection_drop:
+                logger.warning(
+                    "getHloc на %s оборвал соединение для %s — возможно нет подписки на market data: %s",
+                    base, ticker, exc,
+                )
+            else:
+                logger.debug("getHloc на %s вернул ошибку для %s: %s", base, ticker, exc)
             last_exc = exc
 
     raise last_exc if last_exc else RuntimeError("getHloc failed on all hosts")

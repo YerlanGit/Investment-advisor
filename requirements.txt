@@ -14,6 +14,9 @@ numpy>=1.26.0
 scikit-learn>=1.4.0
 requests>=2.31.0
 edgartools>=3.0.0
+# edgartools depends on pytz (timezone handling for SEC filing dates) but
+# doesn't always pull it transitively in slim images.  Pin explicitly.
+pytz>=2024.1
 pyrate-limiter>=2.10.0,<3.0.0
 
 # ── Freedom Broker (Tradernet) connector ─────────────────────────────────────

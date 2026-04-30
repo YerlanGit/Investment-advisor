@@ -213,31 +213,42 @@ def _format_portfolio_preview(df) -> str:
     """
     Сжатая Markdown-таблица портфеля для Telegram-сообщения.
     Возвращает 9-15 строк, форматированных моноширинным блоком.
-    """
-    import pandas as _pd
 
+    ВАЖНО: DataFrame от FreedomConnector хранит тикер в колонке "Ticker"
+    с дефолтным RangeIndex (0, 1, 2…).  Если итерироваться через iterrows()
+    и распаковывать как (idx, row), то idx — это число, а не тикер.
+    """
     if df is None or df.empty:
         return "_(портфель пуст)_"
 
     rows = []
     rows.append("```")
-    rows.append(f"{'Тикер':<10} {'Кол-во':>10} {'Сумма $':>10}")
-    rows.append("─" * 32)
+    rows.append(f"{'Тикер':<12} {'Кол-во':>10} {'Сумма $':>12}")
+    rows.append("─" * 36)
 
     df2 = df.copy()
     if "Quantity" in df2.columns and "Purchase_Price" in df2.columns:
         df2["_value"] = df2["Quantity"] * df2["Purchase_Price"]
     else:
         df2["_value"] = df2.get("Quantity", 0)
+
     df2 = df2.sort_values("_value", ascending=False)
 
-    for ticker, row in df2.iterrows():
-        qty   = row.get("Quantity", 0)
-        value = row.get("_value", 0)
-        rows.append(f"{str(ticker)[:10]:<10} {qty:>10.2f} {value:>10.2f}")
+    # Source of ticker: either the "Ticker" column, or the index when it's named.
+    if "Ticker" in df2.columns:
+        ticker_iter = df2["Ticker"].astype(str).tolist()
+    else:
+        ticker_iter = [str(i) for i in df2.index.tolist()]
 
-    rows.append("─" * 32)
-    rows.append(f"{'Всего':<10} {len(df2):>10} {df2['_value'].sum():>10.2f}")
+    for i, (_, row) in enumerate(df2.iterrows()):
+        ticker = ticker_iter[i] if i < len(ticker_iter) else "?"
+        qty    = row.get("Quantity", 0) or 0
+        value  = row.get("_value", 0) or 0
+        rows.append(f"{ticker[:12]:<12} {qty:>10.2f} {value:>12.2f}")
+
+    rows.append("─" * 36)
+    total_value = df2["_value"].sum() if "_value" in df2.columns else 0
+    rows.append(f"{'Всего':<12} {len(df2):>10} {total_value:>12.2f}")
     rows.append("```")
     return "\n".join(rows)
 
@@ -942,39 +953,155 @@ async def _run_analysis_background(
     df,
     bench_tick: str | None,
 ) -> None:
-    """Фоновая задача: считает MAC3 + отправляет PDF либо ошибку."""
+    """
+    Фоновая задача с поэтапными уведомлениями в Telegram.
+
+    Каждый этап MAC3-pipeline публикует прогресс и ошибки сразу как они
+    случаются — пользователь видит, что делается, и где именно сломалось.
+    """
+    from finance.investment_logic import UniversalPortfolioManager
+
     loop = asyncio.get_running_loop()
+    progress_messages: list = []   # для последующего удаления/обновления
+
+    async def step(emoji: str, text: str):
+        """Отправить сообщение прогресса и сохранить ссылку на него."""
+        try:
+            msg = await bot.send_message(chat_id, f"{emoji} {text}", parse_mode=ParseMode.MARKDOWN)
+            progress_messages.append(msg)
+            return msg
+        except Exception as e:
+            logger.warning("Не удалось отправить прогресс: %s", e)
+            return None
+
     try:
-        results = await loop.run_in_executor(
-            None, _analyze_existing_portfolio_sync, df, bench_tick,
+        # ── Step 1: load market history ──────────────────────────────────
+        await step("📈", "*Шаг 1/4:* Загружаю исторические цены через Freedom API…")
+
+        manager = UniversalPortfolioManager()
+
+        # Wrap the heavy parts to detect WHERE we fail.
+        def _stage_market_data():
+            tickers = [
+                t for t in df["Ticker"].astype(str).tolist()
+                if t.upper() not in manager.engine.NON_RISK_ASSETS
+            ] if "Ticker" in df.columns else [
+                t for t in df.index.astype(str).tolist()
+                if t.upper() not in manager.engine.NON_RISK_ASSETS
+            ]
+            return manager.engine.get_market_data(tickers), tickers
+
+        try:
+            all_data, risky_tickers = await loop.run_in_executor(None, _stage_market_data)
+        except Exception as exc:
+            logger.exception("Stage 1 (market data) failed: %s", exc)
+            await bot.send_message(
+                chat_id,
+                "❌ *Шаг 1 не удался:* не получилось загрузить исторические цены.\n\n"
+                f"Причина: `{str(exc)[:200]}`",
+                parse_mode=ParseMode.MARKDOWN,
+            )
+            raise
+
+        loaded_count = len([c for c in all_data.columns if not all_data[c].isna().all()]) if not all_data.empty else 0
+        total_count = len(risky_tickers) + len(manager.engine.factor_tickers)
+
+        if loaded_count == 0:
+            await bot.send_message(
+                chat_id,
+                "❌ *Шаг 1 — критично:* Freedom API не вернул ни одной серии цен.\n\n"
+                "*Возможные причины:*\n"
+                "• Ваш API-ключ Freedom Broker не имеет доступа к Market Data "
+                "— это **отдельная подписка** на стороне брокера\n"
+                "• Сервер Freedom активно обрывает соединение (`SSL EOF` / "
+                "`RemoteDisconnected` в логах) — обычно так блокируется "
+                "доступ без подписки\n\n"
+                "*Что делать:*\n"
+                "1. Зайдите в Личный кабинет Freedom Broker → API → Market Data\n"
+                "2. Активируйте подписку на исторические данные (если её нет)\n"
+                "3. Либо обратитесь в поддержку брокера: попросите включить "
+                "доступ к `getHloc` для вашего API-ключа\n\n"
+                "Токены *не списаны* — обратитесь в /support за рефандом.",
+                parse_mode=ParseMode.MARKDOWN,
+            )
+            raise RuntimeError("market_data_subscription_required")
+
+        await bot.send_message(
+            chat_id,
+            f"✅ Загружено серий: *{loaded_count}/{total_count}*\n"
+            f"_(остальные тикеры пропущены — будут оценены через прокси-индексы)_",
+            parse_mode=ParseMode.MARKDOWN,
         )
+
+        # ── Step 2: full MAC3 analysis ────────────────────────────────────
+        await step("🧮", "*Шаг 2/4:* Запускаю факторную модель MAC3 (Ridge + Ledoit-Wolf)…")
+        try:
+            results = await loop.run_in_executor(
+                None, _analyze_existing_portfolio_sync, df, bench_tick,
+            )
+        except Exception as exc:
+            logger.exception("Stage 2 (MAC3) failed: %s", exc)
+            await bot.send_message(
+                chat_id,
+                "❌ *Шаг 2 не удался:* MAC3 движок упал.\n\n"
+                f"Причина: `{str(exc)[:200]}`\n\n"
+                "Токены не потеряны — /support.",
+                parse_mode=ParseMode.MARKDOWN,
+            )
+            raise
+
+        await step("✅", "MAC3 факторная модель и риск-декомпозиция посчитаны.")
+
+        # ── Step 3: gate check + fundamentals ────────────────────────────
+        await step("📊", "*Шаг 3/4:* Проверяю риск-лимиты и фундаментальные метрики (SEC EDGAR)…")
+
         if (await get_profile(user_id)) is not None:
             profile = await get_profile(user_id)
             gate_limits = {"max_portfolio_volatility": profile["target_volatility"] * 1.2}
             gate = run_gatekeeper(results, user_limits=gate_limits)
             if not gate["passed"]:
                 logger.warning("Gatekeeper нарушения: %s", gate["critical"])
+                await bot.send_message(
+                    chat_id,
+                    "⚠️ *Внимание:* портфель нарушает риск-лимиты профиля:\n"
+                    f"`{', '.join(gate['critical'][:3])}`",
+                    parse_mode=ParseMode.MARKDOWN,
+                )
 
+        # ── Step 4: PDF generation ────────────────────────────────────────
+        await step("📄", "*Шаг 4/4:* Генерирую PDF-отчёт…")
         payload = _build_pdf_payload(results, tier)
         await _send_pdf(bot, chat_id, user_id, tier, payload)
         await bot.send_message(
             chat_id,
-            "✅ *Отчёт готов.* Скачайте PDF выше — там полный анализ MAC3.",
+            "✅ *Отчёт готов!*\n\n"
+            "Скачайте PDF выше — там полный анализ MAC3, "
+            "разложение рисков по факторам и сравнение с бенчмарками.",
             parse_mode=ParseMode.MARKDOWN,
         )
+
     except RealPortfolioRequired as exc:
         await bot.send_message(
             chat_id,
             "⚠️ *Анализ невозможен: нет реальных данных портфеля.*\n\n"
-            f"{exc}\n\nТокены не потеряны — обратитесь в /support.",
+            f"{exc}\n\nТокены не потеряны — /support.",
             parse_mode=ParseMode.MARKDOWN,
         )
+    except RuntimeError as exc:
+        # Already reported above; no double message.
+        if str(exc) != "market_data_subscription_required":
+            logger.exception("Background analysis runtime error: %s", exc)
+            await bot.send_message(
+                chat_id,
+                f"⚠️ *Ошибка при анализе:*\n`{str(exc)[:200]}`",
+                parse_mode=ParseMode.MARKDOWN,
+            )
     except Exception as exc:
         logger.exception("MAC3 анализ упал для %s: %s", user_id, exc)
         await bot.send_message(
             chat_id,
-            f"⚠️ *Ошибка при анализе портфеля:*\n`{str(exc)[:200]}`\n\n"
-            "Токены не потеряны — обратитесь в /support.",
+            f"⚠️ *Непредвиденная ошибка:*\n`{str(exc)[:200]}`\n\n"
+            "Токены не потеряны — /support.",
             parse_mode=ParseMode.MARKDOWN,
         )
 
