@@ -185,23 +185,19 @@ def test_detect_and_adjust_splits_idempotent_on_smooth_series():
 
 
 def _mock_tradernet_client(response: dict) -> MagicMock:
+    """Mock TradernetClient with attributes needed by the KZ fallback logic."""
     client = MagicMock()
     client._post_v2_signed = MagicMock(return_value=response)
+    client.base_url = "https://tradernet.com/api/"
+    client.public_key = "test_key"
+    client.secret_key = "test_secret"
+    client.timeout = 30
+    client._session = MagicMock()
     return client
 
 
-def _mock_tradernet_client_v2_form(response: dict) -> MagicMock:
-    """Mock that answers on v2-form transport (the first attempt path)."""
-    client = MagicMock()
-    client._post_v2_signed = MagicMock(return_value=response)
-    # Other transports raise so we know the first one was used.
-    client._post_signed   = MagicMock(side_effect=RuntimeError("should not be called"))
-    client._post_json_v2  = MagicMock(side_effect=RuntimeError("should not be called"))
-    return client
-
-
-def test_get_candles_returns_series_from_v2_form_kz(tmp_path, monkeypatch):
-    """End-to-end: tradernet.kz v2-form transport (first in attempt list)."""
+def test_get_candles_returns_series_from_v2_signed(tmp_path, monkeypatch):
+    """End-to-end: v2 signed transport returns SDK-format candles."""
     from freedom_portfolio import history as hist_mod
     monkeypatch.setattr(hist_mod, "_CACHE_DIR", tmp_path)
 
@@ -210,7 +206,7 @@ def test_get_candles_returns_series_from_v2_form_kz(tmp_path, monkeypatch):
     t3 = int(datetime(2024, 1, 3, tzinfo=timezone.utc).timestamp())
     response = {"hloc":    {"AAPL.US": [[101, 99, 100, 100.0], [102, 100, 100.5, 101.0], [103, 101, 101.5, 102.0]]},
                 "xSeries": {"AAPL.US": [t1, t2, t3]}}
-    client = _mock_tradernet_client_v2_form(response)
+    client = _mock_tradernet_client(response)
     s = get_candles(client, "AAPL.US", days=10)
     assert len(s) == 3
     assert s.iloc[-1] == 102.0
@@ -224,7 +220,7 @@ def test_get_candles_uses_cache_on_second_call(tmp_path, monkeypatch):
 
     response = {"hloc": {"AAPL.US": [[101, 99, 100, 100.0]]},
                 "xSeries": {"AAPL.US": [1700000000]}}
-    client = _mock_tradernet_client_v2_form(response)
+    client = _mock_tradernet_client(response)
 
     get_candles(client, "AAPL.US", days=10)
     first_call_count = client._post_v2_signed.call_count
@@ -233,23 +229,30 @@ def test_get_candles_uses_cache_on_second_call(tmp_path, monkeypatch):
     assert client._post_v2_signed.call_count == first_call_count, "second call must hit cache"
 
 
-def test_get_candles_falls_back_to_v1_signed_when_v2_fails(tmp_path, monkeypatch):
-    """If the v2-form transport raises, _fetch_hloc must try v1 signed q={...}."""
+def test_fetch_hloc_sends_correct_date_format(tmp_path, monkeypatch):
+    """Dates must be sent as DD.MM.YYYY HH:MM, not ISO format."""
     from freedom_portfolio import history as hist_mod
+    from freedom_portfolio.history import _fetch_hloc
     monkeypatch.setattr(hist_mod, "_CACHE_DIR", tmp_path)
 
-    client = MagicMock()
-    client._post_v2_signed = MagicMock(side_effect=RuntimeError("Command not found"))
-    response_v1 = {"hloc": {"AAPL.US": {
-        "xSeries": [1700000000, 1700086400],
-        "yPrices": [{"o": 100, "h": 101, "l": 99, "c": 100.0},
-                    {"o": 100, "h": 102, "l": 99, "c": 101.0}],
-    }}}
-    client._post_signed = MagicMock(return_value=response_v1)
-    client._post_json_v2 = MagicMock(side_effect=RuntimeError("not called"))
+    response = {"hloc": [{"t": 1700000000, "c": 100.0}]}
+    client = _mock_tradernet_client(response)
+    _fetch_hloc(client, "AAPL.US", days=30, timeframe="D")
 
-    s = get_candles(client, "AAPL.US", days=10)
-    assert len(s) == 2
-    # v2 was tried twice (kz, then com), v1 succeeded.
-    assert client._post_v2_signed.called
-    assert client._post_signed.called
+    # Check the params passed to _post_v2_signed
+    call_args = client._post_v2_signed.call_args
+    params = call_args[0][1]  # second positional arg
+
+    # Verify date format is DD.MM.YYYY HH:MM
+    assert "date_from" in params
+    assert "date_to" in params
+    import re
+    date_pattern = re.compile(r"^\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}$")
+    assert date_pattern.match(params["date_from"]), \
+        f"date_from must be DD.MM.YYYY HH:MM, got: {params['date_from']}"
+    assert date_pattern.match(params["date_to"]), \
+        f"date_to must be DD.MM.YYYY HH:MM, got: {params['date_to']}"
+
+    # Verify userId is present (even if None)
+    assert "userId" in params
+

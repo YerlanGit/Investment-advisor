@@ -169,76 +169,80 @@ def _fetch_hloc(client, ticker: str, *, days: int, timeframe: str) -> list[Candl
     """
     Fetch historical candles via the Tradernet ``getHloc`` command.
 
-    Tradernet exposes the same command through MULTIPLE wire schemes; the
-    one that works depends on the user's broker region and subscription
-    tier.  We try them in the order most likely to succeed for KZ-registered
-    Freedom Broker accounts (which is what this bot targets).
+    Verified against official Freedom24 Tradernet API documentation at
+    freedombroker.kz/tradernet-api/quotes-get-hloc and MasyaSmv/freedom-broker-api
+    PHP SDK (src/Core/Service/StockHistoryService.php).
 
     Order of attempts:
 
-      1. **V2 form-encoded on tradernet.kz** — ``/api/v2/cmd/getHloc``
-         with ``ticker``+``timeframe="D"``+ISO ``from``/``to`` dates.
-         This is the form documented at tradernet.kz/tradernet-api/quotes-get-hloc.
+      1. **V2 signed on client's primary domain** — ``/api/v2/cmd/getHloc``
+         with official parameter format (``id``, ``date_from``/``date_to`` in
+         ``DD.MM.YYYY HH:MM`` format, ``intervalMode=ClosedRay``).
 
-      2. **V1 signed q={…} on tradernet.kz** — ``/api/`` with md5-signed
-         ``q={"cmd":"getHloc",...}`` form field.  Original pre-v2 API
-         scheme; works as fallback when v2 isn't enabled for the account.
+      2. **V2 signed on KZ fallback domains** — same request on
+         ``tradernet.kz`` and ``freedombroker.kz`` for KZ-registered accounts
+         whose API keys only authenticate on regional endpoints.
 
-      3. **V3 JSON on freedom24.com** — ``/api/getHloc`` with HMAC-SHA256
-         body+timestamp signing (matches the official Python SDK).  Last
-         resort because it requires a freedom24.com market-data subscription
-         which most KZ accounts don't have.
+      3. **Legacy getQuotesHistory** — older endpoint that accepts ISO dates
+         and ``ticker`` instead of ``id``.
 
-    All three are stopped as soon as one returns a parseable candle list.
-    Connection-drop signals (SSL EOF / RemoteDisconnected) fall through to
-    the next attempt; only after ALL fail do we raise — and the caller
-    surfaces a "no market-data subscription" hint to the user.
+    All attempts stop as soon as one returns a parseable candle list.
     """
-    today = datetime.utcnow()
+    today = datetime.now(timezone.utc)
     start = today - timedelta(days=days)
 
     # Documented on tradernet.kz: timeframe is either an integer of minutes
     # (1, 5, 10, 15, 30, 60) or the string "D" for daily bars.
-    tf_kz: int | str = {"D": "D", "H1": 60, "M5": 5, "M1": 1}.get(timeframe, "D")
+    timeframe_minutes = {"D": 1440, "H1": 60, "M5": 5, "M1": 1}.get(timeframe, 1440)
 
-    # Per-scheme parameter sets — Tradernet's wire format is fragmented
-    # across regions, so we try the spelling each scheme expects.
-    kz_params = {
-        "ticker":    ticker,                                # NOT "id"
-        "timeframe": tf_kz,                                 # "D" for daily
-        "count":     min(days, 5000),                       # bar count cap
-        "from":      start.strftime("%Y-%m-%d"),            # ISO date
-        "to":        today.strftime("%Y-%m-%d"),
-    }
-    sdk_params = {
-        "id":            ticker,                            # SDK uses "id"
-        "count":         -1,
-        "timeframe":     1440,                              # minutes (daily)
-        "date_from":     start.strftime("%d.%m.%Y %H:%M"),  # Russian fmt
-        "date_to":       today.strftime("%d.%m.%Y %H:%M"),
-        "intervalMode":  "OpenRay",
+    # Official Tradernet API requires DD.MM.YYYY HH:MM format for dates.
+    # ISO format (YYYY-MM-DD) causes the server to return empty candle arrays.
+    params = {
+        "userId":       None,
+        "id":           ticker,
+        "timeframe":    timeframe_minutes,
+        "intervalMode": "ClosedRay",
+        "count":        -1,
+        "date_from":    start.strftime("%d.%m.%Y 00:00"),
+        "date_to":      today.strftime("%d.%m.%Y 00:00"),
     }
 
-    attempts: list[tuple[str, callable]] = [
-        ("v2-form/tradernet.kz",
-         lambda: client._post_v2_signed("getHloc", kz_params, base_override="https://tradernet.kz")),
-        ("v1-signed-q/tradernet.kz",
-         lambda: client._post_signed("getHloc", kz_params, base_override="https://tradernet.kz")),
-        ("v2-form/tradernet.com",
-         lambda: client._post_v2_signed("getHloc", kz_params)),
-        ("v3-json/freedom24.com",
-         lambda: client._post_json_v2("getHloc", sdk_params, base_override="https://freedom24.com")),
-    ]
+    # ── Phase 1: getHloc on client's primary domain (v2 signed) ──────────
+    try:
+        raw = client._post_v2_signed("getHloc", params)
+        candles = _parse_hloc_response(raw, ticker)
+        if candles:
+            logger.info("getHloc OK для %s на %s (%d свечей)", ticker, client.base_url, len(candles))
+            return candles
+        logger.debug("getHloc вернул пустой ответ для %s на %s", ticker, client.base_url)
+    except Exception as exc:
+        logger.info("getHloc не удался для %s на %s: %s", ticker, client.base_url, exc)
 
-    last_exc: Exception | None = None
-    for label, call in attempts:
+    # ── Phase 2: getHloc on KZ fallback domains ─────────────────────────
+    # KZ-registered accounts may have API keys that only authenticate on
+    # tradernet.kz or freedombroker.kz, not on international tradernet.com.
+    _kz_fallbacks = (
+        "https://tradernet.kz/api/",
+        "https://freedombroker.kz/api/",
+    )
+    primary = client.base_url.rstrip("/")
+    for fallback_url in _kz_fallbacks:
+        if fallback_url.rstrip("/") == primary:
+            continue  # skip if this IS the primary URL
         try:
-            raw = call()
+            from freedom_portfolio.client import TradernetClient
+            fb_client = TradernetClient(
+                client.public_key, client.secret_key,
+                base_url=fallback_url,
+                timeout=client.timeout,
+                session=client._session,
+            )
+            raw = fb_client._post_v2_signed("getHloc", params)
             candles = _parse_hloc_response(raw, ticker)
             if candles:
-                logger.info("getHloc OK для %s через %s (%d свечей)", ticker, label, len(candles))
+                logger.info("getHloc OK для %s через KZ fallback %s (%d свечей)",
+                            ticker, fallback_url, len(candles))
                 return candles
-            logger.debug("getHloc через %s вернул пустой ответ для %s", label, ticker)
         except Exception as exc:
             err_str = str(exc).lower()
             is_connection_drop = any(token in err_str for token in (
@@ -246,11 +250,25 @@ def _fetch_hloc(client, ticker: str, *, days: int, timeframe: str) -> list[Candl
                 "connection reset", "max retries exceeded",
             ))
             log_fn = logger.warning if is_connection_drop else logger.debug
-            log_fn("getHloc через %s упал для %s: %s", label, ticker, exc)
-            last_exc = exc
+            log_fn("getHloc KZ fallback %s упал для %s: %s", fallback_url, ticker, exc)
 
-    if last_exc:
-        raise last_exc
+    # ── Phase 3: legacy getQuotesHistory on primary domain ───────────────
+    # This older endpoint accepts ISO date format.
+    try:
+        logger.info("Пробуем legacy getQuotesHistory для %s", ticker)
+        legacy_params = {
+            "ticker":   ticker,
+            "interval": timeframe_minutes,
+            "from":     start.strftime("%Y-%m-%d"),
+            "to":       today.strftime("%Y-%m-%d"),
+        }
+        raw = client._post_v2_signed("getQuotesHistory", legacy_params)
+        candles = _parse_hloc_response(raw, ticker)
+        if candles:
+            return candles
+    except Exception as exc:
+        logger.warning("Legacy getQuotesHistory тоже не удался для %s: %s", ticker, exc)
+
     return []
 
 
