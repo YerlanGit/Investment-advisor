@@ -65,5 +65,5 @@ if __name__ == "__main__":
     # in all environments including multi-threaded asyncio.gather() contexts.
     if sys.platform != "win32":
         asyncio.set_child_watcher(asyncio.ThreadedChildWatcher())
-    asyncio.run(_main())
+    # asyncio.run(_main())  # Disabled for local runs
 
