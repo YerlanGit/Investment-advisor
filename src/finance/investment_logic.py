@@ -67,6 +67,55 @@ class MAC3RiskEngine:
         'EM_EQUITY_FALLBACK': 'EEM.US',
     }
 
+    # Sector ETF index map — used for sector exposure analysis in reports.
+    # Format: sector_name -> Tradernet ETF ticker.
+    SECTOR_ETF_MAP = {
+        'Technology':     'XLK.US',
+        'Semiconductors': 'SOXX.US',
+        'Finance':        'XLF.US',
+        'Energy':         'XLE.US',
+        'Healthcare':     'XLV.US',
+        'Commodities':    'DBC.US',
+        'Gold':           'GLD.US',
+        'Silver':         'SLV.US',
+        'Oil':            'USO.US',
+        'Industrials':    'XLI.US',
+        'Consumer':       'XLP.US',
+        'Materials':      'XME.US',
+    }
+
+    # Ticker-to-sector classification for automatic sector detection.
+    TICKER_SECTOR = {
+        'AAPL':  'Technology',
+        'MSFT':  'Technology',
+        'GOOGL': 'Technology',
+        'META':  'Technology',
+        'AMZN':  'Technology',
+        'NVDA':  'Semiconductors',
+        'AVGO':  'Semiconductors',
+        'AMD':   'Semiconductors',
+        'INTC':  'Semiconductors',
+        'QBTS':  'Semiconductors',
+        'SOXX':  'Semiconductors',
+        'TSM':   'Semiconductors',
+        'JPM':   'Finance',
+        'GS':    'Finance',
+        'BAC':   'Finance',
+        'KSPI':  'Finance',
+        'HSBK':  'Finance',
+        'XOM':   'Energy',
+        'CVX':   'Energy',
+        'COP':   'Energy',
+        'JNJ':   'Healthcare',
+        'UNH':   'Healthcare',
+        'PFE':   'Healthcare',
+        'GLD':   'Gold',
+        'SLV':   'Silver',
+        'GDX':   'Gold',
+        'USO':   'Oil',
+        'ORCL':  'Technology',
+    }
+
     def __init__(self, trading_days=252, ewma_halflife=63):
         self.trading_days = trading_days
         self.ewma_halflife = ewma_halflife  # 63 дней ≈ λ=0.94 (RiskMetrics)
@@ -162,10 +211,8 @@ class MAC3RiskEngine:
         """
         Загрузка дневных закрытий через Tradernet API (replaces yfinance).
 
-        Параллельный fetch (ThreadPoolExecutor inside get_history_frame), кеш
-        на диске на 1 час, split-detection защита от падения ковариации.
-
-        Параметр period сохранён в днях (730 ≈ 2y) — переход с yfinance period="2y".
+        Returns (data, history_result) tuple where history_result contains
+        loaded/failed/retried ticker details for user-facing messages.
         """
         valid_tickers = self.resolve_tickers(tickers)
         all_req = list(dict.fromkeys(valid_tickers + list(self.factor_tickers.values())))
@@ -174,19 +221,31 @@ class MAC3RiskEngine:
                     len(all_req), ", ".join(all_req))
 
         client = self._get_tradernet_client()
-        data = get_history_frame(client, all_req, days=period_days)
+        history_result = get_history_frame(client, all_req, days=period_days)
 
-        if data.empty:
+        if history_result.data.empty:
             logger.error("Tradernet вернул пустой набор цен — все тикеры провалились")
-            return data
+            return history_result.data, history_result
 
-        # Безрисковая ставка через IEF.US — используем yield-аппроксимацию.
-        # IEF tracks 7-10y Treasury bonds; применяем стандартную bond-ETF→yield
-        # обратную связь: rfr ≈ 0.04 (хардкод, IEF не даёт явный yield в свечах).
-        # Для production-точности можно подтянуть getSecurityInfo по IEF.
-        # Здесь оставляем дефолт self.current_rfr_annual = 0.04.
+        return self.math_firewall(history_result.data), history_result
 
-        return self.math_firewall(data)
+    def get_ticker_sector(self, ticker: str) -> str:
+        """Возвращает сектор для тикера (или 'Other')."""
+        base = ticker.split('.')[0].upper() if '.' in ticker else ticker.upper()
+        return self.TICKER_SECTOR.get(base, 'Other')
+
+    def get_sector_exposure(self, tickers: list, weights: dict) -> dict:
+        """
+        Рассчитывает секторное распределение портфеля.
+
+        Returns dict mapping sector name to total weight %.
+        """
+        sectors: dict[str, float] = {}
+        for t in tickers:
+            sector = self.get_ticker_sector(t)
+            sectors[sector] = sectors.get(sector, 0) + weights.get(t, 0)
+        # Sort by weight descending
+        return dict(sorted(sectors.items(), key=lambda x: x[1], reverse=True))
 
     def calculate_structural_risk(self, data, asset_tickers, weights_dict):
         """
@@ -424,7 +483,7 @@ class UniversalPortfolioManager:
         # Скачиваем цены на Рисковые активы
         risky_tickers = [t for t in df.index if t not in self.engine.NON_RISK_ASSETS]
 
-        all_data = self.engine.get_market_data(risky_tickers)
+        all_data, history_result = self.engine.get_market_data(risky_tickers)
         # Фундаментальные метрики берутся ТОЛЬКО из SEC EDGAR (см. ниже,
         # batch_fundamental_scan). yfinance-источник (ROE/D-E/Forward_PE/MarketCap)
         # удалён — SEC EDGAR покрывает то же и точнее (10-K/10-Q филинги).
@@ -593,6 +652,9 @@ class UniversalPortfolioManager:
                         "Beating_Benchmark": port_return > bm_return
                     }
 
+        # Sector exposure analysis
+        sector_exposure = self.engine.get_sector_exposure(list(df.index), weights_dict)
+
         return {
             "performance_table": df.reset_index(),
             "risk_matrix": cov_matrix,
@@ -600,5 +662,7 @@ class UniversalPortfolioManager:
             "total_value": total_portfolio_value,
             "portfolio_metrics": port_metrics,
             "risk_free_rate": self.engine.current_rfr_annual,
-            "benchmark_comparison": benchmark_results
+            "benchmark_comparison": benchmark_results,
+            "history_result": history_result,
+            "sector_exposure": sector_exposure,
         }

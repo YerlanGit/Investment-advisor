@@ -999,10 +999,11 @@ async def _run_analysis_background(
                 t for t in df.index.astype(str).tolist()
                 if t.upper() not in manager.engine.NON_RISK_ASSETS
             ]
-            return manager.engine.get_market_data(tickers), tickers
+            data, history_result = manager.engine.get_market_data(tickers)
+            return data, tickers, history_result
 
         try:
-            all_data, risky_tickers = await loop.run_in_executor(None, _stage_market_data)
+            all_data, risky_tickers, history_result = await loop.run_in_executor(None, _stage_market_data)
         except Exception as exc:
             logger.exception("Stage 1 (market data) failed: %s", exc)
             await bot.send_message(
@@ -1036,15 +1037,41 @@ async def _run_analysis_background(
             )
             raise RuntimeError("market_data_subscription_required")
 
+        # ── Build detailed ticker status message ──────────────────────────
+        lines = [f"✅ Загружено серий: *{loaded_count}/{total_count}*"]
+
+        # Show proxy-resolved tickers
+        proxy_lines = []
+        for t in risky_tickers:
+            resolved = manager.engine.resolve_tickers([t])
+            if resolved and resolved[0] != f"{t.upper()}.US" and resolved[0] != t.upper():
+                proxy_lines.append(f"  `{t}` → `{resolved[0]}`")
+        if proxy_lines:
+            lines.append("\n📎 *Прокси-замены:*")
+            lines.extend(proxy_lines)
+
+        # Show retried tickers
+        if history_result.retried:
+            lines.append(f"\n🔄 *Восстановлено retry:* {', '.join(history_result.retried)}")
+
+        # Show failed tickers with reasons
+        if history_result.failed:
+            lines.append(f"\n❌ *Не загружены ({len(history_result.failed)}):*")
+            for t, reason in history_result.failed.items():
+                short = reason[:60] + "…" if len(reason) > 60 else reason
+                lines.append(f"  `{t}` — {short}")
+            lines.append("\nℹ️ _Пропущенные оцениваются через факторные индексы_")
+        elif loaded_count == total_count:
+            lines.append("\n✅ _Все тикеры загружены успешно_")
+
         await bot.send_message(
             chat_id,
-            f"✅ Загружено серий: *{loaded_count}/{total_count}*\n"
-            f"_(остальные тикеры пропущены — будут оценены через прокси-индексы)_",
+            "\n".join(lines),
             parse_mode=ParseMode.MARKDOWN,
         )
 
-        # ── Step 2: full MAC3 analysis ────────────────────────────────────
-        await step("🧮", "*Шаг 2/4:* Запускаю факторную модель MAC3 (Ridge + Ledoit-Wolf)…")
+        # ── Step 2: full MAC3 analysis (includes SEC EDGAR) ────────────────
+        await step("🧮", "*Шаг 2/4:* Запускаю MAC3 (Ridge + Ledoit-Wolf) + SEC EDGAR…")
         try:
             results = await loop.run_in_executor(
                 None, _analyze_existing_portfolio_sync, df, bench_tick,
@@ -1060,23 +1087,58 @@ async def _run_analysis_background(
             )
             raise
 
-        await step("✅", "MAC3 факторная модель и риск-декомпозиция посчитаны.")
+        await step("✅", "MAC3 факторная модель, SEC EDGAR и риск-декомпозиция посчитаны.")
 
-        # ── Step 3: gate check + fundamentals ────────────────────────────
-        await step("📊", "*Шаг 3/4:* Проверяю риск-лимиты и фундаментальные метрики (SEC EDGAR)…")
+        # ── Step 3: gatekeeper (advisory only, non-blocking) ──────────────
+        await step("📊", "*Шаг 3/4:* Проверяю риск-лимиты…")
+
+        gate = run_gatekeeper(results)  # Always run with defaults
 
         if (await get_profile(user_id)) is not None:
             profile = await get_profile(user_id)
             gate_limits = {"max_portfolio_volatility": profile["target_volatility"] * 1.2}
             gate = run_gatekeeper(results, user_limits=gate_limits)
-            if not gate["passed"]:
-                logger.warning("Gatekeeper нарушения: %s", gate["critical"])
+
+        # Show gatekeeper results (advisory only — never blocks report)
+        if gate["critical"] or gate["warnings"]:
+            alert_lines = []
+            if gate["critical"]:
+                alert_lines.append("⛔ *Нарушения риск-лимитов:*")
+                for c in gate["critical"][:3]:
+                    alert_lines.append(f"  {c}")
+            if gate["warnings"]:
+                alert_lines.append("⚠️ *Предупреждения:*")
+                for w in gate["warnings"][:3]:
+                    alert_lines.append(f"  {w}")
+            if len(gate["critical"]) + len(gate["warnings"]) > 6:
+                alert_lines.append(f"_…ещё {len(gate['critical']) + len(gate['warnings']) - 6} в PDF-отчёте_")
+
+            try:
                 await bot.send_message(
                     chat_id,
-                    "⚠️ *Внимание:* портфель нарушает риск-лимиты профиля:\n"
-                    f"`{', '.join(gate['critical'][:3])}`",
+                    "\n".join(alert_lines),
                     parse_mode=ParseMode.MARKDOWN,
                 )
+            except Exception:
+                pass  # Don't block on send failure
+        else:
+            await step("✅", "Все риск-проверки пройдены.")
+
+        # Show sector exposure
+        sector_exposure = results.get("sector_exposure", {})
+        if sector_exposure:
+            sector_lines = ["📊 *Секторное распределение:*"]
+            for sector, weight in list(sector_exposure.items())[:6]:
+                bar = "█" * max(1, int(weight * 100 / 5))
+                sector_lines.append(f"  {bar} {sector}: {weight:.0%}")
+            try:
+                await bot.send_message(
+                    chat_id,
+                    "\n".join(sector_lines),
+                    parse_mode=ParseMode.MARKDOWN,
+                )
+            except Exception:
+                pass
 
         # ── Step 4: PDF generation ────────────────────────────────────────
         await step("📄", "*Шаг 4/4:* Генерирую PDF-отчёт…")
