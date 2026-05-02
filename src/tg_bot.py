@@ -1015,7 +1015,13 @@ async def _run_analysis_background(
             raise
 
         loaded_count = len([c for c in all_data.columns if not all_data[c].isna().all()]) if not all_data.empty else 0
-        total_count = len(risky_tickers) + len(manager.engine.factor_tickers)
+        # Count unique *requested* tickers (after proxy resolution + factor ETFs).
+        # Multiple portfolio instruments may map to the same proxy (e.g. 4 AIX bonds → LQD.US),
+        # so raw len(risky_tickers) + len(factor_tickers) overcounts.
+        resolved_unique = list(dict.fromkeys(
+            manager.engine.resolve_tickers(risky_tickers) + list(manager.engine.factor_tickers.values())
+        ))
+        total_count = len(resolved_unique)
 
         if loaded_count == 0:
             await bot.send_message(
@@ -1088,6 +1094,38 @@ async def _run_analysis_background(
             raise
 
         await step("✅", "MAC3 факторная модель, SEC EDGAR и риск-декомпозиция посчитаны.")
+
+        # ── MAC3 Risk Summary notification ─────────────────────────────────
+        port_metrics = results.get("portfolio_metrics", {})
+        if port_metrics:
+            vol = port_metrics.get("Total_Volatility_Ann", 0)
+            sharpe = port_metrics.get("Sharpe_Ratio", float("nan"))
+            cvar = port_metrics.get("CVaR_95_Daily", 0)
+            var95 = port_metrics.get("VaR_95_Daily", 0)
+            sortino = port_metrics.get("Sortino_Ratio", float("nan"))
+            pos_days = port_metrics.get("Positive_Days_Pct", 0)
+
+            import math
+            sharpe_str = f"{sharpe:.2f}" if not math.isnan(sharpe) else "—"
+            sortino_str = f"{sortino:.2f}" if not math.isnan(sortino) else "—"
+
+            risk_lines = [
+                "📊 *MAC3 Risk Summary:*",
+                f"  Volatility: *{vol*100:.1f}%* годовых",
+                f"  Sharpe Ratio: *{sharpe_str}*",
+                f"  Sortino Ratio: *{sortino_str}*",
+                f"  CVaR (95%): *{cvar*100:.2f}%*",
+                f"  VaR (95%): *{var95*100:.2f}%*",
+                f"  Positive Days: *{pos_days:.0f}%*",
+            ]
+            try:
+                await bot.send_message(
+                    chat_id,
+                    "\n".join(risk_lines),
+                    parse_mode=ParseMode.MARKDOWN,
+                )
+            except Exception:
+                pass  # Don't block on send failure
 
         # ── Step 3: gatekeeper (advisory only, non-blocking) ──────────────
         await step("📊", "*Шаг 3/4:* Проверяю риск-лимиты…")

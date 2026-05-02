@@ -1,5 +1,5 @@
 """
-SEC EDGAR Data Provider — Lightweight fundamental scan.
+SEC EDGAR Data Provider — Lightweight fundamental scan via CompanyFacts JSON API.
 
 Fetches ONLY 4 critical metrics from the latest 10-K filing:
   1. Operating Margin   — profitability
@@ -7,13 +7,14 @@ Fetches ONLY 4 critical metrics from the latest 10-K filing:
   3. ROE                — capital efficiency
   4. Revenue Growth YoY — momentum
 
-API: data.sec.gov — free, no key, limit 10 req/sec.
-Library: edgartools v5.30+
+API: data.sec.gov/api/xbrl/companyfacts — free, no key, limit 10 req/sec.
+Transport: raw HTTP GET (requests) — returns structured JSON, no HTML parsing.
 
 Performance notes (2026-05):
-  • Previous version downloaded 2 full 10-K XBRL filings per ticker → ~6 min each.
-  • This version fetches only the latest 10-K + previous revenue for YoY → ~40 sec each.
-  • Parallel batch (3 workers) + LRU cache → first run ~3 min for 7 tickers,
+  • Previous edgartools version downloaded full 10-K XBRL/HTML files (~30 MB each)
+    and parsed them with lxml → ~10 min per ticker on CPU-throttled Cloud Run.
+  • This version fetches a single JSON endpoint per ticker (~200 KB) → ~1 sec each.
+  • Parallel batch (3 workers) + LRU cache → first run ~10 sec for 7 tickers,
     subsequent runs instant.
 """
 import functools
@@ -23,17 +24,126 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import numpy as np
 import pandas as pd
+import requests
 
 logger = logging.getLogger("SEC_EDGAR")
 
-# ── Lazy import edgartools ───────────────────────────────────────────────────
-_edgar_available = False
-try:
-    from edgar import set_identity, Company
-    set_identity("RAMP Advisory ramp-advisory@project.com")
-    _edgar_available = True
-except Exception as _edgar_exc:
-    logger.warning("edgartools недоступен: %s", _edgar_exc)
+# ── SEC EDGAR HTTP config ────────────────────────────────────────────────────
+_SEC_HEADERS = {"User-Agent": "RAMP Advisory ramp-advisory@project.com"}
+_SEC_TIMEOUT = 15  # seconds per request
+
+
+# ── Ticker → CIK lookup (cached for process lifetime) ───────────────────────
+@functools.lru_cache(maxsize=1)
+def _load_cik_lookup() -> dict[str, str]:
+    """
+    Download the SEC ticker→CIK mapping.  ~500 KB JSON, cached in-process.
+    Returns dict: {"AAPL": "0000320193", "MSFT": "0000789019", ...}
+    """
+    try:
+        r = requests.get(
+            "https://www.sec.gov/files/company_tickers.json",
+            headers=_SEC_HEADERS,
+            timeout=_SEC_TIMEOUT,
+        )
+        r.raise_for_status()
+        data = r.json()
+        return {
+            str(v["ticker"]).upper(): str(v["cik_str"]).zfill(10)
+            for v in data.values()
+        }
+    except Exception as exc:
+        logger.warning("[SEC EDGAR] Не удалось загрузить CIK-маппинг: %s", exc)
+        return {}
+
+
+def _ticker_to_cik(ticker: str) -> str | None:
+    """Resolve a ticker symbol to a zero-padded 10-digit CIK string."""
+    base = ticker.split(".")[0].upper() if "." in ticker else ticker.upper()
+    lookup = _load_cik_lookup()
+    return lookup.get(base)
+
+
+# ── XBRL fact extraction helpers ─────────────────────────────────────────────
+
+# Ordered preference lists for each metric — companies use different XBRL tags.
+_REVENUE_TAGS = [
+    "RevenueFromContractWithCustomerExcludingAssessedTax",
+    "Revenues",
+    "SalesRevenueNet",
+    "RevenueFromContractWithCustomerIncludingAssessedTax",
+]
+_OP_INCOME_TAGS = [
+    "OperatingIncomeLoss",
+    "IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest",
+]
+_NET_INCOME_TAGS = ["NetIncomeLoss"]
+_ASSETS_TAGS = ["Assets"]
+_LIABILITIES_TAGS = ["Liabilities"]
+_EQUITY_TAGS = [
+    "StockholdersEquity",
+    "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest",
+]
+
+
+def _get_annual_values(
+    us_gaap: dict, tags: list[str], n: int = 2
+) -> list[float | None]:
+    """
+    Extract the last *n* annual (10-K, FY) values for the tag with the most
+    recent data among *tags*.
+
+    Returns a list of length *n* (most recent first).  Missing entries are None.
+
+    Deduplication by period end-date (``end`` field) — a single 10-K filing may
+    restate multiple prior years; we want unique fiscal periods sorted by recency.
+
+    Tag selection: instead of returning the first matching tag, we evaluate ALL
+    candidate tags and pick the one whose most recent ``end`` date is latest.
+    This handles companies like NVDA that migrated from one XBRL tag to another.
+    """
+    best_result: list[float] | None = None
+    best_end: str = ""
+
+    for tag in tags:
+        concept = us_gaap.get(tag)
+        if not concept:
+            continue
+        units = concept.get("units", {}).get("USD", [])
+        if not units:
+            continue
+        # Filter to annual 10-K filings only
+        annual = [
+            e for e in units
+            if e.get("form") == "10-K" and e.get("fp") == "FY"
+        ]
+        if not annual:
+            continue
+        # Sort by period end date descending → most recent fiscal period first.
+        annual.sort(key=lambda e: e.get("end", ""), reverse=True)
+        # De-duplicate by period end date (same period may appear in multiple filings)
+        seen_end: set[str] = set()
+        deduped: list[dict] = []
+        for entry in annual:
+            end_date = entry.get("end", "")
+            if end_date not in seen_end:
+                seen_end.add(end_date)
+                deduped.append(entry)
+            if len(deduped) >= n:
+                break
+        if not deduped:
+            continue
+        # Pick the tag with the most recent period
+        tag_latest_end = deduped[0].get("end", "")
+        if tag_latest_end > best_end:
+            best_end = tag_latest_end
+            best_result = [float(e["val"]) for e in deduped]
+
+    if best_result is not None:
+        while len(best_result) < n:
+            best_result.append(None)
+        return best_result
+    return [None] * n
 
 
 # ── Tickers to skip (no 10-K on SEC) ────────────────────────────────────────
@@ -60,75 +170,97 @@ def _should_skip(ticker: str) -> bool:
 
 
 # ═══════════════════════════════════════════════════════════
-# 1. LIGHTWEIGHT FUNDAMENTAL SCAN (10-K only)
+# 1. LIGHTWEIGHT FUNDAMENTAL SCAN (CompanyFacts JSON API)
 # ═══════════════════════════════════════════════════════════
 
 @functools.lru_cache(maxsize=128)
 def get_critical_fundamentals(ticker: str) -> dict:
     """
-    Fetch ONLY the 4 critical metrics from the latest 10-K filing.
+    Fetch ONLY the 4 critical metrics from the SEC CompanyFacts JSON API.
+
+    Uses data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json — a single HTTP GET
+    that returns all XBRL facts as structured JSON (~200 KB).  No HTML parsing.
 
     Returns dict with keys:
         operating_margin, debt_to_assets, roe, revenue_growth_yoy,
         filing_date, revenue, net_income
     """
-    if not _edgar_available or _should_skip(ticker):
+    if _should_skip(ticker):
+        return {}
+
+    cik = _ticker_to_cik(ticker)
+    if not cik:
+        logger.debug("[SEC EDGAR] CIK не найден для %s", ticker)
         return {}
 
     try:
-        company = Company(ticker)
-        filings = company.get_filings(form="10-K")
-        if not filings or len(filings) == 0:
-            return {}
-
-        tenk = filings[0].obj()
-        fin = tenk.financials
-
-        def _safe(fn, default=0):
-            try:
-                v = fn()
-                return float(v) if v is not None else default
-            except Exception:
-                return default
-
-        revenue = _safe(lambda: fin.get_revenue())
-        net_income = _safe(lambda: fin.get_net_income())
-        op_income = _safe(lambda: fin.get_operating_income())
-        total_assets = _safe(lambda: fin.get_total_assets())
-        total_liabilities = _safe(lambda: fin.get_total_liabilities())
-        equity = _safe(lambda: fin.get_stockholders_equity())
-
-        facts = {
-            "revenue": revenue,
-            "net_income": net_income,
-            "filing_date": str(filings[0].filing_date),
-        }
-
-        # Critical metrics
-        if revenue > 0:
-            facts["operating_margin"] = op_income / revenue
-        if total_assets > 0:
-            facts["debt_to_assets"] = total_liabilities / total_assets
-        if equity > 0:
-            facts["roe"] = net_income / equity
-
-        # YoY revenue growth (requires previous filing — lightweight extraction)
-        if len(filings) > 1:
-            try:
-                prev_fin = filings[1].obj().financials
-                rev_prev = _safe(lambda: prev_fin.get_revenue())
-                if rev_prev > 0:
-                    facts["revenue_growth_yoy"] = (revenue - rev_prev) / rev_prev
-            except Exception:
-                pass  # Skip YoY if prev filing is corrupted
-
-        time.sleep(0.2)  # SEC rate limit safety (10 req/s)
-        return facts
-
+        url = f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json"
+        r = requests.get(url, headers=_SEC_HEADERS, timeout=_SEC_TIMEOUT)
+        r.raise_for_status()
+        facts = r.json()
     except Exception as exc:
-        logger.warning("[SEC EDGAR] Ошибка для %s: %s", ticker, exc)
-        time.sleep(0.2)
+        logger.warning("[SEC EDGAR] Ошибка загрузки CompanyFacts для %s: %s", ticker, exc)
+        time.sleep(0.15)
         return {}
+
+    us_gaap = facts.get("facts", {}).get("us-gaap", {})
+    if not us_gaap:
+        logger.debug("[SEC EDGAR] Нет us-gaap данных для %s", ticker)
+        return {}
+
+    # Extract latest + previous annual values
+    revenues = _get_annual_values(us_gaap, _REVENUE_TAGS, n=2)
+    net_incomes = _get_annual_values(us_gaap, _NET_INCOME_TAGS, n=1)
+    op_incomes = _get_annual_values(us_gaap, _OP_INCOME_TAGS, n=1)
+    total_assets = _get_annual_values(us_gaap, _ASSETS_TAGS, n=1)
+    total_liabs = _get_annual_values(us_gaap, _LIABILITIES_TAGS, n=1)
+    equities = _get_annual_values(us_gaap, _EQUITY_TAGS, n=1)
+
+    revenue = revenues[0] or 0
+    rev_prev = revenues[1]
+    net_income = net_incomes[0] or 0
+    op_income = op_incomes[0] or 0
+    assets = total_assets[0] or 0
+    liabilities = total_liabs[0] or 0
+    equity = equities[0] or 0
+
+    # Determine filing date from the tag with the most recent annual period
+    filing_date = None
+    best_end = ""
+    for tag in _REVENUE_TAGS:
+        concept = us_gaap.get(tag)
+        if not concept:
+            continue
+        units = concept.get("units", {}).get("USD", [])
+        annual = [e for e in units if e.get("form") == "10-K" and e.get("fp") == "FY"]
+        if annual:
+            annual.sort(key=lambda e: e.get("end", ""), reverse=True)
+            tag_end = annual[0].get("end", "")
+            if tag_end > best_end:
+                best_end = tag_end
+                filing_date = annual[0].get("filed")
+
+    result: dict = {
+        "revenue": revenue,
+        "net_income": net_income,
+        "filing_date": filing_date,
+    }
+
+    # Critical metrics
+    if revenue > 0:
+        result["operating_margin"] = op_income / revenue
+    if assets > 0:
+        result["debt_to_assets"] = liabilities / assets
+    if equity > 0 and equity != 0:
+        result["roe"] = net_income / equity
+
+    # YoY revenue growth
+    if rev_prev and rev_prev > 0:
+        result["revenue_growth_yoy"] = (revenue - rev_prev) / rev_prev
+
+    # Rate-limit safety (SEC allows 10 req/s, we use 3 workers → ~3 req/s)
+    time.sleep(0.15)
+    return result
 
 
 # ═══════════════════════════════════════════════════════════
@@ -219,7 +351,7 @@ def calculate_fundamental_score(ticker: str) -> dict:
 
 def batch_fundamental_scan(tickers: list) -> pd.DataFrame:
     """
-    Parallel batch scan of tickers via SEC EDGAR.
+    Parallel batch scan of tickers via SEC EDGAR CompanyFacts API.
 
     Filters out non-US tickers, ETFs, and AIX instruments.
     Uses ThreadPoolExecutor(3) to stay under SEC 10 req/s limit.

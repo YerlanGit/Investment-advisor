@@ -8,16 +8,11 @@ aiosqlite>=0.20.0
 # ── Finance / MAC3 Risk Engine ───────────────────────────────────────────────
 # Цены и история: Tradernet (Freedom Broker) API — см. freedom_portfolio.history.
 # yfinance удалён 2026-04 (нестабилен из Cloud Run, не покрывает AIX/KZ).
-# Фундаменталка: SEC EDGAR через edgartools (10-K/10-Q филинги).
+# Фундаменталка: SEC EDGAR CompanyFacts JSON API (data.sec.gov, без edgartools).
 pandas>=2.1.0
 numpy>=1.26.0
 scikit-learn>=1.4.0
 requests>=2.31.0
-edgartools>=3.0.0
-# edgartools depends on pytz (timezone handling for SEC filing dates) but
-# doesn't always pull it transitively in slim images.  Pin explicitly.
-pytz>=2024.1
-pyrate-limiter>=2.10.0,<3.0.0
 
 # ── Freedom Broker (Tradernet) connector ─────────────────────────────────────
 pydantic>=2.0

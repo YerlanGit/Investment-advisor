@@ -56,6 +56,7 @@ steps:
       - --cpu=1
       - --timeout=3600           # max request timeout (health probe)
       - --concurrency=1
+      - --no-cpu-throttling        # CRITICAL: bot uses long-polling, not incoming HTTP
       - --no-allow-unauthenticated
       # Secrets injected from Secret Manager — values never touch image layers
       - --set-secrets=RAMP_BOT_TOKEN=RAMP_BOT_TOKEN:latest,FINTECH_MASTER_KEY=FINTECH_MASTER_KEY:latest,ANTHROPIC_API_KEY=ANTHROPIC_API_KEY:latest,FREEDOM_API_KEY=FREEDOM_API_KEY:latest,FREEDOM_API_SECRET=FREEDOM_API_SECRET:latest
