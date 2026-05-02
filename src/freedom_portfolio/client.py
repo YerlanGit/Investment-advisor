@@ -24,10 +24,13 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from typing import Any
 from urllib.parse import quote
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from freedom_portfolio.auth import build_request, build_v2_request
 from freedom_portfolio.models import Portfolio
@@ -40,6 +43,19 @@ logger = logging.getLogger(__name__)
 BASE_URL_LIVE = "https://tradernet.com/api/"
 BASE_URL_DEMO = "https://tradernet.com/api/"
 DEFAULT_TIMEOUT = 30
+
+# Browser-like User-Agent to prevent Cloudflare WAF from blocking server-side
+# requests.  Google Cloud Run IP ranges (35.x / 34.x) are flagged by default
+# when the User-Agent is "python-requests/...".
+_DEFAULT_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/126.0.0.0 Safari/537.36"
+    ),
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "en-US,en;q=0.9",
+}
 
 # KZ-registered accounts may have keys that only authenticate on one of these
 # Kazakhstan-specific deployments.  Both use the same /api/ + q= protocol.
@@ -54,6 +70,10 @@ _FALLBACK_KZ_URLS: tuple[str, ...] = (
 
 class BrokerAPIError(RuntimeError):
     """Generic Tradernet API failure (non-zero ``code`` or ``errMsg`` set)."""
+
+
+class CloudflareBlockError(BrokerAPIError):
+    """Cloudflare WAF blocked the request (HTTP 403 + HTML challenge page)."""
 
 
 class AuthenticationError(BrokerAPIError):
@@ -122,7 +142,24 @@ class TradernetClient:
         self.secret_key = secret_key.strip()
         self.base_url   = (base_url or self.BASE_URL).rstrip("/") + "/"
         self.timeout    = timeout
-        self._session   = session or requests.Session()
+        self._session   = session or self._make_session()
+
+    @staticmethod
+    def _make_session() -> requests.Session:
+        """Create a Session with browser-like headers and retry adapter."""
+        s = requests.Session()
+        s.headers.update(_DEFAULT_HEADERS)
+        # Retry on 429/500/502/503 — but NOT 403 (handled explicitly).
+        retry = Retry(
+            total=3,
+            backoff_factor=1,
+            status_forcelist=[429, 500, 502, 503],
+            allowed_methods=["POST", "GET"],
+        )
+        adapter = HTTPAdapter(max_retries=retry)
+        s.mount("https://", adapter)
+        s.mount("http://", adapter)
+        return s
 
     # ── Public commands ──────────────────────────────────────────────────────
 
@@ -153,7 +190,7 @@ class TradernetClient:
         if self.secret_key:
             for cmd in ("getPositionJson", "getPortfolio"):
                 try:
-                    raw = self._post_v2_signed(cmd, {})
+                    raw = self._with_cf_retry(self._post_v2_signed, cmd, {})
                     return self._parse_portfolio(raw)
                 except (InvalidSignatureError, AuthenticationError) as exc:
                     logger.warning(
@@ -174,7 +211,7 @@ class TradernetClient:
         if self.secret_key:
             for cmd in ("getPositionJson", "getPortfolio"):
                 try:
-                    raw = self._post_signed(cmd, {})
+                    raw = self._with_cf_retry(self._post_signed, cmd, {})
                     return self._parse_portfolio(raw)
                 except (InvalidSignatureError, AuthenticationError) as exc:
                     logger.warning(
@@ -191,7 +228,7 @@ class TradernetClient:
         _primary_rejected = False
         for cmd in ("getPositionJson", "getPortfolio"):
             try:
-                raw = self._post_unsigned(cmd, {})
+                raw = self._with_cf_retry(self._post_unsigned, cmd, {})
                 return self._parse_portfolio(raw)
             except (InvalidSignatureError, AuthenticationError) as exc:
                 logger.warning(
@@ -224,7 +261,7 @@ class TradernetClient:
                             timeout=self.timeout,
                             session=self._session,
                         )
-                        raw = fb_client._post_unsigned(cmd, {})
+                        raw = fb_client._with_cf_retry(fb_client._post_unsigned, cmd, {})
                         logger.info("'%s' succeeded on KZ fallback %s.", cmd, fallback_url)
                         return self._parse_portfolio(raw)
                     except (InvalidSignatureError, AuthenticationError) as exc:
@@ -247,6 +284,31 @@ class TradernetClient:
         return self._call("getAuthInfo", {})
 
     # ── Internals ────────────────────────────────────────────────────────────
+
+    _CF_MAX_RETRIES = 3
+    _CF_BACKOFF_BASE = 2  # seconds
+
+    def _with_cf_retry(self, fn, *args, **kwargs) -> dict:
+        """
+        Execute ``fn(*args, **kwargs)`` with Cloudflare-specific retry.
+
+        If the first attempt hits a CloudflareBlockError, wait 2^attempt seconds
+        and retry up to ``_CF_MAX_RETRIES`` times.  Non-Cloudflare exceptions
+        propagate immediately.
+        """
+        for attempt in range(1, self._CF_MAX_RETRIES + 1):
+            try:
+                return fn(*args, **kwargs)
+            except CloudflareBlockError:
+                if attempt == self._CF_MAX_RETRIES:
+                    raise
+                wait = self._CF_BACKOFF_BASE ** attempt
+                logger.info(
+                    "Cloudflare retry %d/%d — ожидание %ds…",
+                    attempt, self._CF_MAX_RETRIES, wait,
+                )
+                time.sleep(wait)
+        raise RuntimeError("Unreachable")  # pragma: no cover
 
     def _call(self, cmd: str, params: dict) -> dict:
         """Dispatch ``cmd`` via signed or unsigned transport, return parsed JSON."""
@@ -416,7 +478,32 @@ class TradernetClient:
         return "&".join(parts)
 
     @staticmethod
+    def _is_cloudflare_block(resp: requests.Response) -> bool:
+        """Detect Cloudflare WAF challenge page (HTML with IE conditionals)."""
+        if resp.status_code != 403:
+            return False
+        ct = resp.headers.get("content-type", "")
+        body = resp.text[:500]
+        return (
+            "text/html" in ct
+            or "<!DOCTYPE" in body
+            or "no-js" in body
+            or "cloudflare" in body.lower()
+        )
+
+    @staticmethod
     def _decode(resp: requests.Response) -> dict:
+        # Cloudflare detection — raise a distinct exception so callers can retry.
+        if TradernetClient._is_cloudflare_block(resp):
+            logger.warning(
+                "Cloudflare WAF заблокировал запрос к %s (HTTP 403, HTML challenge). "
+                "Вероятно, IP-адрес Cloud Run попал в фильтр.",
+                resp.url,
+            )
+            raise CloudflareBlockError(
+                f"Cloudflare WAF blocked request to {resp.url} — "
+                f"server returned HTML challenge page instead of API response."
+            )
         try:
             resp.raise_for_status()
         except requests.HTTPError as exc:

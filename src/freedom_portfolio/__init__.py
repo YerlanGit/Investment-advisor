@@ -13,6 +13,7 @@ from freedom_portfolio.auth import build_request, build_signature
 from freedom_portfolio.client import (
     AuthenticationError,
     BrokerAPIError,
+    CloudflareBlockError,
     EmptyPortfolioError,
     InvalidSignatureError,
     TradernetClient,
@@ -25,6 +26,7 @@ __all__ = [
     "AuthenticationError",
     "BrokerAPIError",
     "Candle",
+    "CloudflareBlockError",
     "EmptyPortfolioError",
     "InvalidSignatureError",
     "Portfolio",

@@ -28,6 +28,7 @@ import pandas as pd
 from freedom_portfolio.client import (
     AuthenticationError,
     BrokerAPIError,
+    CloudflareBlockError,
     EmptyPortfolioError,
     InvalidSignatureError,
     TradernetClient,
@@ -220,6 +221,14 @@ class FreedomConnector:
         except (InvalidSignatureError, AuthenticationError) as exc:
             # Re-raise as the legacy alias the bot already catches.
             raise BrokerAuthError(str(exc)) from exc
+        except CloudflareBlockError as exc:
+            logger.error(
+                "Cloudflare WAF заблокировал все запросы к Tradernet API. "
+                "IP-адрес Cloud Run отклонён. %s — returning fallback mock.", exc,
+            )
+            df = self._mock_portfolio()
+            df.attrs["_ramp_is_fallback"] = True
+            return df
         except BrokerAPIError as exc:
             logger.error("Tradernet API failure: %s — returning fallback mock.", exc)
             df = self._mock_portfolio()

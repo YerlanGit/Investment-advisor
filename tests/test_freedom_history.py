@@ -186,6 +186,8 @@ def test_detect_and_adjust_splits_idempotent_on_smooth_series():
 
 def _mock_tradernet_client(response: dict) -> MagicMock:
     """Mock TradernetClient with attributes needed by the KZ fallback logic."""
+    from freedom_portfolio.client import TradernetClient
+
     client = MagicMock()
     client._post_v2_signed = MagicMock(return_value=response)
     client.base_url = "https://tradernet.com/api/"
@@ -193,6 +195,10 @@ def _mock_tradernet_client(response: dict) -> MagicMock:
     client.secret_key = "test_secret"
     client.timeout = 30
     client._session = MagicMock()
+    # Bind the real _with_cf_retry so the Cloudflare retry wrapper works.
+    client._with_cf_retry = lambda fn, *a, **kw: TradernetClient._with_cf_retry(client, fn, *a, **kw)
+    client._CF_MAX_RETRIES = TradernetClient._CF_MAX_RETRIES
+    client._CF_BACKOFF_BASE = TradernetClient._CF_BACKOFF_BASE
     return client
 
 

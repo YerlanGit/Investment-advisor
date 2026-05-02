@@ -250,7 +250,7 @@ def _fetch_hloc(client, ticker: str, *, days: int, timeframe: str) -> list[Candl
 
     # ── Phase 1: getHloc on client's primary domain (v2 signed) ──────────
     try:
-        raw = client._post_v2_signed("getHloc", params)
+        raw = client._with_cf_retry(client._post_v2_signed, "getHloc", params)
         candles = _parse_hloc_response(raw, ticker)
         if candles:
             logger.info("getHloc OK для %s на %s (%d свечей)", ticker, client.base_url, len(candles))
@@ -278,7 +278,7 @@ def _fetch_hloc(client, ticker: str, *, days: int, timeframe: str) -> list[Candl
                 timeout=client.timeout,
                 session=client._session,
             )
-            raw = fb_client._post_v2_signed("getHloc", params)
+            raw = fb_client._with_cf_retry(fb_client._post_v2_signed, "getHloc", params)
             candles = _parse_hloc_response(raw, ticker)
             if candles:
                 logger.info("getHloc OK для %s через KZ fallback %s (%d свечей)",
@@ -303,7 +303,7 @@ def _fetch_hloc(client, ticker: str, *, days: int, timeframe: str) -> list[Candl
             "from":     start.strftime("%Y-%m-%d"),
             "to":       today.strftime("%Y-%m-%d"),
         }
-        raw = client._post_v2_signed("getQuotesHistory", legacy_params)
+        raw = client._with_cf_retry(client._post_v2_signed, "getQuotesHistory", legacy_params)
         candles = _parse_hloc_response(raw, ticker)
         if candles:
             return candles
