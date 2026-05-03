@@ -61,7 +61,7 @@ class MAC3RiskEngine:
         # Любой ISIN-тикер с .AIX суффиксом (пример: FFSPC6.1028.AIX).
         # Если префикс другой — fallback к консервативному T-Bill.
         'AIX_DEFAULT':       'BIL.US',
-        # KZ корпоративные бонды без yfinance-маппинга.
+        # KZ корпоративные бонды без прямого Tradernet-маппинга.
         'KZ_CORPORATE_BOND': 'LQD.US',
         # Развивающиеся рынки — KAP.IL/HSBK.IL/KSPI.KZ если основная серия слишком короткая.
         'EM_EQUITY_FALLBACK': 'EEM.US',
@@ -85,12 +85,17 @@ class MAC3RiskEngine:
     }
 
     # Ticker-to-sector classification for automatic sector detection.
+    # KZ/KASE tickers are classified as EM_Kazakhstan — they are benchmarked
+    # against the MSCI EM index (EEM.US), not the S&P 500.
     TICKER_SECTOR = {
+        # US Technology
         'AAPL':  'Technology',
         'MSFT':  'Technology',
         'GOOGL': 'Technology',
         'META':  'Technology',
         'AMZN':  'Technology',
+        'ORCL':  'Technology',
+        # US Semiconductors
         'NVDA':  'Semiconductors',
         'AVGO':  'Semiconductors',
         'AMD':   'Semiconductors',
@@ -98,44 +103,60 @@ class MAC3RiskEngine:
         'QBTS':  'Semiconductors',
         'SOXX':  'Semiconductors',
         'TSM':   'Semiconductors',
+        # US Finance
         'JPM':   'Finance',
         'GS':    'Finance',
         'BAC':   'Finance',
-        'KSPI':  'Finance',
-        'HSBK':  'Finance',
+        # US Energy
         'XOM':   'Energy',
         'CVX':   'Energy',
         'COP':   'Energy',
+        # US Healthcare
         'JNJ':   'Healthcare',
         'UNH':   'Healthcare',
         'PFE':   'Healthcare',
+        # Commodities / Precious Metals
         'GLD':   'Gold',
         'SLV':   'Silver',
         'GDX':   'Gold',
         'USO':   'Oil',
-        'ORCL':  'Technology',
+        # Kazakhstan / KASE / AIX — EM_Kazakhstan (benchmarked vs MSCI EM)
+        'KSPI':  'EM_Kazakhstan',
+        'HSBK':  'EM_Kazakhstan',
+        'KAP':   'EM_Kazakhstan',
+        'KZTK':  'EM_Kazakhstan',
+        'KCEL':  'EM_Kazakhstan',
+        'BAST':  'EM_Kazakhstan',
+        'HRGL':  'EM_Kazakhstan',
+        'KZAP':  'EM_Kazakhstan',
     }
+
+    # Benchmark-only ETFs that must be fetched alongside factor ETFs but are
+    # NOT used as regression factors.  Needed for benchmark_comparison in analyze_all.
+    BENCHMARK_EXTRA = ['QQQ.US', 'AGG.US']
 
     def __init__(self, trading_days=252, ewma_halflife=63):
         self.trading_days = trading_days
         self.ewma_halflife = ewma_halflife  # 63 дней ≈ λ=0.94 (RiskMetrics)
         # Факторные прокси (формат Tradernet — все .US ETF).
-        # Замены относительно legacy yfinance-формата:
-        #   ^GSPC → SPY.US   (тот же фактор-сигнал, более ликвидный, есть на Tradernet)
-        #   ^TNX  → IEF.US   (ETF на 7-10y Treasury — движется обратно к доходности,
-        #                     знак коэффициента в Ridge инвертируется автоматически)
+        # EM_Equity (EEM.US) и EM_Bond (EMB.US) добавлены для корректного
+        # моделирования казахстанских и EM-активов (.KZ/.IL тикеры).
         self.factor_tickers = {
-            'Market':      'SPY.US',
+            'Market':      'SPY.US',    # S&P 500 — глобальный рыночный фактор
             'Momentum':    'MTUM.US',
             'Value':       'VLUE.US',
             'Quality':     'QUAL.US',
             'Size':        'IWM.US',
             'Commodities': 'DBC.US',
-            'Rates':       'IEF.US',
+            'Rates':       'IEF.US',    # 7-10y Treasury — фактор процентных ставок
+            'EM_Equity':   'EEM.US',    # MSCI Emerging Markets — EM equity premium
+            'EM_Bond':     'EMB.US',    # JP Morgan EM Bond ETF — EM credit/FX premium
         }
-        self.current_rfr_annual = 0.04  # Хардкод на случай падения API
-        # Кешируемый клиент Tradernet — переиспользуется между запусками одного
-        # запроса (внутри analyze_all). Keys читаются из env (Cloud Run secret).
+        # Безрисковая ставка: для казахстанских инвесторов ставка НБК актуальнее
+        # 4% US T-bill. Задаётся через env KZ_RFR_ANNUAL (default 14%).
+        self.current_rfr_annual = float(os.getenv("KZ_RFR_ANNUAL", "0.14"))
+        # Кешируемый клиент Tradernet — переиспользуется между запросами одного
+        # вызова (внутри analyze_all). Keys читаются из env (Cloud Run secret).
         self._tradernet_client: TradernetClient | None = None
 
     def math_firewall(self, df):
@@ -192,8 +213,8 @@ class MAC3RiskEngine:
                 resolved.append(self.TICKER_MAP[t_str])
                 continue
 
-            # 5. Крипто (Tradernet их не торгует — оставляем yfinance-формат
-            #    как маркер; код-выше пропустит NaN-колонку без падения)
+            # 5. Крипто (Tradernet их не торгует напрямую — оставляем *-USD формат
+            #    как маркер; отсутствующие колонки пропускаются без падения)
             if t_str in ('BTC', 'ETH', 'SOL', 'BNB'):
                 resolved.append(f"{t_str}-USD")
                 continue
@@ -215,7 +236,9 @@ class MAC3RiskEngine:
         loaded/failed/retried ticker details for user-facing messages.
         """
         valid_tickers = self.resolve_tickers(tickers)
-        all_req = list(dict.fromkeys(valid_tickers + list(self.factor_tickers.values())))
+        all_req = list(dict.fromkeys(
+            valid_tickers + list(self.factor_tickers.values()) + self.BENCHMARK_EXTRA
+        ))
 
         logger.info("Загрузка цен через Tradernet для %d инструментов: %s",
                     len(all_req), ", ".join(all_req))
@@ -230,9 +253,20 @@ class MAC3RiskEngine:
         return self.math_firewall(history_result.data), history_result
 
     def get_ticker_sector(self, ticker: str) -> str:
-        """Возвращает сектор для тикера (или 'Other')."""
+        """Возвращает сектор для тикера (или 'Other').
+
+        KZ-тикеры с суффиксами .KZ или .IL автоматически классифицируются как
+        EM_Kazakhstan, если они не найдены в TICKER_SECTOR по базовому имени.
+        """
         base = ticker.split('.')[0].upper() if '.' in ticker else ticker.upper()
-        return self.TICKER_SECTOR.get(base, 'Other')
+        suffix = ticker.upper().rsplit('.', 1)[-1] if '.' in ticker else ''
+        sector = self.TICKER_SECTOR.get(base)
+        if sector:
+            return sector
+        # KZ/IL exchange suffix → treat as EM Kazakhstan
+        if suffix in ('KZ', 'IL') or ticker.upper().endswith('.AIX'):
+            return 'EM_Kazakhstan'
+        return 'Other'
 
     def get_sector_exposure(self, tickers: list, weights: dict) -> dict:
         """
@@ -256,8 +290,8 @@ class MAC3RiskEngine:
         resolved_assets = self.resolve_tickers(asset_tickers)
 
         # Restrict to columns we actually need and drop all-NaN columns BEFORE
-        # the row-level dropna. Without this, a single broker-only ticker that
-        # yfinance can't price (e.g. FFSPC6.1028.AIX on Astana exchange) leaves
+        # the row-level dropna. Without this, a single broker-only ticker with
+        # no Tradernet history (e.g. FFSPC6.1028.AIX on Astana exchange) leaves
         # an all-NaN column whose NaNs propagate through the row-level dropna
         # and erase every row — Ridge then gets shape (0, K) and raises.
         needed_cols = [*self.factor_tickers.values(), *resolved_assets]
@@ -430,8 +464,8 @@ class UniversalPortfolioManager:
 
     def analyze_all(self, source, scenario_shocks=None, profile_benchmark: str | None = None):
         """
-        profile_benchmark: yfinance ticker for the user's mandate benchmark
-        (e.g. 'AGG' for Conservative, '^GSPC' for Moderate, '^NDX' for Aggressive).
+        profile_benchmark: Tradernet ETF ticker for the user's mandate benchmark
+        (e.g. 'AGG.US' for Conservative, 'SPY.US' for Moderate, 'QQQ.US' for Aggressive).
         When provided it is computed first and labelled 'Профильный бенчмарк' in results.
         """
         if isinstance(source, pd.DataFrame): raw_df = source
@@ -449,7 +483,7 @@ class UniversalPortfolioManager:
             logger.error(
                 "MAC3 ENGINE GATE ▸ FALLBACK mock portfolio detected "
                 "(broker API returned no live data). "
-                "Halting immediately — skipping yfinance fetch and all MAC3 calculations."
+                "Halting immediately — skipping market data fetch and all MAC3 calculations."
             )
             raise RealPortfolioRequired(
                 "Не удалось получить данные портфеля от Freedom Broker. "
@@ -473,7 +507,7 @@ class UniversalPortfolioManager:
         df = self._standardize_columns(raw_df).set_index('Ticker')
 
         # Extract broker-provided current prices before any further processing.
-        # Used as fallback for instruments with no yfinance data
+        # Used as fallback for instruments with no Tradernet history
         # (KZ bonds with ISIN tickers, cash balances from Freedom API "acc").
         broker_current_prices: dict = {}
         if "Broker_Current_Price" in df.columns:
@@ -485,13 +519,13 @@ class UniversalPortfolioManager:
 
         all_data, history_result = self.engine.get_market_data(risky_tickers)
         # Фундаментальные метрики берутся ТОЛЬКО из SEC EDGAR (см. ниже,
-        # batch_fundamental_scan). yfinance-источник (ROE/D-E/Forward_PE/MarketCap)
-        # удалён — SEC EDGAR покрывает то же и точнее (10-K/10-Q филинги).
+        # batch_fundamental_scan). SEC EDGAR покрывает ROE/Debt/Margins/Growth
+        # точнее и без зависимости от стороннего API (10-K/10-Q филинги).
 
         # Установка Current Price.
         # Приоритет:
         #   (1) NON_RISK_ASSETS (кэш) → 1.0
-        #   (2) yfinance или proxy-ETF (для облигаций через BOND_PROXIES)
+        #   (2) Tradernet или proxy-ETF (для облигаций через BOND_PROXIES)
         #   (3) Цена брокера (Freedom API mkt_price) — fallback для КЗ облигаций без данных
         #   (4) Purchase_Price — крайний fallback для облигаций с известным паттерном имени
         #
@@ -514,7 +548,7 @@ class UniversalPortfolioManager:
                 current_prices[orig] = broker_current_prices[orig]
                 broker_priced_only.add(orig)
                 logger.info(
-                    "Используется цена брокера для %s = %.4f (нет данных yfinance)",
+                    "Используется цена брокера для %s = %.4f (нет данных Tradernet)",
                     orig, broker_current_prices[orig],
                 )
             elif orig_str in self.engine.BOND_CLASSIFICATION_MAP or 'BOND' in orig_str or 'OVD' in orig_str:
@@ -538,7 +572,7 @@ class UniversalPortfolioManager:
         # MAC3 Structural Risk.
         # Исключены из факторной модели:
         #   • NON_RISK_ASSETS (кэш) — нулевая волатильность по определению
-        #   • broker_priced_only — КЗ облигации без ценовой истории в yfinance;
+        #   • broker_priced_only — КЗ облигации без ценовой истории в Tradernet;
         #     их веса в weights_dict корректно разбавляют риск акций.
         # Облигации, разрешённые в proxy-ETF (BIL/LQD/HYG), ОСТАЮТСЯ в actual_risky —
         # у них есть ценовая история и они корректно обрабатываются Rates-фактором.
@@ -570,23 +604,44 @@ class UniversalPortfolioManager:
             df['Residual_Vol_Ann'] = df['Residual_Vol_Ann'].fillna(0)
             df['Euler_Risk_Contribution_Pct'] = df['Euler_Risk_Contribution_Pct'].fillna(0)
 
-        # Ожидаемая доходность (ЕДИНАЯ ШКАЛА: log-returns)
-        # Берём только те фактор-столбцы, которые реально пришли из Tradernet
-        # — пропуски (например IEF.US недоступен) больше не валят расчёт.
-        present_factor_tickers = [
-            v for v in self.engine.factor_tickers.values() if v in all_data.columns
+        # Ожидаемая доходность: annualised CAPM-style return from factor betas.
+        #
+        # Correct approach: betas are from DAILY log-return regression, so
+        # expected return must be built from the SAME daily timescale and then
+        # annualised — NOT from the cumulative period log-return (which mixes
+        # timescales and produces nonsensical "expected" values).
+        #
+        # Algorithm:
+        #   1. Compute mean daily log-return for each factor ETF.
+        #   2. Annualise: E[r_f_ann] = mean_daily * trading_days.
+        #   3. Map ETF tickers → factor key names (Beta_Market ← Market ← SPY.US).
+        #   4. Expected return = Σ beta_k * E[r_k_ann]  (in simple return space).
+        #   5. Alpha = actual return (over holding period) - annualised expected.
+        present_factor_keys = [
+            k for k, v in self.engine.factor_tickers.items() if v in all_data.columns
         ]
-        f_data = all_data[present_factor_tickers] if present_factor_tickers else pd.DataFrame()
-        # Log-returns факторов за период (согласовано с calculate_structural_risk)
-        factor_returns_log = (
-            np.log(f_data.ffill().iloc[-1] / f_data.bfill().iloc[0])
-            if not f_data.empty else pd.Series(dtype=float)
-        )
+        present_factor_etfs = [self.engine.factor_tickers[k] for k in present_factor_keys]
+        f_data = all_data[present_factor_etfs] if present_factor_etfs else pd.DataFrame()
+
+        if not f_data.empty:
+            factor_daily_log = np.log(f_data / f_data.shift(1)).dropna()
+            factor_mean_daily = factor_daily_log.mean()       # index = ETF tickers
+            factor_ann = factor_mean_daily * self.engine.trading_days
+            # Map to factor key names for label-safe matching against Beta_* columns
+            factor_ann_by_key = pd.Series({
+                k: factor_ann.get(v, 0.0)
+                for k, v in zip(present_factor_keys, present_factor_etfs)
+            })
+        else:
+            factor_ann_by_key = pd.Series(dtype=float)
+
         beta_cols = [c for c in df.columns if str(c).startswith('Beta_')]
-        if beta_cols:
-            # Expected Return в log-шкале, конвертируем в simple для сравнения с Return_Pct
-            expected_log = df[beta_cols].fillna(0).values @ factor_returns_log.values
-            df['Expected_Return'] = np.exp(expected_log) - 1  # log → simple conversion
+        if beta_cols and not factor_ann_by_key.empty:
+            beta_factor_keys = [c[len('Beta_'):] for c in beta_cols]
+            factor_vec = factor_ann_by_key.reindex(beta_factor_keys).fillna(0.0).values
+            # Annualised expected return (simple, decimal)
+            df['Expected_Return'] = df[beta_cols].fillna(0).values @ factor_vec
+            # Alpha: actual holding-period return minus annualised expectation (in %)
             df['Alpha_Specific'] = (df['Return_Pct'] - df['Expected_Return']) * 100
 
         # ═══════════════ BENCHMARK COMPARISON ═══════════════
@@ -596,10 +651,13 @@ class UniversalPortfolioManager:
             benchmarks["Профильный бенчмарк"] = profile_benchmark
 
         # Бенчмарки в формате Tradernet (.US ETF-прокси для индексов).
+        # EEM.US и EMB.US уже запрошены как EM-факторы → данные гарантированно есть.
         benchmarks.update({
             'S&P 500':      'SPY.US',   # ETF-прокси на ^GSPC
             'Nasdaq 100':   'QQQ.US',   # ETF-прокси на ^NDX
             'Russell 2000': 'IWM.US',   # ETF-прокси на ^RUT
+            'MSCI EM':      'EEM.US',   # Emerging Markets equity index — EM/KASE сравнение
+            'EM Bonds':     'EMB.US',   # JP Morgan EM Bond index — для KZ bond holders
         })
         benchmark_results = {}
         

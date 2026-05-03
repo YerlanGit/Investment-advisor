@@ -43,6 +43,7 @@ from aiogram.types import (
 
 from db_tokenomics import (
     approve_mandate,
+    credit_tokens,
     deduct_tokens,
     get_balance,
     get_connection_mode,
@@ -948,6 +949,7 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
         chat_id   = callback.message.chat.id,
         user_id   = user_id,
         tier      = tier,
+        cost      = cost,
         df        = df,
         bench_tick= bench_tick,
     ))
@@ -960,6 +962,7 @@ async def _run_analysis_background(
     chat_id: int,
     user_id: int,
     tier: str,
+    cost: int,
     df,
     bench_tick: str | None,
 ) -> None:
@@ -968,6 +971,7 @@ async def _run_analysis_background(
 
     Каждый этап MAC3-pipeline публикует прогресс и ошибки сразу как они
     случаются — пользователь видит, что делается, и где именно сломалось.
+    На критических ошибках токены возвращаются автоматически.
     """
     from finance.investment_logic import UniversalPortfolioManager
 
@@ -983,6 +987,20 @@ async def _run_analysis_background(
         except Exception as e:
             logger.warning("Не удалось отправить прогресс: %s", e)
             return None
+
+    async def refund(reason: str) -> None:
+        """Вернуть списанные токены и сообщить пользователю."""
+        try:
+            await credit_tokens(user_id, cost, reason=f"refund_{reason}")
+            balance_after = await get_balance(user_id)
+            await bot.send_message(
+                chat_id,
+                f"↩️ *{cost} токен(а) возвращены* на ваш счёт.\n"
+                f"Текущий баланс: *{balance_after} токен(а)*.",
+                parse_mode=ParseMode.MARKDOWN,
+            )
+        except Exception as exc:
+            logger.error("Не удалось вернуть токены для %s: %s", user_id, exc)
 
     try:
         # ── Step 1: load market history ──────────────────────────────────
@@ -1012,6 +1030,7 @@ async def _run_analysis_background(
                 f"Причина: `{str(exc)[:200]}`",
                 parse_mode=ParseMode.MARKDOWN,
             )
+            await refund("market_data_error")
             raise
 
         loaded_count = len([c for c in all_data.columns if not all_data[c].isna().all()]) if not all_data.empty else 0
@@ -1019,7 +1038,9 @@ async def _run_analysis_background(
         # Multiple portfolio instruments may map to the same proxy (e.g. 4 AIX bonds → LQD.US),
         # so raw len(risky_tickers) + len(factor_tickers) overcounts.
         resolved_unique = list(dict.fromkeys(
-            manager.engine.resolve_tickers(risky_tickers) + list(manager.engine.factor_tickers.values())
+            manager.engine.resolve_tickers(risky_tickers)
+            + list(manager.engine.factor_tickers.values())
+            + manager.engine.BENCHMARK_EXTRA
         ))
         total_count = len(resolved_unique)
 
@@ -1037,10 +1058,10 @@ async def _run_analysis_background(
                 "1. Зайдите в Личный кабинет Freedom Broker → API → Market Data\n"
                 "2. Активируйте подписку на исторические данные (если её нет)\n"
                 "3. Либо обратитесь в поддержку брокера: попросите включить "
-                "доступ к `getHloc` для вашего API-ключа\n\n"
-                "Токены *не списаны* — обратитесь в /support за рефандом.",
+                "доступ к `getHloc` для вашего API-ключа",
                 parse_mode=ParseMode.MARKDOWN,
             )
+            await refund("no_market_data")
             raise RuntimeError("market_data_subscription_required")
 
         # ── Build detailed ticker status message ──────────────────────────
@@ -1087,10 +1108,10 @@ async def _run_analysis_background(
             await bot.send_message(
                 chat_id,
                 "❌ *Шаг 2 не удался:* MAC3 движок упал.\n\n"
-                f"Причина: `{str(exc)[:200]}`\n\n"
-                "Токены не потеряны — /support.",
+                f"Причина: `{str(exc)[:200]}`",
                 parse_mode=ParseMode.MARKDOWN,
             )
+            await refund("mac3_failure")
             raise
 
         await step("✅", "MAC3 факторная модель, SEC EDGAR и риск-декомпозиция посчитаны.")
@@ -1194,11 +1215,12 @@ async def _run_analysis_background(
         await bot.send_message(
             chat_id,
             "⚠️ *Анализ невозможен: нет реальных данных портфеля.*\n\n"
-            f"{exc}\n\nТокены не потеряны — /support.",
+            f"{exc}",
             parse_mode=ParseMode.MARKDOWN,
         )
+        await refund("no_real_portfolio")
     except RuntimeError as exc:
-        # Already reported above; no double message.
+        # market_data_subscription_required already reported + refunded above.
         if str(exc) != "market_data_subscription_required":
             logger.exception("Background analysis runtime error: %s", exc)
             await bot.send_message(
@@ -1206,14 +1228,15 @@ async def _run_analysis_background(
                 f"⚠️ *Ошибка при анализе:*\n`{str(exc)[:200]}`",
                 parse_mode=ParseMode.MARKDOWN,
             )
+            await refund("runtime_error")
     except Exception as exc:
         logger.exception("MAC3 анализ упал для %s: %s", user_id, exc)
         await bot.send_message(
             chat_id,
-            f"⚠️ *Непредвиденная ошибка:*\n`{str(exc)[:200]}`\n\n"
-            "Токены не потеряны — /support.",
+            f"⚠️ *Непредвиденная ошибка:*\n`{str(exc)[:200]}`",
             parse_mode=ParseMode.MARKDOWN,
         )
+        await refund("unexpected_error")
 
 
 async def cb_cancel(callback: CallbackQuery, state: FSMContext) -> None:

@@ -15,14 +15,14 @@ ASSET_DISPLAY: dict[str, str] = {
     "EM_KASE":     "EM / KASE",
 }
 
-# Maps profile name → yfinance ticker used as the TE benchmark proxy.
-# Conservative: AGG (Bloomberg US Agg, bond-heavy blended proxy)
-# Moderate:     ^GSPC (S&P 500, balanced proxy)
-# Aggressive:   ^NDX  (Nasdaq 100, growth proxy)
+# Maps profile name → Tradernet ETF ticker used as the TE benchmark proxy.
+# Conservative: AGG.US (iShares Core US Aggregate Bond ETF)
+# Moderate:     SPY.US (S&P 500 ETF — balanced proxy)
+# Aggressive:   QQQ.US (Nasdaq 100 ETF — growth proxy)
 PROFILE_BENCH_TICKER: dict[str, str] = {
-    "Консервативный": "AGG",
-    "Умеренный":      "^GSPC",
-    "Агрессивный":    "^NDX",
+    "Консервативный": "AGG.US",
+    "Умеренный":      "SPY.US",
+    "Агрессивный":    "QQQ.US",
 }
 
 # Keys are (score_lo, score_hi) inclusive ranges.
