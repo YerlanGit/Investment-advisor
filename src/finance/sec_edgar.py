@@ -264,65 +264,87 @@ def get_critical_fundamentals(ticker: str) -> dict:
 
 
 # ═══════════════════════════════════════════════════════════
-# 2. COMPOSITE SCORE (4 critical factors only)
+# 2. SECTOR-NORMALIZED FUNDAMENTAL SCORING
 # ═══════════════════════════════════════════════════════════
 
-@functools.lru_cache(maxsize=128)
-def calculate_fundamental_score(ticker: str) -> dict:
-    """
-    Composite fundamental score: 0 (weak) → 100 (strong).
+# Sector-specific benchmarks based on S&P 500 sector medians.
+# Each sector has different "healthy" ranges for OpMargin, Debt/Assets, ROE.
+# e.g. Finance sector naturally carries 85% D/A — penalizing it is wrong.
+SECTOR_BENCHMARKS: dict[str, dict] = {
+    "Technology":      {"op_good": 0.20, "op_great": 0.30, "dta_ok": 0.40, "dta_bad": 0.65, "roe_good": 0.18, "roe_great": 0.30},
+    "Semiconductors":  {"op_good": 0.25, "op_great": 0.35, "dta_ok": 0.35, "dta_bad": 0.60, "roe_good": 0.18, "roe_great": 0.30},
+    "Finance":         {"op_good": 0.25, "op_great": 0.35, "dta_ok": 0.85, "dta_bad": 0.95, "roe_good": 0.10, "roe_great": 0.18},
+    "Healthcare":      {"op_good": 0.12, "op_great": 0.22, "dta_ok": 0.50, "dta_bad": 0.75, "roe_good": 0.15, "roe_great": 0.25},
+    "Energy":          {"op_good": 0.08, "op_great": 0.18, "dta_ok": 0.45, "dta_bad": 0.70, "roe_good": 0.12, "roe_great": 0.22},
+    "Consumer":        {"op_good": 0.05, "op_great": 0.12, "dta_ok": 0.60, "dta_bad": 0.80, "roe_good": 0.15, "roe_great": 0.25},
+    "Industrials":     {"op_good": 0.10, "op_great": 0.18, "dta_ok": 0.55, "dta_bad": 0.75, "roe_good": 0.15, "roe_great": 0.25},
+    "Gold":            {"op_good": 0.10, "op_great": 0.20, "dta_ok": 0.40, "dta_bad": 0.60, "roe_good": 0.08, "roe_great": 0.15},
+    "default":         {"op_good": 0.15, "op_great": 0.25, "dta_ok": 0.50, "dta_bad": 0.70, "roe_good": 0.15, "roe_great": 0.25},
+}
 
-    Factors (simplified CFA):
-    ┌──────────────────┬──────┬─────────────────────────┐
-    │ Factor           │ Wt   │ Logic                   │
-    ├──────────────────┼──────┼─────────────────────────┤
-    │ Operating Margin │ 30%  │ >15% = strong           │
-    │ Debt/Assets      │ 25%  │ <40% = healthy          │
-    │ ROE              │ 30%  │ >15% = efficient        │
-    │ Revenue Growth   │ 15%  │ >10% = momentum         │
-    └──────────────────┴──────┴─────────────────────────┘
+
+def calculate_fundamental_score(ticker: str, sector: str = "default") -> dict:
+    """
+    Sector-normalized composite fundamental score: 0 (weak) → 100 (strong).
+
+    Scoring is calibrated against sector-specific benchmarks (SECTOR_BENCHMARKS).
+    For example, a 30% Debt/Assets is excellent for Tech but normal for Finance.
+
+    Factors (CFA-aligned):
+    ┌──────────────────┬──────┬──────────────────────────────────┐
+    │ Factor           │ Wt   │ Logic (sector-normalized)        │
+    ├──────────────────┼──────┼──────────────────────────────────┤
+    │ Operating Margin │ 30%  │ > sector op_great = strong       │
+    │ Debt/Assets      │ 25%  │ < sector dta_ok = healthy        │
+    │ ROE              │ 30%  │ > sector roe_great = efficient   │
+    │ Revenue Growth   │ 15%  │ >10% = momentum (universal)      │
+    └──────────────────┴──────┴──────────────────────────────────┘
     """
     fundamentals = get_critical_fundamentals(ticker)
     if not fundamentals:
-        return {"ticker": ticker, "fundamental_score": 50, "details": [], "raw_fundamentals": {}}
+        return {
+            "ticker": ticker, "fundamental_score": 50,
+            "sector": sector, "details": [], "raw_fundamentals": {},
+        }
 
+    bench = SECTOR_BENCHMARKS.get(sector, SECTOR_BENCHMARKS["default"])
     score = 50.0
     details = []
 
-    # 1. Operating Margin (30%)
+    # 1. Operating Margin (30%) — sector-normalized
     op_margin = fundamentals.get("operating_margin", 0)
-    if op_margin > 0.25:
+    if op_margin > bench["op_great"]:
         score += 18
-        details.append(f"OpMargin {op_margin:.0%} >25% [+18]")
-    elif op_margin > 0.15:
+        details.append(f"OpMargin {op_margin:.0%} >{bench['op_great']:.0%} [{sector}] [+18]")
+    elif op_margin > bench["op_good"]:
         score += 10
-        details.append(f"OpMargin {op_margin:.0%} >15% [+10]")
+        details.append(f"OpMargin {op_margin:.0%} >{bench['op_good']:.0%} [{sector}] [+10]")
     elif op_margin < 0:
         score -= 20
         details.append(f"OpMargin {op_margin:.0%} negative [-20]")
 
-    # 2. Debt/Assets (25%)
+    # 2. Debt/Assets (25%) — sector-normalized
     dta = fundamentals.get("debt_to_assets", 0)
-    if 0 < dta < 0.30:
+    if 0 < dta < bench["dta_ok"] * 0.6:
         score += 12
-        details.append(f"Debt/Assets {dta:.0%} <30% [+12]")
-    elif dta > 0.70:
+        details.append(f"Debt/Assets {dta:.0%} <{bench['dta_ok']*0.6:.0%} [{sector}] [+12]")
+    elif dta > bench["dta_bad"]:
         score -= 15
-        details.append(f"Debt/Assets {dta:.0%} >70% [-15]")
+        details.append(f"Debt/Assets {dta:.0%} >{bench['dta_bad']:.0%} [{sector}] [-15]")
 
-    # 3. ROE (30%)
+    # 3. ROE (30%) — sector-normalized
     roe = fundamentals.get("roe", 0)
-    if roe > 0.25:
+    if roe > bench["roe_great"]:
         score += 18
-        details.append(f"ROE {roe:.0%} >25% [+18]")
-    elif roe > 0.15:
+        details.append(f"ROE {roe:.0%} >{bench['roe_great']:.0%} [{sector}] [+18]")
+    elif roe > bench["roe_good"]:
         score += 10
-        details.append(f"ROE {roe:.0%} >15% [+10]")
+        details.append(f"ROE {roe:.0%} >{bench['roe_good']:.0%} [{sector}] [+10]")
     elif roe < 0:
         score -= 15
         details.append(f"ROE {roe:.0%} negative [-15]")
 
-    # 4. Revenue Growth YoY (15%)
+    # 4. Revenue Growth YoY (15%) — universal (not sector-dependent)
     rev_growth = fundamentals.get("revenue_growth_yoy")
     if rev_growth is not None:
         if rev_growth > 0.20:
@@ -340,6 +362,7 @@ def calculate_fundamental_score(ticker: str) -> dict:
     return {
         "ticker": ticker,
         "fundamental_score": round(score, 1),
+        "sector": sector,
         "details": details,
         "raw_fundamentals": fundamentals,
     }
@@ -349,14 +372,24 @@ def calculate_fundamental_score(ticker: str) -> dict:
 # 3. PARALLEL BATCH SCAN (3 workers, SEC-safe)
 # ═══════════════════════════════════════════════════════════
 
-def batch_fundamental_scan(tickers: list) -> pd.DataFrame:
+def batch_fundamental_scan(
+    tickers: list,
+    sector_map: dict[str, str] | None = None,
+) -> pd.DataFrame:
     """
     Parallel batch scan of tickers via SEC EDGAR CompanyFacts API.
+
+    Args:
+        tickers: list of ticker symbols to scan
+        sector_map: optional mapping {ticker: sector_name} for sector-normalized
+                    scoring. If not provided, all tickers use "default" thresholds.
 
     Filters out non-US tickers, ETFs, and AIX instruments.
     Uses ThreadPoolExecutor(3) to stay under SEC 10 req/s limit.
     Returns DataFrame for join into performance_table.
     """
+    sector_map = sector_map or {}
+
     # Pre-filter: only scan tickers that have SEC filings
     scannable = [t for t in tickers if not _should_skip(t)]
     skipped = [t for t in tickers if _should_skip(t)]
@@ -367,13 +400,15 @@ def batch_fundamental_scan(tickers: list) -> pd.DataFrame:
     results = []
 
     def _scan_one(ticker: str) -> dict:
-        logger.info("[SEC EDGAR] Сканирование %s...", ticker)
+        sector = sector_map.get(ticker, "default")
+        logger.info("[SEC EDGAR] Сканирование %s (sector=%s)...", ticker, sector)
         try:
-            score_data = calculate_fundamental_score(ticker)
+            score_data = calculate_fundamental_score(ticker, sector=sector)
             f = score_data["raw_fundamentals"]
             return {
                 "Ticker": ticker,
                 "Fundamental_Score": score_data["fundamental_score"],
+                "Fundamental_Sector": sector,
                 "SEC_Op_Margin": f.get("operating_margin"),
                 "SEC_Debt_to_Assets": f.get("debt_to_assets"),
                 "SEC_ROE": f.get("roe"),
@@ -382,7 +417,7 @@ def batch_fundamental_scan(tickers: list) -> pd.DataFrame:
             }
         except Exception as e:
             logger.warning("[SEC EDGAR] Ошибка для %s: %s", ticker, e)
-            return {"Ticker": ticker, "Fundamental_Score": 50}
+            return {"Ticker": ticker, "Fundamental_Score": 50, "Fundamental_Sector": sector}
 
     # Parallel execution (3 workers to stay under SEC rate limit)
     if scannable:
@@ -393,7 +428,11 @@ def batch_fundamental_scan(tickers: list) -> pd.DataFrame:
 
     # Add neutral scores for skipped tickers
     for t in skipped:
-        results.append({"Ticker": t, "Fundamental_Score": 50})
+        results.append({
+            "Ticker": t,
+            "Fundamental_Score": 50,
+            "Fundamental_Sector": sector_map.get(t, "EM_Proxy"),
+        })
 
     if not results:
         return pd.DataFrame()

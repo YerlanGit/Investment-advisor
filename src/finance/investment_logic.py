@@ -131,9 +131,14 @@ class MAC3RiskEngine:
         'KZAP':  'EM_Kazakhstan',
     }
 
-    # Benchmark-only ETFs that must be fetched alongside factor ETFs but are
-    # NOT used as regression factors.  Needed for benchmark_comparison in analyze_all.
-    BENCHMARK_EXTRA = ['QQQ.US', 'AGG.US']
+    # Benchmark / catalogue ETFs fetched alongside factor ETFs.
+    # NOT used as regression factors — only for benchmark_comparison + TE.
+    # Includes all tickers from profile_manager.BENCHMARK_LIST so they are
+    # pre-loaded in a single batch (avoids a second download pass).
+    BENCHMARK_EXTRA = [
+        'QQQ.US', 'AGG.US', 'URTH.US',  # broad indices
+        # Factor ETFs already in factor_tickers (SPY, MTUM, VLUE, QUAL, IWM, DBC, IEF, EEM, EMB)
+    ]
 
     def __init__(self, trading_days=252, ewma_halflife=63):
         self.trading_days = trading_days
@@ -422,28 +427,54 @@ class MAC3RiskEngine:
 
         return cov_df, pd.DataFrame(exposures_report).T, portfolio_metrics
 
-    def calculate_atr(self, data, tickers, period=14):
+    def calculate_atr(self, data, tickers, ohlc_data=None, period=14):
         """
-        ATR (Average True Range) — индикатор волатильности для IMS.
-        Используется для оценки внутридневного риска по стандарту SEC 34-105226.
+        True ATR (Wilder’s Average True Range) with OHLC when available.
+
+        True Range = max(H-L, |H-Cp|, |L-Cp|) where Cp is previous Close.
+        Falls back to Close-only approximation (|ΔClose|) when OHLC is unavailable.
+
+        Args:
+            data: Close-price DataFrame (columns = resolved tickers)
+            tickers: list of original (unresolved) tickers
+            ohlc_data: optional dict {resolved_ticker: DataFrame[Open,High,Low,Close]}
+            period: ATR lookback window (default: 14 days, Wilder standard)
         """
         resolved = self.resolve_tickers(tickers)
         atr_results = {}
-        
+
         for orig, res in zip(tickers, resolved):
             if res not in data.columns:
                 continue
+
+            # Prefer True ATR from OHLC if available
+            if ohlc_data and res in ohlc_data:
+                ohlc = ohlc_data[res]
+                if all(c in ohlc.columns for c in ('High', 'Low', 'Close')):
+                    high = ohlc['High']
+                    low = ohlc['Low']
+                    close_prev = ohlc['Close'].shift(1)
+                    tr = pd.concat([
+                        high - low,
+                        (high - close_prev).abs(),
+                        (low - close_prev).abs(),
+                    ], axis=1).max(axis=1)
+                    # Wilder’s EMA (equivalent to ewm with span=period)
+                    atr = tr.ewm(span=period, adjust=False).mean().iloc[-1]
+                    last_close = ohlc['Close'].iloc[-1]
+                    atr_pct = (atr / last_close) * 100 if last_close > 0 else 0
+                    atr_results[orig] = {'ATR_Absolute': atr, 'ATR_Pct': atr_pct}
+                    continue
+
+            # Fallback: Close-only ATR approximation
             prices = data[res]
-            # Для Close-only данных: ATR ≈ |ΔPrice| rolling
             daily_range = prices.diff().abs()
             atr = daily_range.rolling(window=period).mean().iloc[-1]
             atr_pct = (atr / prices.iloc[-1]) * 100 if prices.iloc[-1] > 0 else 0
-            atr_results[orig] = {
-                'ATR_Absolute': atr,
-                'ATR_Pct': atr_pct  # ATR как % от цены — нормализованная волатильность
-            }
-        
+            atr_results[orig] = {'ATR_Absolute': atr, 'ATR_Pct': atr_pct}
+
         return pd.DataFrame(atr_results).T if atr_results else pd.DataFrame()
+
 
 
 class UniversalPortfolioManager:
@@ -583,14 +614,20 @@ class UniversalPortfolioManager:
         cov_matrix, factor_df, port_metrics = self.engine.calculate_structural_risk(all_data, actual_risky, weights_dict)
         
         # ATR (Intraday Margin Standard — SEC 34-105226)
-        atr_df = self.engine.calculate_atr(all_data, actual_risky)
+        # Uses True ATR (OHLC) when available, falls back to Close-only
+        atr_df = self.engine.calculate_atr(
+            all_data, actual_risky,
+            ohlc_data=getattr(history_result, 'ohlc_data', None),
+        )
         if not atr_df.empty:
             df = df.join(atr_df)
-        
-        # SEC EDGAR Fundamental Scores (бесплатный фундаментальный анализ)
+
+        # SEC EDGAR Fundamental Scores (sector-normalized)
+        # Build sector_map from MAC3RiskEngine.TICKER_SECTOR for sector-aware thresholds
+        sector_map = {t: self.engine.get_ticker_sector(t) for t in actual_risky}
         try:
             from finance.sec_edgar import batch_fundamental_scan
-            sec_df = batch_fundamental_scan(actual_risky)
+            sec_df = batch_fundamental_scan(actual_risky, sector_map=sector_map)
             if not sec_df.empty:
                 df = df.join(sec_df)
         except Exception as e:
@@ -613,10 +650,12 @@ class UniversalPortfolioManager:
         #
         # Algorithm:
         #   1. Compute mean daily log-return for each factor ETF.
-        #   2. Annualise: E[r_f_ann] = mean_daily * trading_days.
+        #   2. GEOMETRIC annualisation: E[r_ann] = exp(mean_daily_log * 252) - 1
+        #      This avoids the arithmetic overestimate (arithmetic: mean*252).
         #   3. Map ETF tickers → factor key names (Beta_Market ← Market ← SPY.US).
-        #   4. Expected return = Σ beta_k * E[r_k_ann]  (in simple return space).
-        #   5. Alpha = actual return (over holding period) - annualised expected.
+        #   4. Expected return = Alpha_ann + Σ beta_k * E[r_k_ann]
+        #      Alpha (intercept) from Ridge regression is included.
+        #   5. Specific Alpha = actual return - expected return (in %).
         present_factor_keys = [
             k for k, v in self.engine.factor_tickers.items() if v in all_data.columns
         ]
@@ -626,7 +665,9 @@ class UniversalPortfolioManager:
         if not f_data.empty:
             factor_daily_log = np.log(f_data / f_data.shift(1)).dropna()
             factor_mean_daily = factor_daily_log.mean()       # index = ETF tickers
-            factor_ann = factor_mean_daily * self.engine.trading_days
+            # GEOMETRIC annualisation (correct for compounding):
+            # E[r_ann] = exp(mean_daily_log * 252) - 1
+            factor_ann = np.exp(factor_mean_daily * self.engine.trading_days) - 1
             # Map to factor key names for label-safe matching against Beta_* columns
             factor_ann_by_key = pd.Series({
                 k: factor_ann.get(v, 0.0)
@@ -639,9 +680,17 @@ class UniversalPortfolioManager:
         if beta_cols and not factor_ann_by_key.empty:
             beta_factor_keys = [c[len('Beta_'):] for c in beta_cols]
             factor_vec = factor_ann_by_key.reindex(beta_factor_keys).fillna(0.0).values
-            # Annualised expected return (simple, decimal)
-            df['Expected_Return'] = df[beta_cols].fillna(0).values @ factor_vec
-            # Alpha: actual holding-period return minus annualised expectation (in %)
+            # Factor-driven expected return
+            factor_component = df[beta_cols].fillna(0).values @ factor_vec
+            # Alpha intercept: annualised from daily alpha (stored by Ridge)
+            alpha_col = 'Specific_Alpha_Daily'
+            if alpha_col in df.columns:
+                alpha_ann = df[alpha_col].fillna(0).values * self.engine.trading_days
+            else:
+                alpha_ann = 0.0
+            # Total expected return = alpha + factor contribution
+            df['Expected_Return'] = alpha_ann + factor_component
+            # Specific Alpha: actual holding-period return minus expected (in %)
             df['Alpha_Specific'] = (df['Return_Pct'] - df['Expected_Return']) * 100
 
         # ═══════════════ BENCHMARK COMPARISON ═══════════════
@@ -713,8 +762,36 @@ class UniversalPortfolioManager:
         # Sector exposure analysis
         sector_exposure = self.engine.get_sector_exposure(list(df.index), weights_dict)
 
+        # ═══════════════ FACTOR SCORES GROUPING ═══════════════
+        # Group A (Style Factors): MAC3-derived betas, alpha, volatility
+        # Group B (Fundamental Factors): SEC EDGAR metrics
+        factor_scores = {}
+        perf = df.reset_index()
+        for _, row in perf.iterrows():
+            ticker = row.get('Ticker', '?')
+            group_a = {}
+            group_b = {}
+            # Style factors (Group A)
+            for col in beta_cols:
+                if col in row.index:
+                    group_a[col] = row[col]
+            for col in ['Residual_Vol_Ann', 'Euler_Risk_Contribution_Pct',
+                        'Expected_Return', 'Alpha_Specific', 'Specific_Alpha_Daily']:
+                if col in row.index:
+                    group_a[col] = row[col]
+            # Fundamental factors (Group B)
+            for col in ['Fundamental_Score', 'Fundamental_Sector',
+                        'SEC_Op_Margin', 'SEC_Debt_to_Assets',
+                        'SEC_ROE', 'SEC_Revenue_Growth_YoY', 'SEC_Filing_Date']:
+                if col in row.index:
+                    group_b[col] = row[col]
+            factor_scores[ticker] = {
+                'group_a_style': group_a,
+                'group_b_fundamental': group_b,
+            }
+
         return {
-            "performance_table": df.reset_index(),
+            "performance_table": perf,
             "risk_matrix": cov_matrix,
             "total_portfolio_pnl": df['PnL'].sum(),
             "total_value": total_portfolio_value,
@@ -723,4 +800,5 @@ class UniversalPortfolioManager:
             "benchmark_comparison": benchmark_results,
             "history_result": history_result,
             "sector_exposure": sector_exposure,
+            "factor_scores": factor_scores,
         }

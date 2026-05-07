@@ -7,7 +7,7 @@ Analysis tiers:
   - deep  : 2 tokens → base + scenario analysis + fundamental signals
 
 Onboarding FSM (new users only):
-  Q1 → Q2 → Q3 → Q4 → Universe → MandateReview → PortfolioConnection → Analysis
+  Q1 → Q2 → Q3 → Q4 → Q5 → Q6 → Universe → Benchmark → MandateReview → Connection → Analysis
 
 PortfolioConnection FSM:
   connect:template → save mode → Analysis menu
@@ -46,10 +46,12 @@ from db_tokenomics import (
     credit_tokens,
     deduct_tokens,
     get_balance,
+    get_benchmark_ticker,
     get_connection_mode,
     get_profile,
     init_db,
     init_user,
+    save_benchmark_ticker,
     save_connection_mode,
     save_profile,
 )
@@ -63,7 +65,10 @@ from finance.investment_logic import UniversalPortfolioManager
 from finance.security import SecureVault
 from agent.gatekeeper import run_gatekeeper
 from pdf_generator import MOCK_DATA, generate_portfolio_pdf
-from profile_manager import ASSET_DISPLAY, ASSET_KEYS, PROFILE_BENCH_TICKER, RiskProfileManager
+from profile_manager import (
+    ASSET_DISPLAY, ASSET_KEYS, BENCHMARK_LIST,
+    PROFILE_BENCH_TICKER, RiskProfileManager,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -86,7 +91,10 @@ class Onboarding(StatesGroup):
     Q2            = State()
     Q3            = State()
     Q4            = State()
+    Q5            = State()
+    Q6            = State()
     Universe      = State()
+    Benchmark     = State()
     MandateReview = State()
 
 
@@ -103,10 +111,12 @@ class AnalysisFlow(StatesGroup):
 # ── Onboarding question definitions ──────────────────────────────────────────
 # Each option tuple: (button_label, score_points, callback_data)
 
+NUM_QUESTIONS = 6
+
 QUESTIONS: list[dict] = [
     {
         "state": Onboarding.Q1,
-        "text":  "🕐 *Вопрос 1 из 4*\nКаков ваш инвестиционный горизонт?",
+        "text":  "🕐 *Вопрос 1 из 6*\nКаков ваш инвестиционный горизонт?",
         "options": [
             ("Менее 1 года",                         1, "ob:q1:1"),
             ("От 1 до 3 лет",                        2, "ob:q1:2"),
@@ -115,7 +125,7 @@ QUESTIONS: list[dict] = [
     },
     {
         "state": Onboarding.Q2,
-        "text":  "🎯 *Вопрос 2 из 4*\nВаша главная инвестиционная цель?",
+        "text":  "🎯 *Вопрос 2 из 6*\nВаша главная инвестиционная цель?",
         "options": [
             ("Сохранение капитала",                  1, "ob:q2:1"),
             ("Умеренный рост",                       2, "ob:q2:2"),
@@ -124,7 +134,7 @@ QUESTIONS: list[dict] = [
     },
     {
         "state": Onboarding.Q3,
-        "text":  "📉 *Вопрос 3 из 4*\nЕсли ваш портфель упадёт на 20%, вы:",
+        "text":  "📉 *Вопрос 3 из 6*\nЕсли ваш портфель упадёт на 20%, вы:",
         "options": [
             ("Продам всё, чтобы остановить потери",  1, "ob:q3:1"),
             ("Подожду восстановления",               2, "ob:q3:2"),
@@ -133,11 +143,29 @@ QUESTIONS: list[dict] = [
     },
     {
         "state": Onboarding.Q4,
-        "text":  "📚 *Вопрос 4 из 4*\nВаш опыт в инвестировании?",
+        "text":  "📚 *Вопрос 4 из 6*\nВаш опыт в инвестировании?",
         "options": [
             ("Нет опыта",                            1, "ob:q4:1"),
             ("До 3 лет",                             2, "ob:q4:2"),
             ("Более 3 лет / профессионал",           3, "ob:q4:3"),
+        ],
+    },
+    {
+        "state": Onboarding.Q5,
+        "text":  "🛡 *Вопрос 5 из 6*\nНасколько комфортно вы себя чувствуете финансово?",
+        "options": [
+            ("Живу от зарплаты до зарплаты",         1, "ob:q5:1"),
+            ("Есть накопления на несколько месяцев", 2, "ob:q5:2"),
+            ("Финансово защищён(а) на год и более",  3, "ob:q5:3"),
+        ],
+    },
+    {
+        "state": Onboarding.Q6,
+        "text":  "💼 *Вопрос 6 из 6*\nНасколько стабилен ваш доход?",
+        "options": [
+            ("Нестабильный / фриланс",               1, "ob:q6:1"),
+            ("Стабильная зарплата",                  2, "ob:q6:2"),
+            ("Несколько источников дохода",           3, "ob:q6:3"),
         ],
     },
 ]
@@ -405,11 +433,14 @@ async def _build_analysis_payload(user_id: int, tier: str) -> dict:
 
 # ── Keyboard builders ─────────────────────────────────────────────────────────
 
-def kb_question(options: list[tuple[str, int, str]]) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
+def kb_question(options: list[tuple[str, int, str]], q_num: int = 1) -> InlineKeyboardMarkup:
+    rows = [
         [InlineKeyboardButton(text=label, callback_data=cb)]
         for label, _, cb in options
-    ])
+    ]
+    if q_num > 1:
+        rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="ob:back")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def kb_universe(selected: set[str]) -> InlineKeyboardMarkup:
@@ -420,6 +451,25 @@ def kb_universe(selected: set[str]) -> InlineKeyboardMarkup:
     rows.append([
         InlineKeyboardButton(text="Подтвердить выбор ➡️", callback_data="ob:uni:confirm")
     ])
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="ob:back")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def kb_benchmark(current: str | None = None) -> InlineKeyboardMarkup:
+    """Benchmark selection keyboard. Shows check mark on the currently selected one."""
+    rows = []
+    for ticker, display_name in BENCHMARK_LIST.items():
+        prefix = "✅ " if ticker == current else ""
+        rows.append([
+            InlineKeyboardButton(
+                text=f"{prefix}{display_name}",
+                callback_data=f"ob:bench:{ticker}",
+            )
+        ])
+    rows.append([
+        InlineKeyboardButton(text="Продолжить ➡️", callback_data="ob:bench:confirm")
+    ])
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="ob:back")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -491,11 +541,11 @@ async def send_question(
     state: FSMContext,
     q_idx: int,
 ) -> None:
-    """Advance to Q q_idx (0-based) or to the Universe step when q_idx == 4."""
-    if q_idx < 4:
+    """Advance to Q q_idx (0-based) or to Universe/Benchmark steps after Q6."""
+    if q_idx < NUM_QUESTIONS:
         q = QUESTIONS[q_idx]
         await state.set_state(q["state"])
-        await _edit_or_answer(target, state, q["text"], kb_question(q["options"]))
+        await _edit_or_answer(target, state, q["text"], kb_question(q["options"], q_num=q_idx + 1))
     else:
         data     = await state.get_data()
         selected = set(data.get("universe", []))
@@ -551,11 +601,11 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
         q    = QUESTIONS[0]
         sent = await message.answer(
             "👋 *Добро пожаловать в RAMP — Risk & Asset Management Platform!*\n\n"
-            "Прежде чем начать, пройдите короткое анкетирование (4 вопроса), "
+            "Прежде чем начать, пройдите короткое анкетирование (6 вопросов), "
             "чтобы мы могли составить ваш персональный инвестиционный мандат.\n\n"
             + q["text"],
             parse_mode=ParseMode.MARKDOWN,
-            reply_markup=kb_question(q["options"]),
+            reply_markup=kb_question(q["options"], q_num=1),
         )
         await state.update_data(ob_message_id=sent.message_id)
 
@@ -584,11 +634,12 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
             )
 
 
-# ── Q1–Q4 answer handler ──────────────────────────────────────────────────────
+# ── Q1–Q6 answer handler ──────────────────────────────────────────────────────
 
 @onboarding_router.callback_query(
-    F.data.regexp(r"^ob:q[1-4]:\d$"),
-    StateFilter(Onboarding.Q1, Onboarding.Q2, Onboarding.Q3, Onboarding.Q4),
+    F.data.regexp(r"^ob:q[1-6]:\d$"),
+    StateFilter(Onboarding.Q1, Onboarding.Q2, Onboarding.Q3,
+                Onboarding.Q4, Onboarding.Q5, Onboarding.Q6),
 )
 async def cb_question_answer(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
@@ -597,6 +648,43 @@ async def cb_question_answer(callback: CallbackQuery, state: FSMContext) -> None
     pts   = int(pts_str)
     await state.update_data(**{f"q{q_num}": pts})
     await send_question(callback, state, q_num)
+
+
+# ── Back button handler ───────────────────────────────────────────────────────
+
+@onboarding_router.callback_query(
+    F.data == "ob:back",
+    StateFilter(Onboarding.Q2, Onboarding.Q3, Onboarding.Q4,
+                Onboarding.Q5, Onboarding.Q6,
+                Onboarding.Universe, Onboarding.Benchmark),
+)
+async def cb_back(callback: CallbackQuery, state: FSMContext) -> None:
+    """Roll back to the previous onboarding step."""
+    await callback.answer()
+    current = await state.get_state()
+    # Map current state → previous q_idx (0-based)
+    back_map = {
+        Onboarding.Q2.state:       0,  # back to Q1
+        Onboarding.Q3.state:       1,  # back to Q2
+        Onboarding.Q4.state:       2,
+        Onboarding.Q5.state:       3,
+        Onboarding.Q6.state:       4,
+        Onboarding.Universe.state: 5,  # back to Q6
+    }
+    prev_idx = back_map.get(current)
+    if prev_idx is not None:
+        await send_question(callback, state, prev_idx)
+    elif current == Onboarding.Benchmark.state:
+        # Back from Benchmark → Universe
+        data = await state.get_data()
+        selected = set(data.get("universe", []))
+        await state.set_state(Onboarding.Universe)
+        await _edit_or_answer(
+            callback, state,
+            "🌍 *Выбор классов активов*\n\n"
+            "Отметьте классы активов, которые вы хотите включить в портфель:",
+            kb_universe(selected),
+        )
 
 
 # ── Universe toggle ───────────────────────────────────────────────────────────
@@ -634,18 +722,63 @@ async def cb_universe_confirm(callback: CallbackQuery, state: FSMContext) -> Non
         await callback.message.answer("⚠️ Выберите хотя бы один класс активов.")
         return
 
-    score   = sum(data.get(f"q{i}", 0) for i in range(1, 5))
+    # Score from 6 questions (range 6-18)
+    score   = sum(data.get(f"q{i}", 0) for i in range(1, NUM_QUESTIONS + 1))
     profile = RiskProfileManager.score_to_profile(score)
-    limits  = RiskProfileManager.apply_universe(profile, universe)
-    summary = RiskProfileManager.build_mandate_summary(profile, limits)
 
+    # Store profile data for later use
     await state.update_data(profile_data={
         "name":       profile["name"],
         "target_vol": profile["target_vol"],
         "target_te":  profile["target_te"],
         "score":      score,
-        "limits":     limits,
+        "limits":     RiskProfileManager.apply_universe(profile, universe),
     })
+
+    # Transition to Benchmark selection
+    default_bench = PROFILE_BENCH_TICKER.get(profile["name"], "SPY.US")
+    await state.update_data(benchmark_ticker=default_bench)
+    await state.set_state(Onboarding.Benchmark)
+    await _edit_or_answer(
+        callback, state,
+        "📊 *Выберите бенчмарк для вашего портфеля*\n\n"
+        f"На основе вашего профиля *{profile['name']}* мы рекомендуем "
+        f"*{BENCHMARK_LIST.get(default_bench, default_bench)}*.\n\n"
+        "Вы можете выбрать другой или продолжить с рекомендованным:",
+        kb_benchmark(current=default_bench),
+    )
+
+
+# ── Benchmark toggle ──────────────────────────────────────────────────────────
+
+@onboarding_router.callback_query(
+    F.data.startswith("ob:bench:"),
+    ~F.data.endswith("confirm"),
+    StateFilter(Onboarding.Benchmark),
+)
+async def cb_benchmark_toggle(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    ticker = callback.data[len("ob:bench:"):]
+    await state.update_data(benchmark_ticker=ticker)
+    await callback.message.edit_reply_markup(reply_markup=kb_benchmark(current=ticker))
+
+
+# ── Benchmark confirm ─────────────────────────────────────────────────────────
+
+@onboarding_router.callback_query(
+    F.data == "ob:bench:confirm",
+    StateFilter(Onboarding.Benchmark),
+)
+async def cb_benchmark_confirm(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    data      = await state.get_data()
+    prof      = data["profile_data"]
+    universe  = data.get("universe", [])
+    bench_tk  = data.get("benchmark_ticker")
+
+    summary = RiskProfileManager.build_mandate_summary(
+        prof, prof["limits"], benchmark_ticker=bench_tk,
+    )
     await state.set_state(Onboarding.MandateReview)
     await _edit_or_answer(callback, state, summary, kb_mandate_review())
 
@@ -663,6 +796,7 @@ async def cb_mandate_approve(callback: CallbackQuery, state: FSMContext) -> None
     prof     = data["profile_data"]
     slug     = data.get("slug", "")
     universe = data.get("universe", [])
+    bench_tk = data.get("benchmark_ticker")
 
     await save_profile(
         telegram_id       = user_id,
@@ -672,6 +806,7 @@ async def cb_mandate_approve(callback: CallbackQuery, state: FSMContext) -> None
         target_te         = prof["target_te"],
         selected_assets   = universe,
         limits_dict       = prof["limits"],
+        benchmark_ticker  = bench_tk,
     )
     await approve_mandate(user_id)
     await init_user(user_id)   # grants tokens — user is new here
@@ -1153,10 +1288,10 @@ async def _run_analysis_background(
 
         gate = run_gatekeeper(results)  # Always run with defaults
 
-        if (await get_profile(user_id)) is not None:
-            profile = await get_profile(user_id)
+        profile = await get_profile(user_id)
+        if profile is not None:
             gate_limits = {"max_portfolio_volatility": profile["target_volatility"] * 1.2}
-            gate = run_gatekeeper(results, user_limits=gate_limits)
+            gate = run_gatekeeper(results, user_limits=gate_limits, user_profile=profile)
 
         # Show gatekeeper results (advisory only — never blocks report)
         if gate["critical"] or gate["warnings"]:
@@ -1275,6 +1410,30 @@ async def cmd_support(message: Message) -> None:
     )
 
 
+async def cmd_mandate(message: Message, state: FSMContext) -> None:
+    """Re-run onboarding questionnaire for returning users."""
+    user_id = message.from_user.id
+    profile = await get_profile(user_id)
+    if profile is None:
+        await message.answer(
+            "⚠️ У вас ещё нет профиля. Используйте /start для регистрации.",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        return
+
+    await state.clear()
+    await state.set_state(Onboarding.Q1)
+    q = QUESTIONS[0]
+    sent = await message.answer(
+        "🔄 *Обновление инвестиционного мандата*\n\n"
+        "Пройдите анкетирование заново, чтобы обновить ваш профиль.\n\n"
+        + q["text"],
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=kb_question(q["options"], q_num=1),
+    )
+    await state.update_data(ob_message_id=sent.message_id)
+
+
 # ── Dispatcher assembly ───────────────────────────────────────────────────────
 
 def build_dispatcher() -> Dispatcher:
@@ -1285,10 +1444,11 @@ def build_dispatcher() -> Dispatcher:
     dp.include_router(portfolio_router)
 
     # Message commands
-    dp.message.register(cmd_start,   CommandStart())
-    dp.message.register(cmd_balance, F.text == "/balance")
-    dp.message.register(cmd_topup,   F.text == "/topup")
-    dp.message.register(cmd_support, F.text == "/support")
+    dp.message.register(cmd_start,    CommandStart())
+    dp.message.register(cmd_balance,  F.text == "/balance")
+    dp.message.register(cmd_topup,    F.text == "/topup")
+    dp.message.register(cmd_support,  F.text == "/support")
+    dp.message.register(cmd_mandate,  F.text == "/mandate")
 
     # Analysis flow callbacks
     dp.callback_query.register(cb_analysis_choice, F.data.startswith("analysis:"))

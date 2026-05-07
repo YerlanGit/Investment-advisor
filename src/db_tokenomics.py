@@ -62,14 +62,16 @@ async def init_db() -> None:
                 updated_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        # Schema migration: add connection_mode if the column doesn't exist yet.
-        try:
-            await db.execute(
-                "ALTER TABLE user_profiles ADD COLUMN connection_mode TEXT DEFAULT 'template'"
-            )
-            await db.commit()
-        except Exception:
-            pass  # Column already present — safe to ignore.
+        # Schema migrations: add columns if they don't exist yet.
+        for migration in (
+            "ALTER TABLE user_profiles ADD COLUMN connection_mode TEXT DEFAULT 'template'",
+            "ALTER TABLE user_profiles ADD COLUMN benchmark_ticker TEXT DEFAULT NULL",
+        ):
+            try:
+                await db.execute(migration)
+                await db.commit()
+            except Exception:
+                pass  # Column already present — safe to ignore.
 
         await db.commit()
 
@@ -162,6 +164,7 @@ async def save_profile(
     target_te: float,
     selected_assets: list,
     limits_dict: dict,
+    benchmark_ticker: str | None = None,
 ) -> None:
     """
     UPSERT the user's risk profile. mandate_approved is always reset to 0
@@ -172,8 +175,8 @@ async def save_profile(
             """
             INSERT INTO user_profiles
                 (telegram_id, score, profile_name, target_volatility, target_te,
-                 selected_assets, limits_dict, mandate_approved, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP)
+                 selected_assets, limits_dict, benchmark_ticker, mandate_approved, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP)
             ON CONFLICT(telegram_id) DO UPDATE SET
                 score             = excluded.score,
                 profile_name      = excluded.profile_name,
@@ -181,6 +184,7 @@ async def save_profile(
                 target_te         = excluded.target_te,
                 selected_assets   = excluded.selected_assets,
                 limits_dict       = excluded.limits_dict,
+                benchmark_ticker  = excluded.benchmark_ticker,
                 mandate_approved  = 0,
                 updated_at        = CURRENT_TIMESTAMP
             """,
@@ -188,6 +192,7 @@ async def save_profile(
                 telegram_id, score, profile_name, target_volatility, target_te,
                 json.dumps(selected_assets, ensure_ascii=False),
                 json.dumps(limits_dict, ensure_ascii=False),
+                benchmark_ticker,
             ),
         )
         await db.commit()
@@ -227,6 +232,19 @@ async def get_profile(telegram_id: int) -> dict | None:
         return data
 
 
+async def get_benchmark_ticker(telegram_id: int) -> str | None:
+    """Return the user's selected benchmark ticker, or None."""
+    async with _get_conn() as db:
+        cursor = await db.execute(
+            "SELECT benchmark_ticker FROM user_profiles WHERE telegram_id = ?",
+            (telegram_id,),
+        )
+        row = await cursor.fetchone()
+        if row is None or row[0] is None:
+            return None
+        return row[0]
+
+
 async def save_connection_mode(telegram_id: int, mode: str) -> None:
     """Persist the user's portfolio source choice ('template' or 'freedom')."""
     async with _get_conn() as db:
@@ -251,3 +269,16 @@ async def get_connection_mode(telegram_id: int) -> str:
         if row is None or row[0] is None:
             return "template"
         return row[0]
+
+
+async def save_benchmark_ticker(telegram_id: int, ticker: str) -> None:
+    """Instantly update the user's benchmark without re-approval."""
+    async with _get_conn() as db:
+        await db.execute(
+            "UPDATE user_profiles "
+            "SET benchmark_ticker = ?, updated_at = CURRENT_TIMESTAMP "
+            "WHERE telegram_id = ?",
+            (ticker, telegram_id),
+        )
+        await db.commit()
+        logger.info("Бенчмарк пользователя %s: %s.", telegram_id, ticker)

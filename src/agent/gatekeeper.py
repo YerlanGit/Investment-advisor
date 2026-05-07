@@ -6,6 +6,17 @@ Checks the final report BEFORE showing to user. Runs in 0 ms, costs $0, never ha
 2026-05 update: Gatekeeper is now ADVISORY-ONLY (non-blocking).
 Critical violations are reported as warnings to the user but do NOT prevent
 the report from being delivered. This ensures data upload is never blocked.
+
+Checks implemented:
+  1. Euler Risk concentration
+  2. Capital concentration (single asset weight)
+  3. CVaR tail risk (profile-aware threshold)
+  4. Sharpe Ratio efficiency
+  5. Total portfolio volatility
+  6. ATR spike detection
+  7. Fundamental score weakness
+  8. Mandate compliance (actual allocation vs limits_dict)
+  9. Tracking Error vs profile target_te
 """
 import logging
 
@@ -21,8 +32,58 @@ DEFAULT_LIMITS = {
     "max_portfolio_volatility": 0.40,   # Max annual volatility (40%)
 }
 
+# ── Asset-class classifier for Mandate Compliance (Check 8) ──────────────────
+# Maps portfolio tickers to the ASSET_KEYS used in limits_dict.
+# This must align with profile_manager.ASSET_KEYS.
 
-def run_gatekeeper(report: dict, user_limits: dict = None) -> dict:
+_CLASS_CRYPTO = {"BTC", "ETH", "SOL", "BNB", "DOGE", "ADA", "DOT"}
+_CLASS_COMMODITIES = {
+    "GLD", "SLV", "GDX", "USO", "UNG", "DBC", "PDBC",
+    "GOLD", "SILVER", "OIL",
+}
+_CLASS_BONDS = {
+    "TLT", "AGG", "BND", "TNX", "LQD", "HYG", "BIL", "IEF", "SHY", "EMB",
+}
+_CLASS_KZ = {"KSPI", "HSBK", "KAP", "KZTK", "KCEL", "BAST", "HRGL", "KZAP"}
+_CLASS_ETF = {
+    "SPY", "QQQ", "IWM", "EEM", "URTH", "VTI", "VOO",
+    "MTUM", "VLUE", "QUAL", "XLK", "XLF", "XLE", "XLV",
+    "SOXX", "XME", "XLP", "XLI",
+}
+
+
+def _classify_to_asset_key(ticker: str) -> str:
+    """Classify a ticker into the asset-class keys used by limits_dict."""
+    t = ticker.split(".")[0].upper() if "." in ticker else ticker.upper()
+    suffix = ticker.upper().rsplit(".", 1)[-1] if "." in ticker else ""
+
+    if t in _CLASS_CRYPTO or "-USD" in ticker.upper():
+        return "Crypto"
+    if t in _CLASS_COMMODITIES:
+        return "Commodities"
+    if t in _CLASS_BONDS:
+        return "Bonds"
+    # ISIN-pattern bonds from Freedom Finance
+    if t.startswith(("KZ2P", "KZ1P", "XS", "US912")):
+        return "Bonds"
+    if "BOND" in t or "OVD" in t or "FFSPC" in t:
+        return "Bonds"
+    if t in _CLASS_KZ or suffix in ("KZ", "IL") or ticker.upper().endswith(".AIX"):
+        return "Stocks_KZ"
+    if t in _CLASS_ETF:
+        return "GlobalETFs"
+    # Cash-like
+    if t in ("USD", "EUR", "CASH", "RUB", "KZT"):
+        return "Bonds"  # treat cash as bond-like for allocation purposes
+    # Default: US stocks
+    return "Stocks_US"
+
+
+def run_gatekeeper(
+    report: dict,
+    user_limits: dict = None,
+    user_profile: dict = None,
+) -> dict:
     """
     Advisory-only deterministic audit.
 
@@ -32,6 +93,8 @@ def run_gatekeeper(report: dict, user_limits: dict = None) -> dict:
     Args:
         report: Dict from UniversalPortfolioManager.analyze_all()
         user_limits: User-specific limits (or DEFAULT_LIMITS)
+        user_profile: Full profile dict from get_profile() — includes
+                      limits_dict, target_te, benchmark_ticker, etc.
 
     Returns:
         {
@@ -42,6 +105,13 @@ def run_gatekeeper(report: dict, user_limits: dict = None) -> dict:
         }
     """
     limits = {**DEFAULT_LIMITS, **(user_limits or {})}
+
+    # Scale CVaR threshold by profile's target volatility if available.
+    # Aggressive investors accept deeper tail losses.
+    if user_profile and "target_volatility" in user_profile:
+        target_vol = user_profile["target_volatility"]
+        # Scale: Conservative (5%) → -5%, Aggressive (20%) → -8%
+        limits["max_cvar_daily"] = -0.05 * (1 + target_vol)
 
     critical = []
     warnings = []
@@ -120,6 +190,57 @@ def run_gatekeeper(report: dict, user_limits: dict = None) -> dict:
                     f"⚠️ ФУНДАМЕНТАЛ: {ticker} SEC Score = {fscore:.0f}/100. "
                     f"Слабые финансы (маржа, долг или ROE)."
                 )
+
+    # ═══════════════ CHECK 8: Mandate Compliance ═══════════════
+    # Compare actual portfolio weights by asset class against the user's
+    # limits_dict from their approved investment mandate.
+    if user_profile and "limits_dict" in user_profile:
+        mandate_limits = user_profile["limits_dict"]
+
+        # Build actual allocation by asset class
+        actual_alloc: dict[str, float] = {}
+        ticker_col = "Ticker"
+        if ticker_col in df.columns:
+            total_value = 0
+            for _, row in df.iterrows():
+                cv = row.get("Current_Value", 0) or 0
+                total_value += cv
+
+            if total_value > 0:
+                for _, row in df.iterrows():
+                    ticker = row.get(ticker_col, "?")
+                    cv = row.get("Current_Value", 0) or 0
+                    weight_pct = (cv / total_value) * 100
+                    asset_class = _classify_to_asset_key(ticker)
+                    actual_alloc[asset_class] = actual_alloc.get(asset_class, 0) + weight_pct
+
+                for asset_class, (lo, hi) in mandate_limits.items():
+                    actual = actual_alloc.get(asset_class, 0)
+                    if actual > hi + 2:  # 2% tolerance for rounding
+                        critical.append(
+                            f"⛔ МАНДАТ: {asset_class} = {actual:.0f}% "
+                            f"(макс. по мандату: {hi}%). "
+                            f"Портфель нарушает утверждённую стратегию."
+                        )
+                    elif actual < lo - 2 and lo > 0:  # only flag if minimum is meaningful
+                        warnings.append(
+                            f"⚠️ МАНДАТ: {asset_class} = {actual:.0f}% "
+                            f"(мин. по мандату: {lo}%). Недовес класса активов."
+                        )
+
+    # ═══════════════ CHECK 9: Tracking Error vs Target ═══════════════
+    # If the profile has a target_te, compare the actual TE from benchmark
+    # comparison against it. Advisory only — informative, non-blocking.
+    if user_profile and "target_te" in user_profile:
+        target_te = user_profile["target_te"]
+        bm_data = report.get("benchmark_comparison", {})
+        profile_bm = bm_data.get("Профильный бенчмарк", {})
+        actual_te = profile_bm.get("Tracking_Error")
+        if actual_te is not None and actual_te > target_te * 1.5:
+            warnings.append(
+                f"⚠️ TRACKING ERROR: {actual_te:.1%} (целевой: {target_te:.0%}). "
+                f"Портфель значительно отклоняется от бенчмарка мандата."
+            )
 
     # ═══════════════ RESULT (non-blocking) ═══════════════
     passed = len(critical) == 0
