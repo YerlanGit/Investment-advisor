@@ -424,7 +424,7 @@ async def _build_analysis_payload(user_id: int, tier: str) -> dict:
         gate_limits = {
             "max_portfolio_volatility": profile["target_volatility"] * 1.2
         }
-        gate = run_gatekeeper(results, user_limits=gate_limits)
+        gate = run_gatekeeper(results, user_limits=gate_limits, user_profile=profile)
         if not gate["passed"]:
             logger.warning("Gatekeeper нарушения: %s", gate["critical"])
 
@@ -1169,15 +1169,23 @@ async def _run_analysis_background(
             raise
 
         loaded_count = len([c for c in all_data.columns if not all_data[c].isna().all()]) if not all_data.empty else 0
-        # Count unique *requested* tickers (after proxy resolution + factor ETFs).
-        # Multiple portfolio instruments may map to the same proxy (e.g. 4 AIX bonds → LQD.US),
-        # so raw len(risky_tickers) + len(factor_tickers) overcounts.
-        resolved_unique = list(dict.fromkeys(
-            manager.engine.resolve_tickers(risky_tickers)
-            + list(manager.engine.factor_tickers.values())
+
+        # ── Separate portfolio tickers from internal infrastructure ─────────
+        # Factor ETFs (SPY, MTUM, VLUE, etc.) and BENCHMARK_EXTRA (QQQ, AGG, URTH)
+        # are internal MAC3 infrastructure — do NOT show to users.
+        # Users only care about THEIR portfolio tickers.
+        internal_tickers = set(
+            list(manager.engine.factor_tickers.values())
             + manager.engine.BENCHMARK_EXTRA
+        )
+        resolved_portfolio = list(dict.fromkeys(
+            manager.engine.resolve_tickers(risky_tickers)
         ))
-        total_count = len(resolved_unique)
+        portfolio_loaded = len([
+            t for t in resolved_portfolio
+            if t in all_data.columns and not all_data[t].isna().all()
+        ])
+        portfolio_total = len(resolved_portfolio)
 
         if loaded_count == 0:
             await bot.send_message(
@@ -1200,7 +1208,8 @@ async def _run_analysis_background(
             raise RuntimeError("market_data_subscription_required")
 
         # ── Build detailed ticker status message ──────────────────────────
-        lines = [f"✅ Загружено серий: *{loaded_count}/{total_count}*"]
+        # Show only portfolio tickers (exclude factor ETFs + benchmark extras)
+        lines = [f"✅ Загружено серий: *{portfolio_loaded}/{portfolio_total}*"]
 
         # Show proxy-resolved tickers
         proxy_lines = []
@@ -1212,18 +1221,22 @@ async def _run_analysis_background(
             lines.append("\n📎 *Прокси-замены:*")
             lines.extend(proxy_lines)
 
-        # Show retried tickers
+        # Show retried tickers (only portfolio, not internal)
         if history_result.retried:
-            lines.append(f"\n🔄 *Восстановлено retry:* {', '.join(history_result.retried)}")
+            portfolio_retried = [t for t in history_result.retried if t not in internal_tickers]
+            if portfolio_retried:
+                lines.append(f"\n🔄 *Восстановлено retry:* {', '.join(portfolio_retried)}")
 
-        # Show failed tickers with reasons
+        # Show failed tickers with reasons (only portfolio, not internal)
         if history_result.failed:
-            lines.append(f"\n❌ *Не загружены ({len(history_result.failed)}):*")
-            for t, reason in history_result.failed.items():
-                short = reason[:60] + "…" if len(reason) > 60 else reason
-                lines.append(f"  `{t}` — {short}")
-            lines.append("\nℹ️ _Пропущенные оцениваются через факторные индексы_")
-        elif loaded_count == total_count:
+            portfolio_failed = {t: r for t, r in history_result.failed.items() if t not in internal_tickers}
+            if portfolio_failed:
+                lines.append(f"\n❌ *Не загружены ({len(portfolio_failed)}):*")
+                for t, reason in portfolio_failed.items():
+                    short = reason[:60] + "…" if len(reason) > 60 else reason
+                    lines.append(f"  `{t}` — {short}")
+                lines.append("\nℹ️ _Пропущенные оцениваются через факторные индексы_")
+        if portfolio_loaded == portfolio_total:
             lines.append("\n✅ _Все тикеры загружены успешно_")
 
         await bot.send_message(
