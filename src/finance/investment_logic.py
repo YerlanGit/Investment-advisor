@@ -971,9 +971,21 @@ class UniversalPortfolioManager:
             logger.warning("Technicals computation skipped: %s", exc)
             technicals_map = {}
 
+        # ═══════════════ CDS FEED (free layer) ═══════════════
+        # Lazy-init.  When CDS_DISABLED=1 (e.g. unit tests) we skip the feed
+        # entirely.  Failures are caught and the scoring orchestrator falls
+        # back to SEC-only Credit signals.
+        cds_lookup = None
+        if os.getenv("CDS_DISABLED") != "1":
+            try:
+                from finance.cds_feed import CDSFeed, make_lookup
+                cds_lookup = make_lookup(CDSFeed())
+            except Exception as exc:
+                logger.info("CDS feed unavailable, continuing without it: %s", exc)
+                cds_lookup = None
+
         # ═══════════════ 4-PILLAR SCORING (F/V/T/C) ═══════════════
-        # Produces AssetScore per ticker.  CDS lookup left as None for now;
-        # phase 3 will wire it via cds_feed.CDSFeed.
+        # Produces AssetScore per ticker, including CDS signals when available.
         asset_scores: dict = {}
         try:
             from finance.scoring_orchestrator import score_portfolio
@@ -981,7 +993,7 @@ class UniversalPortfolioManager:
                 perf_table = perf,
                 technicals = technicals_map,
                 regime     = regime_reading,
-                cds_lookup = None,
+                cds_lookup = cds_lookup,
             )
             # Materialise the score columns into the perf table for downstream
             # PDF rendering — this is purely additive, no existing column is
@@ -1018,6 +1030,57 @@ class UniversalPortfolioManager:
         except Exception as exc:
             logger.warning("Scoring orchestrator skipped: %s", exc)
 
+        # ═══════════════ BLACK-LITTERMAN TARGETS ═══════════════
+        # Reverse-optimisation prior + score-derived views → posterior
+        # target weights.  Skipped when there's no covariance matrix
+        # (degenerate portfolio) or when all scores are zero.
+        bl_records: list[dict] | None = None
+        try:
+            from finance.black_litterman import black_litterman, views_from_scores
+            if not cov_matrix.empty and asset_scores:
+                bl_tickers = [t for t in cov_matrix.index]
+                if bl_tickers:
+                    P, Q, conf = views_from_scores(
+                        {t: {"total": getattr(s, "total", None)}
+                         for t, s in asset_scores.items()},
+                        bl_tickers,
+                    )
+                    bl_res = black_litterman(
+                        cov              = cov_matrix,
+                        tickers          = bl_tickers,
+                        current_weights  = {t: weights_dict.get(t, 0) for t in bl_tickers},
+                        views_P          = P if P.size else None,
+                        views_Q          = Q if Q.size else None,
+                        view_confidence  = conf if conf.size else None,
+                    )
+                    bl_records = bl_res.as_records()
+        except Exception as exc:
+            logger.warning("Black-Litterman skipped: %s", exc)
+            bl_records = None
+
+        # ═══════════════ ACTION PLAN ═══════════════
+        # Buy zone / Sell target / Stop loss anchored to ATR + SMA + RSI.
+        action_plan_rows: list[dict] = []
+        try:
+            from finance.action_plan import build_action_plan
+            ap_scores = {
+                t: {"action":  s.action,
+                    "total":   s.total,
+                    "hotspot": s.hotspot}
+                for t, s in asset_scores.items()
+            }
+            rows = build_action_plan(
+                perf_table      = perf,
+                asset_scores    = ap_scores,
+                technicals_map  = technicals_map,
+                bl_records      = bl_records,
+                portfolio_value = total_portfolio_value,
+            )
+            action_plan_rows = [r.as_dict() for r in rows]
+        except Exception as exc:
+            logger.warning("Action plan skipped: %s", exc)
+            action_plan_rows = []
+
         return {
             "performance_table": perf,
             "risk_matrix": cov_matrix,
@@ -1043,4 +1106,7 @@ class UniversalPortfolioManager:
                                       "action":       s.action,
                                       "hotspot":      s.hotspot,
                                   } for t, s in asset_scores.items()},
+            # Phase 3 additions
+            "black_litterman":   bl_records,
+            "action_plan":       action_plan_rows,
         }
