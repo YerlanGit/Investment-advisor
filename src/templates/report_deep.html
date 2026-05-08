@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<title>Portfolio Risk &amp; Allocation — Deep Report</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@600&display=swap" rel="stylesheet" />
+{% include "_base.css.html" %}
+</head>
+<body>
+
+<!-- ═════════════════════════════ PAGE 1 — Cover ══════════════════════════ -->
+<div class="page">
+  <div class="header">
+    <div>
+      <div class="brand-wordmark">PORTFOLIO INTELLIGENCE</div>
+      <div class="brand-tagline">Investment Advisory &amp; Risk Analytics — Deep</div>
+    </div>
+    <div class="header-meta">
+      <div class="report-badge">{{ report_type }}</div>
+      <div>Клиент #{{ user_id }}</div>
+      <div>{{ generated_at }}</div>
+      <div style="color: var(--text-3);">Конфиденциально</div>
+    </div>
+  </div>
+
+  {% if data.ai_verdict %}
+  <div class="verdict">
+    <div class="verdict-label">Расширенный вердикт ИИ-агента</div>
+    <div>{{ data.ai_verdict }}</div>
+  </div>
+  {% endif %}
+
+  {% if data.regime %}
+  <div class="regime-line">
+    <div>Текущий рыночный режим: <strong>{{ data.regime.label }}</strong>
+         · уверенность {{ data.regime.confidence }}%</div>
+    <div class="muted">Growth: {{ '%+.3f' | format(data.regime.growth) }}
+         · Cycle: {{ '%+.3f' | format(data.regime.cycle) }}</div>
+  </div>
+  {% endif %}
+
+  <div class="section-title">Ключевые метрики риска (расширенные)</div>
+  <div class="kpi-grid">
+    <div class="kpi-card">
+      <div class="kpi-label">CVaR 95% · 1д</div>
+      <div class="kpi-value neg">{{ data.cvar }}</div>
+      {% if data.cvar_ci %}<div class="kpi-sub">{{ data.cvar_ci }}</div>{% endif %}
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Sharpe / Sortino</div>
+      <div class="kpi-value neut">{{ data.sharpe }}</div>
+      <div class="kpi-sub">Sortino: {{ data.sortino }}</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">VaR 95% · 1д</div>
+      <div class="kpi-value neg">{{ data.var_95_daily }}</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Max Drawdown</div>
+      <div class="kpi-value neg">{{ data.max_drawdown }}</div>
+      <div class="kpi-sub">Vol: {{ data.volatility }}</div>
+    </div>
+  </div>
+
+  <div class="risk-panel">
+    <div class="kpi-label">Совокупный риск-индекс портфеля</div>
+    <div class="risk-track">
+      <div class="risk-fill" style="width: {{ data.risk_pct | default(50) }}%;"></div>
+    </div>
+    <div class="risk-scale">
+      <span>Консервативный</span>
+      <span>Умеренный</span>
+      <span>Агрессивный</span>
+    </div>
+    <div style="font-size: 9.5px; color: var(--text-2); margin-top: 4px;">
+      {{ data.risk_pct }}/100 · {{ data.risk_label }}
+    </div>
+  </div>
+
+  <div class="pnl-summary" style="margin-top:10px;">
+    <div>
+      <div class="label">Total P/L (позиции)</div>
+      <div class="val {{ data.pnl_total_color }}">{{ data.pnl_total_pct }} · {{ data.pnl_total_abs }}</div>
+    </div>
+    {% if data.pnl_best %}<div>
+      <div class="label">Лучшая позиция</div>
+      <div class="val pos">{{ data.pnl_best.ticker }} {{ data.pnl_best.pnl_pct }}</div>
+      <div class="muted">{{ data.pnl_best.pnl_abs }}</div>
+    </div>{% endif %}
+    {% if data.pnl_worst %}<div>
+      <div class="label">Худшая позиция</div>
+      <div class="val neg">{{ data.pnl_worst.ticker }} {{ data.pnl_worst.pnl_pct }}</div>
+      <div class="muted">{{ data.pnl_worst.pnl_abs }}</div>
+    </div>{% endif %}
+    <div>
+      <div class="label">Hotspots</div>
+      <div class="val warn">{{ data.hotspots | length }}</div>
+      <div class="muted">TRC > 20%</div>
+    </div>
+  </div>
+
+  {% if data.hotspots %}
+  <div class="ai-block" style="margin-top:8px;">
+    <strong style="font-size:9px; letter-spacing:0.18em; text-transform:uppercase; color:var(--gold);">Top риск-перегрузки</strong>
+    <ul>{% for h in data.hotspots %}<li>🔥 {{ h }}</li>{% endfor %}</ul>
+  </div>
+  {% endif %}
+
+  <div class="footer"><span>1 / 4 · Investment Advisory © 2026</span><span>Confidential</span></div>
+</div>
+
+<!-- ═══════════════════════ PAGE 2 — Performance & Benchmarks ═════════════ -->
+<div class="page">
+  <div class="section-title">Динамика портфеля vs бенчмарки</div>
+
+  {% if data.equity_curve_svg %}
+  <div style="background:var(--bg-card); border:1px solid var(--border); border-radius:6px; padding:10px;">
+    {{ data.equity_curve_svg | safe }}
+  </div>
+  {% endif %}
+
+  {% if data.scenarios %}
+  <div class="section-title">Information Ratio &amp; Tracking Error</div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr>
+        <th>Бенчмарк</th><th>Excess (ann.)</th><th>TE</th>
+        <th>Information Ratio</th><th>Статус</th>
+      </tr></thead>
+      <tbody>
+        {% for s in data.scenarios %}
+        <tr {% if loop.first %}style="background:var(--bg-card);"{% endif %}>
+          <td><strong>{% if loop.first %}⭐ {% endif %}{{ s.name }}</strong></td>
+          <td class="{{ s.color }}">{{ s.excess }}</td>
+          <td>{{ s.te }}</td>
+          <td>{{ s.ir }}</td>
+          <td>{% if s.beating %}<span class="pill pos">✅ обгоняет</span>{% else %}<span class="pill neg">❌ отстаёт</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  {% if data.factor_radar_svg %}
+  <div class="section-title">Факторное разложение (β)</div>
+  <div style="display:flex; align-items:center; gap:14px; background:var(--bg-card); border:1px solid var(--border); border-radius:6px; padding:10px;">
+    {{ data.factor_radar_svg | safe }}
+    <div class="muted" style="font-size:9.5px; max-width:380px;">
+      Факторные беты получены из факторной регрессии (Ridge α=1.0, EWMA-ковариация
+      с λ≈0.94 + Ledoit-Wolf shrinkage 70/30). Скрытая концентрация выявляется по
+      сонаправленности β нескольких тикеров.
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="footer"><span>2 / 4 · Investment Advisory © 2026</span><span>Source: Quant Engine</span></div>
+</div>
+
+<!-- ═══════════════ PAGE 3 — Scoring & Fundamental Layer ═════════════════ -->
+<div class="page">
+
+  <div class="section-title">4-Pillar Scoring (F · V · T · C — итог −6…+6)</div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr>
+        <th>Тикер</th><th>Fund.</th><th>Val.</th><th>Tech.</th><th>Credit</th><th>Total</th><th>Action</th>
+      </tr></thead>
+      <tbody>
+        {% for r in data.score_breakdown %}
+        <tr>
+          <td><span class="ticker">{{ r.ticker }}</span></td>
+          <td>{{ r.fundamentals }}</td>
+          <td>{{ r.valuations }}</td>
+          <td>{{ r.technicals }}</td>
+          <td>{{ r.credit }}</td>
+          <td><strong>{{ r.total }}</strong></td>
+          <td><span class="pill {{ r.action_color }}">{{ r.action }}</span></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if data.fundamental_layer %}
+  <div class="section-title">Fundamental Layer — SEC EDGAR (10-K FY)</div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr>
+        <th>Тикер</th><th>ROE</th><th>OpM</th><th>D/A</th><th>Rev YoY</th>
+        <th>FCF M.</th><th>Altman-Z</th><th>Zone</th><th>Piot.</th><th>IntCov</th>
+      </tr></thead>
+      <tbody>
+        {% for r in data.fundamental_layer %}
+        <tr>
+          <td><span class="ticker">{{ r.ticker }}</span></td>
+          <td>{{ r.roe }}</td><td>{{ r.op_m }}</td><td>{{ r.dta }}</td>
+          <td>{{ r.rev_g }}</td><td>{{ r.fcf_m }}</td>
+          <td>{{ r.altman_z }}</td>
+          <td>
+            {% if r.altman_zone == 'Safe'     %}<span class="pill pos">Safe</span>
+            {% elif r.altman_zone == 'Grey'   %}<span class="pill neut">Grey</span>
+            {% elif r.altman_zone == 'Distress' %}<span class="pill neg">Distress</span>
+            {% else %}{{ r.altman_zone }}{% endif %}
+          </td>
+          <td>{{ r.piotroski }}/9</td>
+          <td>{{ r.int_cov }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  {% if data.bl_records %}
+  <div class="section-title">Black-Litterman — целевые веса</div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr>
+        <th>Тикер</th><th>Текущий вес</th><th>Целевой вес</th><th>Δw, п.п.</th>
+      </tr></thead>
+      <tbody>
+        {% for r in data.bl_records %}
+        <tr>
+          <td><span class="ticker">{{ r.ticker }}</span></td>
+          <td>{{ r.current_w }}</td>
+          <td>{{ r.target_w }}</td>
+          <td class="{{ r.color }}"><strong>{{ r.delta_w_pp }}</strong></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  <div class="footer"><span>3 / 4 · Investment Advisory © 2026</span><span>Source: SEC EDGAR · CDS feed · BL engine</span></div>
+</div>
+
+<!-- ════════════════════ PAGE 4 — Action Plan & Sources ══════════════════ -->
+<div class="page">
+
+  <div class="section-title">Action Plan — уровни Buy / Sell / Stop</div>
+  <div class="muted" style="margin-bottom:6px; font-size:9.5px;">
+    Все уровни рассчитаны из ATR (Wilder RMA) + SMA50/100/200 + RSI(14) + MACD.
+    Никаких внешних таргет-прайсов. Цены продаж сглажены к 52w-high.
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr>
+        <th>Тикер</th><th>Action</th><th>Δw, п.п.</th><th>Qty Δ</th>
+        <th>Buy zone</th><th>Sell target</th><th>Stop loss</th><th>Reason</th>
+      </tr></thead>
+      <tbody>
+        {% for r in data.action_plan %}
+        <tr>
+          <td><span class="ticker">{{ r.ticker }}</span></td>
+          <td><span class="pill {{ r.action_color }}">{{ r.action }}</span></td>
+          <td><strong>{{ r.delta_w_pp }}</strong></td>
+          <td>{{ r.qty_delta }}</td>
+          <td class="muted">{{ r.buy_zone }}{% if r.sell_zone != '—' %} / sell {{ r.sell_zone }}{% endif %}</td>
+          <td class="pos">{{ r.take_target }}</td>
+          <td class="neg">{{ r.stop_loss }}</td>
+          <td class="muted" style="font-size:9px;">{{ r.reason }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if data.ai_action_text %}
+  <div class="section-title">Комментарий ИИ-агента к Action Plan</div>
+  <div class="ai-block">{{ data.ai_action_text }}</div>
+  {% endif %}
+
+  {% if data.ai_bullets %}
+  <div class="section-title">Краткие выводы ИИ-агента</div>
+  <div class="ai-block">
+    <ul>{% for b in data.ai_bullets %}<li>{{ b }}</li>{% endfor %}</ul>
+  </div>
+  {% endif %}
+
+  <div class="section-title">CoVe — источники цифр</div>
+  <div class="ai-block" style="font-size:9px;">
+    Vol / CVaR / TE / IR / Max DD: <strong>[Quant Engine · 730d daily · Wilder RMA · EWMA λ≈0.94 ⊕ Ledoit-Wolf]</strong><br>
+    Fundamental Z-scores: <strong>[SEC EDGAR · 10-K FY · sector-normalised]</strong><br>
+    Altman-Z, Piotroski-F, IntCov: <strong>[SEC EDGAR · CompanyFacts JSON]</strong><br>
+    CDS spreads: <strong>[FRED HY proxy · WGB sovereign · QualityGate verified]</strong><br>
+    Regime: <strong>[Engine: Growth/Cycle factor returns]</strong><br>
+    Action levels: <strong>[Engine: ATR Wilder RMA + SMA + RSI + MACD]</strong>
+  </div>
+
+  <div class="footer">
+    <span>4 / 4 · Investment Advisory © 2026 — Не является ИИИ.</span>
+    <span>Advisory only. Документ создан автоматически.</span>
+  </div>
+</div>
+
+</body>
+</html>
