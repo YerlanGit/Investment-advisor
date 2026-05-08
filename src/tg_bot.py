@@ -304,9 +304,17 @@ def _safe_float(val, default: float = 0.0) -> float:
 
 def _build_pdf_payload(results: dict, tier: str) -> dict:
     """
-    Map UniversalPortfolioManager.analyze_all() output to the schema
-    expected by report.html / MOCK_DATA:
-      cvar, sharpe, max_drawdown, risk_pct, assets, scenarios (deep only).
+    Map UniversalPortfolioManager.analyze_all() output to the PDF template schema.
+
+    Phase 1 changes (truth-in-labelling + position-to-date P/L):
+      • The payload key 'max_drawdown' previously held VaR_95_Daily — a
+        misnomer that confused users.  Renamed to 'var_95_daily' (matching
+        the template's on-screen label).  The 'max_drawdown' key now carries
+        the engine's realised peak-to-trough drawdown ('Max_Drawdown').
+      • Per-asset P/L since position entry (absolute and %) added.
+      • Portfolio-level P/L since position entry added.
+      • Annualised excess return ('Excess_Return_Ann') is now used for
+        scenario rows so IR and the displayed excess are on the same scale.
     """
     metrics    = results.get("portfolio_metrics") or {}
     perf_df    = results.get("performance_table")
@@ -315,41 +323,72 @@ def _build_pdf_payload(results: dict, tier: str) -> dict:
     cvar_raw   = _safe_float(metrics.get("CVaR_95_Daily"),        0.0)
     sharpe_raw = _safe_float(metrics.get("Sharpe_Ratio"),         float("nan"))
     var_raw    = _safe_float(metrics.get("VaR_95_Daily"),         0.0)
+    mdd_raw    = _safe_float(metrics.get("Max_Drawdown"),         0.0)
     vol_raw    = _safe_float(metrics.get("Total_Volatility_Ann"), 0.0)
 
-    cvar_str   = f"{cvar_raw * 100:.1f}%"
-    sharpe_str = f"{sharpe_raw:.2f}" if not math.isnan(sharpe_raw) else "—"
-    max_dd_str = f"{var_raw * 100:.1f}%"
-    risk_pct   = min(100, max(0, int(vol_raw / 0.40 * 100)))
+    cvar_str         = f"{cvar_raw * 100:.1f}%"
+    sharpe_str       = f"{sharpe_raw:.2f}" if not math.isnan(sharpe_raw) else "—"
+    var_95_daily_str = f"{var_raw * 100:.1f}%"
+    max_drawdown_str = f"{mdd_raw * 100:.1f}%"
+    risk_pct         = min(100, max(0, int(vol_raw / 0.40 * 100)))
+
+    # ── Aggregate P/L since position entry ─────────────────────────────────
+    total_pnl  = 0.0
+    total_cost = 0.0
+    if perf_df is not None and not perf_df.empty:
+        if "PnL" in perf_df.columns:
+            total_pnl = float(perf_df["PnL"].fillna(0).sum())
+        if "Total_Cost" in perf_df.columns:
+            total_cost = float(perf_df["Total_Cost"].fillna(0).sum())
+    total_return_pct = (total_pnl / total_cost) if total_cost > 0 else 0.0
 
     assets: list[dict] = []
     if perf_df is not None and not perf_df.empty:
         for _, row in perf_df.iterrows():
-            ticker    = str(row.get("Ticker", "—"))
-            cur_val   = _safe_float(row.get("Current_Value"), 0.0)
+            ticker     = str(row.get("Ticker", "—"))
+            cur_val    = _safe_float(row.get("Current_Value"), 0.0)
             weight_pct = cur_val / total_val * 100
-            euler     = _safe_float(row.get("Euler_Risk_Contribution_Pct"), 0.0)
+            euler      = _safe_float(row.get("Euler_Risk_Contribution_Pct"), 0.0)
+            pnl_abs    = _safe_float(row.get("PnL"), 0.0)
+            ret_pct    = _safe_float(row.get("Return_Pct"), 0.0)
             assets.append({
                 "ticker":      ticker,
                 "weight":      f"{weight_pct:.1f}%",
                 "asset_class": _classify_asset(ticker),
                 "euler_risk":  f"{euler:.1f}%",
+                "pnl_pct":     f"{ret_pct * 100:+.1f}%",   # P/L since entry, %
+                "pnl_abs":     f"{pnl_abs:+,.0f}",         # P/L since entry, $
+                "pnl_color":   "pos" if ret_pct >= 0 else "neg",
             })
 
     payload: dict = {
-        "cvar":         cvar_str,
-        "sharpe":       sharpe_str,
-        "max_drawdown": max_dd_str,
-        "risk_pct":     risk_pct,
-        "assets":       assets or MOCK_DATA["assets"],  # fallback if engine returned nothing
+        # KPI strip
+        "cvar":            cvar_str,
+        "sharpe":          sharpe_str,
+        "var_95_daily":    var_95_daily_str,    # canonical key
+        "max_drawdown":    max_drawdown_str,    # now real MaxDD
+        "risk_pct":        risk_pct,
+        # Aggregate P/L since position entry
+        "pnl_total_abs":   f"{total_pnl:+,.0f}",
+        "pnl_total_pct":   f"{total_return_pct * 100:+.1f}%",
+        "pnl_total_color": "pos" if total_return_pct >= 0 else "neg",
+        # Holdings
+        "assets":          assets or MOCK_DATA["assets"],
     }
 
     if tier == "deep":
         bm_data   = results.get("benchmark_comparison") or {}
         scenarios = []
         for bm_name, bm in bm_data.items():
-            excess  = _safe_float(bm.get("Excess_Return"), 0.0)
-            pnl_str = f"+{excess*100:.1f}%" if excess >= 0 else f"{excess*100:.1f}%"
+            # Prefer the annualised excess (consistent scale with IR / TE).
+            # Fall back to period total only if annualised is unavailable
+            # (legacy engine output / first-run before refresh).
+            excess_ann = bm.get("Excess_Return_Ann")
+            if excess_ann is None:
+                excess_ann = _safe_float(bm.get("Excess_Return"), 0.0)
+            else:
+                excess_ann = _safe_float(excess_ann, 0.0)
+            pnl_str = f"+{excess_ann*100:.1f}%" if excess_ann >= 0 else f"{excess_ann*100:.1f}%"
             ir      = _safe_float(bm.get("Information_Ratio"), 0.0)
             beat    = "✅ Обыгрывает" if bm.get("Beating_Benchmark") else "❌ Отстаёт"
             scenarios.append({

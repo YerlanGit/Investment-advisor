@@ -352,7 +352,7 @@
     </div>
     <div class="kpi-card">
       <div class="kpi-label">VaR 95% · 1д</div>
-      <div class="kpi-value neg">{{ data.max_drawdown }}</div>
+      <div class="kpi-value neg">{{ data.var_95_daily | default(data.max_drawdown) }}</div>
     </div>
   </div>
 

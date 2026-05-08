@@ -21,16 +21,25 @@ TEMPLATE_DIR = Path(__file__).parent / "templates"
 OUTPUT_DIR   = Path(__file__).parent.parent / "data" / "user_reports"
 
 MOCK_DATA: dict = {
-    "cvar":         "-5.2%",
-    "sharpe":       "1.34",
-    "max_drawdown": "-12.8%",
-    "risk_pct":     62,
+    "cvar":             "-5.2%",
+    "sharpe":           "1.34",
+    "var_95_daily":     "-2.4%",      # quantile of 1-day return distribution
+    "max_drawdown":     "-12.8%",     # realised peak-to-trough on equity curve
+    "risk_pct":         62,
+    "pnl_total_abs":    "+1,245",
+    "pnl_total_pct":    "+5.8%",
+    "pnl_total_color":  "pos",
     "assets": [
-        {"ticker": "AAPL",  "weight": "20%", "asset_class": "Акции США",    "euler_risk": "18.4%"},
-        {"ticker": "KSPI",  "weight": "15%", "asset_class": "Акции KZ",     "euler_risk": "22.1%"},
-        {"ticker": "BTC",   "weight": "10%", "asset_class": "Крипто",        "euler_risk": "34.7%"},
-        {"ticker": "GOLD",  "weight": "25%", "asset_class": "Сырьё",         "euler_risk": "8.2%"},
-        {"ticker": "CASH",  "weight": "30%", "asset_class": "Ден. средства", "euler_risk": "0.0%"},
+        {"ticker": "AAPL",  "weight": "20%", "asset_class": "Акции США",    "euler_risk": "18.4%",
+         "pnl_pct": "+18.2%", "pnl_abs": "+2,145", "pnl_color": "pos"},
+        {"ticker": "KSPI",  "weight": "15%", "asset_class": "Акции KZ",     "euler_risk": "22.1%",
+         "pnl_pct": "-3.4%",  "pnl_abs": "-320",   "pnl_color": "neg"},
+        {"ticker": "BTC",   "weight": "10%", "asset_class": "Крипто",        "euler_risk": "34.7%",
+         "pnl_pct": "+24.6%", "pnl_abs": "+1,860", "pnl_color": "pos"},
+        {"ticker": "GOLD",  "weight": "25%", "asset_class": "Сырьё",         "euler_risk": "8.2%",
+         "pnl_pct": "+6.1%",  "pnl_abs": "+540",   "pnl_color": "pos"},
+        {"ticker": "CASH",  "weight": "30%", "asset_class": "Ден. средства", "euler_risk": "0.0%",
+         "pnl_pct": "0.0%",   "pnl_abs": "0",      "pnl_color": "pos"},
     ],
     "scenarios": [
         {"name": "Профильный бенчмарк", "probability": "IR: 0.84", "pnl": "+4.1%",  "driver": "✅ Обыгрывает бенчмарк"},
