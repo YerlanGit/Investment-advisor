@@ -18,6 +18,7 @@ import asyncio
 import logging
 import math
 import os
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -65,6 +66,9 @@ from finance.investment_logic import UniversalPortfolioManager
 from finance.security import SecureVault
 from agent.gatekeeper import run_gatekeeper
 from pdf_generator import MOCK_DATA, generate_portfolio_pdf
+from pdf_payload import build_payload as _build_v2_payload, TIER_BASE, TIER_DEEP
+from pdf_charts import equity_curve_svg, factor_radar_svg
+from ai_narrative import generate_narrative
 from profile_manager import (
     ASSET_DISPLAY, ASSET_KEYS, BENCHMARK_LIST,
     PROFILE_BENCH_TICKER, RiskProfileManager,
@@ -294,6 +298,85 @@ def _format_portfolio_preview(df) -> str:
 
 # ── PDF payload mapping ───────────────────────────────────────────────────────
 
+def _build_equity_curve_svg(results: dict) -> str:
+    """Inline equity-curve SVG: portfolio vs profile benchmark daily log returns."""
+    try:
+        history = results.get("history_result")
+        bm_data = results.get("benchmark_comparison") or {}
+        # Pick the profile benchmark when present; otherwise the first row.
+        bm_name = "Профильный бенчмарк" if "Профильный бенчмарк" in bm_data else \
+                  next(iter(bm_data), None)
+        if bm_name is None or history is None or getattr(history, "data", None) is None:
+            return ""
+        prices = history.data
+        # Approximate portfolio daily return as the cap-weighted close-return
+        # of risky names — exact stream lives inside the engine and is not
+        # surfaced; this is a faithful approximation for the chart only.
+        perf = results.get("performance_table")
+        if perf is None or perf.empty:
+            return ""
+        weights_dict = {}
+        total_val = float(results.get("total_value") or 1.0)
+        for _, row in perf.iterrows():
+            t = str(row.get("Ticker"))
+            cv = float(row.get("Current_Value") or 0.0)
+            weights_dict[t] = cv / total_val if total_val else 0.0
+        # Resolved-ticker columns we have prices for
+        import numpy as _np
+        cols = []
+        weights = []
+        for t, w in weights_dict.items():
+            if w <= 0:
+                continue
+            if t in prices.columns:
+                cols.append(t); weights.append(w)
+            else:
+                # Look for SYM.US match
+                for c in prices.columns:
+                    if c.split(".")[0] == t.split(".")[0]:
+                        cols.append(c); weights.append(w); break
+        if not cols:
+            return ""
+        sub = prices[cols].dropna()
+        port_log = _np.log(sub / sub.shift(1)).dropna().values @ _np.array(weights)
+        bm_ticker_map = {
+            "Профильный бенчмарк": None,  # filled below
+            "S&P 500": "SPY.US", "Nasdaq 100": "QQQ.US",
+            "Russell 2000": "IWM.US", "MSCI EM": "EEM.US", "EM Bonds": "EMB.US",
+        }
+        bm_col = bm_ticker_map.get(bm_name)
+        bm_log = None
+        if bm_col and bm_col in prices.columns:
+            import numpy as _np
+            bm_series = prices[bm_col].dropna()
+            bm_log = _np.log(bm_series / bm_series.shift(1)).dropna().values
+        return equity_curve_svg(port_log, bm_log)
+    except Exception as exc:
+        logger.warning("equity_curve_svg build failed: %s", exc)
+        return ""
+
+
+def _build_factor_radar_svg(results: dict) -> str:
+    """Inline factor-radar SVG built from cap-weighted Beta_* exposures."""
+    try:
+        perf = results.get("performance_table")
+        if perf is None or perf.empty:
+            return ""
+        beta_cols = [c for c in perf.columns if str(c).startswith("Beta_")]
+        if not beta_cols:
+            return ""
+        total_val = float(results.get("total_value") or 1.0)
+        weights = (perf["Current_Value"].fillna(0).astype(float) / total_val).values
+        betas: dict[str, float] = {}
+        for col in beta_cols:
+            vals = perf[col].fillna(0).astype(float).values
+            betas[col.replace("Beta_", "")] = float((vals * weights).sum())
+        return factor_radar_svg(betas)
+    except Exception as exc:
+        logger.warning("factor_radar_svg build failed: %s", exc)
+        return ""
+
+
 def _safe_float(val, default: float = 0.0) -> float:
     try:
         f = float(val)
@@ -304,18 +387,26 @@ def _safe_float(val, default: float = 0.0) -> float:
 
 def _build_pdf_payload(results: dict, tier: str) -> dict:
     """
-    Map UniversalPortfolioManager.analyze_all() output to the PDF template schema.
+    Build the PDF payload from analyze_all() output.
 
-    Phase 1 changes (truth-in-labelling + position-to-date P/L):
-      • The payload key 'max_drawdown' previously held VaR_95_Daily — a
-        misnomer that confused users.  Renamed to 'var_95_daily' (matching
-        the template's on-screen label).  The 'max_drawdown' key now carries
-        the engine's realised peak-to-trough drawdown ('Max_Drawdown').
-      • Per-asset P/L since position entry (absolute and %) added.
-      • Portfolio-level P/L since position entry added.
-      • Annualised excess return ('Excess_Return_Ann') is now used for
-        scenario rows so IR and the displayed excess are on the same scale.
+    v2 (default): delegates to pdf_payload.build_payload — produces the rich
+    schema consumed by report_basic.html (2pp) and report_deep.html (4pp),
+    enriched with SVG charts and an AI narrative.
+
+    v1 (legacy, REPORT_VERSION=v1 env): retains the old shape so the legacy
+    report.html keeps rendering without code changes elsewhere.
     """
+    if os.getenv("REPORT_VERSION", "v2").lower() != "v1":
+        # v2 — light theme, basic 2pp / deep 4pp.
+        ai_summary = generate_narrative(results, tier=tier)
+        payload    = _build_v2_payload(results, tier, ai_summary=ai_summary)
+        # Inline SVGs (deep tier only — basic stays under 2 pages without them).
+        if tier == TIER_DEEP:
+            payload["equity_curve_svg"] = _build_equity_curve_svg(results)
+            payload["factor_radar_svg"] = _build_factor_radar_svg(results)
+        return payload
+
+    # ── v1 legacy fallback ──────────────────────────────────────────────────
     metrics    = results.get("portfolio_metrics") or {}
     perf_df    = results.get("performance_table")
     total_val  = _safe_float(results.get("total_value"), 1.0) or 1.0
@@ -982,18 +1073,25 @@ async def _send_pdf(
     payload: dict | None = None,
 ) -> None:
     report_type = TIER_LABEL[tier]
-    pdf_path    = await generate_portfolio_pdf(payload, user_id=user_id, report_type=report_type)
+    pdf_path    = await generate_portfolio_pdf(
+        payload, user_id=user_id, report_type=report_type, tier=tier,
+    )
 
+    today_str = datetime.now().strftime("%Y-%m-%d")
     with open(pdf_path, "rb") as fh:
-        doc = BufferedInputFile(fh.read(), filename=f"RAMP_Report_{user_id}.pdf")
+        doc = BufferedInputFile(
+            fh.read(),
+            filename=f"Portfolio_Report_{user_id}_{today_str}.pdf",
+        )
 
     await bot.send_document(
         chat_id,
         document=doc,
         caption=(
             f"📄 *{report_type}* готов.\n\n"
-            "Данный отчёт сформирован на основе институциональных моделей рисков "
-            "(MAC3, Euler Decomposition, CVaR). Помните: штурвал всегда у вас."
+            "Отчёт сформирован институциональным риск-движком "
+            "(Euler Decomposition · Bootstrap CVaR · 4-pillar Scoring · "
+            "Black-Litterman). Штурвал всегда у вас."
         ),
         parse_mode=ParseMode.MARKDOWN,
     )

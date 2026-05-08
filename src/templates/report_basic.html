@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<title>Portfolio Risk &amp; Allocation Report</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@600&display=swap" rel="stylesheet" />
+{% include "_base.css.html" %}
+</head>
+<body>
+
+<!-- ═══════════════════════════════ PAGE 1 ════════════════════════════════ -->
+<div class="page">
+
+  <div class="header">
+    <div>
+      <div class="brand-wordmark">PORTFOLIO INTELLIGENCE</div>
+      <div class="brand-tagline">Investment Advisory &amp; Risk Analytics</div>
+    </div>
+    <div class="header-meta">
+      <div class="report-badge">{{ report_type }}</div>
+      <div>Клиент #{{ user_id }}</div>
+      <div>{{ generated_at }}</div>
+      <div style="color: var(--text-3);">Конфиденциально</div>
+    </div>
+  </div>
+
+  {% if data.ai_verdict %}
+  <div class="verdict">
+    <div class="verdict-label">Вердикт ИИ-агента</div>
+    <div>{{ data.ai_verdict }}</div>
+  </div>
+  {% endif %}
+
+  {% if data.regime %}
+  <div class="regime-line">
+    <div>Текущий рыночный режим: <strong>{{ data.regime.label }}</strong>
+         · уверенность {{ data.regime.confidence }}%</div>
+    <div class="muted">Growth axis: {{ '%+.3f' | format(data.regime.growth) }}
+         · Cycle axis: {{ '%+.3f' | format(data.regime.cycle) }}</div>
+  </div>
+  {% endif %}
+
+  <div class="section-title">Ключевые метрики риска</div>
+  <div class="kpi-grid">
+    <div class="kpi-card">
+      <div class="kpi-label">CVaR 95% · 1д</div>
+      <div class="kpi-value neg">{{ data.cvar }}</div>
+      {% if data.cvar_ci %}<div class="kpi-sub">{{ data.cvar_ci }}</div>{% endif %}
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Sharpe Ratio</div>
+      <div class="kpi-value neut">{{ data.sharpe }}</div>
+      <div class="kpi-sub">Sortino: {{ data.sortino }}</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">VaR 95% · 1д</div>
+      <div class="kpi-value neg">{{ data.var_95_daily }}</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Max Drawdown</div>
+      <div class="kpi-value neg">{{ data.max_drawdown }}</div>
+      <div class="kpi-sub">Vol: {{ data.volatility }}</div>
+    </div>
+  </div>
+
+  <div class="risk-panel">
+    <div class="kpi-label">Совокупный риск-индекс портфеля</div>
+    <div class="risk-track">
+      <div class="risk-fill" style="width: {{ data.risk_pct | default(50) }}%;"></div>
+    </div>
+    <div class="risk-scale">
+      <span>Консервативный</span>
+      <span>Умеренный</span>
+      <span>Агрессивный</span>
+    </div>
+    <div style="font-size: 9.5px; color: var(--text-2); margin-top: 4px;">
+      {{ data.risk_pct }}/100 · {{ data.risk_label }}
+      <span class="muted">(0.4·Vol + 0.4·|CVaR| + 0.2·max TRC)</span>
+    </div>
+  </div>
+
+  {% if data.hotspots %}
+  <div class="section-title">Top-3 риск-перегрузки</div>
+  <div class="ai-block">
+    <ul>
+      {% for h in data.hotspots %}
+      <li>🔥 {{ h }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  <div class="footer">
+    <span>1 / 2 · Investment Advisory © 2026 — Конфиденциально.</span>
+    <span>Не является ИИИ. Advisory only.</span>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════ PAGE 2 ════════════════════════════════ -->
+<div class="page">
+
+  <div class="section-title">Структура портфеля и P/L по позициям</div>
+
+  <div class="pnl-summary">
+    <div>
+      <div class="label">Total P/L (с момента входа)</div>
+      <div class="val {{ data.pnl_total_color }}">{{ data.pnl_total_pct }} · {{ data.pnl_total_abs }}</div>
+    </div>
+    {% if data.pnl_best %}
+    <div>
+      <div class="label">Лучшая позиция</div>
+      <div class="val pos">{{ data.pnl_best.ticker }} {{ data.pnl_best.pnl_pct }}</div>
+      <div class="muted">{{ data.pnl_best.pnl_abs }}</div>
+    </div>
+    {% endif %}
+    {% if data.pnl_worst %}
+    <div>
+      <div class="label">Худшая позиция</div>
+      <div class="val neg">{{ data.pnl_worst.ticker }} {{ data.pnl_worst.pnl_pct }}</div>
+      <div class="muted">{{ data.pnl_worst.pnl_abs }}</div>
+    </div>
+    {% endif %}
+    <div>
+      <div class="label">Композит-риск</div>
+      <div class="val neut">{{ data.risk_pct }}/100</div>
+      <div class="muted">{{ data.risk_label }}</div>
+    </div>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th style="width:4%">#</th>
+          <th>Тикер</th>
+          <th>Класс</th>
+          <th>Вес</th>
+          <th>TRC</th>
+          <th>ATR</th>
+          <th>P/L Pos</th>
+          <th>Score</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for a in data.assets %}
+        <tr {% if a.hotspot %}class="hot"{% endif %}>
+          <td class="muted">{{ loop.index }}</td>
+          <td><span class="ticker">{{ a.ticker }}</span>{% if a.hotspot %} 🔥{% endif %}</td>
+          <td class="muted">{{ a.asset_class }}</td>
+          <td>{{ a.weight }}</td>
+          <td>{{ a.euler_risk }}</td>
+          <td class="muted">{{ a.atr_pct }}</td>
+          <td class="{{ a.pnl_color }}">{{ a.pnl_pct }}<br><span class="muted" style="font-size:9px;">{{ a.pnl_abs }}</span></td>
+          <td class="{{ a.score_color }}">{{ a.total_score }}</td>
+          <td><span class="pill {{ a.action_color }}">{{ a.action }}</span></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if data.sectors %}
+  <div class="section-title">Секторное распределение</div>
+  <div>
+    {% for s in data.sectors %}
+    <div class="sector-bar">
+      <div class="sector-bar-name">{{ s.name }}</div>
+      <div class="sector-bar-track">
+        <div class="sector-bar-fill" style="width: {{ [s.weight_pct, 100] | min }}%;"></div>
+      </div>
+      <div class="sector-bar-pct">{{ s.weight_str }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if data.ai_bullets %}
+  <div class="section-title">Краткие выводы ИИ-агента</div>
+  <div class="ai-block">
+    <ul>
+      {% for b in data.ai_bullets %}
+      <li>{{ b }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  <div class="footer">
+    <span>2 / 2 · Investment Advisory © 2026</span>
+    <span>Источники: Quant Engine · SEC EDGAR · Tradernet · Regime · CDS feed</span>
+  </div>
+</div>
+
+</body>
+</html>
