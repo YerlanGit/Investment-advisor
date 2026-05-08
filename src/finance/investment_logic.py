@@ -415,13 +415,26 @@ class MAC3RiskEngine:
         
         var_95 = np.percentile(port_returns_daily, 5) if len(port_returns_daily)>0 else 0
         cvar_95 = port_returns_daily[port_returns_daily <= var_95].mean() if len(port_returns_daily)>0 else 0
-        
+
+        # Real Max Drawdown (peak-to-trough on equity curve).
+        # port_returns_daily are daily LOG returns → equity curve = exp(cumsum).
+        # MaxDD ≠ VaR_95: VaR is a 1-day quantile, MaxDD is the worst peak-to-trough
+        # of the realised equity path. Both are needed for a complete risk picture.
+        if len(port_returns_daily) > 0:
+            eq_curve     = np.exp(np.cumsum(port_returns_daily))
+            running_max  = np.maximum.accumulate(eq_curve)
+            drawdowns    = eq_curve / running_max - 1.0
+            max_drawdown = float(drawdowns.min())
+        else:
+            max_drawdown = 0.0
+
         portfolio_metrics = {
             "Total_Volatility_Ann": port_volatility,
             "Sharpe_Ratio": (ann_return - self.current_rfr_annual) / port_volatility if port_volatility > 0 else np.nan,
             "Sortino_Ratio": (ann_return - self.current_rfr_annual) / downside_vol if downside_vol > 0 else np.nan,
             "VaR_95_Daily": var_95,
             "CVaR_95_Daily": cvar_95,
+            "Max_Drawdown": max_drawdown,           # NEW: realised peak-to-trough drawdown
             "Positive_Days_Pct": (port_returns_daily > 0).mean() * 100 if len(port_returns_daily)>0 else 0
         }
 
@@ -459,17 +472,19 @@ class MAC3RiskEngine:
                         (high - close_prev).abs(),
                         (low - close_prev).abs(),
                     ], axis=1).max(axis=1)
-                    # Wilder’s EMA (equivalent to ewm with span=period)
-                    atr = tr.ewm(span=period, adjust=False).mean().iloc[-1]
+                    # Wilder's RMA (α = 1/period). NOT pandas span (which gives
+                    # α = 2/(span+1) — that's EMA, ~2× faster than Wilder, and
+                    # would under-smooth True Range. SEC 34-105226 / Wilder 1978.
+                    atr = tr.ewm(alpha=1.0 / period, adjust=False).mean().iloc[-1]
                     last_close = ohlc['Close'].iloc[-1]
                     atr_pct = (atr / last_close) * 100 if last_close > 0 else 0
                     atr_results[orig] = {'ATR_Absolute': atr, 'ATR_Pct': atr_pct}
                     continue
 
-            # Fallback: Close-only ATR approximation
+            # Fallback: Close-only ATR approximation (Wilder RMA on |ΔClose|)
             prices = data[res]
             daily_range = prices.diff().abs()
-            atr = daily_range.rolling(window=period).mean().iloc[-1]
+            atr = daily_range.ewm(alpha=1.0 / period, adjust=False).mean().iloc[-1]
             atr_pct = (atr / prices.iloc[-1]) * 100 if prices.iloc[-1] > 0 else 0
             atr_results[orig] = {'ATR_Absolute': atr, 'ATR_Pct': atr_pct}
 
@@ -734,29 +749,45 @@ class UniversalPortfolioManager:
                                                   if self.engine.resolve_tickers([t])[0] in all_data.columns])
                         if len(risky_weights) == port_daily_returns.shape[1]:
                             port_daily = port_daily_returns.values @ risky_weights
-                            
-                            # Выравниваем длины
-                            min_len = min(len(port_daily), len(bm_daily))
-                            tracking_diff = port_daily[-min_len:] - bm_daily.values[-min_len:]
-                            tracking_error = np.std(tracking_diff) * np.sqrt(self.engine.trading_days)
-                            
-                            # Information Ratio = (Rp - Rb) / TE
-                            excess_ann = (port_return - bm_return)
-                            info_ratio = excess_ann / tracking_error if tracking_error > 0 else 0
+
+                            # Align lengths
+                            min_len            = min(len(port_daily), len(bm_daily))
+                            port_daily_aligned = port_daily[-min_len:]
+                            bm_daily_aligned   = bm_daily.values[-min_len:]
+                            tracking_diff      = port_daily_aligned - bm_daily_aligned
+                            tracking_error     = np.std(tracking_diff) * np.sqrt(self.engine.trading_days)
+
+                            # Geometric-annualised returns on the SAME aligned window.
+                            # Previously: excess_ann = (port_return - bm_return) which
+                            # mixed period-return (~2y) with annualised TE → IR scale bug.
+                            # Now both numerator and denominator are annualised consistently.
+                            port_ann_return = float(np.exp(np.mean(port_daily_aligned) * self.engine.trading_days) - 1)
+                            bm_ann_return   = float(np.exp(np.mean(bm_daily_aligned)   * self.engine.trading_days) - 1)
+                            excess_ann      = port_ann_return - bm_ann_return
+                            info_ratio      = excess_ann / tracking_error if tracking_error > 0 else 0
                         else:
-                            tracking_error = None
-                            info_ratio = None
+                            tracking_error  = None
+                            info_ratio      = None
+                            excess_ann      = None
+                            port_ann_return = None
+                            bm_ann_return   = None
                     else:
-                        tracking_error = None
-                        info_ratio = None
-                    
+                        tracking_error  = None
+                        info_ratio      = None
+                        excess_ann      = None
+                        port_ann_return = None
+                        bm_ann_return   = None
+
                     benchmark_results[bm_name] = {
-                        "Benchmark_Return": bm_return,
-                        "Portfolio_Return": port_return,
-                        "Excess_Return": port_return - bm_return,
-                        "Tracking_Error": tracking_error,
-                        "Information_Ratio": info_ratio,
-                        "Beating_Benchmark": port_return > bm_return
+                        "Benchmark_Return":     bm_return,                    # period total (display)
+                        "Portfolio_Return":     port_return,                  # period total (display)
+                        "Excess_Return":        port_return - bm_return,      # period total (display)
+                        "Portfolio_Ann_Return": port_ann_return,              # NEW: annualised, aligned w/ TE
+                        "Benchmark_Ann_Return": bm_ann_return,                # NEW
+                        "Excess_Return_Ann":    excess_ann,                   # NEW: annualised excess (for IR)
+                        "Tracking_Error":       tracking_error,
+                        "Information_Ratio":    info_ratio,
+                        "Beating_Benchmark":    port_return > bm_return,
                     }
 
         # Sector exposure analysis
