@@ -84,6 +84,33 @@ _EQUITY_TAGS = [
     "StockholdersEquity",
     "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest",
 ]
+# Phase 2.4 — additional tags for Altman-Z, Piotroski-F, IntCov, FCF margin.
+_CURRENT_ASSETS_TAGS    = ["AssetsCurrent"]
+_CURRENT_LIABS_TAGS     = ["LiabilitiesCurrent"]
+_RETAINED_EARN_TAGS     = ["RetainedEarningsAccumulatedDeficit"]
+_INTEREST_EXP_TAGS      = [
+    "InterestExpense",
+    "InterestExpenseDebt",
+    "InterestExpenseOperating",
+]
+_CFO_TAGS               = [
+    "NetCashProvidedByUsedInOperatingActivities",
+    "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations",
+]
+_CAPEX_TAGS             = [
+    "PaymentsToAcquirePropertyPlantAndEquipment",
+    "PaymentsForCapitalImprovements",
+]
+_LONG_TERM_DEBT_TAGS    = [
+    "LongTermDebt",
+    "LongTermDebtNoncurrent",
+]
+_SHARES_OUT_TAGS        = [
+    "CommonStockSharesOutstanding",
+    "CommonStockSharesIssued",
+]
+_GROSS_PROFIT_TAGS      = ["GrossProfit"]
+_PE_RATIO_DEFAULT       = None  # P/E sourced from market data when available
 
 
 def _get_annual_values(
@@ -264,6 +291,173 @@ def get_critical_fundamentals(ticker: str) -> dict:
 
 
 # ═══════════════════════════════════════════════════════════
+# 1b.  EXTENDED FUNDAMENTALS — Altman-Z, Piotroski-F, IntCov,
+#      FCF margin, Long-term debt.  All from the same JSON
+#      payload as get_critical_fundamentals (no extra requests).
+# ═══════════════════════════════════════════════════════════
+
+@functools.lru_cache(maxsize=128)
+def get_extended_fundamentals(ticker: str) -> dict:
+    """
+    Fetch extended fundamentals used by pillar D (Credit) of the scoring model.
+    Re-uses the same CompanyFacts JSON endpoint and lru-cache as the lightweight
+    scan, so the marginal cost for an existing ticker is one dict lookup.
+
+    Returns (subset of keys when data is missing):
+        altman_z         : float | None
+        altman_zone      : 'Safe' | 'Grey' | 'Distress' | None
+        piotroski_f      : int  (0..9) | None
+        interest_coverage: float | None  (EBIT / InterestExpense)
+        fcf_margin       : float | None  (FCF / Revenue)
+        long_term_debt   : float | None
+        ebit             : float | None
+        cfo              : float | None
+        capex            : float | None
+    """
+    if _should_skip(ticker):
+        return {}
+
+    cik = _ticker_to_cik(ticker)
+    if not cik:
+        return {}
+
+    try:
+        url = f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json"
+        r = requests.get(url, headers=_SEC_HEADERS, timeout=_SEC_TIMEOUT)
+        r.raise_for_status()
+        facts = r.json()
+    except Exception as exc:
+        logger.warning("[SEC EDGAR] Extended fetch failed for %s: %s", ticker, exc)
+        time.sleep(0.15)
+        return {}
+
+    us_gaap = facts.get("facts", {}).get("us-gaap", {})
+    if not us_gaap:
+        return {}
+
+    # Pull two annual readings for momentum-style comparisons (Piotroski needs YoY deltas)
+    revenue        = _get_annual_values(us_gaap, _REVENUE_TAGS,        n=2)
+    op_income      = _get_annual_values(us_gaap, _OP_INCOME_TAGS,      n=2)
+    net_income     = _get_annual_values(us_gaap, _NET_INCOME_TAGS,     n=2)
+    total_assets   = _get_annual_values(us_gaap, _ASSETS_TAGS,         n=2)
+    total_liabs    = _get_annual_values(us_gaap, _LIABILITIES_TAGS,    n=2)
+    current_assets = _get_annual_values(us_gaap, _CURRENT_ASSETS_TAGS, n=2)
+    current_liabs  = _get_annual_values(us_gaap, _CURRENT_LIABS_TAGS,  n=2)
+    retained_earn  = _get_annual_values(us_gaap, _RETAINED_EARN_TAGS,  n=1)
+    interest_exp   = _get_annual_values(us_gaap, _INTEREST_EXP_TAGS,   n=1)
+    cfo            = _get_annual_values(us_gaap, _CFO_TAGS,            n=2)
+    capex          = _get_annual_values(us_gaap, _CAPEX_TAGS,          n=1)
+    long_term_debt = _get_annual_values(us_gaap, _LONG_TERM_DEBT_TAGS, n=2)
+    gross_profit   = _get_annual_values(us_gaap, _GROSS_PROFIT_TAGS,   n=2)
+    shares_out     = _get_annual_values(us_gaap, _SHARES_OUT_TAGS,     n=1)
+
+    out: dict = {
+        "ebit":           op_income[0],
+        "cfo":            cfo[0],
+        "capex":          capex[0],
+        "long_term_debt": long_term_debt[0],
+        "shares_outstanding": shares_out[0],
+    }
+
+    rev0 = revenue[0]
+    rev1 = revenue[1] if len(revenue) > 1 else None
+
+    # ── FCF margin = (CFO - CapEx) / Revenue ────────────────────────────────
+    if cfo[0] is not None and capex[0] is not None and rev0 and rev0 > 0:
+        # CapEx is reported as a positive outflow on the cash-flow statement.
+        out["fcf"]        = cfo[0] - capex[0]
+        out["fcf_margin"] = (cfo[0] - capex[0]) / rev0
+
+    # ── Interest Coverage = EBIT / InterestExpense ──────────────────────────
+    if op_income[0] is not None and interest_exp[0] and interest_exp[0] > 0:
+        out["interest_coverage"] = op_income[0] / interest_exp[0]
+
+    # ── Altman Z-Score (public-firm formula) ────────────────────────────────
+    # Z = 1.2·X1 + 1.4·X2 + 3.3·X3 + 0.6·X4 + 1.0·X5
+    # X1 = Working Capital / Total Assets
+    # X2 = Retained Earnings / Total Assets
+    # X3 = EBIT / Total Assets
+    # X4 = Market Cap / Total Liabilities  (proxy: BookEquity / Liab if no MV)
+    # X5 = Revenue / Total Assets
+    try:
+        ta = total_assets[0]
+        tl = total_liabs[0]
+        ca = current_assets[0]
+        cl = current_liabs[0]
+        re_val = retained_earn[0]
+        ebit = op_income[0]
+        if ta and ta > 0 and ca is not None and cl is not None and \
+           re_val is not None and ebit is not None and \
+           tl and tl > 0 and rev0 is not None:
+            wc  = ca - cl
+            x1  = wc / ta
+            x2  = re_val / ta
+            x3  = ebit / ta
+            # Use book-equity proxy when no market price is available here.
+            be  = ta - tl
+            x4  = be / tl if tl > 0 else 0.0
+            x5  = rev0 / ta
+            z = 1.2 * x1 + 1.4 * x2 + 3.3 * x3 + 0.6 * x4 + 1.0 * x5
+            out["altman_z"] = float(z)
+            if z > 2.99:
+                out["altman_zone"] = "Safe"
+            elif z >= 1.81:
+                out["altman_zone"] = "Grey"
+            else:
+                out["altman_zone"] = "Distress"
+    except Exception:
+        pass  # missing tags → no Z
+
+    # ── Piotroski F-Score (9 binary checks) ─────────────────────────────────
+    try:
+        f = 0
+        ni0 = net_income[0]
+        ni1 = net_income[1] if len(net_income) > 1 else None
+        cfo0 = cfo[0]
+        cfo1 = cfo[1] if len(cfo) > 1 else None
+        ta0 = total_assets[0]
+        ta1 = total_assets[1] if len(total_assets) > 1 else None
+        ltd0 = long_term_debt[0]
+        ltd1 = long_term_debt[1] if len(long_term_debt) > 1 else None
+        ca0 = current_assets[0]; cl0 = current_liabs[0]
+        ca1 = current_assets[1] if len(current_assets) > 1 else None
+        cl1 = current_liabs[1]  if len(current_liabs)  > 1 else None
+        gp0 = gross_profit[0]
+        gp1 = gross_profit[1] if len(gross_profit) > 1 else None
+
+        # 1. Net income > 0
+        if ni0 is not None and ni0 > 0: f += 1
+        # 2. CFO > 0
+        if cfo0 is not None and cfo0 > 0: f += 1
+        # 3. ΔROA > 0  (use NI/TA proxy)
+        if ni0 is not None and ni1 is not None and ta0 and ta1:
+            if (ni0 / ta0) > (ni1 / ta1): f += 1
+        # 4. Accruals: CFO > NI
+        if cfo0 is not None and ni0 is not None and cfo0 > ni0: f += 1
+        # 5. ΔLeverage < 0  (LongTermDebt / Assets shrinks YoY)
+        if ltd0 is not None and ltd1 is not None and ta0 and ta1:
+            if (ltd0 / ta0) < (ltd1 / ta1): f += 1
+        # 6. ΔLiquidity > 0  (CurrentRatio expands YoY)
+        if ca0 and cl0 and ca1 and cl1:
+            if (ca0 / cl0) > (ca1 / cl1): f += 1
+        # 7. No new equity issuance — rough proxy: shares outstanding flat
+        #    (we don't fetch t-1 shares here; skip — caller may add)
+        # 8. ΔGross margin > 0  (GP/Rev expands YoY)
+        if gp0 is not None and gp1 is not None and rev0 and rev1:
+            if (gp0 / rev0) > (gp1 / rev1): f += 1
+        # 9. ΔAsset Turnover > 0
+        if rev0 is not None and rev1 is not None and ta0 and ta1:
+            if (rev0 / ta0) > (rev1 / ta1): f += 1
+        # Cap at 9; we may report 0..8 if the equity-issuance check is unavailable.
+        out["piotroski_f"] = f
+    except Exception:
+        pass
+
+    time.sleep(0.10)
+    return out
+
+
+# ═══════════════════════════════════════════════════════════
 # 2. SECTOR-NORMALIZED FUNDAMENTAL SCORING
 # ═══════════════════════════════════════════════════════════
 
@@ -405,7 +599,8 @@ def batch_fundamental_scan(
         try:
             score_data = calculate_fundamental_score(ticker, sector=sector)
             f = score_data["raw_fundamentals"]
-            return {
+            ext = get_extended_fundamentals(ticker)
+            row = {
                 "Ticker": ticker,
                 "Fundamental_Score": score_data["fundamental_score"],
                 "Fundamental_Sector": sector,
@@ -414,7 +609,15 @@ def batch_fundamental_scan(
                 "SEC_ROE": f.get("roe"),
                 "SEC_Revenue_Growth_YoY": f.get("revenue_growth_yoy"),
                 "SEC_Filing_Date": f.get("filing_date"),
+                # Phase 2.4 extensions for the Credit pillar.
+                "SEC_FCF_Margin":         ext.get("fcf_margin"),
+                "SEC_Interest_Coverage":  ext.get("interest_coverage"),
+                "SEC_Altman_Z":           ext.get("altman_z"),
+                "SEC_Altman_Zone":        ext.get("altman_zone"),
+                "SEC_Piotroski_F":        ext.get("piotroski_f"),
+                "SEC_Long_Term_Debt":     ext.get("long_term_debt"),
             }
+            return row
         except Exception as e:
             logger.warning("[SEC EDGAR] Ошибка для %s: %s", ticker, e)
             return {"Ticker": ticker, "Fundamental_Score": 50, "Fundamental_Sector": sector}

@@ -168,6 +168,93 @@ class MAC3RiskEngine:
         """Защита от 'битых' данных (галлюцинаций API)."""
         return df.ffill().bfill()
 
+    # ── Bootstrap CVaR (stationary block bootstrap, Politis-Romano 1994) ─────
+    @staticmethod
+    def _bootstrap_cvar(returns: np.ndarray, n_boot: int = 2000,
+                        alpha: float = 0.05, seed: int = 42) -> dict:
+        """
+        Compute CVaR(alpha) point estimate plus 95% bootstrap CI.
+
+        Stationary block-bootstrap with geometric block lengths (mean ≈ √N)
+        preserves daily-return autocorrelation — naive iid resampling
+        underestimates tail risk on serially-dependent series.
+
+        Returns: {'point': float, 'lo95': float, 'hi95': float}
+        """
+        rng = np.random.default_rng(seed)
+        N = len(returns)
+        if N == 0:
+            return {"point": 0.0, "lo95": None, "hi95": None}
+        block = max(1, int(np.sqrt(N)))
+        cvars = np.empty(n_boot, dtype=float)
+        ret_arr = np.asarray(returns, dtype=float)
+        for b in range(n_boot):
+            idx = np.empty(N, dtype=np.int64)
+            filled = 0
+            while filled < N:
+                start = int(rng.integers(0, N))
+                L = int(rng.geometric(1.0 / block))
+                take = min(L, N - filled)
+                for k in range(take):
+                    idx[filled + k] = (start + k) % N
+                filled += take
+            sample = ret_arr[idx]
+            var_b = np.percentile(sample, alpha * 100)
+            tail = sample[sample <= var_b]
+            cvars[b] = float(tail.mean()) if tail.size else float(var_b)
+        return {
+            "point": float(np.mean(cvars)),
+            "lo95":  float(np.percentile(cvars, 2.5)),
+            "hi95":  float(np.percentile(cvars, 97.5)),
+        }
+
+    # ── Marginal VaR (numerical sensitivity dVaR/dw_i) ───────────────────────
+    @staticmethod
+    def _marginal_var(a_data: pd.DataFrame, weights: np.ndarray,
+                      var_p: float = 0.05, h: float = 0.005) -> pd.Series:
+        """
+        Symmetric finite-difference marginal VaR per asset.
+        dVaR/dw_i ≈ (VaR(w + h·e_i) − VaR(w − h·e_i)) / (2h)
+
+        Result is in the same units as one-day return (decimal).  A negative
+        Marginal VaR for a long position means adding to that position would
+        REDUCE 1-day downside (rare, usually for negatively-correlated hedges).
+        """
+        cols = list(a_data.columns)
+        ret_mat = a_data.values
+        out: dict[str, float] = {}
+        for i, ticker in enumerate(cols):
+            w_plus  = weights.copy(); w_plus[i]  += h
+            w_minus = weights.copy(); w_minus[i] -= h
+            v_plus  = float(np.percentile(ret_mat @ w_plus,  var_p * 100))
+            v_minus = float(np.percentile(ret_mat @ w_minus, var_p * 100))
+            out[ticker] = (v_plus - v_minus) / (2.0 * h)
+        return pd.Series(out)
+
+    # ── Composite Risk Score (0..100) ────────────────────────────────────────
+    @staticmethod
+    def _composite_risk_score(volatility: float, cvar: float,
+                              max_erc_pct: float) -> int:
+        """
+        Blend three independent risk signals into a single 0..100 user-facing
+        gauge.  Replaces the prior 'risk_pct = vol/0.40 * 100' which ignored
+        tails and concentration.
+
+          • Vol     normalised by 0.40 (40% annual vol = 100)        weight 0.40
+          • |CVaR|  normalised by 0.10 (10% daily tail = 100)        weight 0.40
+          • maxERC  normalised by 50    (50% concentration = 100)    weight 0.20
+
+        All weights are deterministic so two consecutive runs on the same
+        portfolio produce the same score.
+        """
+        def _norm(x: float, scale: float) -> float:
+            return min(100.0, max(0.0, (x / scale) * 100.0)) if scale > 0 else 0.0
+        s_vol  = _norm(float(volatility),       0.40)
+        s_cvar = _norm(abs(float(cvar)),        0.10)
+        s_conc = _norm(float(max_erc_pct),      50.0)
+        score = 0.40 * s_vol + 0.40 * s_cvar + 0.20 * s_conc
+        return int(round(score))
+
     def _get_tradernet_client(self) -> TradernetClient:
         """Lazy-init Tradernet client.  Reused across calls inside analyze_all."""
         if self._tradernet_client is None:
@@ -416,6 +503,16 @@ class MAC3RiskEngine:
         var_95 = np.percentile(port_returns_daily, 5) if len(port_returns_daily)>0 else 0
         cvar_95 = port_returns_daily[port_returns_daily <= var_95].mean() if len(port_returns_daily)>0 else 0
 
+        # Bootstrap CVaR with 95% CI (stationary block bootstrap, Politis-Romano).
+        # The point CVaR above is just the empirical mean of the bottom-5%
+        # observations on a finite window — its standard error is ~15-20% of
+        # the magnitude.  Bootstrap gives a confidence interval the user can
+        # weight against the lower bound when sizing tail-risk hedges.
+        if len(port_returns_daily) >= 60:
+            cvar_boot = self._bootstrap_cvar(port_returns_daily, n_boot=2000, alpha=0.05)
+        else:
+            cvar_boot = {"point": float(cvar_95), "lo95": None, "hi95": None}
+
         # Real Max Drawdown (peak-to-trough on equity curve).
         # port_returns_daily are daily LOG returns → equity curve = exp(cumsum).
         # MaxDD ≠ VaR_95: VaR is a 1-day quantile, MaxDD is the worst peak-to-trough
@@ -428,13 +525,38 @@ class MAC3RiskEngine:
         else:
             max_drawdown = 0.0
 
+        # Marginal VaR per asset — sensitivity dVaR/dw_i.
+        #
+        # Useful complement to Euler TRC: TRC says "what fraction of CURRENT
+        # portfolio risk is driven by asset i", M-VaR says "by how many bps
+        # would 1-day VaR move if I add 1% weight to asset i".  M-VaR is in
+        # the same units as VaR itself (decimal daily return per unit weight).
+        if len(port_returns_daily) >= 60 and a_data.shape[1] > 0:
+            mvar_series = self._marginal_var(a_data, weights, var_p=0.05, h=0.005)
+            for asset, mvar_val in mvar_series.items():
+                if asset in exposures_report:
+                    exposures_report[asset]['Marginal_VaR_Daily'] = float(mvar_val)
+
+        # Composite Risk Score 0..100 — blends the three independent signals
+        # (volatility, tail, concentration) into a single user-facing gauge.
+        # Replaces the prior gauge that looked at vol alone.
+        max_erc = 0.0
+        if len(weights) > 0 and port_volatility > 0:
+            max_erc = float(np.max(np.abs(erc_pct))) * 100
+        composite_risk = self._composite_risk_score(
+            volatility=port_volatility, cvar=cvar_95, max_erc_pct=max_erc,
+        )
+
         portfolio_metrics = {
             "Total_Volatility_Ann": port_volatility,
             "Sharpe_Ratio": (ann_return - self.current_rfr_annual) / port_volatility if port_volatility > 0 else np.nan,
             "Sortino_Ratio": (ann_return - self.current_rfr_annual) / downside_vol if downside_vol > 0 else np.nan,
             "VaR_95_Daily": var_95,
             "CVaR_95_Daily": cvar_95,
-            "Max_Drawdown": max_drawdown,           # NEW: realised peak-to-trough drawdown
+            "CVaR_95_Bootstrap": cvar_boot,           # NEW: {point, lo95, hi95}
+            "Max_Drawdown": max_drawdown,             # NEW: realised peak-to-trough drawdown
+            "Max_Euler_Risk_Pct": max_erc,            # NEW: max single-asset TRC %
+            "Composite_Risk_Score": composite_risk,   # NEW: blended 0..100 gauge
             "Positive_Days_Pct": (port_returns_daily > 0).mean() * 100 if len(port_returns_daily)>0 else 0
         }
 
@@ -821,6 +943,81 @@ class UniversalPortfolioManager:
                 'group_b_fundamental': group_b,
             }
 
+        # ═══════════════ MACRO REGIME CLASSIFICATION ═══════════════
+        # Reuses the factor ETF prices already in `all_data` — no extra calls.
+        try:
+            from finance.regime import RegimeClassifier
+            regime_reading = RegimeClassifier().classify(all_data)
+        except Exception as exc:
+            logger.warning("Regime classification skipped: %s", exc)
+            regime_reading = None
+
+        # ═══════════════ TECHNICALS (pillar C) ═══════════════
+        # Computes RSI/MACD/SMA/Bollinger/52w-Hi/Mom-12m1m per-asset.
+        # Uses the same close-price frame already loaded; no new fetches.
+        technicals_map: dict = {}
+        try:
+            from finance.technicals import compute_technicals
+            tech_sector_map = {
+                t: self.engine.get_ticker_sector(t) for t in actual_risky
+            }
+            technicals_map = compute_technicals(
+                close_prices = all_data,
+                tickers      = actual_risky,
+                volume_frame = None,            # OHLC volumes wired in a later phase
+                sector_map   = tech_sector_map,
+            )
+        except Exception as exc:
+            logger.warning("Technicals computation skipped: %s", exc)
+            technicals_map = {}
+
+        # ═══════════════ 4-PILLAR SCORING (F/V/T/C) ═══════════════
+        # Produces AssetScore per ticker.  CDS lookup left as None for now;
+        # phase 3 will wire it via cds_feed.CDSFeed.
+        asset_scores: dict = {}
+        try:
+            from finance.scoring_orchestrator import score_portfolio
+            asset_scores = score_portfolio(
+                perf_table = perf,
+                technicals = technicals_map,
+                regime     = regime_reading,
+                cds_lookup = None,
+            )
+            # Materialise the score columns into the perf table for downstream
+            # PDF rendering — this is purely additive, no existing column is
+            # overwritten.
+            if asset_scores:
+                score_rows = []
+                for t in perf["Ticker"].tolist():
+                    sc = asset_scores.get(str(t))
+                    if sc is None:
+                        score_rows.append({
+                            "Ticker": t,
+                            "Score_Fundamentals": None,
+                            "Score_Valuations":   None,
+                            "Score_Technicals":   None,
+                            "Score_Credit":       None,
+                            "Score_Total":        None,
+                            "Score_Action":       None,
+                            "Score_Hotspot":      False,
+                        })
+                    else:
+                        score_rows.append({
+                            "Ticker": t,
+                            "Score_Fundamentals": sc.fundamentals,
+                            "Score_Valuations":   sc.valuations,
+                            "Score_Technicals":   sc.technicals,
+                            "Score_Credit":       sc.credit,
+                            "Score_Total":        sc.total,
+                            "Score_Action":       sc.action,
+                            "Score_Hotspot":      sc.hotspot,
+                        })
+                score_df = pd.DataFrame(score_rows).set_index("Ticker")
+                # Join back onto perf without losing existing columns.
+                perf = perf.set_index("Ticker").join(score_df, how="left").reset_index()
+        except Exception as exc:
+            logger.warning("Scoring orchestrator skipped: %s", exc)
+
         return {
             "performance_table": perf,
             "risk_matrix": cov_matrix,
@@ -832,4 +1029,18 @@ class UniversalPortfolioManager:
             "history_result": history_result,
             "sector_exposure": sector_exposure,
             "factor_scores": factor_scores,
+            # Phase 2 additions
+            "regime":            regime_reading.as_dict() if regime_reading else None,
+            "technicals":        {t: {"score": r.score, "raw": r.raw,
+                                       "components": r.components}
+                                  for t, r in technicals_map.items()},
+            "asset_scores":      {t: {
+                                      "fundamentals": s.fundamentals,
+                                      "valuations":   s.valuations,
+                                      "technicals":   s.technicals,
+                                      "credit":       s.credit,
+                                      "total":        s.total,
+                                      "action":       s.action,
+                                      "hotspot":      s.hotspot,
+                                  } for t, s in asset_scores.items()},
         }
