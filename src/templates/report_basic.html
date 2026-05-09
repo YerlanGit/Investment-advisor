@@ -7,6 +7,17 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@600&display=swap" rel="stylesheet" />
 {% include "_base.css.html" %}
+<style>
+.plain-box {
+  background: #f0f7ff; border: 1px solid #b3d4f5; border-radius: 6px;
+  padding: 10px 14px; margin: 8px 0; font-size: 10.5px; line-height: 1.55;
+  color: #1a3a5c;
+}
+.plain-box-label {
+  font-size: 8.5px; font-weight: 700; letter-spacing: 0.15em;
+  text-transform: uppercase; color: #4a7ab5; margin-bottom: 5px;
+}
+</style>
 </head>
 <body>
 
@@ -30,6 +41,22 @@
   <div class="verdict">
     <div class="verdict-label">Вердикт ИИ-агента</div>
     <div>{{ data.ai_verdict }}</div>
+  </div>
+  {% endif %}
+
+  {% if data.ai_plain_summary %}
+  <div class="plain-box">
+    <div class="plain-box-label">Простыми словами</div>
+    {{ data.ai_plain_summary }}
+  </div>
+  {% endif %}
+
+  {% if data.ai_bullets %}
+  <div class="ai-block" style="margin-top:8px;">
+    <strong style="font-size:9px; letter-spacing:0.15em; text-transform:uppercase; color:var(--gold);">
+      Выводы ИИ-агента
+    </strong>
+    <ul style="margin-top:6px;">{% for b in data.ai_bullets %}<li>{{ b }}</li>{% endfor %}</ul>
   </div>
   {% endif %}
 
@@ -205,17 +232,6 @@
       <div class="sector-bar-pct">{{ s.weight_str }}</div>
     </div>
     {% endfor %}
-  </div>
-  {% endif %}
-
-  {% if data.ai_bullets %}
-  <div class="section-title">Краткие выводы ИИ-агента{% if data.used_rag %}<span class="rag-tag">+ Bank RAG</span>{% endif %}</div>
-  <div class="ai-block">
-    <ul>
-      {% for b in data.ai_bullets %}
-      <li>{{ b }}</li>
-      {% endfor %}
-    </ul>
   </div>
   {% endif %}
 

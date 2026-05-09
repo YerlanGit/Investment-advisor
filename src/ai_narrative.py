@@ -17,8 +17,8 @@ from typing import Optional
 logger = logging.getLogger("AINarrative")
 
 # Hard caps so we don't blow the API budget per report.
-MAX_TOKENS_BASE = 700
-MAX_TOKENS_DEEP = 2200
+MAX_TOKENS_BASE = 900
+MAX_TOKENS_DEEP = 3500
 DEFAULT_MODEL   = os.getenv("ANTHROPIC_MODEL", "claude-3-5-sonnet-20241022")
 
 
@@ -142,10 +142,17 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "") -> str:
             "summary, ни RAG-блоком.\n"
         )
 
+    plain_field = (
+        '  "plain_summary": "2-3 предложения простым языком для обычного '
+        'инвестора (без жаргона): что сейчас с портфелем, главный риск, '
+        'и один конкретный совет что делать. ≤300 знаков.",\n'
+    )
+
     return (
         "Ниже структура портфеля и риск-аналитика. Сформируй СТРОГО JSON-ответ:\n"
         "{\n"
         '  "verdict":  "1 предложение, ≤180 знаков — общий вердикт",\n'
+        f'{plain_field}'
         f'  "bullets": [{n_bullets} пунктов, каждый ≤ 180 знаков],\n'
         '  "action_plan_text": "..."  // только для tier=deep\n'
         "}\n\n"
@@ -207,8 +214,17 @@ def _fallback_narrative(results: dict, tier: str) -> dict:
     else:
         action_plan_text = ""
 
+    plain_summary = (
+        f"Ваш портфель сейчас в {risk_label} зоне риска ({composite}/100). "
+        + (f"Доходность с поправкой на риск (Sharpe) составляет {sharpe:.2f} — "
+           + ("выше нуля, это хороший знак." if sharpe > 0 else "ниже нуля, осторожно.")
+           if isinstance(sharpe, (int, float)) and sharpe == sharpe else "")
+        + (" Рекомендуем проверить Action Plan и сократить позиции с высоким риском." if tier == "deep" else "")
+    )
+
     return {
         "verdict": verdict,
+        "plain_summary": plain_summary[:300],
         "bullets": bullets[:7 if tier == "deep" else 3],
         "action_plan_text": action_plan_text,
         "used_rag": False,
@@ -286,23 +302,26 @@ def generate_narrative(results: dict, tier: str = "base",
             raise ValueError("No JSON object found in response")
         parsed = json.loads(raw[first_brace:last_brace + 1])
 
-        verdict  = str(parsed.get("verdict", "")).strip()
-        bullets  = [str(b).strip() for b in (parsed.get("bullets") or []) if str(b).strip()]
-        plan_txt = str(parsed.get("action_plan_text", "")).strip()
+        verdict      = str(parsed.get("verdict", "")).strip()
+        plain_summary= str(parsed.get("plain_summary", "")).strip()
+        bullets      = [str(b).strip() for b in (parsed.get("bullets") or []) if str(b).strip()]
+        plan_txt     = str(parsed.get("action_plan_text", "")).strip()
         if not verdict or not bullets:
             raise ValueError("verdict or bullets missing")
 
         # CoVe enforcement: strip any RAG citation that wasn't actually
         # present in the market_context block.
-        bullets  = [_strip_unverified_rag_citations(b, market_context) for b in bullets]
-        plan_txt = _strip_unverified_rag_citations(plan_txt, market_context)
-        verdict  = _strip_unverified_rag_citations(verdict,  market_context)
+        bullets       = [_strip_unverified_rag_citations(b, market_context) for b in bullets]
+        plan_txt      = _strip_unverified_rag_citations(plan_txt,      market_context)
+        verdict       = _strip_unverified_rag_citations(verdict,       market_context)
+        plain_summary = _strip_unverified_rag_citations(plain_summary, market_context)
 
         return {
-            "verdict": verdict[:300],
-            "bullets": bullets[:7 if tier == "deep" else 3],
+            "verdict":          verdict[:300],
+            "plain_summary":    plain_summary[:400],
+            "bullets":          bullets[:7 if tier == "deep" else 3],
             "action_plan_text": plan_txt[:800] if tier == "deep" else "",
-            "used_rag": used_rag,
+            "used_rag":         used_rag,
         }
     except Exception as exc:
         logger.warning("AI narrative failed (%s) — using fallback.", exc)

@@ -488,7 +488,8 @@ def _fetch_rag_context(results: dict) -> str:
         return ""
 
 
-def _build_pdf_payload(results: dict, tier: str) -> dict:
+def _build_pdf_payload(results: dict, tier: str,
+                       user_bench_ticker: str | None = None) -> dict:
     """
     Build the PDF payload from analyze_all() output.
 
@@ -508,7 +509,8 @@ def _build_pdf_payload(results: dict, tier: str) -> dict:
         market_context = _fetch_rag_context(results) if tier == TIER_DEEP else ""
         ai_summary = generate_narrative(results, tier=tier,
                                           market_context=market_context)
-        payload    = _build_v2_payload(results, tier, ai_summary=ai_summary)
+        payload    = _build_v2_payload(results, tier, ai_summary=ai_summary,
+                                       user_bench_ticker=user_bench_ticker)
         # Inline SVGs (deep tier only — basic stays under 2 pages without them).
         if tier == TIER_DEEP:
             payload["equity_curve_svg"] = _build_equity_curve_svg(results)
@@ -1596,7 +1598,7 @@ async def _run_analysis_background(
 
         # ── Step 4: PDF generation ────────────────────────────────────────
         await step("📄", "*Шаг 4/4:* Генерирую PDF-отчёт…")
-        payload = _build_pdf_payload(results, tier)
+        payload = _build_pdf_payload(results, tier, user_bench_ticker=bench_tick)
         await _send_pdf(bot, chat_id, user_id, tier, payload)
         await bot.send_message(
             chat_id,

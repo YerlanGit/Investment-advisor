@@ -113,9 +113,22 @@ _FACTOR_ETFS = [
     "DBC.US", "IEF.US", "EEM.US", "EMB.US",
 ]
 
+# Benchmark display-name → Tradernet ticker (reverse used to filter scenarios).
+_BM_TICKER_TO_NAME: dict[str, str] = {
+    "SPY.US":  "S&P 500",
+    "QQQ.US":  "Nasdaq 100",
+    "IWM.US":  "Russell 2000",
+    "EEM.US":  "MSCI EM",
+    "EMB.US":  "EM Bonds",
+    "AGG.US":  "US Aggregate Bond",
+    "URTH.US": "MSCI World",
+    "IEF.US":  "US 10Y Treasury",
+}
+
 
 def build_payload(results: dict, tier: str,
-                  ai_summary: Optional[dict] = None) -> dict:
+                  ai_summary: Optional[dict] = None,
+                  user_bench_ticker: Optional[str] = None) -> dict:
     """
     Build the payload consumed by report_basic.html / report_deep.html.
 
@@ -336,6 +349,7 @@ def build_payload(results: dict, tier: str,
         "data_quality":      data_quality,
         # AI Narrative — placeholder unless caller passed one in
         "ai_verdict":        (ai_summary or {}).get("verdict", ""),
+        "ai_plain_summary":  (ai_summary or {}).get("plain_summary", ""),
         "ai_bullets":        (ai_summary or {}).get("bullets", []),
         "used_rag":          bool((ai_summary or {}).get("used_rag")),
         # Tier metadata
@@ -346,8 +360,15 @@ def build_payload(results: dict, tier: str,
     if tier == TIER_DEEP:
         # Benchmarks (annualised excess + IR)
         bm_data   = results.get("benchmark_comparison") or {}
+        # Determine which benchmark display name matches the user's ticker.
+        user_bm_name: Optional[str] = None
+        if user_bench_ticker:
+            user_bm_name = _BM_TICKER_TO_NAME.get(user_bench_ticker)
         scenarios = []
         for bm_name, bm in bm_data.items():
+            # Skip benchmarks not selected by this user (when we know their choice).
+            if user_bm_name and bm_name != user_bm_name:
+                continue
             excess_ann = bm.get("Excess_Return_Ann")
             if excess_ann is None:
                 excess_ann = _safe_float(bm.get("Excess_Return"), 0.0)

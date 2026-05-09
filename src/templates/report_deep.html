@@ -7,10 +7,51 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@600&display=swap" rel="stylesheet" />
 {% include "_base.css.html" %}
+<style>
+.plain-box {
+  background: #f0f7ff; border: 1px solid #b3d4f5; border-radius: 6px;
+  padding: 10px 14px; margin: 8px 0; font-size: 10.5px; line-height: 1.55;
+  color: #1a3a5c;
+}
+.plain-box-label {
+  font-size: 8.5px; font-weight: 700; letter-spacing: 0.15em;
+  text-transform: uppercase; color: #4a7ab5; margin-bottom: 5px;
+}
+.bm-card {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: 6px; padding: 10px 14px; margin: 8px 0;
+}
+.bm-card-title {
+  font-size: 9px; font-weight: 700; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--gold); margin-bottom: 8px;
+}
+.bm-stats { display: flex; gap: 24px; flex-wrap: wrap; }
+.bm-stat .label { font-size: 8.5px; color: var(--text-2); }
+.bm-stat .val { font-size: 13px; font-weight: 700; margin-top: 2px; }
+.rag-insights {
+  background: var(--bg-card); border-left: 3px solid var(--gold);
+  border-radius: 0 6px 6px 0; padding: 10px 14px; margin: 10px 0;
+}
+.rag-insights-label {
+  font-size: 8.5px; font-weight: 700; letter-spacing: 0.15em;
+  text-transform: uppercase; color: var(--gold); margin-bottom: 6px;
+}
+.scoring-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 6px; margin-top: 8px;
+}
+.scoring-card {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: 5px; padding: 7px 10px;
+}
+.scoring-card .ticker { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 600; }
+.scoring-card .scores { font-size: 9px; color: var(--text-2); margin-top: 3px; }
+.scoring-card .total { font-size: 11px; font-weight: 700; margin-top: 2px; }
+</style>
 </head>
 <body>
 
-<!-- ═════════════════════════════ PAGE 1 — Cover ══════════════════════════ -->
+<!-- ═════════════════════════════ PAGE 1 — AI Intelligence ═══════════════════ -->
 <div class="page">
   <div class="header">
     <div>
@@ -27,15 +68,31 @@
 
   {% if data.ai_verdict %}
   <div class="verdict">
-    <div class="verdict-label">Расширенный вердикт ИИ-агента</div>
+    <div class="verdict-label">Вердикт ИИ-агента</div>
     <div>{{ data.ai_verdict }}</div>
+  </div>
+  {% endif %}
+
+  {% if data.ai_plain_summary %}
+  <div class="plain-box">
+    <div class="plain-box-label">Простыми словами</div>
+    {{ data.ai_plain_summary }}
+  </div>
+  {% endif %}
+
+  {% if data.ai_bullets %}
+  <div class="ai-block" style="margin-top:8px;">
+    <strong style="font-size:9px; letter-spacing:0.15em; text-transform:uppercase; color:var(--gold);">
+      Выводы ИИ-агента{% if data.used_rag %} <span class="rag-tag">+ Bank RAG</span>{% endif %}
+    </strong>
+    <ul style="margin-top:6px;">{% for b in data.ai_bullets %}<li>{{ b }}</li>{% endfor %}</ul>
   </div>
   {% endif %}
 
   {% if data.regime %}
   <div class="regime-line" style="flex-direction: column; align-items: stretch;">
     <div style="display:flex; justify-content:space-between;">
-      <div>Текущий рыночный режим: <strong>{{ data.regime.label }}</strong>
+      <div>Рыночный режим: <strong>{{ data.regime.label }}</strong>
            · уверенность {{ data.regime.confidence }}%</div>
       <div class="muted">Growth: {{ '%+.3f' | format(data.regime.growth) }}
            · Cycle: {{ '%+.3f' | format(data.regime.cycle) }}</div>
@@ -59,7 +116,7 @@
       Бенчмарки: {{ data.data_quality.benchmarks_loaded }}
     </span>
     {% if data.data_quality.sec_skipped %}
-    <span class="dq-pill warn">SEC EDGAR пропущен: {{ data.data_quality.sec_skipped | length }}</span>
+    <span class="dq-pill warn">SEC пропущен: {{ data.data_quality.sec_skipped | length }}</span>
     {% endif %}
     {% if data.used_rag %}
     <span class="dq-pill">📚 Bank RAG активен</span>
@@ -67,7 +124,7 @@
   </div>
   {% endif %}
 
-  <div class="section-title">Ключевые метрики риска (расширенные)</div>
+  <div class="section-title">Ключевые метрики риска</div>
   <div class="kpi-grid">
     <div class="kpi-card{% if data.kpi_extremes and data.kpi_extremes.cvar %} extreme{% endif %}">
       <div class="kpi-label">CVaR 95% · 1д</div>
@@ -120,11 +177,11 @@
       <div class="val neg">{{ data.pnl_worst.ticker }} {{ data.pnl_worst.pnl_pct }}</div>
       <div class="muted">{{ data.pnl_worst.pnl_abs }}</div>
     </div>{% endif %}
-    <div>
+    {% if data.hotspots %}<div>
       <div class="label">Hotspots</div>
       <div class="val warn">{{ data.hotspots | length }}</div>
-      <div class="muted">TRC > 20%</div>
-    </div>
+      <div class="muted">TRC &gt; 20%</div>
+    </div>{% endif %}
   </div>
 
   {% if data.hotspots %}
@@ -137,9 +194,9 @@
   <div class="footer"><span>1 / 4 · Investment Advisory © 2026</span><span>Confidential</span></div>
 </div>
 
-<!-- ═══════════════════════ PAGE 2 — Performance & Benchmarks ═════════════ -->
+<!-- ═══════════════════════ PAGE 2 — Portfolio ════════════════════════════════ -->
 <div class="page">
-  <div class="section-title">Динамика портфеля vs бенчмарки</div>
+  <div class="section-title">Динамика портфеля</div>
 
   {% if data.equity_curve_svg %}
   <div style="background:var(--bg-card); border:1px solid var(--border); border-radius:6px; padding:10px;">
@@ -148,135 +205,153 @@
   {% endif %}
 
   {% if data.scenarios %}
-  <div class="section-title">Information Ratio &amp; Tracking Error</div>
+  {% set bm = data.scenarios[0] %}
+  <div class="section-title">Сравнение с бенчмарком</div>
+  <div class="bm-card">
+    <div class="bm-card-title">{{ bm.name }}</div>
+    <div class="bm-stats">
+      <div class="bm-stat">
+        <div class="label">Excess Return (ann.)</div>
+        <div class="val {{ bm.color }}">{{ bm.excess }}</div>
+      </div>
+      <div class="bm-stat">
+        <div class="label">Tracking Error</div>
+        <div class="val">{{ bm.te }}</div>
+      </div>
+      <div class="bm-stat">
+        <div class="label">Information Ratio</div>
+        <div class="val">{{ bm.ir }}</div>
+      </div>
+      <div class="bm-stat">
+        <div class="label">Статус</div>
+        <div style="margin-top:2px;">
+          {% if bm.beating %}<span class="pill pos">✅ обгоняет</span>
+          {% else %}<span class="pill neg">❌ отстаёт</span>{% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="section-title">Структура портфеля и P/L</div>
   <div class="table-wrap">
     <table>
       <thead><tr>
-        <th>Бенчмарк</th><th>Excess (ann.)</th><th>TE</th>
-        <th>Information Ratio</th><th>Статус</th>
+        <th style="width:4%">#</th>
+        <th>Тикер</th>
+        <th>Класс</th>
+        <th>Вес <span class="muted" style="font-weight:400;">лимит 15%</span></th>
+        <th>TRC <span class="muted" style="font-weight:400;">лимит 20%</span></th>
+        <th>ATR <span class="muted" style="font-weight:400;">&gt;3% ⚠</span></th>
+        <th>P/L</th>
+        <th>Score · Action</th>
       </tr></thead>
       <tbody>
-        {% for s in data.scenarios %}
-        <tr {% if loop.first %}style="background:var(--bg-card);"{% endif %}>
-          <td><strong>{% if loop.first %}⭐ {% endif %}{{ s.name }}</strong></td>
-          <td class="{{ s.color }}">{{ s.excess }}</td>
-          <td>{{ s.te }}</td>
-          <td>{{ s.ir }}</td>
-          <td>{% if s.beating %}<span class="pill pos">✅ обгоняет</span>{% else %}<span class="pill neg">❌ отстаёт</span>{% endif %}</td>
+        {% for a in data.assets %}
+        <tr {% if a.hotspot %}class="hot"{% endif %}>
+          <td class="muted">{{ loop.index }}</td>
+          <td><span class="ticker">{{ a.ticker }}</span>{% if a.hotspot %} 🔥{% endif %}</td>
+          <td class="muted">{{ a.asset_class }}</td>
+          <td{% if a.weight_extreme %} class="extreme-cell"{% endif %}>{{ a.weight }}{% if a.weight_extreme %} <span class="extreme-icon">⚠</span>{% endif %}</td>
+          <td{% if a.euler_extreme %} class="extreme-cell"{% endif %}>{{ a.euler_risk }}{% if a.euler_extreme %} <span class="extreme-icon">⚠</span>{% endif %}</td>
+          <td{% if a.atr_extreme %} class="extreme-cell"{% endif %}>{{ a.atr_pct }}{% if a.atr_extreme %} <span class="extreme-icon">⚠</span>{% endif %}</td>
+          <td class="{{ a.pnl_color }}">{{ a.pnl_pct }}<br><span class="muted" style="font-size:9px;">{{ a.pnl_abs }}</span></td>
+          <td><span class="{{ a.score_color }}">{{ a.total_score }}</span> · <span class="pill {{ a.action_color }}">{{ a.action }}</span></td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
-  {% endif %}
+  <div class="muted" style="font-size:8.5px; margin-top:5px;">
+    <em>TRC</em> — % риска портфеля (Euler); <em>ATR</em> — дневной диапазон % цены;
+    <em>Score</em> — Fund+Val+Tech+Credit ∈ [−6, +6]; 🔥 — Hotspot (TRC &gt; лимит).
+  </div>
 
-  {% if data.factor_radar_svg %}
-  <div class="section-title">Факторное разложение (β)</div>
-  <div style="display:flex; align-items:center; gap:14px; background:var(--bg-card); border:1px solid var(--border); border-radius:6px; padding:10px;">
-    {{ data.factor_radar_svg | safe }}
-    <div class="muted" style="font-size:9.5px; max-width:380px;">
-      Факторные беты получены из факторной регрессии (Ridge α=1.0, EWMA-ковариация
-      с λ≈0.94 + Ledoit-Wolf shrinkage 70/30). Скрытая концентрация выявляется по
-      сонаправленности β нескольких тикеров.
+  {% if data.sectors %}
+  <div class="section-title">Секторное распределение</div>
+  <div>
+    {% for s in data.sectors %}
+    <div class="sector-bar">
+      <div class="sector-bar-name">{{ s.name }}</div>
+      <div class="sector-bar-track">
+        <div class="sector-bar-fill" style="width: {{ [s.weight_pct, 100] | min }}%;"></div>
+      </div>
+      <div class="sector-bar-pct">{{ s.weight_str }}</div>
     </div>
+    {% endfor %}
   </div>
   {% endif %}
 
   <div class="footer"><span>2 / 4 · Investment Advisory © 2026</span><span>Source: Quant Engine</span></div>
 </div>
 
-<!-- ═══════════════ PAGE 3 — Scoring & Fundamental Layer ═════════════════ -->
+<!-- ═══════════════════ PAGE 3 — Deep Analytics ══════════════════════════════ -->
 <div class="page">
 
-  <div class="section-title">4-Pillar Scoring (F · V · T · C — итог −6…+6)</div>
-  <div class="table-wrap">
-    <table>
-      <thead><tr>
-        <th>Тикер</th><th>Fund.</th><th>Val.</th><th>Tech.</th><th>Credit</th><th>Total</th><th>Action</th>
-      </tr></thead>
-      <tbody>
-        {% for r in data.score_breakdown %}
-        <tr>
-          <td><span class="ticker">{{ r.ticker }}</span></td>
-          <td>{{ r.fundamentals }}</td>
-          <td>{{ r.valuations }}</td>
-          <td>{{ r.technicals }}</td>
-          <td>{{ r.credit }}</td>
-          <td><strong>{{ r.total }}</strong></td>
-          <td><span class="pill {{ r.action_color }}">{{ r.action }}</span></td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-
-  {% if data.fundamental_layer %}
-  <div class="section-title">Fundamental Layer — SEC EDGAR (10-K FY)</div>
-  <div class="table-wrap">
-    <table>
-      <thead><tr>
-        <th>Тикер</th><th>ROE</th><th>OpM</th><th>D/A</th><th>Rev YoY</th>
-        <th>FCF M.</th><th>Altman-Z</th><th>Zone</th><th>Piot.</th><th>IntCov</th>
-      </tr></thead>
-      <tbody>
-        {% for r in data.fundamental_layer %}
-        <tr>
-          <td><span class="ticker">{{ r.ticker }}</span></td>
-          <td>{{ r.roe }}</td><td>{{ r.op_m }}</td><td>{{ r.dta }}</td>
-          <td>{{ r.rev_g }}</td><td>{{ r.fcf_m }}</td>
-          <td>{{ r.altman_z }}</td>
-          <td>
-            {% if r.altman_zone == 'Safe'     %}<span class="pill pos">Safe</span>
-            {% elif r.altman_zone == 'Grey'   %}<span class="pill neut">Grey</span>
-            {% elif r.altman_zone == 'Distress' %}<span class="pill neg">Distress</span>
-            {% else %}{{ r.altman_zone }}{% endif %}
-          </td>
-          <td>{{ r.piotroski }}/9</td>
-          <td>{{ r.int_cov }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+  {% if data.factor_radar_svg %}
+  <div class="section-title">Факторное разложение (β) — скрытые концентрации</div>
+  <div style="display:flex; align-items:flex-start; gap:14px; background:var(--bg-card); border:1px solid var(--border); border-radius:6px; padding:10px;">
+    {{ data.factor_radar_svg | safe }}
+    <div style="font-size:9.5px; max-width:380px; line-height:1.55;">
+      <div style="margin-bottom:6px;"><strong>Что показывает радар:</strong> насколько ваш портфель зависит от глобальных рыночных факторов. Большая "площадь" = больше зависимость от рынка.</div>
+      <div><strong>Как читать:</strong> если несколько позиций одновременно сдвигаются в одном направлении (рост/падение), значит они несут скрытую общую ставку — диверсификация может быть ниже, чем кажется.</div>
+      <div style="margin-top:6px; color:var(--text-2);">Метод: Ridge β-регрессия (α=1.0), EWMA-ковариация λ≈0.94, Ledoit-Wolf 70/30.</div>
+    </div>
   </div>
   {% endif %}
 
-  {% if data.bl_records %}
-  <div class="section-title">Black-Litterman — целевые веса</div>
-  <div class="table-wrap">
-    <table>
-      <thead><tr>
-        <th>Тикер</th><th>Текущий вес</th><th>Целевой вес</th><th>Δw, п.п.</th>
-      </tr></thead>
-      <tbody>
-        {% for r in data.bl_records %}
-        <tr>
-          <td><span class="ticker">{{ r.ticker }}</span></td>
-          <td>{{ r.current_w }}</td>
-          <td>{{ r.target_w }}</td>
-          <td class="{{ r.color }}"><strong>{{ r.delta_w_pp }}</strong></td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+  {% if data.used_rag %}
+  <div class="section-title">Аналитика инвест-банков</div>
+  <div class="rag-insights">
+    <div class="rag-insights-label">📚 Bank RAG — выдержки из отчётов</div>
+    <div style="font-size:9.5px; line-height:1.6; color:var(--text-1);">
+      {% set rag_found = namespace(count=0) %}
+      {% for b in data.ai_bullets %}
+      {% if '[RAG:' in b %}
+      {% set rag_found.count = rag_found.count + 1 %}
+      <div style="margin-bottom:5px; padding-left:6px; border-left:2px solid var(--gold);">{{ b }}</div>
+      {% endif %}
+      {% endfor %}
+      {% if rag_found.count == 0 %}
+      <span class="muted">Банковские отчёты были запрошены. Инсайты включены в выводы ИИ-агента на странице 1.</span>
+      {% endif %}
+    </div>
   </div>
   {% endif %}
 
-  <div class="footer"><span>3 / 4 · Investment Advisory © 2026</span><span>Source: SEC EDGAR · CDS feed · BL engine</span></div>
+  {% if data.score_breakdown %}
+  <div class="section-title">4-Pillar Scoring — оценка позиций (F · V · T · C)</div>
+  <div class="scoring-grid">
+    {% for r in data.score_breakdown %}
+    <div class="scoring-card">
+      <div class="ticker">{{ r.ticker }}</div>
+      <div class="scores">F {{ r.fundamentals }} · V {{ r.valuations }} · T {{ r.technicals }} · C {{ r.credit }}</div>
+      <div class="total {{ r.action_color.replace('pill ','') | default('neut') }}">
+        Итог: {{ r.total }} · <span class="pill {{ r.action_color }}">{{ r.action }}</span>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  <div class="muted" style="font-size:8.5px; margin-top:6px;">
+    F=Fundamental · V=Valuation · T=Technical · C=Credit · Диапазон каждого: −2…+2 · Итог ∈ [−6, +6]
+  </div>
+  {% endif %}
+
+  <div class="footer"><span>3 / 4 · Investment Advisory © 2026</span><span>Source: Quant Engine · Bank RAG</span></div>
 </div>
 
-<!-- ════════════════════ PAGE 4 — Action Plan & Sources ══════════════════ -->
+<!-- ════════════════════ PAGE 4 — Action Plan & Sources ══════════════════════ -->
 <div class="page">
 
   <div class="section-title">Action Plan — уровни Buy / Sell / Stop</div>
   <div class="muted" style="margin-bottom:6px; font-size:9.5px;">
-    Все уровни рассчитаны из ATR (Wilder RMA) + SMA50/100/200 + RSI(14) + MACD.
-    Никаких внешних таргет-прайсов. Цены продаж сглажены к 52w-high.
+    Уровни рассчитаны из ATR (Wilder RMA) + SMA50/100/200 + RSI(14) + MACD. Без внешних таргет-прайсов.
   </div>
   <div class="table-wrap">
     <table>
       <thead><tr>
         <th>Тикер</th><th>Action</th><th>Δw, п.п.</th><th>Qty Δ</th>
-        <th>Buy zone</th><th>Sell target</th><th>Stop loss</th><th>Reason</th>
+        <th>Buy zone</th><th>Sell target</th><th>Stop loss</th><th>Причина</th>
       </tr></thead>
       <tbody>
         {% for r in data.action_plan %}
@@ -285,7 +360,7 @@
           <td><span class="pill {{ r.action_color }}">{{ r.action }}</span></td>
           <td><strong>{{ r.delta_w_pp }}</strong></td>
           <td>{{ r.qty_delta }}</td>
-          <td class="muted">{{ r.buy_zone }}{% if r.sell_zone != '—' %} / sell {{ r.sell_zone }}{% endif %}</td>
+          <td class="muted">{{ r.buy_zone }}{% if r.sell_zone != '—' %} / {{ r.sell_zone }}{% endif %}</td>
           <td class="pos">{{ r.take_target }}</td>
           <td class="neg">{{ r.stop_loss }}</td>
           <td class="muted" style="font-size:9px;">{{ r.reason }}</td>
@@ -296,25 +371,19 @@
   </div>
 
   {% if data.ai_action_text %}
-  <div class="section-title">Комментарий ИИ-агента к Action Plan</div>
+  <div class="section-title">Комментарий ИИ-агента</div>
   <div class="ai-block">{{ data.ai_action_text }}</div>
   {% endif %}
 
-  {% if data.ai_bullets %}
-  <div class="section-title">Краткие выводы ИИ-агента{% if data.used_rag %}<span class="rag-tag">+ Bank RAG</span>{% endif %}</div>
-  <div class="ai-block">
-    <ul>{% for b in data.ai_bullets %}<li>{{ b }}</li>{% endfor %}</ul>
-  </div>
-  {% endif %}
-
-  <div class="section-title">CoVe — источники цифр</div>
+  <div class="section-title">CoVe — источники данных</div>
   <div class="ai-block" style="font-size:9px;">
     Vol / CVaR / TE / IR / Max DD: <strong>[Quant Engine · 730d daily · Wilder RMA · EWMA λ≈0.94 ⊕ Ledoit-Wolf]</strong><br>
     Fundamental Z-scores: <strong>[SEC EDGAR · 10-K FY · sector-normalised]</strong><br>
     Altman-Z, Piotroski-F, IntCov: <strong>[SEC EDGAR · CompanyFacts JSON]</strong><br>
     CDS spreads: <strong>[FRED HY proxy · WGB sovereign · QualityGate verified]</strong><br>
-    Regime: <strong>[Engine: Growth/Cycle factor returns]</strong><br>
-    Action levels: <strong>[Engine: ATR Wilder RMA + SMA + RSI + MACD]</strong>
+    Режим рынка: <strong>[Engine: Growth/Cycle factor returns]</strong><br>
+    Action levels: <strong>[Engine: ATR Wilder RMA + SMA + RSI + MACD]</strong><br>
+    {% if data.used_rag %}Bank insights: <strong>[ChromaDB RAG · Bank PDF reports]</strong><br>{% endif %}
   </div>
 
   <div class="footer">

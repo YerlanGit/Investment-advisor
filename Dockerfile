@@ -58,6 +58,12 @@ COPY src/ ./src/
 # (see entrypoint.py:_download_chroma_db) so RAG sees the freshest snapshot.
 RUN mkdir -p /app/data/user_reports /app/data/chroma_db
 
+# Pre-bake the Chroma ONNX embedding model (79 MB) so it's in the image layer.
+# Without this every first ChromaDB query downloads it from S3, adding ~2s latency.
+RUN python -c \
+  "from chromadb.utils.embedding_functions import DefaultEmbeddingFunction; \
+   DefaultEmbeddingFunction()([])" 2>/dev/null || true
+
 # ── Environment ───────────────────────────────────────────────────────────────
 # All secrets (RAMP_BOT_TOKEN, FINTECH_MASTER_KEY, ANTHROPIC_API_KEY) are
 # injected at runtime via Cloud Run Secret Manager bindings — never bake them
