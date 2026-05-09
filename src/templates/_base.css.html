@@ -262,6 +262,72 @@
   .pnl-summary .label { font-size: 8px; color: var(--text-2); letter-spacing: 0.12em; text-transform: uppercase; }
   .pnl-summary .val   { font-size: 13px; font-weight: 700; margin-top: 1px; }
 
+  /* Extreme-value highlighting */
+  .kpi-card.extreme {
+    border-color: var(--negative);
+    box-shadow: inset 3px 0 0 var(--negative);
+  }
+  .extreme-icon {
+    color: var(--negative);
+    font-weight: 700;
+    margin-left: 4px;
+  }
+  td.extreme-cell { background: #FEF2F2; }
+  .extreme-tag {
+    display: inline-block;
+    background: #FEF2F2;
+    color: var(--negative);
+    font-size: 8px;
+    font-weight: 700;
+    padding: 1px 5px;
+    border-radius: 99px;
+    margin-left: 3px;
+    border: 1px solid #FECACA;
+  }
+
+  /* Data-quality strip */
+  .data-quality {
+    background: #F8FAFC;
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 5px;
+    padding: 8px 12px;
+    margin-bottom: 10px;
+    font-size: 9px;
+    color: var(--text-2);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+  }
+  .dq-pill {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 99px;
+    font-weight: 600;
+    background: #ECFDF5;
+    color: var(--positive);
+  }
+  .dq-pill.warn { background: #FFEDD5; color: var(--warn); }
+
+  /* RAG-citation visual marker */
+  .rag-tag {
+    display: inline-block;
+    background: #EEF2FF;
+    color: var(--accent);
+    font-size: 8.5px;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 3px;
+    margin-left: 4px;
+    border: 1px solid #DBEAFE;
+  }
+
+  /* Regime explainer block */
+  .regime-explain { font-size: 9px; color: var(--text-2); margin-top: 5px; }
+  .regime-explain ul { margin: 0; padding-left: 16px; }
+  .regime-explain li { margin: 2px 0; }
+
   /* Footer */
   .footer {
     margin-top: 16px;

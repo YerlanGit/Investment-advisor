@@ -67,10 +67,51 @@ def _risk_score_label(score: int) -> str:
     return "Агрессивный"
 
 
+# ── Extreme-value thresholds ────────────────────────────────────────────────
+# Used to flag rows that warrant a red icon + AI tooltip.
+EXTREME = {
+    "atr_pct_high":      3.0,    # %  daily True ATR > 3% of price
+    "trc_pct_high":      20.0,   # %  Euler risk contribution
+    "sharpe_low":        0.0,    # Sharpe < 0
+    "vol_high":          0.30,   # 30% annualised
+    "cvar_low":         -0.07,   # -7% one-day CVaR
+    "max_dd_low":       -0.20,   # -20% peak-to-trough
+    "beta_high":         1.5,    # |Beta_Market|
+    "weight_high_pct":   15.0,   # single-asset weight
+}
+
+
+def _flag(value, *, kind: str) -> bool:
+    """Return True when `value` is in the 'extreme' tail per `kind`."""
+    if value is None:
+        return False
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return False
+    if math.isnan(v) or math.isinf(v):
+        return False
+    if kind == "atr_pct":   return v > EXTREME["atr_pct_high"]
+    if kind == "trc_pct":   return v > EXTREME["trc_pct_high"]
+    if kind == "weight":    return v > EXTREME["weight_high_pct"]
+    if kind == "sharpe":    return v < EXTREME["sharpe_low"]
+    if kind == "vol":       return v > EXTREME["vol_high"]
+    if kind == "cvar":      return v < EXTREME["cvar_low"]
+    if kind == "mdd":       return v < EXTREME["max_dd_low"]
+    if kind == "beta":      return abs(v) > EXTREME["beta_high"]
+    return False
+
+
 # ── Public API ───────────────────────────────────────────────────────────────
 
 TIER_BASE = "base"
 TIER_DEEP = "deep"
+
+# Factor ETFs the engine attempts to load (keep in sync with MAC3RiskEngine).
+_FACTOR_ETFS = [
+    "SPY.US", "MTUM.US", "VLUE.US", "QUAL.US", "IWM.US",
+    "DBC.US", "IEF.US", "EEM.US", "EMB.US",
+]
 
 
 def build_payload(results: dict, tier: str,
@@ -153,12 +194,23 @@ def build_payload(results: dict, tier: str,
             if ret_pct < worst_pct:
                 worst_pct, worst_abs, worst_t = ret_pct, pnl_abs, ticker
 
+            # Extreme-value flags (drive red icons + AI tooltips in template).
+            extremes: list[str] = []
+            if _flag(weight_pct, kind="weight"):
+                extremes.append("вес > 15%")
+            if _flag(euler, kind="trc_pct"):
+                extremes.append("TRC > 20%")
+            if _flag(atr_pct, kind="atr_pct"):
+                extremes.append("ATR > 3%")
             assets.append({
                 "ticker":        ticker,
                 "weight":        f"{weight_pct:.1f}%",
+                "weight_extreme":_flag(weight_pct, kind="weight"),
                 "asset_class":   _classify_asset(ticker),
                 "euler_risk":    f"{euler:.1f}%",
+                "euler_extreme": _flag(euler, kind="trc_pct"),
                 "atr_pct":       f"{atr_pct:.2f}%" if atr_pct is not None else "—",
+                "atr_extreme":   _flag(atr_pct, kind="atr_pct"),
                 "mvar_bps":      f"{mvar*10000:.0f}" if mvar is not None else "—",
                 "pnl_pct":       _format_pnl_pct(ret_pct),
                 "pnl_abs":       _format_pnl_abs(pnl_abs),
@@ -169,6 +221,7 @@ def build_payload(results: dict, tier: str,
                 "action":        action,
                 "action_color":  _action_color(action),
                 "hotspot":       hotspot,
+                "extremes":      extremes,
             })
 
         best  = {"ticker": best_t  or "—", "pnl_pct": _format_pnl_pct(best_pct  if best_t else 0.0),
@@ -196,12 +249,63 @@ def build_payload(results: dict, tier: str,
     regime_block = None
     regime = results.get("regime")
     if regime:
+        signals = regime.get("signals") or {}
+        # Build a compact human-readable explainer string from raw signals.
+        explainers: list[str] = []
+        sv = signals.get("spy_vs_ief_60d")
+        if sv is not None:
+            sign = "обгоняет" if sv >= 0 else "отстаёт от"
+            explainers.append(f"SPY {sign} IEF на {sv*100:+.1f}% за 60 дней (рост vs облигации)")
+        xv = signals.get("xly_vs_xlp_60d")
+        if xv is not None:
+            who = "Discretionary > Staples" if xv >= 0 else "Staples > Discretionary"
+            explainers.append(f"{who}: {xv*100:+.1f}% за 60д (цикличные {('on' if xv>=0 else 'off')})")
+        iv = signals.get("iwm_vs_spy_60d")
+        if iv is not None:
+            who = "small-caps лидируют" if iv >= 0 else "large-caps лидируют"
+            explainers.append(f"{who}: IWM−SPY {iv*100:+.1f}% за 60д")
+        ev = signals.get("eem_60d")
+        if ev is not None:
+            tone = "EM risk-on" if ev >= 0 else "EM risk-off"
+            explainers.append(f"EEM 60д {ev*100:+.1f}% ({tone})")
         regime_block = {
             "label":      regime["regime"],
             "confidence": int(round(regime["confidence"] * 100)),
             "growth":     regime["growth_score"],
             "cycle":      regime["cycle_score"],
+            "explainers": explainers,
         }
+
+    # ── Data quality (loaded factors / benchmarks / SEC) ──────────────────
+    history = results.get("history_result")
+    available_cols = []
+    if history is not None and getattr(history, "data", None) is not None:
+        available_cols = list(getattr(history, "data").columns)
+    factors_loaded = sum(1 for f in _FACTOR_ETFS if f in available_cols)
+    factors_total  = len(_FACTOR_ETFS)
+    bm_loaded = len(results.get("benchmark_comparison") or {})
+    sec_skipped: list[str] = []
+    if perf_df is not None and not perf_df.empty and "Fundamental_Sector" in perf_df.columns:
+        sec_skipped = perf_df.loc[
+            perf_df["Fundamental_Sector"].astype(str).isin(["default", "EM_Proxy"]),
+            "Ticker",
+        ].astype(str).tolist()
+    data_quality = {
+        "factors_loaded":     factors_loaded,
+        "factors_total":      factors_total,
+        "factors_complete":   factors_loaded == factors_total,
+        "benchmarks_loaded":  bm_loaded,
+        "sec_skipped":        sec_skipped,
+        "data_source_label":  "Daily CLOSE из Tradernet (730d). ATR — OHLC, fallback |ΔClose|.",
+    }
+
+    # KPI extreme flags — drive red borders + tooltips in template.
+    kpi_extremes = {
+        "cvar":         _flag(cvar_raw,    kind="cvar"),
+        "sharpe":       _flag(sharpe_raw,  kind="sharpe"),
+        "vol":          _flag(vol_raw,     kind="vol"),
+        "max_drawdown": _flag(mdd_raw,     kind="mdd"),
+    }
 
     # ── Common payload (always rendered) ───────────────────────────────────
     payload: dict = {
@@ -215,6 +319,7 @@ def build_payload(results: dict, tier: str,
         "volatility":        vol_str,
         "risk_pct":          composite,
         "risk_label":        _risk_score_label(composite),
+        "kpi_extremes":      kpi_extremes,
         # Aggregate P/L since entry
         "pnl_total_abs":     _format_pnl_abs(total_pnl),
         "pnl_total_pct":     _format_pnl_pct(total_return_pct),
@@ -227,9 +332,12 @@ def build_payload(results: dict, tier: str,
         "sectors":           sectors,
         # Regime
         "regime":            regime_block,
+        # Data quality
+        "data_quality":      data_quality,
         # AI Narrative — placeholder unless caller passed one in
         "ai_verdict":        (ai_summary or {}).get("verdict", ""),
         "ai_bullets":        (ai_summary or {}).get("bullets", []),
+        "used_rag":          bool((ai_summary or {}).get("used_rag")),
         # Tier metadata
         "tier":              tier,
     }

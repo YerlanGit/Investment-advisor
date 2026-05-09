@@ -33,34 +33,60 @@
   {% endif %}
 
   {% if data.regime %}
-  <div class="regime-line">
-    <div>Текущий рыночный режим: <strong>{{ data.regime.label }}</strong>
-         · уверенность {{ data.regime.confidence }}%</div>
-    <div class="muted">Growth: {{ '%+.3f' | format(data.regime.growth) }}
-         · Cycle: {{ '%+.3f' | format(data.regime.cycle) }}</div>
+  <div class="regime-line" style="flex-direction: column; align-items: stretch;">
+    <div style="display:flex; justify-content:space-between;">
+      <div>Текущий рыночный режим: <strong>{{ data.regime.label }}</strong>
+           · уверенность {{ data.regime.confidence }}%</div>
+      <div class="muted">Growth: {{ '%+.3f' | format(data.regime.growth) }}
+           · Cycle: {{ '%+.3f' | format(data.regime.cycle) }}</div>
+    </div>
+    {% if data.regime.explainers %}
+    <div class="regime-explain">
+      <strong>Сигналы (60-дневные):</strong>
+      <ul>{% for ex in data.regime.explainers %}<li>{{ ex }}</li>{% endfor %}</ul>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% if data.data_quality %}
+  <div class="data-quality">
+    <span><strong>Источник:</strong> {{ data.data_quality.data_source_label }}</span>
+    <span class="dq-pill {% if not data.data_quality.factors_complete %}warn{% endif %}">
+      Факторы: {{ data.data_quality.factors_loaded }}/{{ data.data_quality.factors_total }}
+    </span>
+    <span class="dq-pill {% if data.data_quality.benchmarks_loaded == 0 %}warn{% endif %}">
+      Бенчмарки: {{ data.data_quality.benchmarks_loaded }}
+    </span>
+    {% if data.data_quality.sec_skipped %}
+    <span class="dq-pill warn">SEC EDGAR пропущен: {{ data.data_quality.sec_skipped | length }}</span>
+    {% endif %}
+    {% if data.used_rag %}
+    <span class="dq-pill">📚 Bank RAG активен</span>
+    {% endif %}
   </div>
   {% endif %}
 
   <div class="section-title">Ключевые метрики риска (расширенные)</div>
   <div class="kpi-grid">
-    <div class="kpi-card">
+    <div class="kpi-card{% if data.kpi_extremes and data.kpi_extremes.cvar %} extreme{% endif %}">
       <div class="kpi-label">CVaR 95% · 1д</div>
-      <div class="kpi-value neg">{{ data.cvar }}</div>
+      <div class="kpi-value neg">{{ data.cvar }}{% if data.kpi_extremes and data.kpi_extremes.cvar %}<span class="extreme-icon">⚠</span>{% endif %}</div>
       {% if data.cvar_ci %}<div class="kpi-sub">{{ data.cvar_ci }}</div>{% endif %}
     </div>
-    <div class="kpi-card">
+    <div class="kpi-card{% if data.kpi_extremes and data.kpi_extremes.sharpe %} extreme{% endif %}">
       <div class="kpi-label">Sharpe / Sortino</div>
-      <div class="kpi-value neut">{{ data.sharpe }}</div>
+      <div class="kpi-value neut">{{ data.sharpe }}{% if data.kpi_extremes and data.kpi_extremes.sharpe %}<span class="extreme-icon">⚠</span>{% endif %}</div>
       <div class="kpi-sub">Sortino: {{ data.sortino }}</div>
     </div>
     <div class="kpi-card">
       <div class="kpi-label">VaR 95% · 1д</div>
       <div class="kpi-value neg">{{ data.var_95_daily }}</div>
     </div>
-    <div class="kpi-card">
+    <div class="kpi-card{% if data.kpi_extremes and data.kpi_extremes.max_drawdown %} extreme{% endif %}">
       <div class="kpi-label">Max Drawdown</div>
-      <div class="kpi-value neg">{{ data.max_drawdown }}</div>
-      <div class="kpi-sub">Vol: {{ data.volatility }}</div>
+      <div class="kpi-value neg">{{ data.max_drawdown }}{% if data.kpi_extremes and data.kpi_extremes.max_drawdown %}<span class="extreme-icon">⚠</span>{% endif %}</div>
+      <div class="kpi-sub">Vol: {{ data.volatility }}{% if data.kpi_extremes and data.kpi_extremes.vol %} ⚠{% endif %}</div>
     </div>
   </div>
 
@@ -275,7 +301,7 @@
   {% endif %}
 
   {% if data.ai_bullets %}
-  <div class="section-title">Краткие выводы ИИ-агента</div>
+  <div class="section-title">Краткие выводы ИИ-агента{% if data.used_rag %}<span class="rag-tag">+ Bank RAG</span>{% endif %}</div>
   <div class="ai-block">
     <ul>{% for b in data.ai_bullets %}<li>{{ b }}</li>{% endfor %}</ul>
   </div>

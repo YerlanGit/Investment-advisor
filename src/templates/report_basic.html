@@ -34,34 +34,57 @@
   {% endif %}
 
   {% if data.regime %}
-  <div class="regime-line">
-    <div>Текущий рыночный режим: <strong>{{ data.regime.label }}</strong>
-         · уверенность {{ data.regime.confidence }}%</div>
-    <div class="muted">Growth axis: {{ '%+.3f' | format(data.regime.growth) }}
-         · Cycle axis: {{ '%+.3f' | format(data.regime.cycle) }}</div>
+  <div class="regime-line" style="flex-direction: column; align-items: stretch;">
+    <div style="display:flex; justify-content:space-between;">
+      <div>Текущий рыночный режим: <strong>{{ data.regime.label }}</strong>
+           · уверенность {{ data.regime.confidence }}%</div>
+      <div class="muted">Growth: {{ '%+.3f' | format(data.regime.growth) }}
+           · Cycle: {{ '%+.3f' | format(data.regime.cycle) }}</div>
+    </div>
+    {% if data.regime.explainers %}
+    <div class="regime-explain">
+      <strong>На чём основано:</strong>
+      <ul>{% for ex in data.regime.explainers %}<li>{{ ex }}</li>{% endfor %}</ul>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% if data.data_quality %}
+  <div class="data-quality">
+    <span><strong>Источник:</strong> {{ data.data_quality.data_source_label }}</span>
+    <span class="dq-pill {% if not data.data_quality.factors_complete %}warn{% endif %}">
+      Факторы: {{ data.data_quality.factors_loaded }}/{{ data.data_quality.factors_total }}
+    </span>
+    <span class="dq-pill {% if data.data_quality.benchmarks_loaded == 0 %}warn{% endif %}">
+      Бенчмарки: {{ data.data_quality.benchmarks_loaded }}
+    </span>
+    {% if data.data_quality.sec_skipped %}
+    <span class="dq-pill warn">SEC EDGAR пропущен: {{ data.data_quality.sec_skipped | length }}</span>
+    {% endif %}
   </div>
   {% endif %}
 
   <div class="section-title">Ключевые метрики риска</div>
   <div class="kpi-grid">
-    <div class="kpi-card">
+    <div class="kpi-card{% if data.kpi_extremes and data.kpi_extremes.cvar %} extreme{% endif %}">
       <div class="kpi-label">CVaR 95% · 1д</div>
-      <div class="kpi-value neg">{{ data.cvar }}</div>
+      <div class="kpi-value neg">{{ data.cvar }}{% if data.kpi_extremes and data.kpi_extremes.cvar %}<span class="extreme-icon">⚠</span>{% endif %}</div>
       {% if data.cvar_ci %}<div class="kpi-sub">{{ data.cvar_ci }}</div>{% endif %}
     </div>
-    <div class="kpi-card">
+    <div class="kpi-card{% if data.kpi_extremes and data.kpi_extremes.sharpe %} extreme{% endif %}">
       <div class="kpi-label">Sharpe Ratio</div>
-      <div class="kpi-value neut">{{ data.sharpe }}</div>
+      <div class="kpi-value neut">{{ data.sharpe }}{% if data.kpi_extremes and data.kpi_extremes.sharpe %}<span class="extreme-icon">⚠</span>{% endif %}</div>
       <div class="kpi-sub">Sortino: {{ data.sortino }}</div>
     </div>
     <div class="kpi-card">
       <div class="kpi-label">VaR 95% · 1д</div>
       <div class="kpi-value neg">{{ data.var_95_daily }}</div>
     </div>
-    <div class="kpi-card">
+    <div class="kpi-card{% if data.kpi_extremes and data.kpi_extremes.max_drawdown %} extreme{% endif %}">
       <div class="kpi-label">Max Drawdown</div>
-      <div class="kpi-value neg">{{ data.max_drawdown }}</div>
-      <div class="kpi-sub">Vol: {{ data.volatility }}</div>
+      <div class="kpi-value neg">{{ data.max_drawdown }}{% if data.kpi_extremes and data.kpi_extremes.max_drawdown %}<span class="extreme-icon">⚠</span>{% endif %}</div>
+      <div class="kpi-sub">Vol: {{ data.volatility }}{% if data.kpi_extremes and data.kpi_extremes.vol %} ⚠{% endif %}</div>
     </div>
   </div>
 
@@ -136,9 +159,9 @@
           <th style="width:4%">#</th>
           <th>Тикер</th>
           <th>Класс</th>
-          <th>Вес</th>
-          <th>TRC</th>
-          <th>ATR</th>
+          <th>Вес <span class="muted" style="font-weight:400;">лимит 15%</span></th>
+          <th>TRC <span class="muted" style="font-weight:400;">лимит 20%</span></th>
+          <th>ATR <span class="muted" style="font-weight:400;">тревога &gt;3%</span></th>
           <th>P/L Pos</th>
           <th>Score</th>
           <th>Action</th>
@@ -150,9 +173,9 @@
           <td class="muted">{{ loop.index }}</td>
           <td><span class="ticker">{{ a.ticker }}</span>{% if a.hotspot %} 🔥{% endif %}</td>
           <td class="muted">{{ a.asset_class }}</td>
-          <td>{{ a.weight }}</td>
-          <td>{{ a.euler_risk }}</td>
-          <td class="muted">{{ a.atr_pct }}</td>
+          <td{% if a.weight_extreme %} class="extreme-cell"{% endif %}>{{ a.weight }}{% if a.weight_extreme %} <span class="extreme-icon">⚠</span>{% endif %}</td>
+          <td{% if a.euler_extreme %} class="extreme-cell"{% endif %}>{{ a.euler_risk }}{% if a.euler_extreme %} <span class="extreme-icon">⚠</span>{% endif %}</td>
+          <td{% if a.atr_extreme %} class="extreme-cell"{% endif %}>{{ a.atr_pct }}{% if a.atr_extreme %} <span class="extreme-icon">⚠</span>{% endif %}</td>
           <td class="{{ a.pnl_color }}">{{ a.pnl_pct }}<br><span class="muted" style="font-size:9px;">{{ a.pnl_abs }}</span></td>
           <td class="{{ a.score_color }}">{{ a.total_score }}</td>
           <td><span class="pill {{ a.action_color }}">{{ a.action }}</span></td>
@@ -160,6 +183,14 @@
         {% endfor %}
       </tbody>
     </table>
+  </div>
+  <div class="muted" style="font-size:8.5px; margin-top:5px;">
+    <strong>Расшифровка:</strong>
+    <em>TRC</em> — % общего риска портфеля от позиции (Euler);
+    <em>ATR</em> — средний дневной диапазон в % цены (Wilder RMA);
+    <em>P/L Pos</em> — доходность с момента покупки;
+    <em>Score</em> — Total Score Fund+Val+Tech+Credit ∈ [−6, +6];
+    <em>🔥</em> — Hotspot (TRC превышает лимит).
   </div>
 
   {% if data.sectors %}
@@ -178,7 +209,7 @@
   {% endif %}
 
   {% if data.ai_bullets %}
-  <div class="section-title">Краткие выводы ИИ-агента</div>
+  <div class="section-title">Краткие выводы ИИ-агента{% if data.used_rag %}<span class="rag-tag">+ Bank RAG</span>{% endif %}</div>
   <div class="ai-block">
     <ul>
       {% for b in data.ai_bullets %}
