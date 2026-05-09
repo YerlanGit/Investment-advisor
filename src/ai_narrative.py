@@ -19,7 +19,7 @@ logger = logging.getLogger("AINarrative")
 # Hard caps so we don't blow the API budget per report.
 MAX_TOKENS_BASE = 900
 MAX_TOKENS_DEEP = 3500
-DEFAULT_MODEL   = os.getenv("ANTHROPIC_MODEL", "claude-3-5-sonnet-20241022")
+DEFAULT_MODEL   = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
 
 
 # ── Prompt builders ─────────────────────────────────────────────────────────
