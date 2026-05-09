@@ -54,7 +54,9 @@ COPY src/ ./src/
 # ── Runtime data directories ──────────────────────────────────────────────────
 # NOTE: Cloud Run containers are ephemeral — SQLite data is lost on restart.
 # For production, migrate to Cloud SQL (PostgreSQL) and Cloud Storage for PDFs.
-RUN mkdir -p /app/data/user_reports
+# /app/data/chroma_db is pre-warmed on boot from gs://ramp-bot-chroma-db/
+# (see entrypoint.py:_download_chroma_db) so RAG sees the freshest snapshot.
+RUN mkdir -p /app/data/user_reports /app/data/chroma_db
 
 # ── Environment ───────────────────────────────────────────────────────────────
 # All secrets (RAMP_BOT_TOKEN, FINTECH_MASTER_KEY, ANTHROPIC_API_KEY) are

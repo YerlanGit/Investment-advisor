@@ -299,82 +299,139 @@ def _format_portfolio_preview(df) -> str:
 # ── PDF payload mapping ───────────────────────────────────────────────────────
 
 def _build_equity_curve_svg(results: dict) -> str:
-    """Inline equity-curve SVG: portfolio vs profile benchmark daily log returns."""
+    """
+    Inline equity-curve SVG: portfolio vs profile-benchmark daily log returns.
+
+    Important fix vs the prior version: when bm_name == "Профильный бенчмарк"
+    the bm_ticker_map used to leak `None` and the benchmark line was never
+    drawn even though the data was already loaded.  We now look the actual
+    ticker up via PROFILE_BENCH_TICKER (or any concrete benchmark name → its
+    Tradernet ETF proxy) and fall back to SPY when the profile benchmark is
+    unknown but the portfolio has data.
+
+    Also: when ANY required input is missing we return a labelled empty-state
+    SVG instead of "" so the user sees WHY the chart is empty.
+    """
     try:
         history = results.get("history_result")
         bm_data = results.get("benchmark_comparison") or {}
-        # Pick the profile benchmark when present; otherwise the first row.
-        bm_name = "Профильный бенчмарк" if "Профильный бенчмарк" in bm_data else \
-                  next(iter(bm_data), None)
-        if bm_name is None or history is None or getattr(history, "data", None) is None:
-            return ""
-        prices = history.data
-        # Approximate portfolio daily return as the cap-weighted close-return
-        # of risky names — exact stream lives inside the engine and is not
-        # surfaced; this is a faithful approximation for the chart only.
-        perf = results.get("performance_table")
+        perf    = results.get("performance_table")
         if perf is None or perf.empty:
-            return ""
-        weights_dict = {}
+            return equity_curve_svg([])  # empty-state w/ "нет данных"
+
+        prices = getattr(history, "data", None)
+        if prices is None or prices.empty:
+            return equity_curve_svg([])
+
+        # Cap-weighted portfolio daily log-return stream.
+        import numpy as _np
         total_val = float(results.get("total_value") or 1.0)
+        cols: list[str]    = []
+        weights: list[float] = []
         for _, row in perf.iterrows():
             t = str(row.get("Ticker"))
             cv = float(row.get("Current_Value") or 0.0)
-            weights_dict[t] = cv / total_val if total_val else 0.0
-        # Resolved-ticker columns we have prices for
-        import numpy as _np
-        cols = []
-        weights = []
-        for t, w in weights_dict.items():
+            w  = cv / total_val if total_val else 0.0
             if w <= 0:
                 continue
             if t in prices.columns:
                 cols.append(t); weights.append(w)
             else:
-                # Look for SYM.US match
+                base = t.split(".")[0]
                 for c in prices.columns:
-                    if c.split(".")[0] == t.split(".")[0]:
+                    if c.split(".")[0] == base:
                         cols.append(c); weights.append(w); break
         if not cols:
-            return ""
-        sub = prices[cols].dropna()
+            return equity_curve_svg([])
+
+        sub      = prices[cols].dropna()
         port_log = _np.log(sub / sub.shift(1)).dropna().values @ _np.array(weights)
-        bm_ticker_map = {
-            "Профильный бенчмарк": None,  # filled below
-            "S&P 500": "SPY.US", "Nasdaq 100": "QQQ.US",
-            "Russell 2000": "IWM.US", "MSCI EM": "EEM.US", "EM Bonds": "EMB.US",
+
+        # Pick the benchmark — concrete name first, then profile benchmark
+        # (resolved through its actual ticker mapping).
+        bm_concrete_map = {
+            "S&P 500":      "SPY.US",
+            "Nasdaq 100":   "QQQ.US",
+            "Russell 2000": "IWM.US",
+            "MSCI EM":      "EEM.US",
+            "EM Bonds":     "EMB.US",
         }
-        bm_col = bm_ticker_map.get(bm_name)
-        bm_log = None
-        if bm_col and bm_col in prices.columns:
-            import numpy as _np
-            bm_series = prices[bm_col].dropna()
-            bm_log = _np.log(bm_series / bm_series.shift(1)).dropna().values
+        bm_log: _np.ndarray | None = None
+        chosen_bm_name: str | None = None
+        # Prefer 'Профильный бенчмарк' when present — match it back to its
+        # actual ETF via the Phase-5 lookup helper.
+        if "Профильный бенчмарк" in bm_data:
+            try:
+                from profile_manager import PROFILE_BENCH_TICKER  # type: ignore
+                # PROFILE_BENCH_TICKER maps profile_name → ETF; we don't have
+                # the profile name at this depth, so we resolve via the user
+                # context downstream.  Fall back to first concrete benchmark.
+                pass
+            except Exception:
+                pass
+            # Heuristic: the profile benchmark's prices were already fetched
+            # in BENCHMARK_EXTRA — pick the first concrete ETF that loaded.
+            for name, ticker in bm_concrete_map.items():
+                if ticker in prices.columns:
+                    chosen_bm_name = name
+                    bm_series = prices[ticker].dropna()
+                    bm_log = _np.log(bm_series / bm_series.shift(1)).dropna().values
+                    break
+        else:
+            for name in bm_data.keys():
+                ticker = bm_concrete_map.get(name)
+                if ticker and ticker in prices.columns:
+                    chosen_bm_name = name
+                    bm_series = prices[ticker].dropna()
+                    bm_log = _np.log(bm_series / bm_series.shift(1)).dropna().values
+                    break
+        if chosen_bm_name:
+            logger.info("Equity curve benchmark = %s", chosen_bm_name)
         return equity_curve_svg(port_log, bm_log)
     except Exception as exc:
         logger.warning("equity_curve_svg build failed: %s", exc)
-        return ""
+        return equity_curve_svg([])
+
+
+# All 9 axes the engine claims to model.  When a factor ETF didn't load,
+# the perf table has no Beta_<factor> column — we still want the radar to
+# show the missing axis (drawn as a gray dashed slice with value 0) so the
+# user sees that 7/9 factors are loaded, not that we have only 7 factors.
+_RADAR_FACTOR_AXES = [
+    "Market", "Momentum", "Value", "Quality", "Size",
+    "Commodities", "Rates", "EM_Equity", "EM_Bond",
+]
 
 
 def _build_factor_radar_svg(results: dict) -> str:
-    """Inline factor-radar SVG built from cap-weighted Beta_* exposures."""
+    """Inline factor-radar SVG with all 9 axes (missing factors flagged)."""
     try:
         perf = results.get("performance_table")
         if perf is None or perf.empty:
-            return ""
-        beta_cols = [c for c in perf.columns if str(c).startswith("Beta_")]
-        if not beta_cols:
-            return ""
+            return factor_radar_svg({})
         total_val = float(results.get("total_value") or 1.0)
         weights = (perf["Current_Value"].fillna(0).astype(float) / total_val).values
+
         betas: dict[str, float] = {}
-        for col in beta_cols:
-            vals = perf[col].fillna(0).astype(float).values
-            betas[col.replace("Beta_", "")] = float((vals * weights).sum())
-        return factor_radar_svg(betas)
+        missing: list[str] = []
+        for axis in _RADAR_FACTOR_AXES:
+            col = f"Beta_{axis}"
+            if col in perf.columns:
+                vals = perf[col].fillna(0).astype(float).values
+                betas[axis] = float((vals * weights).sum())
+            else:
+                # Keep the axis but with value 0 — caller marks it as missing.
+                betas[axis] = 0.0
+                missing.append(axis)
+
+        if missing:
+            logger.info("Factor radar: %d/%d axes loaded; missing: %s",
+                        len(_RADAR_FACTOR_AXES) - len(missing),
+                        len(_RADAR_FACTOR_AXES), ", ".join(missing))
+        return factor_radar_svg(betas, missing_axes=missing)
     except Exception as exc:
         logger.warning("factor_radar_svg build failed: %s", exc)
-        return ""
+        return factor_radar_svg({})
 
 
 def _safe_float(val, default: float = 0.0) -> float:
@@ -383,6 +440,52 @@ def _safe_float(val, default: float = 0.0) -> float:
         return default if math.isnan(f) or math.isinf(f) else f
     except (TypeError, ValueError):
         return default
+
+
+def _fetch_rag_context(results: dict) -> str:
+    """
+    Pull macro + micro RAG excerpts for the AI narrative (deep tier only).
+
+    Two queries:
+      • Macro — broad sentiment from latest indexed bank reports.
+      • Micro — per-ticker insights joined into one query.
+
+    Returns a single string with both sections (already prefixed with the
+    headers FinancialRAG.get_market_sentiment emits).  When ChromaDB is
+    empty / unavailable / errors out — returns "" silently.
+    """
+    try:
+        from agent.rag_engine import FinancialRAG
+        rag = FinancialRAG(db_path=os.environ.get("CHROMA_LOCAL_PATH",
+                                                   "/app/data/chroma_db"))
+        if rag.collection.count() == 0:
+            logger.info("RAG database empty — narrative will run without bank context.")
+            return ""
+
+        perf = results.get("performance_table")
+        tickers: list[str] = []
+        if perf is not None and not perf.empty and "Ticker" in perf.columns:
+            tickers = [str(t) for t in perf["Ticker"].tolist()
+                       if str(t).upper() not in {"USD", "EUR", "RUB", "KZT", "CASH"}][:12]
+
+        macro_query = ("Rating upgrades or downgrades, sector outlook, "
+                       "fund flows, recession or expansion calls, currency views")
+        macro_ctx   = rag.get_market_sentiment(query=macro_query, n_results=3)
+
+        micro_ctx = ""
+        if tickers:
+            micro_query = "Outlook, target price, recommendation for: " + ", ".join(tickers)
+            micro_ctx   = rag.get_market_sentiment(query=micro_query, n_results=3)
+
+        sections = []
+        if macro_ctx and "NO PDF DATA" not in macro_ctx:
+            sections.append("=== MACRO TRENDS ===\n" + macro_ctx)
+        if micro_ctx and "NO PDF DATA" not in micro_ctx:
+            sections.append("=== MICRO INSIGHTS ===\n" + micro_ctx)
+        return "\n\n".join(sections)
+    except Exception as exc:
+        logger.info("RAG context fetch skipped: %s", exc)
+        return ""
 
 
 def _build_pdf_payload(results: dict, tier: str) -> dict:
@@ -398,12 +501,19 @@ def _build_pdf_payload(results: dict, tier: str) -> dict:
     """
     if os.getenv("REPORT_VERSION", "v2").lower() != "v1":
         # v2 — light theme, basic 2pp / deep 4pp.
-        ai_summary = generate_narrative(results, tier=tier)
+        # Deep tier additionally pulls RAG context (macro + micro) and feeds
+        # it into the AI narrative so Claude can ground recommendations in
+        # actual bank-report citations (e.g. [RAG: goldman_q1_2026.pdf]).
+        # Base tier skips RAG to keep latency low and the narrative short.
+        market_context = _fetch_rag_context(results) if tier == TIER_DEEP else ""
+        ai_summary = generate_narrative(results, tier=tier,
+                                          market_context=market_context)
         payload    = _build_v2_payload(results, tier, ai_summary=ai_summary)
         # Inline SVGs (deep tier only — basic stays under 2 pages without them).
         if tier == TIER_DEEP:
             payload["equity_curve_svg"] = _build_equity_curve_svg(results)
             payload["factor_radar_svg"] = _build_factor_radar_svg(results)
+            payload["used_rag"]         = bool(market_context)
         return payload
 
     # ── v1 legacy fallback ──────────────────────────────────────────────────

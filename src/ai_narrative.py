@@ -107,8 +107,15 @@ def _safe_round(v, digits: int):
         return None
 
 
-def _user_prompt(summary: dict, *, tier: str) -> str:
-    """Build the user message that asks for verdict + bullets + (deep) plan."""
+def _user_prompt(summary: dict, *, tier: str, market_context: str = "") -> str:
+    """
+    Build the user message that asks for verdict + bullets + (deep) plan.
+
+    When tier == 'deep' AND market_context is non-empty, an extra RAG section
+    is appended and the model is INSTRUCTED to cite each insight back as
+    [RAG: <filename>].  Citations whose filename does not appear verbatim in
+    the provided context are stripped post-hoc to enforce CoVe.
+    """
     if tier == "deep":
         n_bullets = "5–7"
         ask_plan  = ("Также выведи ключ \"action_plan_text\": краткий блок (≤ 600 знаков) "
@@ -117,6 +124,24 @@ def _user_prompt(summary: dict, *, tier: str) -> str:
     else:
         n_bullets = "3"
         ask_plan  = ""
+
+    rag_block = ""
+    rag_rule  = ""
+    if tier == "deep" and market_context:
+        rag_block = (
+            "\n\n=== BANK ANALYTICS (RAG) ===\n"
+            f"{market_context[:6000]}\n"
+            "=== END BANK ANALYTICS ==="
+        )
+        rag_rule = (
+            "Если в bullets или action_plan_text используешь факт из BANK "
+            "ANALYTICS — ОБЯЗАТЕЛЬНО цитируй источник как [RAG: <имя_файла>] "
+            "ровно в том виде, в каком имя файла появляется в блоке выше "
+            "(между квадратными скобками после даты). Не выдумывай файлы, "
+            "которых нет в блоке. Не выдумывай числа, не подкреплённые ни "
+            "summary, ни RAG-блоком.\n"
+        )
+
     return (
         "Ниже структура портфеля и риск-аналитика. Сформируй СТРОГО JSON-ответ:\n"
         "{\n"
@@ -125,9 +150,11 @@ def _user_prompt(summary: dict, *, tier: str) -> str:
         '  "action_plan_text": "..."  // только для tier=deep\n'
         "}\n\n"
         "Никакого текста вне JSON. Никаких markdown-форматов. Слово \"RAMP\" не использовать.\n"
-        "Все числа со ссылкой на источник [Quant Engine] / [SEC EDGAR] / [CDS] / [Regime].\n\n"
-        f"{ask_plan}\n\n"
+        "Все числа со ссылкой на источник [Quant Engine] / [SEC EDGAR] / [CDS] / [Regime].\n"
+        f"{rag_rule}"
+        f"\n{ask_plan}\n\n"
         f"=== SUMMARY ===\n{json.dumps(summary, ensure_ascii=False)[:9000]}"
+        f"{rag_block}"
     )
 
 
@@ -184,20 +211,56 @@ def _fallback_narrative(results: dict, tier: str) -> dict:
         "verdict": verdict,
         "bullets": bullets[:7 if tier == "deep" else 3],
         "action_plan_text": action_plan_text,
+        "used_rag": False,
     }
 
 
 # ── Public API ───────────────────────────────────────────────────────────────
 
-def generate_narrative(results: dict, tier: str = "base") -> dict:
+def _strip_unverified_rag_citations(text: str, market_context: str) -> str:
     """
-    Returns {verdict, bullets, action_plan_text} for the PDF.
-    Falls back deterministically when the API is unavailable.
+    Remove [RAG: <name>] markers whose <name> does not appear verbatim in the
+    market_context block.  Defensive against the model citing files it never
+    saw.  When market_context is empty this is a no-op (the prompt forbids
+    RAG citations in that case anyway).
+    """
+    if not text:
+        return text
+    if not market_context:
+        # No RAG was provided → strip any RAG citation entirely.
+        import re
+        return re.sub(r"\s*\[RAG:[^\]]*\]", "", text)
+    import re
+    def _keep(match: "re.Match") -> str:
+        name = match.group(1).strip()
+        return match.group(0) if name and name in market_context else ""
+    return re.sub(r"\[RAG:\s*([^\]]+)\]", _keep, text)
+
+
+def generate_narrative(results: dict, tier: str = "base",
+                       market_context: str = "") -> dict:
+    """
+    Returns {verdict, bullets, action_plan_text, used_rag} for the PDF.
+
+    Args:
+        results        : dict from UniversalPortfolioManager.analyze_all().
+        tier           : 'base' or 'deep'. Only deep tier consumes RAG.
+        market_context : Optional RAG context string.  When non-empty AND
+                         tier == 'deep', the prompt asks the model to cite
+                         sources back as [RAG: <filename>].  Citations whose
+                         filename is not present in market_context are
+                         stripped to enforce CoVe.
+
+    Falls back deterministically when the API is unavailable or fails.
     """
     api_key = os.getenv("ANTHROPIC_API_KEY")
+    used_rag = bool(market_context) and tier == "deep"
+
     if not api_key:
         logger.info("ANTHROPIC_API_KEY missing — using fallback narrative.")
-        return _fallback_narrative(results, tier)
+        out = _fallback_narrative(results, tier)
+        out["used_rag"] = False
+        return out
 
     summary = _summarise_for_prompt(results)
     try:
@@ -209,7 +272,11 @@ def generate_narrative(results: dict, tier: str = "base") -> dict:
             max_tokens  = max_tokens,
             temperature = 0.1,
             system      = _build_system_prompt(),
-            messages    = [{"role": "user", "content": _user_prompt(summary, tier=tier)}],
+            messages    = [{
+                "role": "user",
+                "content": _user_prompt(summary, tier=tier,
+                                          market_context=market_context),
+            }],
         )
         raw = response.content[0].text.strip()
         # Extract JSON block defensively (model may wrap in markdown despite the rule).
@@ -224,14 +291,24 @@ def generate_narrative(results: dict, tier: str = "base") -> dict:
         plan_txt = str(parsed.get("action_plan_text", "")).strip()
         if not verdict or not bullets:
             raise ValueError("verdict or bullets missing")
+
+        # CoVe enforcement: strip any RAG citation that wasn't actually
+        # present in the market_context block.
+        bullets  = [_strip_unverified_rag_citations(b, market_context) for b in bullets]
+        plan_txt = _strip_unverified_rag_citations(plan_txt, market_context)
+        verdict  = _strip_unverified_rag_citations(verdict,  market_context)
+
         return {
             "verdict": verdict[:300],
             "bullets": bullets[:7 if tier == "deep" else 3],
             "action_plan_text": plan_txt[:800] if tier == "deep" else "",
+            "used_rag": used_rag,
         }
     except Exception as exc:
         logger.warning("AI narrative failed (%s) — using fallback.", exc)
-        return _fallback_narrative(results, tier)
+        out = _fallback_narrative(results, tier)
+        out["used_rag"] = False
+        return out
 
 
 __all__ = ["generate_narrative"]

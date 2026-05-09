@@ -188,18 +188,30 @@ def sector_pie_svg(sectors: dict[str, float],
 # ── Factor radar ─────────────────────────────────────────────────────────────
 
 def factor_radar_svg(betas: dict[str, float],
-                     *, size: int = 240) -> str:
+                     *, size: int = 240,
+                     missing_axes: list[str] | None = None) -> str:
     """
     Radar chart of factor betas.  Each axis is one factor; values are clipped
     to [-1.5, 1.5] for a balanced visual.
+
+    Args:
+        betas        : Dict of {axis_name: beta}.  Pass 0.0 for missing factors
+                       to keep the axis on the chart (better for the user
+                       than a polygon that silently drops sides).
+        missing_axes : Optional list of axis names whose data was unavailable
+                       — these axes are drawn with a gray dashed marker so
+                       the user can see N/N axes loaded.
     """
     if not betas:
         return _empty_chart(size, size, "нет данных")
     labels = list(betas.keys())
     values = [float(v) for v in betas.values()]
     n = len(labels)
+    if n < 3:
+        return _empty_chart(size, size, "недостаточно факторов")
+    missing_set = set(missing_axes or [])
     cx, cy = size / 2, size / 2
-    r_max = size / 2 - 22
+    r_max = size / 2 - 28
     grid_levels = (-1.5, -0.75, 0.0, 0.75, 1.5)
 
     def _pt(idx: int, val: float) -> tuple[float, float]:
@@ -219,26 +231,45 @@ def factor_radar_svg(betas: dict[str, float],
             ring.append(f"{cx + radius*math.cos(angle):.1f},{cy + radius*math.sin(angle):.1f}")
         parts.append(f'<polygon points="{" ".join(ring)}" fill="none" stroke="{GRID}" stroke-width="0.5" />')
 
-    # Axis spokes + labels
+    # Axis spokes + labels (missing axes get a dashed gray spoke + ⚠ marker)
     for i, label in enumerate(labels):
+        is_missing = label in missing_set
         ax_x = cx + r_max * math.cos(-math.pi / 2.0 + 2 * math.pi * i / n)
         ax_y = cy + r_max * math.sin(-math.pi / 2.0 + 2 * math.pi * i / n)
-        parts.append(f'<line x1="{cx}" y1="{cy}" x2="{ax_x:.1f}" y2="{ax_y:.1f}" stroke="{GRID}" stroke-width="0.5" />')
+        spoke_dash = ' stroke-dasharray="2 2"' if is_missing else ""
+        spoke_color = NEUT if is_missing else GRID
+        parts.append(
+            f'<line x1="{cx}" y1="{cy}" x2="{ax_x:.1f}" y2="{ax_y:.1f}" '
+            f'stroke="{spoke_color}" stroke-width="0.6"{spoke_dash} />'
+        )
         # Label outside the ring
-        lab_r = r_max + 12
+        lab_r = r_max + 14
         lab_x = cx + lab_r * math.cos(-math.pi / 2.0 + 2 * math.pi * i / n)
         lab_y = cy + lab_r * math.sin(-math.pi / 2.0 + 2 * math.pi * i / n)
+        prefix = "⚠ " if is_missing else ""
+        text_color = NEUT if is_missing else TEXT_2
         parts.append(
             f'<text x="{lab_x:.1f}" y="{lab_y+3:.1f}" text-anchor="middle" '
-            f'font-family="Inter,Arial" font-size="9" fill="{TEXT_2}">{_xml_escape(label)}</text>'
+            f'font-family="Inter,Arial" font-size="9" fill="{text_color}">'
+            f'{_xml_escape(prefix + label)}</text>'
         )
 
-    # Data polygon
-    pts = [f"{x:.1f},{y:.1f}" for x, y in (_pt(i, v) for i, v in enumerate(values))]
-    parts.append(
-        f'<polygon points="{" ".join(pts)}" fill="{NAVY_HI}" fill-opacity="0.20" '
-        f'stroke="{NAVY}" stroke-width="1.5" />'
-    )
+    # Data polygon — only draw if at least 3 axes have non-zero, real values.
+    real_axes = [i for i, lbl in enumerate(labels) if lbl not in missing_set]
+    if len(real_axes) >= 3:
+        pts = [f"{x:.1f},{y:.1f}" for x, y in (_pt(i, v) for i, v in enumerate(values))]
+        parts.append(
+            f'<polygon points="{" ".join(pts)}" fill="{NAVY_HI}" fill-opacity="0.20" '
+            f'stroke="{NAVY}" stroke-width="1.5" />'
+        )
+
+    # Footnote when any axis is missing
+    if missing_set:
+        parts.append(
+            f'<text x="{cx}" y="{size - 6}" text-anchor="middle" '
+            f'font-family="Inter,Arial" font-size="8" fill="{NEUT}">'
+            f'⚠ {len(missing_set)}/{n} осей: данные ETF недоступны</text>'
+        )
 
     return (
         f'<svg width="{size}" height="{size}" viewBox="0 0 {size} {size}" '
