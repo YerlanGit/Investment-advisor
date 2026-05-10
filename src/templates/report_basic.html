@@ -2,21 +2,182 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8" />
-<title>Portfolio Risk &amp; Allocation Report</title>
+<title>Portfolio Intelligence Report</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@600&display=swap" rel="stylesheet" />
 {% include "_base.css.html" %}
 <style>
-.plain-box {
-  background: #f0f7ff; border: 1px solid #b3d4f5; border-radius: 6px;
-  padding: 10px 14px; margin: 8px 0; font-size: 10.5px; line-height: 1.55;
-  color: #1a3a5c;
+/* ── Snapshot bar ── */
+.snapshot-bar {
+  display: flex; justify-content: space-between; align-items: center;
+  background: #0d2240; border-radius: 8px; padding: 12px 18px;
+  margin: 10px 0 14px; color: #fff;
 }
-.plain-box-label {
-  font-size: 8.5px; font-weight: 700; letter-spacing: 0.15em;
-  text-transform: uppercase; color: #4a7ab5; margin-bottom: 5px;
+.snap-item { text-align: center; }
+.snap-label { font-size: 8px; letter-spacing: 0.14em; text-transform: uppercase; color: #8aadcc; margin-bottom: 3px; }
+.snap-value { font-family: 'JetBrains Mono', monospace; font-size: 16px; font-weight: 700; }
+.snap-value.pos { color: #4ade80; }
+.snap-value.neg { color: #f87171; }
+.snap-value.neut { color: #fbbf24; }
+.snap-value.white { color: #fff; }
+.snap-sub { font-size: 9px; color: #8aadcc; margin-top: 2px; }
+.snap-divider { width: 1px; background: rgba(255,255,255,0.15); height: 40px; }
+
+/* ── Three-Question blocks ── */
+.q-block { margin: 10px 0; }
+.q-header {
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 12px; border-radius: 6px 6px 0 0;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.05em;
 }
+.q-header.q1 { background: #0d2240; color: #fff; }
+.q-header.q2 { background: #1e3a5f; color: #fff; }
+.q-header.q3 { background: #163045; color: #fff; }
+.q-num { font-family: 'JetBrains Mono', monospace; font-size: 10px; opacity: 0.7; }
+.q-status { font-size: 14px; margin-left: auto; }
+.q-body {
+  border: 1px solid #d0dce8; border-top: none; border-radius: 0 0 6px 6px;
+  padding: 12px 14px; background: #f8fbff;
+}
+
+/* ── Dollar impact box ── */
+.dollar-impact {
+  display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap;
+}
+.di-card {
+  flex: 1; min-width: 90px; background: #fff; border: 1px solid #d0dce8;
+  border-radius: 6px; padding: 8px 10px; text-align: center;
+}
+.di-label { font-size: 8px; letter-spacing: 0.12em; text-transform: uppercase; color: #6b8aaa; margin-bottom: 4px; }
+.di-value { font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 700; }
+.di-value.neg { color: #dc2626; }
+.di-value.pos { color: #16a34a; }
+.di-sub { font-size: 8.5px; color: #8a9db0; margin-top: 2px; }
+
+/* ── Metric chips row ── */
+.metric-chips { display: flex; gap: 7px; flex-wrap: wrap; margin: 8px 0; }
+.metric-chip {
+  background: #fff; border: 1px solid #ccd8e4; border-radius: 20px;
+  padding: 5px 11px; font-size: 9px; white-space: nowrap;
+}
+.metric-chip .mc-label { color: #6b8aaa; margin-right: 4px; }
+.metric-chip .mc-val { font-weight: 700; color: #0d2240; }
+.metric-chip .mc-val.bad { color: #dc2626; }
+.metric-chip .mc-val.warn { color: #d97706; }
+.metric-chip .mc-val.good { color: #16a34a; }
+.metric-chip .mc-note { font-size: 7.5px; color: #9aabb8; margin-left: 3px; }
+
+/* ── Risk gauge ── */
+.risk-gauge-wrap { margin: 8px 0; }
+.risk-gauge-track {
+  height: 10px; border-radius: 5px;
+  background: linear-gradient(to right, #22c55e 0%, #f59e0b 50%, #ef4444 100%);
+  position: relative; margin: 4px 0;
+}
+.risk-gauge-needle {
+  position: absolute; top: -3px;
+  width: 4px; height: 16px; background: #0d2240;
+  border-radius: 2px; transform: translateX(-50%);
+}
+.risk-gauge-labels { display: flex; justify-content: space-between; font-size: 8px; color: #8a9db0; }
+.delta-chip {
+  display: inline-block; padding: 2px 7px; border-radius: 10px;
+  font-size: 8.5px; font-weight: 600;
+}
+.delta-chip.up { background: #fee2e2; color: #b91c1c; }
+.delta-chip.down { background: #dcfce7; color: #15803d; }
+.delta-chip.flat { background: #f1f5f9; color: #64748b; }
+
+/* ── Plain summary hero ── */
+.plain-hero {
+  background: #eff6ff; border-left: 4px solid #3b82f6;
+  border-radius: 0 6px 6px 0; padding: 11px 14px; margin: 10px 0;
+  font-size: 11px; line-height: 1.65; color: #1e3a5c;
+}
+.plain-hero-label {
+  font-size: 8px; font-weight: 700; letter-spacing: 0.15em;
+  text-transform: uppercase; color: #3b82f6; margin-bottom: 6px;
+}
+
+/* ── Hotspot alerts ── */
+.hotspot-alert {
+  background: #fff7ed; border: 1px solid #fdba74; border-radius: 5px;
+  padding: 7px 11px; margin: 6px 0; font-size: 9.5px; color: #92400e;
+}
+
+/* ── Benchmark row ── */
+.bm-row {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  background: #fff; border: 1px solid #d0dce8; border-radius: 6px;
+  padding: 10px 14px; margin: 8px 0;
+}
+.bm-item { }
+.bm-item .bl { font-size: 8px; color: #6b8aaa; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 3px; }
+.bm-item .bv { font-size: 13px; font-weight: 700; color: #0d2240; }
+.bm-item .bv.pos { color: #16a34a; }
+.bm-item .bv.neg { color: #dc2626; }
+.bm-note { font-size: 8px; color: #9aabb8; margin-top: 2px; }
+.bm-divider { width: 1px; height: 36px; background: #e0e8f0; }
+
+/* ── Regime box ── */
+.regime-box {
+  background: #fff; border: 1px solid #d0dce8; border-radius: 6px;
+  padding: 10px 14px; margin: 8px 0;
+}
+.regime-header { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.regime-label-tag {
+  font-size: 9px; font-weight: 700; letter-spacing: 0.12em;
+  text-transform: uppercase; color: #6b8aaa;
+}
+.regime-name { font-size: 14px; font-weight: 700; color: #0d2240; }
+.regime-conf { font-size: 9px; color: #8a9db0; }
+.regime-rag { margin-top: 7px; padding-top: 7px; border-top: 1px solid #e8f0f8; }
+.regime-rag-label { font-size: 8px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: #d97706; margin-bottom: 5px; }
+.regime-rag-item {
+  font-size: 9px; color: #374151; line-height: 1.55;
+  padding: 3px 0 3px 8px; border-left: 2px solid #fbbf24; margin-bottom: 3px;
+}
+
+/* ── Priority action box ── */
+.priority-box {
+  background: #0d2240; color: #fff; border-radius: 7px;
+  padding: 12px 16px; margin: 10px 0;
+}
+.priority-label { font-size: 8px; letter-spacing: 0.16em; text-transform: uppercase; color: #8aadcc; margin-bottom: 5px; }
+.priority-text { font-size: 12px; font-weight: 600; line-height: 1.5; }
+
+/* ── AI bullets ── */
+.bullets-block { margin: 8px 0; }
+.bullets-label { font-size: 8px; font-weight: 700; letter-spacing: 0.15em; text-transform: uppercase; color: #d97706; margin-bottom: 6px; }
+.bullets-block ul { margin: 0; padding-left: 16px; }
+.bullets-block li { font-size: 10px; line-height: 1.6; margin-bottom: 3px; color: #1e293b; }
+
+/* ── Scenario grid ── */
+.scenario-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin: 10px 0; }
+.scenario-card {
+  background: #fff; border: 1px solid #d0dce8; border-radius: 7px;
+  padding: 10px 11px;
+}
+.sc-icon { font-size: 16px; margin-bottom: 5px; }
+.sc-title { font-size: 8.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #0d2240; margin-bottom: 4px; }
+.sc-desc { font-size: 8px; color: #6b8aaa; margin-bottom: 8px; line-height: 1.5; }
+.sc-pick {
+  background: #f8fbff; border: 1px solid #e0eaf5;
+  border-radius: 5px; padding: 6px 8px; margin-bottom: 5px;
+}
+.sc-ticker { font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 700; color: #0d2240; }
+.sc-name { font-size: 8.5px; color: #475569; margin: 2px 0; }
+.sc-why { font-size: 8px; color: #64748b; line-height: 1.5; }
+.sc-badge {
+  display: inline-block; padding: 1px 6px; border-radius: 8px;
+  font-size: 7.5px; font-weight: 600; text-transform: uppercase; margin-top: 3px;
+}
+.sc-badge.etf { background: #dbeafe; color: #1d4ed8; }
+.sc-badge.stock { background: #dcfce7; color: #15803d; }
+.sc-badge.bond { background: #fef3c7; color: #92400e; }
+.sc-badge.crypto { background: #fce7f3; color: #9d174d; }
+.sc-badge.commodity { background: #f5f3ff; color: #6d28d9; }
 </style>
 </head>
 <body>
@@ -37,45 +198,220 @@
     </div>
   </div>
 
-  {% if data.ai_verdict %}
-  <div class="verdict">
-    <div class="verdict-label">Вердикт ИИ-агента</div>
-    <div>{{ data.ai_verdict }}</div>
-  </div>
-  {% endif %}
-
-  {% if data.ai_plain_summary %}
-  <div class="plain-box">
-    <div class="plain-box-label">Простыми словами</div>
-    {{ data.ai_plain_summary }}
-  </div>
-  {% endif %}
-
-  {% if data.ai_bullets %}
-  <div class="ai-block" style="margin-top:8px;">
-    <strong style="font-size:9px; letter-spacing:0.15em; text-transform:uppercase; color:var(--gold);">
-      Выводы ИИ-агента
-    </strong>
-    <ul style="margin-top:6px;">{% for b in data.ai_bullets %}<li>{{ b }}</li>{% endfor %}</ul>
-  </div>
-  {% endif %}
-
-  {% if data.regime %}
-  <div class="regime-line" style="flex-direction: column; align-items: stretch;">
-    <div style="display:flex; justify-content:space-between;">
-      <div>Текущий рыночный режим: <strong>{{ data.regime.label }}</strong>
-           · уверенность {{ data.regime.confidence }}%</div>
-      <div class="muted">Growth: {{ '%+.3f' | format(data.regime.growth) }}
-           · Cycle: {{ '%+.3f' | format(data.regime.cycle) }}</div>
+  <!-- Snapshot bar -->
+  <div class="snapshot-bar">
+    <div class="snap-item">
+      <div class="snap-label">Стоимость портфеля</div>
+      <div class="snap-value white">{{ data.total_value_usd | default('—') }}</div>
+      <div class="snap-sub">{{ data.pnl_total_pct | default('') }} total P/L</div>
     </div>
-    {% if data.regime.explainers %}
-    <div class="regime-explain">
-      <strong>На чём основано:</strong>
-      <ul>{% for ex in data.regime.explainers %}<li>{{ ex }}</li>{% endfor %}</ul>
+    <div class="snap-divider"></div>
+    <div class="snap-item">
+      <div class="snap-label">Доходность с входа</div>
+      <div class="snap-value {{ data.pnl_total_color | default('neut') }}">{{ data.pnl_total_pct | default('—') }}</div>
+      <div class="snap-sub">{{ data.pnl_total_abs | default('') }}</div>
     </div>
-    {% endif %}
+    <div class="snap-divider"></div>
+    <div class="snap-item">
+      <div class="snap-label">Риск-индекс</div>
+      <div class="snap-value {% if data.risk_pct and data.risk_pct > 65 %}neg{% elif data.risk_pct and data.risk_pct > 40 %}neut{% else %}pos{% endif %}">
+        {{ data.risk_pct | default('—') }}/100
+      </div>
+      {% if data.risk_score_delta is not none and data.risk_score_delta != 0 %}
+      <div class="snap-sub">
+        {% if data.risk_score_delta > 0 %}▲{% else %}▼{% endif %} {{ data.risk_score_delta | abs }} vs прошлый месяц
+      </div>
+      {% endif %}
+    </div>
+    <div class="snap-divider"></div>
+    <div class="snap-item">
+      <div class="snap-label">Дата отчёта</div>
+      <div class="snap-value white" style="font-size:12px;">{{ generated_at }}</div>
+      <div class="snap-sub">{{ data.risk_label | default('') }}</div>
+    </div>
   </div>
-  {% endif %}
+
+  <!-- Q1: Ваши деньги в безопасности? -->
+  <div class="q-block">
+    <div class="q-header q1">
+      <span class="q-num">Q1</span>
+      <span>Ваши деньги в безопасности?</span>
+      <span class="q-status">
+        {% if data.kpi_extremes and (data.kpi_extremes.cvar or data.kpi_extremes.max_drawdown or data.kpi_extremes.vol) %}⛔
+        {% elif data.hotspots %}⚠️
+        {% else %}✅{% endif %}
+      </span>
+    </div>
+    <div class="q-body">
+
+      <!-- Dollar impact -->
+      <div class="dollar-impact">
+        <div class="di-card">
+          <div class="di-label">Потенциальный убыток за день (CVaR 95%)</div>
+          <div class="di-value neg">{{ data.cvar_dollar | default(data.cvar) }}</div>
+          <div class="di-sub">{{ data.cvar }} от портфеля</div>
+        </div>
+        <div class="di-card">
+          <div class="di-label">Максимальная просадка (реализованная)</div>
+          <div class="di-value neg">{{ data.mdd_dollar | default(data.max_drawdown) }}</div>
+          <div class="di-sub">{{ data.max_drawdown }} peak-to-trough</div>
+        </div>
+        <div class="di-card">
+          <div class="di-label">VaR 95% · 1 день</div>
+          <div class="di-value neg">{{ data.var_dollar | default(data.var_95_daily) }}</div>
+          <div class="di-sub">{{ data.var_95_daily }} вероятный максимум</div>
+        </div>
+      </div>
+
+      <!-- Metric chips -->
+      <div class="metric-chips">
+        <div class="metric-chip">
+          <span class="mc-label">Sharpe</span>
+          <span class="mc-val {% if data.sharpe and data.sharpe | float < 0.5 %}bad{% elif data.sharpe and data.sharpe | float < 1.0 %}warn{% else %}good{% endif %}">{{ data.sharpe }}</span>
+          <span class="mc-note">(норма ≥1.0)</span>
+        </div>
+        <div class="metric-chip">
+          <span class="mc-label">Волатильность</span>
+          <span class="mc-val {% if data.kpi_extremes and data.kpi_extremes.vol %}bad{% else %}{% endif %}">{{ data.volatility }}</span>
+          <span class="mc-note">годовая</span>
+        </div>
+        <div class="metric-chip">
+          <span class="mc-label">Tracking Error</span>
+          <span class="mc-val">{% if data.scenarios and data.scenarios | length > 0 %}{{ data.scenarios[0].te }}{% else %}—{% endif %}</span>
+          <span class="mc-note">отклонение от бенчмарка ≠ волатильности</span>
+        </div>
+        <div class="metric-chip">
+          <span class="mc-label">CVaR 95%</span>
+          <span class="mc-val {% if data.kpi_extremes and data.kpi_extremes.cvar %}bad{% endif %}">{{ data.cvar }}</span>
+          {% if data.cvar_ci %}<span class="mc-note">CI: {{ data.cvar_ci }}</span>{% endif %}
+        </div>
+        <div class="metric-chip">
+          <span class="mc-label">Max Drawdown</span>
+          <span class="mc-val {% if data.kpi_extremes and data.kpi_extremes.max_drawdown %}bad{% endif %}">{{ data.max_drawdown }}</span>
+        </div>
+        <div class="metric-chip">
+          <span class="mc-label">Sortino</span>
+          <span class="mc-val">{{ data.sortino }}</span>
+        </div>
+      </div>
+
+      <!-- Risk gauge -->
+      <div class="risk-gauge-wrap">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:3px;">
+          <span style="font-size:9px; color:#6b8aaa;">Риск-индекс: <strong style="color:#0d2240;">{{ data.risk_pct }}/100 · {{ data.risk_label }}</strong></span>
+          {% if data.risk_score_delta is not none %}
+          <span class="delta-chip {% if data.risk_score_delta > 3 %}up{% elif data.risk_score_delta < -3 %}down{% else %}flat{% endif %}">
+            {% if data.risk_score_delta > 0 %}▲ +{{ data.risk_score_delta }}{% elif data.risk_score_delta < 0 %}▼ {{ data.risk_score_delta }}{% else %}= без изменений{% endif %} vs прошлый отчёт
+          </span>
+          {% endif %}
+        </div>
+        <div class="risk-gauge-track">
+          <div class="risk-gauge-needle" style="left: {{ data.risk_pct | default(50) }}%;"></div>
+        </div>
+        <div class="risk-gauge-labels">
+          <span>Консервативный</span><span>Умеренный</span><span>Агрессивный</span>
+        </div>
+        <div style="font-size:8px; color:#9aabb8; margin-top:3px;">0.4×Волатильность + 0.4×|CVaR| + 0.2×max TRC [Quant Engine]</div>
+      </div>
+
+      <!-- Hotspot alerts -->
+      {% if data.hotspots %}
+      {% for h in data.hotspots %}
+      <div class="hotspot-alert">🔥 <strong>Концентрация риска:</strong> {{ h }}</div>
+      {% endfor %}
+      {% endif %}
+
+      <!-- Plain summary hero -->
+      {% if data.ai_plain_summary %}
+      <div class="plain-hero">
+        <div class="plain-hero-label">Простыми словами — что происходит с портфелем</div>
+        {{ data.ai_plain_summary }}
+      </div>
+      {% endif %}
+
+    </div>
+  </div>
+
+  <!-- Q2: Вы обгоняете рынок? -->
+  <div class="q-block">
+    <div class="q-header q2">
+      <span class="q-num">Q2</span>
+      <span>Вы обгоняете рынок?</span>
+      <span class="q-status">
+        {% if data.scenarios and data.scenarios[0].beating %}✅{% else %}⚠️{% endif %}
+      </span>
+    </div>
+    <div class="q-body">
+
+      {% if data.scenarios and data.scenarios | length > 0 %}
+      {% set bm = data.scenarios[0] %}
+      <div class="bm-row">
+        <div class="bm-item">
+          <div class="bl">Бенчмарк</div>
+          <div class="bv" style="font-size:12px;">{{ bm.name }}</div>
+        </div>
+        <div class="bm-divider"></div>
+        <div class="bm-item">
+          <div class="bl">Excess Return (годовой)</div>
+          <div class="bv {{ bm.color }}">{{ bm.excess }}</div>
+          <div class="bm-note">сверх бенчмарка</div>
+        </div>
+        <div class="bm-divider"></div>
+        <div class="bm-item">
+          <div class="bl">Tracking Error</div>
+          <div class="bv">{{ bm.te }}</div>
+          <div class="bm-note">отклонение доходности от бенчмарка (≠ волатильность портфеля)</div>
+        </div>
+        <div class="bm-divider"></div>
+        <div class="bm-item">
+          <div class="bl">Information Ratio</div>
+          <div class="bv {% if bm.ir and bm.ir | float > 0.5 %}pos{% elif bm.ir and bm.ir | float < 0 %}neg{% endif %}">{{ bm.ir }}</div>
+          <div class="bm-note">IR = Excess Return ÷ TE</div>
+        </div>
+        <div class="bm-divider"></div>
+        <div class="bm-item">
+          <div class="bl">Статус</div>
+          {% if bm.beating %}
+          <span class="pill pos">✅ обгоняет</span>
+          {% else %}
+          <span class="pill neg">❌ отстаёт</span>
+          {% endif %}
+        </div>
+      </div>
+      {% endif %}
+
+      <!-- Regime box -->
+      {% if data.regime %}
+      <div class="regime-box">
+        <div class="regime-header">
+          <div>
+            <div class="regime-label-tag">Рыночный режим [Quant Engine]</div>
+            <div class="regime-name">{{ data.regime.label }}</div>
+          </div>
+          <div style="margin-left:auto; text-align:right;">
+            <div class="regime-conf">Уверенность: {{ data.regime.confidence }}%</div>
+            <div style="font-size:8.5px; color:#8a9db0;">Growth: {{ '%+.3f' | format(data.regime.growth) }} · Cycle: {{ '%+.3f' | format(data.regime.cycle) }}</div>
+          </div>
+        </div>
+        {% if data.regime_rag_confirm and data.regime_rag_confirm | length > 0 %}
+        <div class="regime-rag">
+          <div class="regime-rag-label">📚 Подтверждение из банковских отчётов</div>
+          {% for rc in data.regime_rag_confirm %}
+          <div class="regime-rag-item">{{ rc }}</div>
+          {% endfor %}
+        </div>
+        {% endif %}
+        {% if data.regime.explainers %}
+        <div style="margin-top:7px; font-size:8.5px; color:#6b8aaa;">
+          <strong style="color:#0d2240;">Сигналы:</strong>
+          {% for ex in data.regime.explainers %}<span>{{ ex }}{% if not loop.last %} · {% endif %}</span>{% endfor %}
+        </div>
+        {% endif %}
+      </div>
+      {% endif %}
+
+    </div>
+  </div>
 
   {% if data.data_quality %}
   <div class="data-quality">
@@ -92,56 +428,6 @@
   </div>
   {% endif %}
 
-  <div class="section-title">Ключевые метрики риска</div>
-  <div class="kpi-grid">
-    <div class="kpi-card{% if data.kpi_extremes and data.kpi_extremes.cvar %} extreme{% endif %}">
-      <div class="kpi-label">CVaR 95% · 1д</div>
-      <div class="kpi-value neg">{{ data.cvar }}{% if data.kpi_extremes and data.kpi_extremes.cvar %}<span class="extreme-icon">⚠</span>{% endif %}</div>
-      {% if data.cvar_ci %}<div class="kpi-sub">{{ data.cvar_ci }}</div>{% endif %}
-    </div>
-    <div class="kpi-card{% if data.kpi_extremes and data.kpi_extremes.sharpe %} extreme{% endif %}">
-      <div class="kpi-label">Sharpe Ratio</div>
-      <div class="kpi-value neut">{{ data.sharpe }}{% if data.kpi_extremes and data.kpi_extremes.sharpe %}<span class="extreme-icon">⚠</span>{% endif %}</div>
-      <div class="kpi-sub">Sortino: {{ data.sortino }}</div>
-    </div>
-    <div class="kpi-card">
-      <div class="kpi-label">VaR 95% · 1д</div>
-      <div class="kpi-value neg">{{ data.var_95_daily }}</div>
-    </div>
-    <div class="kpi-card{% if data.kpi_extremes and data.kpi_extremes.max_drawdown %} extreme{% endif %}">
-      <div class="kpi-label">Max Drawdown</div>
-      <div class="kpi-value neg">{{ data.max_drawdown }}{% if data.kpi_extremes and data.kpi_extremes.max_drawdown %}<span class="extreme-icon">⚠</span>{% endif %}</div>
-      <div class="kpi-sub">Vol: {{ data.volatility }}{% if data.kpi_extremes and data.kpi_extremes.vol %} ⚠{% endif %}</div>
-    </div>
-  </div>
-
-  <div class="risk-panel">
-    <div class="kpi-label">Совокупный риск-индекс портфеля</div>
-    <div class="risk-track">
-      <div class="risk-fill" style="width: {{ data.risk_pct | default(50) }}%;"></div>
-    </div>
-    <div class="risk-scale">
-      <span>Консервативный</span>
-      <span>Умеренный</span>
-      <span>Агрессивный</span>
-    </div>
-    <div style="font-size: 9.5px; color: var(--text-2); margin-top: 4px;">
-      {{ data.risk_pct }}/100 · {{ data.risk_label }}
-      <span class="muted">(0.4·Vol + 0.4·|CVaR| + 0.2·max TRC)</span>
-    </div>
-  </div>
-
-  {% if data.hotspots %}
-  <div class="section-title">Top-3 риск-перегрузки</div>
-  <div class="ai-block">
-    <ul>
-      {% for h in data.hotspots %}
-      <li>🔥 {{ h }}</li>
-      {% endfor %}
-    </ul>
-  </div>
-  {% endif %}
-
   <div class="footer">
     <span>1 / 2 · Investment Advisory © 2026 — Конфиденциально.</span>
     <span>Не является ИИИ. Advisory only.</span>
@@ -151,34 +437,105 @@
 <!-- ═══════════════════════════════ PAGE 2 ════════════════════════════════ -->
 <div class="page">
 
-  <div class="section-title">Структура портфеля и P/L по позициям</div>
+  <!-- Q3: Что делать прямо сейчас? -->
+  <div class="q-block">
+    <div class="q-header q3">
+      <span class="q-num">Q3</span>
+      <span>Что делать прямо сейчас?</span>
+      <span class="q-status">
+        {% if data.priority_action %}⚡{% else %}ℹ️{% endif %}
+      </span>
+    </div>
+    <div class="q-body">
 
-  <div class="pnl-summary">
-    <div>
-      <div class="label">Total P/L (с момента входа)</div>
-      <div class="val {{ data.pnl_total_color }}">{{ data.pnl_total_pct }} · {{ data.pnl_total_abs }}</div>
-    </div>
-    {% if data.pnl_best %}
-    <div>
-      <div class="label">Лучшая позиция</div>
-      <div class="val pos">{{ data.pnl_best.ticker }} {{ data.pnl_best.pnl_pct }}</div>
-      <div class="muted">{{ data.pnl_best.pnl_abs }}</div>
-    </div>
-    {% endif %}
-    {% if data.pnl_worst %}
-    <div>
-      <div class="label">Худшая позиция</div>
-      <div class="val neg">{{ data.pnl_worst.ticker }} {{ data.pnl_worst.pnl_pct }}</div>
-      <div class="muted">{{ data.pnl_worst.pnl_abs }}</div>
-    </div>
-    {% endif %}
-    <div>
-      <div class="label">Композит-риск</div>
-      <div class="val neut">{{ data.risk_pct }}/100</div>
-      <div class="muted">{{ data.risk_label }}</div>
+      <!-- Priority action -->
+      {% if data.priority_action %}
+      <div class="priority-box">
+        <div class="priority-label">Приоритетное действие #1</div>
+        <div class="priority-text">{{ data.priority_action }}</div>
+      </div>
+      {% endif %}
+
+      <!-- AI bullets -->
+      {% if data.ai_bullets %}
+      <div class="bullets-block">
+        <div class="bullets-label">Выводы Quant Engine</div>
+        <ul>{% for b in data.ai_bullets %}<li>{{ b }}</li>{% endfor %}</ul>
+      </div>
+      {% endif %}
+
+      <!-- Stock picks scenario grid -->
+      {% if data.ai_stock_picks %}
+      <div style="font-size:9px; font-weight:700; letter-spacing:0.12em; text-transform:uppercase; color:#0d2240; margin: 10px 0 6px;">
+        Идеи ИИ-агента — 3 сценария (advisory only)
+      </div>
+      <div class="scenario-grid">
+
+        <!-- Boost Alpha -->
+        <div class="scenario-card">
+          <div class="sc-icon">🚀</div>
+          <div class="sc-title">Boost Alpha</div>
+          <div class="sc-desc">Добавить риск для роста доходности</div>
+          {% set picks = data.ai_stock_picks.boost_alpha.picks | default([]) %}
+          {% for p in picks %}
+          <div class="sc-pick">
+            <div class="sc-ticker">{{ p.ticker }}</div>
+            <div class="sc-name">{{ p.name }}</div>
+            <div class="sc-why">{{ p.why }}</div>
+            <span class="sc-badge {{ p.type | default('etf') | lower }}">{{ p.type | default('ETF') }}</span>
+          </div>
+          {% else %}
+          <div class="sc-pick"><div class="sc-why" style="color:#9ca3af;">Нет данных</div></div>
+          {% endfor %}
+        </div>
+
+        <!-- Rebalance -->
+        <div class="scenario-card">
+          <div class="sc-icon">⚖️</div>
+          <div class="sc-title">Rebalance</div>
+          <div class="sc-desc">Улучшить качество без изменения риска</div>
+          {% set picks = data.ai_stock_picks.rebalance.picks | default([]) %}
+          {% for p in picks %}
+          <div class="sc-pick">
+            <div class="sc-ticker">{{ p.ticker }}</div>
+            <div class="sc-name">{{ p.name }}</div>
+            <div class="sc-why">{{ p.why }}</div>
+            <span class="sc-badge {{ p.type | default('etf') | lower }}">{{ p.type | default('ETF') }}</span>
+          </div>
+          {% else %}
+          <div class="sc-pick"><div class="sc-why" style="color:#9ca3af;">Нет данных</div></div>
+          {% endfor %}
+        </div>
+
+        <!-- Protect Capital -->
+        <div class="scenario-card">
+          <div class="sc-icon">🛡️</div>
+          <div class="sc-title">Protect Capital</div>
+          <div class="sc-desc">Снизить риск при смене режима</div>
+          {% set picks = data.ai_stock_picks.protect_capital.picks | default([]) %}
+          {% for p in picks %}
+          <div class="sc-pick">
+            <div class="sc-ticker">{{ p.ticker }}</div>
+            <div class="sc-name">{{ p.name }}</div>
+            <div class="sc-why">{{ p.why }}</div>
+            <span class="sc-badge {{ p.type | default('etf') | lower }}">{{ p.type | default('ETF') }}</span>
+          </div>
+          {% else %}
+          <div class="sc-pick"><div class="sc-why" style="color:#9ca3af;">Нет данных</div></div>
+          {% endfor %}
+        </div>
+
+      </div>
+      <div style="font-size:8px; color:#9aabb8; margin-top:4px;">
+        Источники: [Quant Engine] · [Regime] · Только для ознакомления, не является рекомендацией к покупке.
+      </div>
+      {% endif %}
+
     </div>
   </div>
 
+  <!-- Holdings table -->
+  <div class="section-title">Структура портфеля и P/L по позициям</div>
   <div class="table-wrap">
     <table>
       <thead>
@@ -188,8 +545,8 @@
           <th>Класс</th>
           <th>Вес <span class="muted" style="font-weight:400;">лимит 15%</span></th>
           <th>TRC <span class="muted" style="font-weight:400;">лимит 20%</span></th>
-          <th>ATR <span class="muted" style="font-weight:400;">тревога &gt;3%</span></th>
-          <th>P/L Pos</th>
+          <th>ATR <span class="muted" style="font-weight:400;">&gt;3% ⚠</span></th>
+          <th>P/L</th>
           <th>Score</th>
           <th>Action</th>
         </tr>
@@ -213,11 +570,11 @@
   </div>
   <div class="muted" style="font-size:8.5px; margin-top:5px;">
     <strong>Расшифровка:</strong>
-    <em>TRC</em> — % общего риска портфеля от позиции (Euler);
+    <em>TRC</em> — % общего риска портфеля от позиции (Euler decomposition);
     <em>ATR</em> — средний дневной диапазон в % цены (Wilder RMA);
     <em>P/L Pos</em> — доходность с момента покупки;
-    <em>Score</em> — Total Score Fund+Val+Tech+Credit ∈ [−6, +6];
-    <em>🔥</em> — Hotspot (TRC превышает лимит).
+    <em>Score</em> — Total Score: Fundamental + Valuation + Technical + Credit ∈ [−6, +6];
+    <em>🔥</em> — Hotspot (TRC превышает лимит 20%).
   </div>
 
   {% if data.sectors %}

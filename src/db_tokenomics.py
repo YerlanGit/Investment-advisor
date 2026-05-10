@@ -62,6 +62,21 @@ async def init_db() -> None:
                 updated_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS report_snapshots (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                telegram_id   INTEGER NOT NULL,
+                report_date   TEXT    NOT NULL,
+                tier          TEXT    NOT NULL,
+                risk_score    INTEGER,
+                sharpe        REAL,
+                cvar          REAL,
+                volatility    REAL,
+                total_value   REAL,
+                created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (telegram_id) REFERENCES users(telegram_id)
+            )
+        """)
         # Schema migrations: add columns if they don't exist yet.
         for migration in (
             "ALTER TABLE user_profiles ADD COLUMN connection_mode TEXT DEFAULT 'template'",
@@ -282,3 +297,49 @@ async def save_benchmark_ticker(telegram_id: int, ticker: str) -> None:
         )
         await db.commit()
         logger.info("Бенчмарк пользователя %s: %s.", telegram_id, ticker)
+
+
+async def save_report_snapshot(
+    telegram_id: int,
+    tier: str,
+    risk_score: int | None,
+    sharpe: float | None,
+    cvar: float | None,
+    volatility: float | None,
+    total_value: float | None,
+) -> None:
+    """Persist key metrics from the just-generated report for month-over-month delta."""
+    from datetime import date
+    async with _get_conn() as db:
+        await db.execute(
+            """INSERT INTO report_snapshots
+               (telegram_id, report_date, tier, risk_score, sharpe, cvar, volatility, total_value)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (telegram_id, date.today().isoformat(), tier,
+             risk_score, sharpe, cvar, volatility, total_value),
+        )
+        await db.commit()
+
+
+async def get_last_report_snapshot(telegram_id: int, tier: str) -> dict | None:
+    """Return the previous report snapshot (excluding today) for delta calculation."""
+    from datetime import date
+    async with _get_conn() as db:
+        cursor = await db.execute(
+            """SELECT report_date, risk_score, sharpe, cvar, volatility, total_value
+               FROM report_snapshots
+               WHERE telegram_id = ? AND tier = ? AND report_date < ?
+               ORDER BY report_date DESC LIMIT 1""",
+            (telegram_id, tier, date.today().isoformat()),
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        return {
+            "report_date": row[0],
+            "risk_score":  row[1],
+            "sharpe":      row[2],
+            "cvar":        row[3],
+            "volatility":  row[4],
+            "total_value": row[5],
+        }

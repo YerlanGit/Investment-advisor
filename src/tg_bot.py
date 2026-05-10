@@ -50,11 +50,13 @@ from db_tokenomics import (
     get_benchmark_ticker,
     get_connection_mode,
     get_profile,
+    get_last_report_snapshot,
     init_db,
     init_user,
     save_benchmark_ticker,
     save_connection_mode,
     save_profile,
+    save_report_snapshot,
 )
 from finance.broker_api import (
     BrokerAuthError,
@@ -442,17 +444,13 @@ def _safe_float(val, default: float = 0.0) -> float:
         return default
 
 
-def _fetch_rag_context(results: dict) -> str:
+def _fetch_rag_context(results: dict) -> tuple[str, list[str]]:
     """
     Pull macro + micro RAG excerpts for the AI narrative (deep tier only).
+    Also queries for regime confirmation from bank reports.
 
-    Two queries:
-      • Macro — broad sentiment from latest indexed bank reports.
-      • Micro — per-ticker insights joined into one query.
-
-    Returns a single string with both sections (already prefixed with the
-    headers FinancialRAG.get_market_sentiment emits).  When ChromaDB is
-    empty / unavailable / errors out — returns "" silently.
+    Returns (market_context_str, regime_rag_confirm_list).
+    Both are empty on ChromaDB unavailability.
     """
     try:
         from agent.rag_engine import FinancialRAG
@@ -460,7 +458,7 @@ def _fetch_rag_context(results: dict) -> str:
                                                    "/app/data/chroma_db"))
         if rag.collection.count() == 0:
             logger.info("RAG database empty — narrative will run without bank context.")
-            return ""
+            return "", []
 
         perf = results.get("performance_table")
         tickers: list[str] = []
@@ -470,26 +468,46 @@ def _fetch_rag_context(results: dict) -> str:
 
         macro_query = ("Rating upgrades or downgrades, sector outlook, "
                        "fund flows, recession or expansion calls, currency views")
-        macro_ctx   = rag.get_market_sentiment(query=macro_query, n_results=3)
+        macro_ctx = rag.get_market_sentiment(query=macro_query, n_results=3)
 
         micro_ctx = ""
         if tickers:
             micro_query = "Outlook, target price, recommendation for: " + ", ".join(tickers)
             micro_ctx   = rag.get_market_sentiment(query=micro_query, n_results=3)
 
+        # Regime confirmation — look for reports that discuss the current macro regime
+        regime_rag_confirm: list[str] = []
+        regime = results.get("regime") or {}
+        regime_label = regime.get("regime", "")
+        if regime_label:
+            regime_query = (
+                f"Market regime {regime_label} GDP growth recession expansion "
+                "economic cycle leading indicators PMI yield curve"
+            )
+            regime_raw = rag.get_market_sentiment(query=regime_query, n_results=2)
+            if regime_raw and "NO PDF DATA" not in regime_raw:
+                for line in regime_raw.split("\n"):
+                    line = line.strip()
+                    if line and len(line) > 30:
+                        regime_rag_confirm.append(line[:200])
+                        if len(regime_rag_confirm) >= 3:
+                            break
+
         sections = []
         if macro_ctx and "NO PDF DATA" not in macro_ctx:
             sections.append("=== MACRO TRENDS ===\n" + macro_ctx)
         if micro_ctx and "NO PDF DATA" not in micro_ctx:
             sections.append("=== MICRO INSIGHTS ===\n" + micro_ctx)
-        return "\n\n".join(sections)
+        return "\n\n".join(sections), regime_rag_confirm
     except Exception as exc:
         logger.info("RAG context fetch skipped: %s", exc)
-        return ""
+        return "", []
 
 
 def _build_pdf_payload(results: dict, tier: str,
-                       user_bench_ticker: str | None = None) -> dict:
+                       user_bench_ticker: str | None = None,
+                       prev_snapshot: dict | None = None,
+                       user_risk_profile: str = "Moderate") -> dict:
     """
     Build the PDF payload from analyze_all() output.
 
@@ -501,17 +519,27 @@ def _build_pdf_payload(results: dict, tier: str,
     report.html keeps rendering without code changes elsewhere.
     """
     if os.getenv("REPORT_VERSION", "v2").lower() != "v1":
-        # v2 — light theme, basic 2pp / deep 4pp.
-        # Deep tier additionally pulls RAG context (macro + micro) and feeds
-        # it into the AI narrative so Claude can ground recommendations in
-        # actual bank-report citations (e.g. [RAG: goldman_q1_2026.pdf]).
-        # Base tier skips RAG to keep latency low and the narrative short.
-        market_context = _fetch_rag_context(results) if tier == TIER_DEEP else ""
-        ai_summary = generate_narrative(results, tier=tier,
-                                          market_context=market_context)
-        payload    = _build_v2_payload(results, tier, ai_summary=ai_summary,
-                                       user_bench_ticker=user_bench_ticker)
-        # Inline SVGs (deep tier only — basic stays under 2 pages without them).
+        # Deep tier pulls RAG context (macro + micro + regime confirmation).
+        # Base tier skips RAG to keep latency low.
+        regime_rag_confirm: list[str] = []
+        if tier == TIER_DEEP:
+            market_context, regime_rag_confirm = _fetch_rag_context(results)
+        else:
+            market_context = ""
+
+        ai_summary = generate_narrative(
+            results,
+            tier=tier,
+            market_context=market_context,
+            user_risk_profile=user_risk_profile,
+        )
+        payload = _build_v2_payload(
+            results, tier,
+            ai_summary=ai_summary,
+            user_bench_ticker=user_bench_ticker,
+            prev_snapshot=prev_snapshot,
+            regime_rag_confirm=regime_rag_confirm,
+        )
         if tier == TIER_DEEP:
             payload["equity_curve_svg"] = _build_equity_curve_svg(results)
             payload["factor_radar_svg"] = _build_factor_radar_svg(results)
@@ -1598,8 +1626,37 @@ async def _run_analysis_background(
 
         # ── Step 4: PDF generation ────────────────────────────────────────
         await step("📄", "*Шаг 4/4:* Генерирую PDF-отчёт…")
-        payload = _build_pdf_payload(results, tier, user_bench_ticker=bench_tick)
+
+        # Fetch previous snapshot for month-over-month delta
+        prev_snapshot = await get_last_report_snapshot(user_id, tier)
+
+        # Resolve user's risk profile name for AI stock-pick context
+        profile       = await get_profile(user_id)
+        profile_name  = (profile or {}).get("profile_name", "Moderate")
+
+        payload = _build_pdf_payload(
+            results, tier,
+            user_bench_ticker=bench_tick,
+            prev_snapshot=prev_snapshot,
+            user_risk_profile=profile_name,
+        )
         await _send_pdf(bot, chat_id, user_id, tier, payload)
+
+        # Persist this report's key metrics for future MoM comparison
+        metrics = results.get("portfolio_metrics") or {}
+        try:
+            await save_report_snapshot(
+                telegram_id = user_id,
+                tier        = tier,
+                risk_score  = payload.get("risk_pct"),
+                sharpe      = metrics.get("Sharpe_Ratio"),
+                cvar        = metrics.get("CVaR_95_Daily"),
+                volatility  = metrics.get("Total_Volatility_Ann"),
+                total_value = results.get("total_value"),
+            )
+        except Exception as snap_exc:
+            logger.warning("Failed to save report snapshot: %s", snap_exc)
+
         await bot.send_message(
             chat_id,
             "✅ *Отчёт готов!*\n\n"

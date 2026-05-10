@@ -12,14 +12,17 @@ Output path: data/user_reports/<user_id>_<YYYY-MM-DD>_<tier>.pdf
 """
 
 import asyncio
+import json
 import logging
 import os
+import subprocess
+import sys
+import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
-from playwright.sync_api import sync_playwright
 
 logger = logging.getLogger(__name__)
 
@@ -117,33 +120,51 @@ async def generate_portfolio_pdf(
 
 
 def _render_pdf_sync(html_string: str, output_path: str) -> None:
-    """Blocking Playwright render — must be called from a thread, not the event loop."""
-    with sync_playwright() as pw:
-        browser = pw.chromium.launch(
-            args=[
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-gpu",
-                "--no-zygote",        # disable pre-forked zygote (requires NETLINK)
-                "--single-process",   # renderer runs in browser process (Cloud Run safe)
-                "--disable-extensions",
-            ],
-        )
-        page = browser.new_page()
-        page.set_content(html_string, wait_until="networkidle", timeout=30_000)
-        page.pdf(
-            path             = output_path,
-            format           = "A4",
-            print_background = True,
-            margin           = {
-                "top":    "14mm",
-                "bottom": "14mm",
-                "left":   "12mm",
-                "right":  "12mm",
-            },
-        )
-        browser.close()
+    """
+    Blocking Playwright render — runs Chromium in a child subprocess so that
+    Chromium's SIGTRAP on --single-process exit (Cloud Run / gVisor) does not
+    propagate to the parent aiogram process and cause container restarts.
+    """
+    # Inline runner script passed via stdin to avoid temp-file race conditions.
+    runner_code = r"""
+import sys, json
+from playwright.sync_api import sync_playwright
+args_cfg = json.loads(sys.stdin.read())
+html_string  = args_cfg["html"]
+output_path  = args_cfg["output"]
+with sync_playwright() as pw:
+    browser = pw.chromium.launch(
+        args=[
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-gpu",
+            "--no-zygote",
+            "--single-process",
+            "--disable-extensions",
+        ],
+    )
+    page = browser.new_page()
+    page.set_content(html_string, wait_until="networkidle", timeout=30000)
+    page.pdf(
+        path=output_path, format="A4", print_background=True,
+        margin={"top": "14mm", "bottom": "14mm", "left": "12mm", "right": "12mm"},
+    )
+    browser.close()
+"""
+    payload = json.dumps({"html": html_string, "output": output_path})
+    result = subprocess.run(
+        [sys.executable, "-c", runner_code],
+        input=payload.encode(),
+        capture_output=True,
+        timeout=90,
+    )
+    # Non-zero exit is expected when Chromium raises SIGTRAP on --single-process
+    # cleanup (signal 5 → exit code 133 on Linux).  The PDF is already written
+    # at that point — only raise if the output file is missing.
+    if result.returncode not in (0, 133) and not Path(output_path).exists():
+        stderr = result.stderr.decode(errors="replace")[:600]
+        raise RuntimeError(f"PDF subprocess failed (rc={result.returncode}): {stderr}")
 
 
 # ── CLI smoke-test ────────────────────────────────────────────────────────────

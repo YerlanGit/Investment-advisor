@@ -128,7 +128,9 @@ _BM_TICKER_TO_NAME: dict[str, str] = {
 
 def build_payload(results: dict, tier: str,
                   ai_summary: Optional[dict] = None,
-                  user_bench_ticker: Optional[str] = None) -> dict:
+                  user_bench_ticker: Optional[str] = None,
+                  prev_snapshot: Optional[dict] = None,
+                  regime_rag_confirm: Optional[list] = None) -> dict:
     """
     Build the payload consumed by report_basic.html / report_deep.html.
 
@@ -320,6 +322,29 @@ def build_payload(results: dict, tier: str,
         "max_drawdown": _flag(mdd_raw,     kind="mdd"),
     }
 
+    # ── Dollar impact fields ───────────────────────────────────────────────
+    cvar_dollar = f"${abs(cvar_raw * total_val):,.0f}" if total_val > 0 else "—"
+    mdd_dollar  = f"${abs(mdd_raw  * total_val):,.0f}" if total_val > 0 else "—"
+    var_dollar  = f"${abs(var_raw  * total_val):,.0f}" if total_val > 0 else "—"
+
+    # ── Month-over-month risk delta ────────────────────────────────────────
+    prev_risk_score: Optional[int] = None
+    risk_score_delta: Optional[int] = None
+    if prev_snapshot:
+        prev_risk_score  = prev_snapshot.get("risk_score")
+        if prev_risk_score is not None:
+            risk_score_delta = composite - int(prev_risk_score)
+
+    # ── Priority action (first hotspot or first action plan entry) ─────────
+    priority_action: Optional[str] = None
+    action_plan = results.get("action_plan") or []
+    if hotspots:
+        priority_action = hotspots[0]
+    elif action_plan:
+        ap = action_plan[0]
+        priority_action = (f"{ap.get('action','Hold')} {ap.get('ticker','')}: "
+                           f"{ap.get('reason','')}"[:120])
+
     # ── Common payload (always rendered) ───────────────────────────────────
     payload: dict = {
         # KPIs
@@ -333,6 +358,16 @@ def build_payload(results: dict, tier: str,
         "risk_pct":          composite,
         "risk_label":        _risk_score_label(composite),
         "kpi_extremes":      kpi_extremes,
+        # Dollar impact
+        "total_value_usd":   f"${total_val:,.0f}",
+        "cvar_dollar":       cvar_dollar,
+        "mdd_dollar":        mdd_dollar,
+        "var_dollar":        var_dollar,
+        # Month-over-month delta
+        "prev_risk_score":   prev_risk_score,
+        "risk_score_delta":  risk_score_delta,
+        # Priority action (top of page 2)
+        "priority_action":   priority_action,
         # Aggregate P/L since entry
         "pnl_total_abs":     _format_pnl_abs(total_pnl),
         "pnl_total_pct":     _format_pnl_pct(total_return_pct),
@@ -345,12 +380,14 @@ def build_payload(results: dict, tier: str,
         "sectors":           sectors,
         # Regime
         "regime":            regime_block,
+        "regime_rag_confirm": regime_rag_confirm or [],
         # Data quality
         "data_quality":      data_quality,
         # AI Narrative — placeholder unless caller passed one in
         "ai_verdict":        (ai_summary or {}).get("verdict", ""),
         "ai_plain_summary":  (ai_summary or {}).get("plain_summary", ""),
         "ai_bullets":        (ai_summary or {}).get("bullets", []),
+        "ai_stock_picks":    (ai_summary or {}).get("stock_picks", {}),
         "used_rag":          bool((ai_summary or {}).get("used_rag")),
         # Tier metadata
         "tier":              tier,
@@ -462,6 +499,15 @@ def build_payload(results: dict, tier: str,
             payload["ai_action_text"] = ai_summary.get("action_plan_text", "")
 
     return payload
+
+
+# ── Benchmark display — label formatting ─────────────────────────────────────
+
+def te_label(te_val: Optional[float]) -> str:
+    """Format Tracking Error with an explicit label to distinguish from Volatility."""
+    if te_val is None:
+        return "—"
+    return f"{te_val * 100:.1f}%"
 
 
 def _fmt_pct(v) -> str:

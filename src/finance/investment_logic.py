@@ -277,6 +277,7 @@ class MAC3RiskEngine:
             фактор-моделирования.  Ценообразование остаётся через брокера.
         """
         resolved = []
+        aix_found: list[str] = []
         for t in tickers:
             t_str = str(t).upper().strip()
             if t_str in self.NON_RISK_ASSETS:
@@ -296,7 +297,7 @@ class MAC3RiskEngine:
             if t_str.endswith('.AIX') or 'FFSPC' in t_str:
                 proxy = self.INSTRUMENT_PROXY_MAP.get('AIX_SPC',
                           self.INSTRUMENT_PROXY_MAP['AIX_DEFAULT'])
-                logger.info("AIX-инструмент %s → прокси %s для фактор-модели", t_str, proxy)
+                aix_found.append(t_str)
                 resolved.append(proxy)
                 continue
 
@@ -318,6 +319,9 @@ class MAC3RiskEngine:
 
             # 7. Голый US-тикер → добавить .US
             resolved.append(f"{t_str}.US")
+        if aix_found:
+            proxy = self.INSTRUMENT_PROXY_MAP.get('AIX_SPC', self.INSTRUMENT_PROXY_MAP['AIX_DEFAULT'])
+            logger.info("AIX instruments proxied to %s for factor model: %s", proxy, ", ".join(aix_found))
         return resolved
 
     def get_market_data(self, tickers, period_days: int = 730):
@@ -441,7 +445,7 @@ class MAC3RiskEngine:
             residuals = y - model.predict(X)
             
             B_matrix.append(betas)
-            specific_variances.append(np.var(residuals))
+            specific_variances.append(np.var(residuals, ddof=1))
             
             exposures_report[asset] = {f'Beta_{k}': b for k, b in zip(f_data.columns, betas)}
             exposures_report[asset]['Specific_Alpha_Daily'] = alpha
@@ -877,7 +881,7 @@ class UniversalPortfolioManager:
                             port_daily_aligned = port_daily[-min_len:]
                             bm_daily_aligned   = bm_daily.values[-min_len:]
                             tracking_diff      = port_daily_aligned - bm_daily_aligned
-                            tracking_error     = np.std(tracking_diff) * np.sqrt(self.engine.trading_days)
+                            tracking_error     = np.std(tracking_diff, ddof=1) * np.sqrt(self.engine.trading_days)
 
                             # Geometric-annualised returns on the SAME aligned window.
                             # Previously: excess_ann = (port_return - bm_return) which

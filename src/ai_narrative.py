@@ -1,37 +1,39 @@
 """
-AI narrative generator — wraps the Claude API to produce the verdict box,
-executive-summary bullets, and (deep tier only) the action-plan commentary
-that the PDF templates render.
+AI narrative generator — produces verdict, plain-language summary, insight bullets,
+stock-pick scenarios, and (deep tier) action-plan commentary for the PDF templates.
 
-The module is deterministic when ANTHROPIC_API_KEY is missing or the call
-fails: it falls back to a rule-based summary derived purely from the engine
-output, so the PDF is always produced.
+Model selection:
+  Base tier  → Claude Haiku  (fast, low-cost; 900 output tokens)
+  Deep tier  → Claude Sonnet (higher quality prose + RAG synthesis; 4 500 tokens)
+
+Falls back to a rule-based summary when the API key is absent or the call fails,
+so the PDF is always produced regardless of API availability.
 """
 from __future__ import annotations
 
 import json
 import logging
 import os
+import re
 from typing import Optional
 
 logger = logging.getLogger("AINarrative")
 
-# Hard caps so we don't blow the API budget per report.
 MAX_TOKENS_BASE = 900
-MAX_TOKENS_DEEP = 3500
-DEFAULT_MODEL   = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
+MAX_TOKENS_DEEP = 4_500
+
+MODEL_BASE = os.getenv("ANTHROPIC_MODEL_BASE", "claude-haiku-4-5-20251001")
+MODEL_DEEP = os.getenv("ANTHROPIC_MODEL_DEEP", "claude-sonnet-4-6")
 
 
-# ── Prompt builders ─────────────────────────────────────────────────────────
+# ── System prompt ────────────────────────────────────────────────────────────
 
 def _build_system_prompt() -> str:
-    """Load the project's SYSTEM_PROMPT.md (v3) as the system instruction."""
     here = os.path.dirname(__file__)
-    candidates = [
+    for path in [
         os.path.join(here, "..", "SYSTEM_PROMPT.md"),
         os.path.join(here, "..", "..", "SYSTEM_PROMPT.md"),
-    ]
-    for path in candidates:
+    ]:
         try:
             with open(path, "r", encoding="utf-8") as fh:
                 return fh.read()
@@ -41,16 +43,17 @@ def _build_system_prompt() -> str:
             "Output advisory-only text. Never mention 'RAMP'.")
 
 
+# ── Compact summary for LLM input ───────────────────────────────────────────
+
 def _summarise_for_prompt(results: dict) -> dict:
     """
-    Build a compact, JSON-serialisable view of analyze_all() results that
-    the LLM consumes.  Stays small to keep input tokens bounded.
+    Build a compact, JSON-serialisable view of analyze_all() results.
+    Kept small to keep input tokens bounded.
     """
     metrics = results.get("portfolio_metrics") or {}
     perf    = results.get("performance_table")
     perf_rows: list[dict] = []
     if perf is not None and not perf.empty:
-        # Limit to 25 rows to bound input — sort by Current_Value desc.
         df = perf.copy()
         if "Current_Value" in df.columns:
             df = df.sort_values("Current_Value", ascending=False)
@@ -65,10 +68,11 @@ def _summarise_for_prompt(results: dict) -> dict:
                 "score":    _safe_round(row.get("Score_Total"), 1),
                 "action":   row.get("Score_Action"),
                 "sector":   row.get("Fundamental_Sector"),
+                "beta_mkt": _safe_round(row.get("Beta_Market"), 2),
             })
     bm = {
         name: {
-            "ir":     _safe_round(d.get("Information_Ratio"),   2),
+            "ir":     _safe_round(d.get("Information_Ratio"), 2),
             "te":     _safe_round((d.get("Tracking_Error") or 0) * 100, 1),
             "excess": _safe_round((d.get("Excess_Return_Ann") or 0) * 100, 1),
         }
@@ -77,53 +81,61 @@ def _summarise_for_prompt(results: dict) -> dict:
     cvar_boot = metrics.get("CVaR_95_Bootstrap") or {}
     return {
         "metrics": {
-            "vol_ann":        _safe_round((metrics.get("Total_Volatility_Ann") or 0) * 100, 1),
-            "sharpe":         _safe_round(metrics.get("Sharpe_Ratio"),  2),
-            "sortino":        _safe_round(metrics.get("Sortino_Ratio"), 2),
-            "var_95":         _safe_round((metrics.get("VaR_95_Daily")  or 0) * 100, 2),
-            "cvar_95":        _safe_round((metrics.get("CVaR_95_Daily") or 0) * 100, 2),
-            "cvar_lo95":      _safe_round((cvar_boot.get("lo95") or 0) * 100, 2),
-            "cvar_hi95":      _safe_round((cvar_boot.get("hi95") or 0) * 100, 2),
-            "max_dd":         _safe_round((metrics.get("Max_Drawdown")  or 0) * 100, 2),
-            "max_erc_pct":    _safe_round(metrics.get("Max_Euler_Risk_Pct"), 1),
-            "composite":      metrics.get("Composite_Risk_Score"),
+            "vol_ann":      _safe_round((metrics.get("Total_Volatility_Ann") or 0) * 100, 1),
+            "sharpe":       _safe_round(metrics.get("Sharpe_Ratio"), 2),
+            "sortino":      _safe_round(metrics.get("Sortino_Ratio"), 2),
+            "var_95":       _safe_round((metrics.get("VaR_95_Daily") or 0) * 100, 2),
+            "cvar_95":      _safe_round((metrics.get("CVaR_95_Daily") or 0) * 100, 2),
+            "cvar_lo95":    _safe_round((cvar_boot.get("lo95") or 0) * 100, 2),
+            "cvar_hi95":    _safe_round((cvar_boot.get("hi95") or 0) * 100, 2),
+            "max_dd":       _safe_round((metrics.get("Max_Drawdown") or 0) * 100, 2),
+            "max_erc_pct":  _safe_round(metrics.get("Max_Euler_Risk_Pct"), 1),
+            "composite":    metrics.get("Composite_Risk_Score"),
         },
-        "regime":     results.get("regime"),
-        "sectors":    {k: round(float(v) * 100, 1)
-                       for k, v in (results.get("sector_exposure") or {}).items()},
-        "benchmarks": bm,
-        "holdings":   perf_rows,
-        "action_plan": (results.get("action_plan") or [])[:8],
+        "total_value":  _safe_round(results.get("total_value"), 0),
+        "regime":       results.get("regime"),
+        "sectors":      {k: round(float(v) * 100, 1)
+                         for k, v in (results.get("sector_exposure") or {}).items()},
+        "benchmarks":   bm,
+        "holdings":     perf_rows,
+        "action_plan":  (results.get("action_plan") or [])[:8],
     }
 
 
 def _safe_round(v, digits: int):
     try:
         x = float(v)
-        if x != x:  # NaN check
-            return None
-        return round(x, digits)
+        return None if x != x else round(x, digits)
     except (TypeError, ValueError):
         return None
 
 
-def _user_prompt(summary: dict, *, tier: str, market_context: str = "") -> str:
-    """
-    Build the user message that asks for verdict + bullets + (deep) plan.
+# ── Strip unverified RAG citations ───────────────────────────────────────────
 
-    When tier == 'deep' AND market_context is non-empty, an extra RAG section
-    is appended and the model is INSTRUCTED to cite each insight back as
-    [RAG: <filename>].  Citations whose filename does not appear verbatim in
-    the provided context are stripped post-hoc to enforce CoVe.
-    """
-    if tier == "deep":
-        n_bullets = "5–7"
-        ask_plan  = ("Также выведи ключ \"action_plan_text\": краткий блок (≤ 600 знаков) "
-                     "с 2-3 предложениями про самые приоритетные действия (Trim/Sell сначала). "
-                     "Опирайся на action_plan из summary.")
-    else:
-        n_bullets = "3"
-        ask_plan  = ""
+def _strip_unverified_rag_citations(text: str, market_context: str) -> str:
+    if not text:
+        return text
+    if not market_context:
+        return re.sub(r"\s*\[RAG:[^\]]*\]", "", text)
+    def _keep(match: re.Match) -> str:
+        name = match.group(1).strip()
+        return match.group(0) if name and name in market_context else ""
+    return re.sub(r"\[RAG:\s*([^\]]+)\]", _keep, text)
+
+
+# ── Narrative prompt ─────────────────────────────────────────────────────────
+
+def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
+                 user_profile: str = "Moderate") -> str:
+    regime = (summary.get("regime") or {})
+    regime_label = regime.get("regime", "unknown")
+    n_bullets = "5–7" if tier == "deep" else "3"
+    n_picks   = 5 if tier == "deep" else 3
+    ask_plan  = (
+        'Also output key "action_plan_text": concise block (≤600 chars) with '
+        '2-3 sentences on the most urgent Trim/Sell actions. Reference action_plan from summary.'
+        if tier == "deep" else ""
+    )
 
     rag_block = ""
     rag_rule  = ""
@@ -134,142 +146,190 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "") -> str:
             "=== END BANK ANALYTICS ==="
         )
         rag_rule = (
-            "Если в bullets или action_plan_text используешь факт из BANK "
-            "ANALYTICS — ОБЯЗАТЕЛЬНО цитируй источник как [RAG: <имя_файла>] "
-            "ровно в том виде, в каком имя файла появляется в блоке выше "
-            "(между квадратными скобками после даты). Не выдумывай файлы, "
-            "которых нет в блоке. Не выдумывай числа, не подкреплённые ни "
-            "summary, ни RAG-блоком.\n"
+            "When using a fact from BANK ANALYTICS in bullets, action_plan_text, or stock pick "
+            "rationale — cite it as [RAG: <filename>] EXACTLY as the filename appears in the "
+            "block above. Do not invent filenames or numbers not supported by summary or RAG. "
+            "If a pick cannot be confirmed by RAG or quant data, mark it [NOT CONFIRMED].\n"
         )
 
-    plain_field = (
-        '  "plain_summary": "2-3 предложения простым языком для обычного '
-        'инвестора (без жаргона): что сейчас с портфелем, главный риск, '
-        'и один конкретный совет что делать. ≤300 знаков.",\n'
-    )
+    scenarios_spec = f"""
+"stock_picks": {{
+  "boost_alpha": {{
+    "label": "Boost Alpha — Higher Risk",
+    "desc": "Increase returns by accepting more risk. Current regime: {regime_label}.",
+    "picks": [  // {1 if n_picks == 3 else 2} picks: small-cap momentum, commodity/crypto/PE ETFs
+      {{"ticker": "...", "name": "...", "why": "...(≤120 chars, cite source)", "type": "ETF|Stock"}}
+    ]
+  }},
+  "rebalance": {{
+    "label": "Maintain Profile — Quality Rebalance",
+    "desc": "Improve portfolio quality without changing overall risk level.",
+    "picks": [  // {1 if n_picks == 3 else 2} picks: quality stocks aligned with regime
+      {{"ticker": "...", "name": "...", "why": "...", "type": "ETF|Stock"}}
+    ]
+  }},
+  "protect_capital": {{
+    "label": "Protect Capital — Reduce Risk",
+    "desc": "Defensive positioning for regime change or rising macro risk.",
+    "picks": [  // 1 pick: dividend stocks, short-duration bonds, gold ETF
+      {{"ticker": "...", "name": "...", "why": "...", "type": "ETF|Stock"}}
+    ]
+  }}
+}}"""
 
     return (
-        "Ниже структура портфеля и риск-аналитика. Сформируй СТРОГО JSON-ответ:\n"
+        "Analyze the portfolio and return STRICT JSON (no text outside JSON, no markdown):\n"
         "{\n"
-        '  "verdict":  "1 предложение, ≤180 знаков — общий вердикт",\n'
-        f'{plain_field}'
-        f'  "bullets": [{n_bullets} пунктов, каждый ≤ 180 знаков],\n'
-        '  "action_plan_text": "..."  // только для tier=deep\n'
+        '  "verdict": "1 sentence ≤180 chars — overall verdict",\n'
+        '  "plain_summary": "2-3 plain sentences for a non-expert investor: '
+        'current state, main risk, one concrete action. ≤300 chars.",\n'
+        f'  "bullets": [{n_bullets} items, each ≤180 chars, each with [Source] tag],\n'
+        f"{scenarios_spec},\n"
+        '  "action_plan_text": "..."  // deep tier only\n'
         "}\n\n"
-        "Никакого текста вне JSON. Никаких markdown-форматов. Слово \"RAMP\" не использовать.\n"
-        "Все числа со ссылкой на источник [Quant Engine] / [SEC EDGAR] / [CDS] / [Regime].\n"
+        "Rules:\n"
+        "- No 'RAMP' anywhere.\n"
+        "- Every number needs a source tag: [Quant Engine], [SEC EDGAR], [CDS], [Regime], or [RAG: file].\n"
+        "- Stock picks must match user risk profile: " + user_profile + ".\n"
+        "- For Boost Alpha: suggest instruments NOT already in the portfolio that increase alpha "
+        "(small-cap momentum ETFs like IWM/MTUM, commodity ETFs like DBC/GLD, crypto ETFs like BITO, "
+        "private equity like PSP, leverage ETFs matching risk appetite).\n"
+        "- For Rebalance: suggest quality stocks/ETFs aligned with current market regime "
+        "(factor: QUAL, sector rotation based on regime signals).\n"
+        "- For Protect Capital: suggest defensive instruments (AGG, TLT, VIG dividend ETF, "
+        "sector ETFs like XLU/XLV, or trim existing overweight positions).\n"
+        "- CoVe self-check: before finalizing, verify that every ticker exists, every "
+        "fact is sourced, and no number is invented.\n"
         f"{rag_rule}"
         f"\n{ask_plan}\n\n"
-        f"=== SUMMARY ===\n{json.dumps(summary, ensure_ascii=False)[:9000]}"
+        f"=== PORTFOLIO SUMMARY ===\n{json.dumps(summary, ensure_ascii=False)[:9000]}"
         f"{rag_block}"
     )
 
 
-# ── Fallback summary (no API key / failure path) ────────────────────────────
+# ── Fallback narrative (no API key / failure path) ───────────────────────────
 
 def _fallback_narrative(results: dict, tier: str) -> dict:
-    """
-    Rule-based summary used when Claude is unavailable.  Only references
-    fields directly present in `results` so it can never hallucinate.
-    """
     metrics = results.get("portfolio_metrics") or {}
     regime  = results.get("regime") or {}
     perf    = results.get("performance_table")
 
-    # Verdict line
-    composite = metrics.get("Composite_Risk_Score") or 0
-    risk_label = "консервативный" if composite < 33 else \
-                 "умеренный" if composite < 66 else "агрессивный"
-    sharpe = metrics.get("Sharpe_Ratio")
-    s_text = f"Sharpe {sharpe:.2f}" if isinstance(sharpe, (int, float)) and sharpe == sharpe else "Sharpe н/д"
-    verdict = (f"Профиль риска {risk_label} (composite {composite}). {s_text}. "
-               f"Режим рынка: {regime.get('regime', 'N/A')}.")
+    composite  = metrics.get("Composite_Risk_Score") or 0
+    risk_label = ("консервативный" if composite < 33 else
+                  "умеренный"      if composite < 66 else "агрессивный")
+    sharpe     = metrics.get("Sharpe_Ratio")
+    s_text     = (f"Sharpe {sharpe:.2f}"
+                  if isinstance(sharpe, (int, float)) and sharpe == sharpe else "Sharpe н/д")
+    verdict    = (f"Risk profile: {risk_label} (composite {composite}/100). "
+                  f"{s_text}. Regime: {regime.get('regime', 'N/A')}.")
 
-    # Bullets — Hotspot first when present (most important user-facing signal),
-    # then tail risk, drawdown, and macro regime.
     bullets: list[str] = []
     if perf is not None and not perf.empty and "Score_Hotspot" in perf.columns:
         hot = perf[perf["Score_Hotspot"] == True]   # noqa: E712
         if not hot.empty:
-            t = str(hot.iloc[0].get("Ticker"))
+            t   = str(hot.iloc[0].get("Ticker"))
             trc = float(hot.iloc[0].get("Euler_Risk_Contribution_Pct") or 0)
-            bullets.append(f"🔥 Hotspot: {t} даёт {trc:.1f}% общего риска — рекомендуется частичное сокращение "
-                           f"[Quant Engine]")
+            bullets.append(f"Position {t} contributes {trc:.1f}% of total portfolio risk — "
+                           f"consider partial reduction [Quant Engine]")
     cvar = metrics.get("CVaR_95_Daily")
     if cvar is not None:
-        bullets.append(f"Ожидаемый убыток в худшие 5% дней: {cvar*100:.1f}% [Quant Engine]")
+        bullets.append(f"Expected loss on the worst 5% of days: {cvar*100:.1f}% [Quant Engine]")
     mdd = metrics.get("Max_Drawdown")
     if mdd is not None:
-        bullets.append(f"Реализованная максимальная просадка: {mdd*100:.1f}% [Quant Engine]")
+        bullets.append(f"Historical peak-to-trough drawdown: {mdd*100:.1f}% [Quant Engine]")
     if regime.get("regime"):
-        bullets.append(f"Макро-режим {regime['regime']} (уверенность {int(round(regime.get('confidence', 0)*100))}%) "
-                       f"учтён в Macro Alignment [Regime]")
-
+        bullets.append(f"Market regime {regime['regime']} "
+                       f"({int(round(regime.get('confidence', 0)*100))}% confidence) "
+                       f"factored into scoring [Regime]")
     if tier == "deep":
-        bullets.append("Используйте Action Plan ниже: уровни Buy / Sell / Stop рассчитаны "
-                       "из ATR (Wilder RMA) и SMA200 [Quant Engine]")
-        action_plan_text = ("Приоритет — закрытие концентрационных hotspots; затем точечные покупки "
-                            "по Buy-зонам в активах с положительным Total Score. "
-                            "Все сделки в пределах 25% оборота NAV.")
-    else:
-        action_plan_text = ""
+        bullets.append("See Action Plan for buy/sell levels derived from ATR + SMA200 [Quant Engine]")
 
     plain_summary = (
-        f"Ваш портфель сейчас в {risk_label} зоне риска ({composite}/100). "
-        + (f"Доходность с поправкой на риск (Sharpe) составляет {sharpe:.2f} — "
-           + ("выше нуля, это хороший знак." if sharpe > 0 else "ниже нуля, осторожно.")
+        f"Your portfolio is in the {risk_label} risk zone ({composite}/100). "
+        + (f"Risk-adjusted return (Sharpe) is {sharpe:.2f} — "
+           + ("positive, a good sign." if sharpe > 0 else "below zero, use caution.")
            if isinstance(sharpe, (int, float)) and sharpe == sharpe else "")
-        + (" Рекомендуем проверить Action Plan и сократить позиции с высоким риском." if tier == "deep" else "")
     )
 
+    regime_label = regime.get("regime", "")
+    stock_picks  = _fallback_stock_picks(regime_label, tier)
+
     return {
-        "verdict": verdict,
-        "plain_summary": plain_summary[:300],
-        "bullets": bullets[:7 if tier == "deep" else 3],
-        "action_plan_text": action_plan_text,
-        "used_rag": False,
+        "verdict":          verdict,
+        "plain_summary":    plain_summary[:300],
+        "bullets":          bullets[:7 if tier == "deep" else 3],
+        "action_plan_text": ("Priority: address concentration hotspots first. "
+                             "Then add positions at Buy-zone levels. "
+                             "Keep cumulative turnover ≤25% NAV."
+                             if tier == "deep" else ""),
+        "stock_picks":      stock_picks,
+        "used_rag":         False,
+    }
+
+
+def _fallback_stock_picks(regime_label: str, tier: str) -> dict:
+    """Rule-based stock picks when Claude is unavailable."""
+    expansion = regime_label in ("Recovery", "Expansion", "")
+    picks_boost = [
+        {"ticker": "MTUM", "name": "iShares MSCI USA Momentum Factor ETF",
+         "why": "Captures equity momentum premium; outperforms in expansion regimes [Quant Engine]",
+         "type": "ETF"},
+    ]
+    picks_balance = [
+        {"ticker": "QUAL", "name": "iShares MSCI USA Quality Factor ETF",
+         "why": "High-quality large caps with stable earnings; regime-agnostic [Quant Engine]",
+         "type": "ETF"},
+    ]
+    picks_protect = [
+        {"ticker": "AGG",  "name": "iShares Core U.S. Aggregate Bond ETF",
+         "why": "Broad US bond exposure; reduces equity concentration risk [Quant Engine]",
+         "type": "ETF"},
+    ]
+    if not expansion:
+        picks_boost = [
+            {"ticker": "DBC", "name": "Invesco DB Commodity Index ETF",
+             "why": "Commodity exposure benefits from stagflation / slowdown regimes [Quant Engine]",
+             "type": "ETF"},
+        ]
+
+    if tier == "deep":
+        picks_boost.append(
+            {"ticker": "IWM", "name": "iShares Russell 2000 ETF",
+             "why": "Small-cap momentum; adds alpha vs large-cap heavy portfolios [Quant Engine]",
+             "type": "ETF"}
+        )
+        picks_balance.append(
+            {"ticker": "VIG", "name": "Vanguard Dividend Appreciation ETF",
+             "why": "Consistent dividend growers; low drawdown, quality bias [Quant Engine]",
+             "type": "ETF"}
+        )
+
+    return {
+        "boost_alpha":      {"label": "Boost Alpha — Higher Risk",
+                             "desc":  "Increase return potential by adding growth or momentum exposure.",
+                             "picks": picks_boost},
+        "rebalance":        {"label": "Maintain Profile — Quality Rebalance",
+                             "desc":  "Improve portfolio quality without changing overall risk.",
+                             "picks": picks_balance},
+        "protect_capital":  {"label": "Protect Capital — Reduce Risk",
+                             "desc":  "Defensive positioning for regime change or macro uncertainty.",
+                             "picks": picks_protect},
     }
 
 
 # ── Public API ───────────────────────────────────────────────────────────────
 
-def _strip_unverified_rag_citations(text: str, market_context: str) -> str:
-    """
-    Remove [RAG: <name>] markers whose <name> does not appear verbatim in the
-    market_context block.  Defensive against the model citing files it never
-    saw.  When market_context is empty this is a no-op (the prompt forbids
-    RAG citations in that case anyway).
-    """
-    if not text:
-        return text
-    if not market_context:
-        # No RAG was provided → strip any RAG citation entirely.
-        import re
-        return re.sub(r"\s*\[RAG:[^\]]*\]", "", text)
-    import re
-    def _keep(match: "re.Match") -> str:
-        name = match.group(1).strip()
-        return match.group(0) if name and name in market_context else ""
-    return re.sub(r"\[RAG:\s*([^\]]+)\]", _keep, text)
-
-
 def generate_narrative(results: dict, tier: str = "base",
-                       market_context: str = "") -> dict:
+                       market_context: str = "",
+                       user_risk_profile: str = "Moderate") -> dict:
     """
-    Returns {verdict, bullets, action_plan_text, used_rag} for the PDF.
+    Returns {verdict, plain_summary, bullets, stock_picks, action_plan_text, used_rag}.
 
-    Args:
-        results        : dict from UniversalPortfolioManager.analyze_all().
-        tier           : 'base' or 'deep'. Only deep tier consumes RAG.
-        market_context : Optional RAG context string.  When non-empty AND
-                         tier == 'deep', the prompt asks the model to cite
-                         sources back as [RAG: <filename>].  Citations whose
-                         filename is not present in market_context are
-                         stripped to enforce CoVe.
-
+    Base tier  → Claude Haiku  (900 tokens, fast)
+    Deep tier  → Claude Sonnet (4500 tokens, richer prose + RAG synthesis)
     Falls back deterministically when the API is unavailable or fails.
     """
-    api_key = os.getenv("ANTHROPIC_API_KEY")
+    api_key  = os.getenv("ANTHROPIC_API_KEY")
     used_rag = bool(market_context) and tier == "deep"
 
     if not api_key:
@@ -279,48 +339,55 @@ def generate_narrative(results: dict, tier: str = "base",
         return out
 
     summary = _summarise_for_prompt(results)
+    model   = MODEL_DEEP if tier == "deep" else MODEL_BASE
+    max_tok = MAX_TOKENS_DEEP if tier == "deep" else MAX_TOKENS_BASE
+
     try:
         import anthropic
-        client = anthropic.Anthropic(api_key=api_key)
-        max_tokens = MAX_TOKENS_DEEP if tier == "deep" else MAX_TOKENS_BASE
+        client   = anthropic.Anthropic(api_key=api_key)
         response = client.messages.create(
-            model       = DEFAULT_MODEL,
-            max_tokens  = max_tokens,
+            model       = model,
+            max_tokens  = max_tok,
             temperature = 0.1,
             system      = _build_system_prompt(),
             messages    = [{
                 "role": "user",
                 "content": _user_prompt(summary, tier=tier,
-                                          market_context=market_context),
+                                        market_context=market_context,
+                                        user_profile=user_risk_profile),
             }],
         )
         raw = response.content[0].text.strip()
-        # Extract JSON block defensively (model may wrap in markdown despite the rule).
         first_brace = raw.find("{")
         last_brace  = raw.rfind("}")
         if first_brace == -1 or last_brace == -1:
-            raise ValueError("No JSON object found in response")
+            raise ValueError("No JSON object in response")
         parsed = json.loads(raw[first_brace:last_brace + 1])
 
-        verdict      = str(parsed.get("verdict", "")).strip()
-        plain_summary= str(parsed.get("plain_summary", "")).strip()
-        bullets      = [str(b).strip() for b in (parsed.get("bullets") or []) if str(b).strip()]
-        plan_txt     = str(parsed.get("action_plan_text", "")).strip()
+        verdict       = str(parsed.get("verdict", "")).strip()
+        plain_summary = str(parsed.get("plain_summary", "")).strip()
+        bullets       = [str(b).strip() for b in (parsed.get("bullets") or []) if str(b).strip()]
+        plan_txt      = str(parsed.get("action_plan_text", "")).strip()
+        stock_picks   = parsed.get("stock_picks") or {}
+
         if not verdict or not bullets:
             raise ValueError("verdict or bullets missing")
 
-        # CoVe enforcement: strip any RAG citation that wasn't actually
-        # present in the market_context block.
+        # CoVe: strip RAG citations whose source file is not in market_context.
         bullets       = [_strip_unverified_rag_citations(b, market_context) for b in bullets]
-        plan_txt      = _strip_unverified_rag_citations(plan_txt,      market_context)
-        verdict       = _strip_unverified_rag_citations(verdict,       market_context)
+        plan_txt      = _strip_unverified_rag_citations(plan_txt, market_context)
+        verdict       = _strip_unverified_rag_citations(verdict, market_context)
         plain_summary = _strip_unverified_rag_citations(plain_summary, market_context)
+
+        # Normalise stock_picks structure (both flat list and nested dict are accepted).
+        stock_picks = _normalise_stock_picks(stock_picks, tier, market_context)
 
         return {
             "verdict":          verdict[:300],
             "plain_summary":    plain_summary[:400],
             "bullets":          bullets[:7 if tier == "deep" else 3],
             "action_plan_text": plan_txt[:800] if tier == "deep" else "",
+            "stock_picks":      stock_picks,
             "used_rag":         used_rag,
         }
     except Exception as exc:
@@ -328,6 +395,32 @@ def generate_narrative(results: dict, tier: str = "base",
         out = _fallback_narrative(results, tier)
         out["used_rag"] = False
         return out
+
+
+def _normalise_stock_picks(raw: dict, tier: str, market_context: str) -> dict:
+    """
+    Ensure stock_picks has exactly the three scenario keys.
+    Strips unverified RAG citations from pick rationale.
+    """
+    result: dict = {}
+    for key in ("boost_alpha", "rebalance", "protect_capital"):
+        scenario = raw.get(key) or {}
+        picks    = scenario.get("picks") or []
+        clean_picks = []
+        for p in picks:
+            why = _strip_unverified_rag_citations(str(p.get("why", "")), market_context)
+            clean_picks.append({
+                "ticker": str(p.get("ticker", "")).upper()[:10],
+                "name":   str(p.get("name", ""))[:80],
+                "why":    why[:160],
+                "type":   str(p.get("type", "Stock"))[:10],
+            })
+        result[key] = {
+            "label": str(scenario.get("label", key))[:80],
+            "desc":  str(scenario.get("desc", ""))[:160],
+            "picks": clean_picks,
+        }
+    return result
 
 
 __all__ = ["generate_narrative"]
