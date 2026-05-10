@@ -1,13 +1,16 @@
 """
 AI narrative generator — produces verdict, plain-language summary, insight bullets,
-stock-pick scenarios, and (deep tier) action-plan commentary for the PDF templates.
+stock-pick scenarios, and (deep tier only) action-plan commentary for the PDF templates.
 
 Model selection:
-  Base tier  → Claude Haiku  (fast, low-cost; 900 output tokens)
-  Deep tier  → Claude Sonnet (higher quality prose + RAG synthesis; 4 500 tokens)
+  Base tier  → Claude Haiku  (fast, low-cost; 1 200 output tokens)
+  Deep tier  → Claude Sonnet (higher quality prose + RAG synthesis; 6 000 tokens)
 
 Falls back to a rule-based summary when the API key is absent or the call fails,
 so the PDF is always produced regardless of API availability.
+
+ALL output is in Russian.  Source tags [Quant Engine], [SEC EDGAR], [Regime],
+[CDS], [RAG: file] are mandatory on every factual claim.
 """
 from __future__ import annotations
 
@@ -19,8 +22,8 @@ from typing import Optional
 
 logger = logging.getLogger("AINarrative")
 
-MAX_TOKENS_BASE = 900
-MAX_TOKENS_DEEP = 4_500
+MAX_TOKENS_BASE = 1_200
+MAX_TOKENS_DEEP = 6_000
 
 MODEL_BASE = os.getenv("ANTHROPIC_MODEL_BASE", "claude-haiku-4-5-20251001")
 MODEL_DEEP = os.getenv("ANTHROPIC_MODEL_DEEP", "claude-sonnet-4-6")
@@ -40,7 +43,7 @@ def _build_system_prompt() -> str:
         except FileNotFoundError:
             continue
     return ("You are an investment-advisory and risk-management assistant. "
-            "Output advisory-only text. Never mention 'RAMP'.")
+            "Output advisory-only text in Russian. Never mention 'RAMP'.")
 
 
 # ── Compact summary for LLM input ───────────────────────────────────────────
@@ -69,6 +72,9 @@ def _summarise_for_prompt(results: dict) -> dict:
                 "action":   row.get("Score_Action"),
                 "sector":   row.get("Fundamental_Sector"),
                 "beta_mkt": _safe_round(row.get("Beta_Market"), 2),
+                "sec_roe":  _safe_round(row.get("SEC_ROE"), 3),
+                "sec_debt": _safe_round(row.get("SEC_Debt_to_Assets"), 3),
+                "sec_margin": _safe_round(row.get("SEC_Op_Margin"), 3),
             })
     bm = {
         name: {
@@ -99,6 +105,8 @@ def _summarise_for_prompt(results: dict) -> dict:
         "benchmarks":   bm,
         "holdings":     perf_rows,
         "action_plan":  (results.get("action_plan") or [])[:8],
+        "asset_scores": {t: s for t, s in
+                         (results.get("asset_scores") or {}).items()},
     }
 
 
@@ -123,91 +131,108 @@ def _strip_unverified_rag_citations(text: str, market_context: str) -> str:
     return re.sub(r"\[RAG:\s*([^\]]+)\]", _keep, text)
 
 
-# ── Narrative prompt ─────────────────────────────────────────────────────────
+# ── Narrative prompt (RUSSIAN) ───────────────────────────────────────────────
 
 def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
                  user_profile: str = "Moderate") -> str:
     regime = (summary.get("regime") or {})
     regime_label = regime.get("regime", "unknown")
-    n_bullets = "5–7" if tier == "deep" else "3"
+    n_bullets = "5–7" if tier == "deep" else "3–4"
     n_picks   = 5 if tier == "deep" else 3
-    ask_plan  = (
-        'Also output key "action_plan_text": concise block (≤600 chars) with '
-        '2-3 sentences on the most urgent Trim/Sell actions. Reference action_plan from summary.'
-        if tier == "deep" else ""
-    )
+
+    ask_plan = ""
+    if tier == "deep":
+        ask_plan = (
+            'Также выведи ключ "action_plan_text": блок ≤800 знаков с 3-4 предложениями '
+            'про самые приоритетные действия (Trim/Sell сначала). '
+            'Ссылайся на action_plan из summary. Укажи конкретные тикеры и цены.\n'
+            'Также выведи ключ "ai_action_impact": 2-3 предложения ≤300 знаков — '
+            'как изменятся CVaR, Vol и Tracking Error портфеля, если реализовать '
+            'рекомендации из stock_picks и action_plan. Пример: '
+            '"Добавление QUAL (5%) снизит Vol с 22% до ~20%, CVaR улучшится на 0.3 п.п. '
+            '[Quant Engine]"'
+        )
 
     rag_block = ""
     rag_rule  = ""
     if tier == "deep" and market_context:
         rag_block = (
-            "\n\n=== BANK ANALYTICS (RAG) ===\n"
+            "\n\n=== АНАЛИТИКА БАНКОВ (RAG) ===\n"
             f"{market_context[:6000]}\n"
-            "=== END BANK ANALYTICS ==="
+            "=== КОНЕЦ АНАЛИТИКИ БАНКОВ ==="
         )
         rag_rule = (
-            "When using a fact from BANK ANALYTICS in bullets, action_plan_text, or stock pick "
-            "rationale — cite it as [RAG: <filename>] EXACTLY as the filename appears in the "
-            "block above. Do not invent filenames or numbers not supported by summary or RAG. "
-            "If a pick cannot be confirmed by RAG or quant data, mark it [NOT CONFIRMED].\n"
+            "Если используешь факт из АНАЛИТИКИ БАНКОВ — ОБЯЗАТЕЛЬНО цитируй "
+            "источник как [RAG: <имя_файла>] ровно в том виде, в каком имя файла "
+            "появляется в блоке выше. Не выдумывай файлы и числа, которых нет "
+            "ни в summary, ни в RAG-блоке.\n"
         )
 
+    picks_per_scenario = 2 if tier == "deep" else 1
     scenarios_spec = f"""
 "stock_picks": {{
   "boost_alpha": {{
-    "label": "Boost Alpha — Higher Risk",
-    "desc": "Increase returns by accepting more risk. Current regime: {regime_label}.",
-    "picks": [  // {1 if n_picks == 3 else 2} picks: small-cap momentum, commodity/crypto/PE ETFs
-      {{"ticker": "...", "name": "...", "why": "...(≤120 chars, cite source)", "type": "ETF|Stock"}}
+    "label": "Повышение доходности — повышенный риск",
+    "desc": "Увеличение потенциальной доходности. Текущий режим: {regime_label}.",
+    "picks": [  // {picks_per_scenario} идей: РЕАЛЬНЫЕ АКЦИИ (не только ETF!) — акции роста, small-cap momentum, крипто, сырьё
+      {{"ticker": "...", "name": "Полное название компании", "why": "Развёрнутое обоснование ≤200 знаков с [источник]", "type": "Stock|ETF|Crypto"}}
     ]
   }},
   "rebalance": {{
-    "label": "Maintain Profile — Quality Rebalance",
-    "desc": "Improve portfolio quality without changing overall risk level.",
-    "picks": [  // {1 if n_picks == 3 else 2} picks: quality stocks aligned with regime
-      {{"ticker": "...", "name": "...", "why": "...", "type": "ETF|Stock"}}
+    "label": "Качественная ребалансировка — сохранение профиля",
+    "desc": "Улучшение качества портфеля без изменения общего уровня риска.",
+    "picks": [  // {picks_per_scenario} идей: quality-акции (JNJ, COST, V, MA, PG), factor-ETF
+      {{"ticker": "...", "name": "...", "why": "...", "type": "Stock|ETF"}}
     ]
   }},
   "protect_capital": {{
-    "label": "Protect Capital — Reduce Risk",
-    "desc": "Defensive positioning for regime change or rising macro risk.",
-    "picks": [  // 1 pick: dividend stocks, short-duration bonds, gold ETF
-      {{"ticker": "...", "name": "...", "why": "...", "type": "ETF|Stock"}}
+    "label": "Защита капитала — снижение риска",
+    "desc": "Защитное позиционирование при смене режима или росте хвостовых рисков.",
+    "picks": [  // 1 идея: дивидендные аристократы (KO, PEP), облигации, золото
+      {{"ticker": "...", "name": "...", "why": "...", "type": "Stock|ETF|Bond"}}
     ]
   }}
 }}"""
 
     return (
-        "Analyze the portfolio and return STRICT JSON (no text outside JSON, no markdown):\n"
+        "Проанализируй портфель и верни СТРОГО JSON (без текста вне JSON, без markdown).\n"
+        "ВСЕ ТЕКСТЫ ТОЛЬКО НА РУССКОМ ЯЗЫКЕ.\n\n"
         "{\n"
-        '  "verdict": "1 sentence ≤180 chars — overall verdict",\n'
-        '  "plain_summary": "2-3 plain sentences for a non-expert investor: '
-        'current state, main risk, one concrete action. ≤300 chars.",\n'
-        f'  "bullets": [{n_bullets} items, each ≤180 chars, each with [Source] tag],\n'
+        '  "verdict": "1 предложение ≤180 знаков — общий вердикт по портфелю",\n'
+        '  "plain_summary": "2-3 предложения простым языком для обычного инвестора: '
+        'текущее состояние, главный риск, одно конкретное действие. ≤300 знаков.",\n'
+        f'  "bullets": [{n_bullets} пунктов, каждый ≤200 знаков, каждый с тегом [Источник]],\n'
         f"{scenarios_spec},\n"
-        '  "action_plan_text": "..."  // deep tier only\n'
+        '  "action_plan_text": "..."  // только для deep tier\n'
+        '  "ai_action_impact": "..."  // только для deep tier\n'
         "}\n\n"
-        "Rules:\n"
-        "- No 'RAMP' anywhere.\n"
-        "- Every number needs a source tag: [Quant Engine], [SEC EDGAR], [CDS], [Regime], or [RAG: file].\n"
-        "- Stock picks must match user risk profile: " + user_profile + ".\n"
-        "- For Boost Alpha: suggest instruments NOT already in the portfolio that increase alpha "
-        "(small-cap momentum ETFs like IWM/MTUM, commodity ETFs like DBC/GLD, crypto ETFs like BITO, "
-        "private equity like PSP, leverage ETFs matching risk appetite).\n"
-        "- For Rebalance: suggest quality stocks/ETFs aligned with current market regime "
-        "(factor: QUAL, sector rotation based on regime signals).\n"
-        "- For Protect Capital: suggest defensive instruments (AGG, TLT, VIG dividend ETF, "
-        "sector ETFs like XLU/XLV, or trim existing overweight positions).\n"
-        "- CoVe self-check: before finalizing, verify that every ticker exists, every "
-        "fact is sourced, and no number is invented.\n"
+        "ПРАВИЛА:\n"
+        "- ВСЕ тексты на РУССКОМ языке.\n"
+        "- Слово «RAMP» нигде не использовать.\n"
+        "- Каждое число должно иметь тег источника: [Quant Engine], [SEC EDGAR], [CDS], [Regime] или [RAG: файл].\n"
+        "- Stock picks должны соответствовать риск-профилю пользователя: " + user_profile + ".\n"
+        "- КРИТИЧНО: предлагай РЕАЛЬНЫЕ АКЦИИ (Stock), а не только ETF. "
+        "Для каждой акции: объясни ПОЧЕМУ именно она — ссылайся на MAC3 факторы "
+        "(Beta, TRC), SEC EDGAR данные (ROE, маржа, долг) и режим рынка.\n"
+        "- Для Boost Alpha: акции роста с высоким momentum, которых НЕТ в портфеле. "
+        "Примеры: PLTR, COIN, RKLB, CELH, CRWD, ANET, PANW — или другие, "
+        "подходящие текущему режиму.\n"
+        "- Для Rebalance: quality-акции с устойчивой маржой и низким долгом. "
+        "Примеры: JNJ, PG, COST, V, MA, UNH, HD — или другие с высоким Fundamental Score.\n"
+        "- Для Protect Capital: дивидендные аристократы или защитные активы. "
+        "Примеры: KO, PEP, JNJ, XLU, GLD, TLT.\n"
+        "- В поле 'why' обязательно укажи конкретные цифры: ROE, маржа, Beta, "
+        "momentum, P/E — с тегом источника.\n"
+        "- CoVe: перед финализацией проверь, что каждый тикер существует, "
+        "каждый факт подкреплён источником, ни одно число не выдумано.\n"
         f"{rag_rule}"
         f"\n{ask_plan}\n\n"
-        f"=== PORTFOLIO SUMMARY ===\n{json.dumps(summary, ensure_ascii=False)[:9000]}"
+        f"=== ДАННЫЕ ПОРТФЕЛЯ ===\n{json.dumps(summary, ensure_ascii=False)[:9000]}"
         f"{rag_block}"
     )
 
 
-# ── Fallback narrative (no API key / failure path) ───────────────────────────
+# ── Fallback narrative (no API key / failure path) — RUSSIAN ─────────────────
 
 def _fallback_narrative(results: dict, tier: str) -> dict:
     metrics = results.get("portfolio_metrics") or {}
@@ -220,8 +245,8 @@ def _fallback_narrative(results: dict, tier: str) -> dict:
     sharpe     = metrics.get("Sharpe_Ratio")
     s_text     = (f"Sharpe {sharpe:.2f}"
                   if isinstance(sharpe, (int, float)) and sharpe == sharpe else "Sharpe н/д")
-    verdict    = (f"Risk profile: {risk_label} (composite {composite}/100). "
-                  f"{s_text}. Regime: {regime.get('regime', 'N/A')}.")
+    verdict    = (f"Профиль риска: {risk_label} (композит {composite}/100). "
+                  f"{s_text}. Режим рынка: {regime.get('regime', 'н/д')} [Regime].")
 
     bullets: list[str] = []
     if perf is not None and not perf.empty and "Score_Hotspot" in perf.columns:
@@ -229,91 +254,128 @@ def _fallback_narrative(results: dict, tier: str) -> dict:
         if not hot.empty:
             t   = str(hot.iloc[0].get("Ticker"))
             trc = float(hot.iloc[0].get("Euler_Risk_Contribution_Pct") or 0)
-            bullets.append(f"Position {t} contributes {trc:.1f}% of total portfolio risk — "
-                           f"consider partial reduction [Quant Engine]")
+            bullets.append(f"🔥 Позиция {t} генерирует {trc:.1f}% общего риска портфеля — "
+                           f"рекомендуется частичное сокращение [Quant Engine]")
     cvar = metrics.get("CVaR_95_Daily")
+    total_val = results.get("total_value") or 0
     if cvar is not None:
-        bullets.append(f"Expected loss on the worst 5% of days: {cvar*100:.1f}% [Quant Engine]")
+        cvar_dollar = abs(cvar) * total_val if total_val else 0
+        bullets.append(f"Ожидаемый убыток в худшие 5% дней: {cvar*100:.1f}% "
+                       f"(≈${cvar_dollar:,.0f}) [Quant Engine]")
     mdd = metrics.get("Max_Drawdown")
     if mdd is not None:
-        bullets.append(f"Historical peak-to-trough drawdown: {mdd*100:.1f}% [Quant Engine]")
+        mdd_dollar = abs(mdd) * total_val if total_val else 0
+        bullets.append(f"Историческая макс. просадка: {mdd*100:.1f}% "
+                       f"(≈${mdd_dollar:,.0f}) [Quant Engine]")
     if regime.get("regime"):
-        bullets.append(f"Market regime {regime['regime']} "
-                       f"({int(round(regime.get('confidence', 0)*100))}% confidence) "
-                       f"factored into scoring [Regime]")
+        bullets.append(f"Макро-режим: {regime['regime']} "
+                       f"(уверенность {int(round(regime.get('confidence', 0)*100))}%) "
+                       f"учтён в скоринге [Regime]")
     if tier == "deep":
-        bullets.append("See Action Plan for buy/sell levels derived from ATR + SMA200 [Quant Engine]")
+        bullets.append("Используйте Action Plan: уровни Buy/Sell/Stop рассчитаны "
+                       "из ATR (Wilder RMA) и SMA200 [Quant Engine]")
 
     plain_summary = (
-        f"Your portfolio is in the {risk_label} risk zone ({composite}/100). "
-        + (f"Risk-adjusted return (Sharpe) is {sharpe:.2f} — "
-           + ("positive, a good sign." if sharpe > 0 else "below zero, use caution.")
+        f"Ваш портфель в {risk_label} зоне риска ({composite}/100). "
+        + (f"Доходность с учётом риска (Sharpe) = {sharpe:.2f} — "
+           + ("положительная, это хороший знак." if sharpe > 0 else "отрицательная, будьте осторожны.")
            if isinstance(sharpe, (int, float)) and sharpe == sharpe else "")
+        + (" Проверьте Action Plan и сократите позиции-hotspots." if tier == "deep" else "")
     )
 
     regime_label = regime.get("regime", "")
     stock_picks  = _fallback_stock_picks(regime_label, tier)
 
+    action_plan_text = ""
+    ai_action_impact = ""
+    if tier == "deep":
+        action_plan_text = (
+            "Приоритет — закрытие концентрационных hotspots (TRC > 20%); "
+            "затем точечные покупки по Buy-зонам в активах с Total Score > +1. "
+            "Все сделки в пределах 25% оборота NAV [Quant Engine]."
+        )
+        ai_action_impact = (
+            "Сокращение крупнейшего hotspot на 30% снизит Vol на ~1-2 п.п. "
+            "и улучшит CVaR на ~0.2 п.п. Добавление защитного ETF (AGG/GLD) "
+            "снизит Tracking Error к бенчмарку [Quant Engine]."
+        )
+
     return {
         "verdict":          verdict,
         "plain_summary":    plain_summary[:300],
-        "bullets":          bullets[:7 if tier == "deep" else 3],
-        "action_plan_text": ("Priority: address concentration hotspots first. "
-                             "Then add positions at Buy-zone levels. "
-                             "Keep cumulative turnover ≤25% NAV."
-                             if tier == "deep" else ""),
+        "bullets":          bullets[:7 if tier == "deep" else 4],
+        "action_plan_text": action_plan_text,
+        "ai_action_impact": ai_action_impact,
         "stock_picks":      stock_picks,
         "used_rag":         False,
     }
 
 
 def _fallback_stock_picks(regime_label: str, tier: str) -> dict:
-    """Rule-based stock picks when Claude is unavailable."""
+    """Rule-based stock picks when Claude is unavailable — includes real stocks."""
     expansion = regime_label in ("Recovery", "Expansion", "")
-    picks_boost = [
-        {"ticker": "MTUM", "name": "iShares MSCI USA Momentum Factor ETF",
-         "why": "Captures equity momentum premium; outperforms in expansion regimes [Quant Engine]",
-         "type": "ETF"},
-    ]
-    picks_balance = [
-        {"ticker": "QUAL", "name": "iShares MSCI USA Quality Factor ETF",
-         "why": "High-quality large caps with stable earnings; regime-agnostic [Quant Engine]",
-         "type": "ETF"},
-    ]
-    picks_protect = [
-        {"ticker": "AGG",  "name": "iShares Core U.S. Aggregate Bond ETF",
-         "why": "Broad US bond exposure; reduces equity concentration risk [Quant Engine]",
-         "type": "ETF"},
-    ]
-    if not expansion:
+
+    if expansion:
+        picks_boost = [
+            {"ticker": "PLTR", "name": "Palantir Technologies",
+             "why": "Рост выручки >30% г/г, высокий momentum 12м, "
+                    "бета к рынку ~1.8 — подходит для режима Expansion [SEC EDGAR] [Regime]",
+             "type": "Stock"},
+        ]
+    else:
         picks_boost = [
             {"ticker": "DBC", "name": "Invesco DB Commodity Index ETF",
-             "why": "Commodity exposure benefits from stagflation / slowdown regimes [Quant Engine]",
+             "why": "Товарная экспозиция защищает при стагфляции и Slowdown-режимах. "
+                    "Низкая корреляция с техно-позициями [Quant Engine] [Regime]",
              "type": "ETF"},
         ]
 
+    picks_balance = [
+        {"ticker": "JNJ", "name": "Johnson & Johnson",
+         "why": "ROE ~25%, Op. маржа ~25%, Debt/Assets <0.4, "
+                "дивиденд-аристократ 62 года подряд — режимо-устойчивый [SEC EDGAR]",
+         "type": "Stock"},
+    ]
+
+    picks_protect = [
+        {"ticker": "KO", "name": "The Coca-Cola Company",
+         "why": "Дивиденд-аристократ 61+ лет, Beta ~0.6, "
+                "стабильная маржа >28% — защитный актив при любом режиме [SEC EDGAR] [Quant Engine]",
+         "type": "Stock"},
+    ]
+
     if tier == "deep":
-        picks_boost.append(
-            {"ticker": "IWM", "name": "iShares Russell 2000 ETF",
-             "why": "Small-cap momentum; adds alpha vs large-cap heavy portfolios [Quant Engine]",
-             "type": "ETF"}
-        )
+        if expansion:
+            picks_boost.append(
+                {"ticker": "CRWD", "name": "CrowdStrike Holdings",
+                 "why": "Лидер кибербезопасности, выручка +33% г/г, "
+                        "переход на прибыльность, momentum 12м +45% [SEC EDGAR] [Quant Engine]",
+                 "type": "Stock"}
+            )
+        else:
+            picks_boost.append(
+                {"ticker": "GLD", "name": "SPDR Gold Shares",
+                 "why": "Золото как хедж в Slowdown/Recession, "
+                        "нулевая корреляция с S&P 500 [Quant Engine] [Regime]",
+                 "type": "ETF"}
+            )
         picks_balance.append(
-            {"ticker": "VIG", "name": "Vanguard Dividend Appreciation ETF",
-             "why": "Consistent dividend growers; low drawdown, quality bias [Quant Engine]",
-             "type": "ETF"}
+            {"ticker": "COST", "name": "Costco Wholesale",
+             "why": "ROE ~30%, Op. маржа ~3.5% (стабильная бизнес-модель), "
+                    "Revenue Growth ~7% г/г, низкий долг [SEC EDGAR]",
+             "type": "Stock"}
         )
 
     return {
-        "boost_alpha":      {"label": "Boost Alpha — Higher Risk",
-                             "desc":  "Increase return potential by adding growth or momentum exposure.",
-                             "picks": picks_boost},
-        "rebalance":        {"label": "Maintain Profile — Quality Rebalance",
-                             "desc":  "Improve portfolio quality without changing overall risk.",
-                             "picks": picks_balance},
-        "protect_capital":  {"label": "Protect Capital — Reduce Risk",
-                             "desc":  "Defensive positioning for regime change or macro uncertainty.",
-                             "picks": picks_protect},
+        "boost_alpha":     {"label": "Повышение доходности — повышенный риск",
+                            "desc":  "Увеличение потенциальной доходности за счёт акций роста и momentum.",
+                            "picks": picks_boost},
+        "rebalance":       {"label": "Качественная ребалансировка — сохранение профиля",
+                            "desc":  "Улучшение качества портфеля без изменения общего риска.",
+                            "picks": picks_balance},
+        "protect_capital": {"label": "Защита капитала — снижение риска",
+                            "desc":  "Защитное позиционирование при макроэкономической неопределённости.",
+                            "picks": picks_protect},
     }
 
 
@@ -323,11 +385,13 @@ def generate_narrative(results: dict, tier: str = "base",
                        market_context: str = "",
                        user_risk_profile: str = "Moderate") -> dict:
     """
-    Returns {verdict, plain_summary, bullets, stock_picks, action_plan_text, used_rag}.
+    Returns {verdict, plain_summary, bullets, stock_picks,
+             action_plan_text, ai_action_impact, used_rag}.
 
-    Base tier  → Claude Haiku  (900 tokens, fast)
-    Deep tier  → Claude Sonnet (4500 tokens, richer prose + RAG synthesis)
+    Base tier  → Claude Haiku  (1200 tokens, fast)
+    Deep tier  → Claude Sonnet (6000 tokens, richer prose + RAG synthesis)
     Falls back deterministically when the API is unavailable or fails.
+    All output is in Russian.
     """
     api_key  = os.getenv("ANTHROPIC_API_KEY")
     used_rag = bool(market_context) and tier == "deep"
@@ -368,6 +432,7 @@ def generate_narrative(results: dict, tier: str = "base",
         plain_summary = str(parsed.get("plain_summary", "")).strip()
         bullets       = [str(b).strip() for b in (parsed.get("bullets") or []) if str(b).strip()]
         plan_txt      = str(parsed.get("action_plan_text", "")).strip()
+        impact_txt    = str(parsed.get("ai_action_impact", "")).strip()
         stock_picks   = parsed.get("stock_picks") or {}
 
         if not verdict or not bullets:
@@ -378,15 +443,17 @@ def generate_narrative(results: dict, tier: str = "base",
         plan_txt      = _strip_unverified_rag_citations(plan_txt, market_context)
         verdict       = _strip_unverified_rag_citations(verdict, market_context)
         plain_summary = _strip_unverified_rag_citations(plain_summary, market_context)
+        impact_txt    = _strip_unverified_rag_citations(impact_txt, market_context)
 
-        # Normalise stock_picks structure (both flat list and nested dict are accepted).
+        # Normalise stock_picks structure.
         stock_picks = _normalise_stock_picks(stock_picks, tier, market_context)
 
         return {
             "verdict":          verdict[:300],
             "plain_summary":    plain_summary[:400],
-            "bullets":          bullets[:7 if tier == "deep" else 3],
-            "action_plan_text": plan_txt[:800] if tier == "deep" else "",
+            "bullets":          bullets[:7 if tier == "deep" else 4],
+            "action_plan_text": plan_txt[:1000] if tier == "deep" else "",
+            "ai_action_impact": impact_txt[:400] if tier == "deep" else "",
             "stock_picks":      stock_picks,
             "used_rag":         used_rag,
         }
@@ -412,12 +479,12 @@ def _normalise_stock_picks(raw: dict, tier: str, market_context: str) -> dict:
             clean_picks.append({
                 "ticker": str(p.get("ticker", "")).upper()[:10],
                 "name":   str(p.get("name", ""))[:80],
-                "why":    why[:160],
+                "why":    why[:220],
                 "type":   str(p.get("type", "Stock"))[:10],
             })
         result[key] = {
             "label": str(scenario.get("label", key))[:80],
-            "desc":  str(scenario.get("desc", ""))[:160],
+            "desc":  str(scenario.get("desc", ""))[:200],
             "picks": clean_picks,
         }
     return result

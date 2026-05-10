@@ -188,7 +188,7 @@
   <div class="header">
     <div>
       <div class="brand-wordmark">PORTFOLIO INTELLIGENCE</div>
-      <div class="brand-tagline">Investment Advisory &amp; Risk Analytics</div>
+      <div class="brand-tagline">Инвестиционный советник и риск-аналитика</div>
     </div>
     <div class="header-meta">
       <div class="report-badge">{{ report_type }}</div>
@@ -203,7 +203,7 @@
     <div class="snap-item">
       <div class="snap-label">Стоимость портфеля</div>
       <div class="snap-value white">{{ data.total_value_usd | default('—') }}</div>
-      <div class="snap-sub">{{ data.pnl_total_pct | default('') }} total P/L</div>
+      <div class="snap-sub">{{ data.pnl_total_pct | default('') }} общий P/L [Tradernet]</div>
     </div>
     <div class="snap-divider"></div>
     <div class="snap-item">
@@ -254,7 +254,7 @@
         <div class="di-card">
           <div class="di-label">Максимальная просадка (реализованная)</div>
           <div class="di-value neg">{{ data.mdd_dollar | default(data.max_drawdown) }}</div>
-          <div class="di-sub">{{ data.max_drawdown }} peak-to-trough</div>
+          <div class="di-sub">{{ data.max_drawdown }} от пика до дна [Quant Engine]</div>
         </div>
         <div class="di-card">
           <div class="di-label">VaR 95% · 1 день</div>
@@ -429,8 +429,8 @@
   {% endif %}
 
   <div class="footer">
-    <span>1 / 2 · Investment Advisory © 2026 — Конфиденциально.</span>
-    <span>Не является ИИИ. Advisory only.</span>
+    <span>1 / 2 · Portfolio Intelligence © 2026 — Конфиденциально.</span>
+    <span>Не является ИИИ. Только рекомендации.</span>
   </div>
 </div>
 
@@ -474,8 +474,8 @@
         <!-- Boost Alpha -->
         <div class="scenario-card">
           <div class="sc-icon">🚀</div>
-          <div class="sc-title">Boost Alpha</div>
-          <div class="sc-desc">Добавить риск для роста доходности</div>
+          <div class="sc-title">Повышение доходности</div>
+          <div class="sc-desc">{{ data.ai_stock_picks.boost_alpha.desc | default('Добавить риск для роста доходности') }}</div>
           {% set picks = data.ai_stock_picks.boost_alpha.picks | default([]) %}
           {% for p in picks %}
           <div class="sc-pick">
@@ -492,8 +492,8 @@
         <!-- Rebalance -->
         <div class="scenario-card">
           <div class="sc-icon">⚖️</div>
-          <div class="sc-title">Rebalance</div>
-          <div class="sc-desc">Улучшить качество без изменения риска</div>
+          <div class="sc-title">Ребалансировка</div>
+          <div class="sc-desc">{{ data.ai_stock_picks.rebalance.desc | default('Улучшить качество без изменения риска') }}</div>
           {% set picks = data.ai_stock_picks.rebalance.picks | default([]) %}
           {% for p in picks %}
           <div class="sc-pick">
@@ -510,8 +510,8 @@
         <!-- Protect Capital -->
         <div class="scenario-card">
           <div class="sc-icon">🛡️</div>
-          <div class="sc-title">Protect Capital</div>
-          <div class="sc-desc">Снизить риск при смене режима</div>
+          <div class="sc-title">Защита капитала</div>
+          <div class="sc-desc">{{ data.ai_stock_picks.protect_capital.desc | default('Снизить риск при смене режима') }}</div>
           {% set picks = data.ai_stock_picks.protect_capital.picks | default([]) %}
           {% for p in picks %}
           <div class="sc-pick">
@@ -527,7 +527,7 @@
 
       </div>
       <div style="font-size:8px; color:#9aabb8; margin-top:4px;">
-        Источники: [Quant Engine] · [Regime] · Только для ознакомления, не является рекомендацией к покупке.
+        Источники: [Quant Engine] · [SEC EDGAR] · [Regime] · [RAG]. Только для ознакомления, не является рекомендацией к покупке.
       </div>
       {% endif %}
 
@@ -570,11 +570,11 @@
   </div>
   <div class="muted" style="font-size:8.5px; margin-top:5px;">
     <strong>Расшифровка:</strong>
-    <em>TRC</em> — % общего риска портфеля от позиции (Euler decomposition);
-    <em>ATR</em> — средний дневной диапазон в % цены (Wilder RMA);
-    <em>P/L Pos</em> — доходность с момента покупки;
-    <em>Score</em> — Total Score: Fundamental + Valuation + Technical + Credit ∈ [−6, +6];
-    <em>🔥</em> — Hotspot (TRC превышает лимит 20%).
+    <em>TRC</em> — % общего риска от позиции (Euler decomposition) [Quant Engine];
+    <em>ATR</em> — средний дневной диапазон в % цены (Wilder RMA) [Quant Engine];
+    <em>P/L</em> — доходность с момента покупки [Tradernet];
+    <em>Скоринг</em> — Total Score: Fundamental + Valuation + Technical + Credit ∈ [−6, +6] [Quant Engine + SEC EDGAR];
+    <em>🔥</em> — Hotspot (TRC > лимит 20%) [Quant Engine].
   </div>
 
   {% if data.sectors %}
@@ -593,8 +593,8 @@
   {% endif %}
 
   <div class="footer">
-    <span>2 / 2 · Investment Advisory © 2026</span>
-    <span>Источники: Quant Engine · SEC EDGAR · Tradernet · Regime · CDS feed</span>
+    <span>2 / 2 · Portfolio Intelligence © 2026</span>
+    <span>Источники: [Quant Engine] · [SEC EDGAR] · [Tradernet] · [Regime] · [CDS feed]</span>
   </div>
 </div>
 

@@ -494,9 +494,10 @@ def build_payload(results: dict, tier: str,
             for r in bl_records
         ]
 
-        # AI deep narrative (full bullets list + action-plan text)
+        # AI deep narrative (full bullets list + action-plan text + impact)
         if ai_summary:
             payload["ai_action_text"] = ai_summary.get("action_plan_text", "")
+            payload["ai_action_impact"] = ai_summary.get("ai_action_impact", "")
 
     return payload
 
