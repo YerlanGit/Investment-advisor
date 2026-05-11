@@ -314,6 +314,12 @@
         <div style="font-size:8px; color:#9aabb8; margin-top:3px;">0.4×Волатильность + 0.4×|CVaR| + 0.2×max TRC [Quant Engine]</div>
       </div>
 
+      {% if data.ai_risk_comment %}
+      <div style="background:#f0f9ff; border-left:3px solid #3b82f6; border-radius:0 5px 5px 0; padding:7px 11px; margin:6px 0; font-size:9.5px; color:#1e3a5c; line-height:1.55;">
+        🧠 <strong>Комментарий ИИ:</strong> {{ data.ai_risk_comment }}
+      </div>
+      {% endif %}
+
       <!-- Hotspot alerts -->
       {% if data.hotspots %}
       {% for h in data.hotspots %}
@@ -410,6 +416,12 @@
           {% for ex in data.regime.explainers %}<span>{{ ex }}{% if not loop.last %} · {% endif %}</span>{% endfor %}
         </div>
         {% endif %}
+      </div>
+      {% endif %}
+
+      {% if data.ai_regime_comment %}
+      <div style="background:#fffbeb; border-left:3px solid #f59e0b; border-radius:0 5px 5px 0; padding:7px 11px; margin:6px 0; font-size:9.5px; color:#78350f; line-height:1.55;">
+        🧠 <strong>Комментарий ИИ к режиму:</strong> {{ data.ai_regime_comment }}
       </div>
       {% endif %}
 

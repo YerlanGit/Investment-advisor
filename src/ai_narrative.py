@@ -131,27 +131,63 @@ def _strip_unverified_rag_citations(text: str, market_context: str) -> str:
     return re.sub(r"\[RAG:\s*([^\]]+)\]", _keep, text)
 
 
+# ── JSON repair for truncated responses ──────────────────────────────────────
+
+def _repair_truncated_json(raw: str) -> str:
+    """
+    Repair JSON truncated by max_tokens.  Closes open strings, arrays, objects.
+    """
+    try:
+        json.loads(raw)
+        return raw
+    except json.JSONDecodeError:
+        pass
+
+    repaired = raw.rstrip()
+    repaired = repaired.rstrip(',')
+    # Close an open string
+    if repaired.count('"') % 2 == 1:
+        # Find last unmatched quote and truncate partial value
+        last_q = repaired.rfind('"')
+        # Check if it's a key or value being written
+        before = repaired[:last_q].rstrip()
+        if before.endswith(':'):
+            # Truncated value — close string
+            repaired = repaired + '"'
+        else:
+            # Truncated mid-string — close it
+            repaired = repaired + '"'
+    # Remove trailing partial key-value (key without value)
+    repaired = re.sub(r',\s*"[^"]*"\s*:\s*$', '', repaired)
+    # Close open arrays and objects
+    open_braces = repaired.count('{') - repaired.count('}')
+    open_brackets = repaired.count('[') - repaired.count(']')
+    repaired = repaired.rstrip(',')
+    repaired += ']' * max(0, open_brackets)
+    repaired += '}' * max(0, open_braces)
+    try:
+        json.loads(repaired)
+        return repaired
+    except json.JSONDecodeError:
+        pass
+    # Last resort: try to find the last valid closing brace
+    for i in range(len(repaired) - 1, 0, -1):
+        if repaired[i] == '}':
+            candidate = repaired[:i+1]
+            try:
+                json.loads(candidate)
+                return candidate
+            except json.JSONDecodeError:
+                continue
+    return raw  # give up, return original
+
+
 # ── Narrative prompt (RUSSIAN) ───────────────────────────────────────────────
 
 def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
                  user_profile: str = "Moderate") -> str:
     regime = (summary.get("regime") or {})
     regime_label = regime.get("regime", "unknown")
-    n_bullets = "5–7" if tier == "deep" else "3–4"
-    n_picks   = 5 if tier == "deep" else 3
-
-    ask_plan = ""
-    if tier == "deep":
-        ask_plan = (
-            'Также выведи ключ "action_plan_text": блок ≤800 знаков с 3-4 предложениями '
-            'про самые приоритетные действия (Trim/Sell сначала). '
-            'Ссылайся на action_plan из summary. Укажи конкретные тикеры и цены.\n'
-            'Также выведи ключ "ai_action_impact": 2-3 предложения ≤300 знаков — '
-            'как изменятся CVaR, Vol и Tracking Error портфеля, если реализовать '
-            'рекомендации из stock_picks и action_plan. Пример: '
-            '"Добавление QUAL (5%) снизит Vol с 22% до ~20%, CVaR улучшится на 0.3 п.п. '
-            '[Quant Engine]"'
-        )
 
     rag_block = ""
     rag_rule  = ""
@@ -162,34 +198,56 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
             "=== КОНЕЦ АНАЛИТИКИ БАНКОВ ==="
         )
         rag_rule = (
-            "Если используешь факт из АНАЛИТИКИ БАНКОВ — ОБЯЗАТЕЛЬНО цитируй "
-            "источник как [RAG: <имя_файла>] ровно в том виде, в каком имя файла "
-            "появляется в блоке выше. Не выдумывай файлы и числа, которых нет "
-            "ни в summary, ни в RAG-блоке.\n"
+            "Если используешь факт из АНАЛИТИКИ БАНКОВ — цитируй "
+            "[RAG: <имя_файла>]. Не выдумывай файлы.\n"
         )
 
-    picks_per_scenario = 2 if tier == "deep" else 1
-    scenarios_spec = f"""
+    # ── Base tier: compact prompt, 1 pick per scenario, 3 bullets ──
+    if tier != "deep":
+        return (
+            "Проанализируй портфель. Верни СТРОГО JSON (без текста вне JSON).\n"
+            "ВСЕ ТЕКСТЫ НА РУССКОМ.\n\n"
+            '{\n'
+            '  "verdict": "≤150 знаков — вердикт",\n'
+            '  "plain_summary": "≤250 знаков простым языком",\n'
+            '  "bullets": ["3 пункта ≤120 знаков каждый с [Источник]"],\n'
+            '  "ai_risk_comment": "≤150 знаков — комментарий к риск-метрикам (CVaR, Vol, MaxDD)",\n'
+            '  "ai_regime_comment": "≤120 знаков — комментарий к рыночному режиму",\n'
+            '  "stock_picks": {\n'
+            '    "boost_alpha": {"label": "Повышение доходности", "desc": "≤80 знаков", '
+            '"picks": [{"ticker": "...", "name": "...", "why": "≤100 знаков [источник]", "type": "Stock"}]},\n'
+            '    "rebalance": {"label": "Ребалансировка", "desc": "≤80 знаков", '
+            '"picks": [{"ticker": "...", "name": "...", "why": "≤100 знаков", "type": "Stock"}]},\n'
+            '    "protect_capital": {"label": "Защита капитала", "desc": "≤80 знаков", '
+            '"picks": [{"ticker": "...", "name": "...", "why": "≤100 знаков", "type": "Stock"}]}\n'
+            '  }\n'
+            '}\n\n'
+            "ПРАВИЛА: русский язык. Без «RAMP». Каждое число — [Quant Engine]/[SEC EDGAR]/[Regime].\n"
+            f"Риск-профиль: {user_profile}. Режим: {regime_label}.\n"
+            "Stock picks: РЕАЛЬНЫЕ АКЦИИ (PLTR, JNJ, KO и т.п.), не только ETF. "
+            "why ≤100 знаков с цифрами.\n\n"
+            f"=== ДАННЫЕ ===\n{json.dumps(summary, ensure_ascii=False)[:7000]}"
+        )
+
+    # ── Deep tier: full prompt with per-section comments ──
+    picks_spec = f"""
 "stock_picks": {{
   "boost_alpha": {{
-    "label": "Повышение доходности — повышенный риск",
-    "desc": "Увеличение потенциальной доходности. Текущий режим: {regime_label}.",
-    "picks": [  // {picks_per_scenario} идей: РЕАЛЬНЫЕ АКЦИИ (не только ETF!) — акции роста, small-cap momentum, крипто, сырьё
-      {{"ticker": "...", "name": "Полное название компании", "why": "Развёрнутое обоснование ≤200 знаков с [источник]", "type": "Stock|ETF|Crypto"}}
+    "label": "Повышение доходности", "desc": "≤100 знаков. Режим: {regime_label}.",
+    "picks": [  // 2 идеи: реальные акции роста
+      {{"ticker": "...", "name": "...", "why": "≤180 знаков с [источник]", "type": "Stock|ETF"}}
     ]
   }},
   "rebalance": {{
-    "label": "Качественная ребалансировка — сохранение профиля",
-    "desc": "Улучшение качества портфеля без изменения общего уровня риска.",
-    "picks": [  // {picks_per_scenario} идей: quality-акции (JNJ, COST, V, MA, PG), factor-ETF
-      {{"ticker": "...", "name": "...", "why": "...", "type": "Stock|ETF"}}
+    "label": "Ребалансировка", "desc": "≤100 знаков.",
+    "picks": [  // 2 quality-акции
+      {{"ticker": "...", "name": "...", "why": "≤180 знаков", "type": "Stock|ETF"}}
     ]
   }},
   "protect_capital": {{
-    "label": "Защита капитала — снижение риска",
-    "desc": "Защитное позиционирование при смене режима или росте хвостовых рисков.",
-    "picks": [  // 1 идея: дивидендные аристократы (KO, PEP), облигации, золото
-      {{"ticker": "...", "name": "...", "why": "...", "type": "Stock|ETF|Bond"}}
+    "label": "Защита капитала", "desc": "≤100 знаков.",
+    "picks": [  // 1 защитный инструмент
+      {{"ticker": "...", "name": "...", "why": "≤180 знаков", "type": "Stock|ETF|Bond"}}
     ]
   }}
 }}"""
@@ -197,37 +255,31 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
     return (
         "Проанализируй портфель и верни СТРОГО JSON (без текста вне JSON, без markdown).\n"
         "ВСЕ ТЕКСТЫ ТОЛЬКО НА РУССКОМ ЯЗЫКЕ.\n\n"
-        "{\n"
-        '  "verdict": "1 предложение ≤180 знаков — общий вердикт по портфелю",\n'
-        '  "plain_summary": "2-3 предложения простым языком для обычного инвестора: '
-        'текущее состояние, главный риск, одно конкретное действие. ≤300 знаков.",\n'
-        f'  "bullets": [{n_bullets} пунктов, каждый ≤200 знаков, каждый с тегом [Источник]],\n'
-        f"{scenarios_spec},\n"
-        '  "action_plan_text": "..."  // только для deep tier\n'
-        '  "ai_action_impact": "..."  // только для deep tier\n'
-        "}\n\n"
+        '{\n'
+        '  "verdict": "≤180 знаков — общий вердикт",\n'
+        '  "plain_summary": "≤300 знаков простым языком",\n'
+        '  "bullets": ["5–7 пунктов ≤180 знаков каждый с [Источник]"],\n'
+        '  "ai_risk_comment": "≤200 знаков — вывод по риск-метрикам: CVaR, Vol, MaxDD, Sharpe. '
+        'Сопоставь с лимитами мандата. Упомяни $ потерь.",\n'
+        '  "ai_benchmark_comment": "≤200 знаков — обгоняет ли портфель бенчмарк? '
+        'Tracking Error vs Volatility — почему разные. IR интерпретация.",\n'
+        '  "ai_regime_comment": "≤200 знаков — режим рынка, как он влияет на портфель, '
+        'подтверждается ли банковскими отчётами (если есть RAG).",\n'
+        '  "ai_holdings_comment": "≤200 знаков — ключевые hotspots, перевесы, '
+        'какие позиции увеличивают хвостовой риск.",\n'
+        '  "ai_sector_comment": "≤150 знаков — секторные перевесы/недовесы vs бенчмарк.",\n'
+        f'{picks_spec},\n'
+        '  "action_plan_text": "≤800 знаков — приоритетные действия (Trim/Sell сначала)",\n'
+        '  "ai_action_impact": "≤300 знаков — как изменятся CVaR/Vol/TE при реализации"\n'
+        '}\n\n'
         "ПРАВИЛА:\n"
-        "- ВСЕ тексты на РУССКОМ языке.\n"
-        "- Слово «RAMP» нигде не использовать.\n"
-        "- Каждое число должно иметь тег источника: [Quant Engine], [SEC EDGAR], [CDS], [Regime] или [RAG: файл].\n"
-        "- Stock picks должны соответствовать риск-профилю пользователя: " + user_profile + ".\n"
-        "- КРИТИЧНО: предлагай РЕАЛЬНЫЕ АКЦИИ (Stock), а не только ETF. "
-        "Для каждой акции: объясни ПОЧЕМУ именно она — ссылайся на MAC3 факторы "
-        "(Beta, TRC), SEC EDGAR данные (ROE, маржа, долг) и режим рынка.\n"
-        "- Для Boost Alpha: акции роста с высоким momentum, которых НЕТ в портфеле. "
-        "Примеры: PLTR, COIN, RKLB, CELH, CRWD, ANET, PANW — или другие, "
-        "подходящие текущему режиму.\n"
-        "- Для Rebalance: quality-акции с устойчивой маржой и низким долгом. "
-        "Примеры: JNJ, PG, COST, V, MA, UNH, HD — или другие с высоким Fundamental Score.\n"
-        "- Для Protect Capital: дивидендные аристократы или защитные активы. "
-        "Примеры: KO, PEP, JNJ, XLU, GLD, TLT.\n"
-        "- В поле 'why' обязательно укажи конкретные цифры: ROE, маржа, Beta, "
-        "momentum, P/E — с тегом источника.\n"
-        "- CoVe: перед финализацией проверь, что каждый тикер существует, "
-        "каждый факт подкреплён источником, ни одно число не выдумано.\n"
+        "- ВСЕ тексты на РУССКОМ. Без «RAMP».\n"
+        "- Каждое число — [Quant Engine], [SEC EDGAR], [Regime] или [RAG: файл].\n"
+        f"- Риск-профиль: {user_profile}.\n"
+        "- РЕАЛЬНЫЕ АКЦИИ: PLTR, CRWD, JNJ, COST, KO и т.п. — не только ETF.\n"
+        "- why: конкретные цифры (ROE, маржа, Beta, P/E) с [источник].\n"
         f"{rag_rule}"
-        f"\n{ask_plan}\n\n"
-        f"=== ДАННЫЕ ПОРТФЕЛЯ ===\n{json.dumps(summary, ensure_ascii=False)[:9000]}"
+        f"\n=== ДАННЫЕ ПОРТФЕЛЯ ===\n{json.dumps(summary, ensure_ascii=False)[:9000]}"
         f"{rag_block}"
     )
 
@@ -434,7 +486,16 @@ def generate_narrative(results: dict, tier: str = "base",
         last_brace  = raw.rfind("}")
         if first_brace == -1 or last_brace == -1:
             raise ValueError(f"JSON-объект не найден в ответе (raw[:200]={raw[:200]!r})")
-        parsed = json.loads(raw[first_brace:last_brace + 1])
+        json_str = raw[first_brace:last_brace + 1]
+        try:
+            parsed = json.loads(json_str)
+        except json.JSONDecodeError:
+            # Likely truncated by max_tokens — attempt repair
+            logger.info("AI narrative: JSON невалиден, пробуем repair (output=%d tok)",
+                        usage.output_tokens)
+            repaired = _repair_truncated_json(json_str)
+            parsed = json.loads(repaired)  # will raise if repair failed
+            logger.info("AI narrative: JSON repair УСПЕШЕН")
 
         verdict       = str(parsed.get("verdict", "")).strip()
         plain_summary = str(parsed.get("plain_summary", "")).strip()
@@ -462,15 +523,27 @@ def generate_narrative(results: dict, tier: str = "base",
         logger.info("AI narrative: SUCCESS model=%s verdict=%d chars bullets=%d picks=%d",
                     model, len(verdict), len(bullets), total_picks)
 
+        # Extract per-section AI comments (deep tier)
+        ai_risk_comment      = str(parsed.get("ai_risk_comment", "")).strip()[:250]
+        ai_benchmark_comment = str(parsed.get("ai_benchmark_comment", "")).strip()[:250]
+        ai_regime_comment    = str(parsed.get("ai_regime_comment", "")).strip()[:250]
+        ai_holdings_comment  = str(parsed.get("ai_holdings_comment", "")).strip()[:250]
+        ai_sector_comment    = str(parsed.get("ai_sector_comment", "")).strip()[:200]
+
         return {
-            "verdict":          verdict[:300],
-            "plain_summary":    plain_summary[:400],
-            "bullets":          bullets[:7 if tier == "deep" else 4],
-            "action_plan_text": plan_txt[:1000] if tier == "deep" else "",
-            "ai_action_impact": impact_txt[:400] if tier == "deep" else "",
-            "stock_picks":      stock_picks,
-            "used_rag":         used_rag,
-            "model_used":       model,
+            "verdict":              verdict[:300],
+            "plain_summary":        plain_summary[:400],
+            "bullets":              bullets[:7 if tier == "deep" else 4],
+            "action_plan_text":     plan_txt[:1000] if tier == "deep" else "",
+            "ai_action_impact":     impact_txt[:400] if tier == "deep" else "",
+            "stock_picks":          stock_picks,
+            "used_rag":             used_rag,
+            "model_used":           model,
+            "ai_risk_comment":      ai_risk_comment,
+            "ai_benchmark_comment": ai_benchmark_comment,
+            "ai_regime_comment":    ai_regime_comment,
+            "ai_holdings_comment":  ai_holdings_comment,
+            "ai_sector_comment":    ai_sector_comment,
         }
     except Exception as exc:
         logger.warning("AI narrative FAILED (%s) — используется fallback. Модель: %s",

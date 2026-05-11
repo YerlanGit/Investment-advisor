@@ -342,6 +342,12 @@
         <div style="font-size:8px; color:#9aabb8; margin-top:3px;">0.4×Vol + 0.4×|CVaR| + 0.2×max TRC [Quant Engine]</div>
       </div>
 
+      {% if data.ai_risk_comment %}
+      <div style="background:#f0f9ff; border-left:3px solid #3b82f6; border-radius:0 5px 5px 0; padding:7px 11px; margin:6px 0; font-size:9.5px; color:#1e3a5c; line-height:1.55;">
+        🧠 <strong>Комментарий ИИ:</strong> {{ data.ai_risk_comment }}
+      </div>
+      {% endif %}
+
       {% if data.hotspots %}
       {% for h in data.hotspots %}
       <div class="hotspot-alert">🔥 <strong>Концентрация риска:</strong> {{ h }}</div>
@@ -404,6 +410,11 @@
       </div>
       {% endif %}
 
+      {% if data.ai_benchmark_comment %}
+      <div style="background:#ecfdf5; border-left:3px solid #10b981; border-radius:0 5px 5px 0; padding:7px 11px; margin:6px 0; font-size:9.5px; color:#064e3b; line-height:1.55;">
+        🧠 <strong>Анализ ИИ:</strong> {{ data.ai_benchmark_comment }}
+      </div>
+      {% endif %}
       {% if data.regime %}
       <div class="regime-box">
         <div class="regime-header">
@@ -430,6 +441,12 @@
           {% for ex in data.regime.explainers %}<span>{{ ex }}{% if not loop.last %} · {% endif %}</span>{% endfor %}
         </div>
         {% endif %}
+      </div>
+      {% endif %}
+
+      {% if data.ai_regime_comment %}
+      <div style="background:#fffbeb; border-left:3px solid #f59e0b; border-radius:0 5px 5px 0; padding:7px 11px; margin:6px 0; font-size:9.5px; color:#78350f; line-height:1.55;">
+        🧠 <strong>Комментарий ИИ к режиму:</strong> {{ data.ai_regime_comment }}
       </div>
       {% endif %}
 
@@ -596,6 +613,12 @@
     <em>Скоринг</em> — Fund+Val+Tech+Credit ∈ [−6, +6] [Quant Engine + SEC EDGAR]; 🔥 — Hotspot (TRC &gt; 20%).
   </div>
 
+  {% if data.ai_holdings_comment %}
+  <div style="background:#f0f9ff; border-left:3px solid #3b82f6; border-radius:0 5px 5px 0; padding:7px 11px; margin:6px 0; font-size:9.5px; color:#1e3a5c; line-height:1.55;">
+    🧠 <strong>Анализ позиций:</strong> {{ data.ai_holdings_comment }}
+  </div>
+  {% endif %}
+
   {% if data.sectors %}
   <div class="section-title">Секторное распределение</div>
   <div>
@@ -609,6 +632,12 @@
     </div>
     {% endfor %}
   </div>
+
+  {% if data.ai_sector_comment %}
+  <div style="background:#faf5ff; border-left:3px solid #8b5cf6; border-radius:0 5px 5px 0; padding:7px 11px; margin:4px 0; font-size:9.5px; color:#4c1d95; line-height:1.55;">
+    🧠 <strong>Секторный анализ:</strong> {{ data.ai_sector_comment }}
+  </div>
+  {% endif %}
   {% endif %}
 
   <div class="footer"><span>2 / 4 · Portfolio Intelligence © 2026</span><span>Источники: [Quant Engine] · [Tradernet] · [Bank RAG]</span></div>

@@ -401,12 +401,19 @@ def build_payload(results: dict, tier: str,
         # Data quality
         "data_quality":      data_quality,
         # AI Narrative — placeholder unless caller passed one in
-        "ai_verdict":        (ai_summary or {}).get("verdict", ""),
-        "ai_plain_summary":  (ai_summary or {}).get("plain_summary", ""),
-        "ai_bullets":        (ai_summary or {}).get("bullets", []),
-        "ai_stock_picks":    (ai_summary or {}).get("stock_picks", {}),
-        "used_rag":          bool((ai_summary or {}).get("used_rag")),
-        "ai_model_used":     _model_display_name((ai_summary or {}).get("model_used", "")),
+        "ai_verdict":            (ai_summary or {}).get("verdict", ""),
+        "ai_plain_summary":      (ai_summary or {}).get("plain_summary", ""),
+        "ai_bullets":            (ai_summary or {}).get("bullets", []),
+        "ai_stock_picks":        (ai_summary or {}).get("stock_picks", {}),
+        "used_rag":              bool((ai_summary or {}).get("used_rag")),
+        "ai_model_used":         _model_display_name((ai_summary or {}).get("model_used", "")),
+        "ai_action_impact":      (ai_summary or {}).get("ai_action_impact", ""),
+        # Per-section AI commentary (populated by Claude, empty if fallback)
+        "ai_risk_comment":       (ai_summary or {}).get("ai_risk_comment", ""),
+        "ai_benchmark_comment":  (ai_summary or {}).get("ai_benchmark_comment", ""),
+        "ai_regime_comment":     (ai_summary or {}).get("ai_regime_comment", ""),
+        "ai_holdings_comment":   (ai_summary or {}).get("ai_holdings_comment", ""),
+        "ai_sector_comment":     (ai_summary or {}).get("ai_sector_comment", ""),
         # Tier metadata
         "tier":              tier,
     }
