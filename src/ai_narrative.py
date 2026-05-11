@@ -22,7 +22,7 @@ from typing import Optional
 
 logger = logging.getLogger("AINarrative")
 
-MAX_TOKENS_BASE = 1_200
+MAX_TOKENS_BASE = 2_500
 MAX_TOKENS_DEEP = 6_000
 
 MODEL_BASE = os.getenv("ANTHROPIC_MODEL_BASE", "claude-haiku-4-5-20251001")
@@ -116,6 +116,60 @@ def _safe_round(v, digits: int):
         return None if x != x else round(x, digits)
     except (TypeError, ValueError):
         return None
+
+
+def _repair_truncated_json(raw: str) -> str:
+    """
+    Attempt to repair JSON that was truncated due to max_tokens.
+    Strategy: close any open strings, arrays, and objects.
+    """
+    # If it already parses, return as-is
+    try:
+        json.loads(raw)
+        return raw
+    except json.JSONDecodeError:
+        pass
+
+    repaired = raw.rstrip()
+    # Remove trailing comma if present
+    repaired = repaired.rstrip(',')
+    # Remove incomplete key-value at end (trailing partial string)
+    # e.g. ..."some_key": "some incomplete v
+    if repaired.count('"') % 2 == 1:
+        # Odd number of quotes — close the open string
+        repaired += '"'
+
+    # Count unmatched brackets
+    open_braces   = repaired.count('{') - repaired.count('}')
+    open_brackets = repaired.count('[') - repaired.count(']')
+
+    # Close arrays first, then objects
+    for _ in range(max(0, open_brackets)):
+        repaired += ']'
+    for _ in range(max(0, open_braces)):
+        repaired += '}'
+
+    try:
+        json.loads(repaired)
+        return repaired
+    except json.JSONDecodeError:
+        # More aggressive: try stripping the last incomplete element
+        # Find the last complete key-value pair
+        for trim_pos in range(len(repaired) - 1, max(0, len(repaired) - 200), -1):
+            candidate = repaired[:trim_pos].rstrip().rstrip(',')
+            open_b = candidate.count('{') - candidate.count('}')
+            open_a = candidate.count('[') - candidate.count(']')
+            if candidate.count('"') % 2 == 1:
+                candidate += '"'
+            candidate += ']' * max(0, open_a)
+            candidate += '}' * max(0, open_b)
+            try:
+                json.loads(candidate)
+                return candidate
+            except json.JSONDecodeError:
+                continue
+    # Give up
+    return raw
 
 
 # ── Strip unverified RAG citations ───────────────────────────────────────────
@@ -434,7 +488,16 @@ def generate_narrative(results: dict, tier: str = "base",
         last_brace  = raw.rfind("}")
         if first_brace == -1 or last_brace == -1:
             raise ValueError(f"JSON-объект не найден в ответе (raw[:200]={raw[:200]!r})")
-        parsed = json.loads(raw[first_brace:last_brace + 1])
+        json_str = raw[first_brace:last_brace + 1]
+
+        # If output hit max_tokens, JSON may be truncated — try to repair
+        stop_reason = getattr(response, 'stop_reason', None)
+        if stop_reason == 'max_tokens' or usage.output_tokens >= max_tok - 5:
+            logger.info("AI narrative: ответ обрезан (stop=%s, tokens=%d/%d) — попытка ремонта JSON",
+                        stop_reason, usage.output_tokens, max_tok)
+            json_str = _repair_truncated_json(json_str)
+
+        parsed = json.loads(json_str)
 
         verdict       = str(parsed.get("verdict", "")).strip()
         plain_summary = str(parsed.get("plain_summary", "")).strip()
