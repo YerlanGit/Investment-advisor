@@ -67,6 +67,23 @@ def _risk_score_label(score: int) -> str:
     return "Агрессивный"
 
 
+def _model_display_name(model_id: str) -> str:
+    """Convert internal model ID to short human-readable label for PDF."""
+    _MAP = {
+        "claude-haiku-4-5-20251001": "Claude Haiku 4.5",
+        "claude-haiku-4-5":          "Claude Haiku 4.5",
+        "claude-sonnet-4-6":         "Claude Sonnet 4.6",
+        "claude-opus-4-7":           "Claude Opus 4.7",
+        "fallback":                  "Fallback (нет API)",
+    }
+    if not model_id:
+        return ""
+    for key, label in _MAP.items():
+        if key in model_id:
+            return label
+    return model_id
+
+
 # ── Extreme-value thresholds ────────────────────────────────────────────────
 # Used to flag rows that warrant a red icon + AI tooltip.
 EXTREME = {
@@ -389,6 +406,7 @@ def build_payload(results: dict, tier: str,
         "ai_bullets":        (ai_summary or {}).get("bullets", []),
         "ai_stock_picks":    (ai_summary or {}).get("stock_picks", {}),
         "used_rag":          bool((ai_summary or {}).get("used_rag")),
+        "ai_model_used":     _model_display_name((ai_summary or {}).get("model_used", "")),
         # Tier metadata
         "tier":              tier,
     }

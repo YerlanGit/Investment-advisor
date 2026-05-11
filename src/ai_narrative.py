@@ -308,6 +308,7 @@ def _fallback_narrative(results: dict, tier: str) -> dict:
         "ai_action_impact": ai_action_impact,
         "stock_picks":      stock_picks,
         "used_rag":         False,
+        "model_used":       "fallback",
     }
 
 
@@ -397,15 +398,18 @@ def generate_narrative(results: dict, tier: str = "base",
     used_rag = bool(market_context) and tier == "deep"
 
     if not api_key:
-        logger.info("ANTHROPIC_API_KEY missing — using fallback narrative.")
+        logger.warning("ANTHROPIC_API_KEY отсутствует — используется fallback-нарратив.")
         out = _fallback_narrative(results, tier)
         out["used_rag"] = False
+        out["model_used"] = "fallback"
         return out
 
     summary = _summarise_for_prompt(results)
     model   = MODEL_DEEP if tier == "deep" else MODEL_BASE
     max_tok = MAX_TOKENS_DEEP if tier == "deep" else MAX_TOKENS_BASE
 
+    logger.info("AI narrative: запрос к %s (tier=%s, max_tokens=%d, rag=%s)",
+                model, tier, max_tok, used_rag)
     try:
         import anthropic
         client   = anthropic.Anthropic(api_key=api_key)
@@ -421,11 +425,15 @@ def generate_narrative(results: dict, tier: str = "base",
                                         user_profile=user_risk_profile),
             }],
         )
-        raw = response.content[0].text.strip()
+        usage    = response.usage
+        raw      = response.content[0].text.strip()
+        logger.info("AI narrative: ответ от %s получен (input=%d tok, output=%d tok, len=%d chars)",
+                    model, usage.input_tokens, usage.output_tokens, len(raw))
+
         first_brace = raw.find("{")
         last_brace  = raw.rfind("}")
         if first_brace == -1 or last_brace == -1:
-            raise ValueError("No JSON object in response")
+            raise ValueError(f"JSON-объект не найден в ответе (raw[:200]={raw[:200]!r})")
         parsed = json.loads(raw[first_brace:last_brace + 1])
 
         verdict       = str(parsed.get("verdict", "")).strip()
@@ -436,7 +444,9 @@ def generate_narrative(results: dict, tier: str = "base",
         stock_picks   = parsed.get("stock_picks") or {}
 
         if not verdict or not bullets:
-            raise ValueError("verdict or bullets missing")
+            raise ValueError(
+                f"verdict или bullets пусты (verdict={verdict!r}, bullets_count={len(bullets)})"
+            )
 
         # CoVe: strip RAG citations whose source file is not in market_context.
         bullets       = [_strip_unverified_rag_citations(b, market_context) for b in bullets]
@@ -447,6 +457,10 @@ def generate_narrative(results: dict, tier: str = "base",
 
         # Normalise stock_picks structure.
         stock_picks = _normalise_stock_picks(stock_picks, tier, market_context)
+        total_picks = sum(len(s.get("picks", [])) for s in stock_picks.values())
+
+        logger.info("AI narrative: SUCCESS model=%s verdict=%d chars bullets=%d picks=%d",
+                    model, len(verdict), len(bullets), total_picks)
 
         return {
             "verdict":          verdict[:300],
@@ -456,11 +470,14 @@ def generate_narrative(results: dict, tier: str = "base",
             "ai_action_impact": impact_txt[:400] if tier == "deep" else "",
             "stock_picks":      stock_picks,
             "used_rag":         used_rag,
+            "model_used":       model,
         }
     except Exception as exc:
-        logger.warning("AI narrative failed (%s) — using fallback.", exc)
+        logger.warning("AI narrative FAILED (%s) — используется fallback. Модель: %s",
+                       exc, model, exc_info=True)
         out = _fallback_narrative(results, tier)
-        out["used_rag"] = False
+        out["used_rag"]   = False
+        out["model_used"] = "fallback"
         return out
 
 

@@ -324,7 +324,10 @@
       <!-- Plain summary hero -->
       {% if data.ai_plain_summary %}
       <div class="plain-hero">
-        <div class="plain-hero-label">Простыми словами — что происходит с портфелем</div>
+        <div class="plain-hero-label">
+          Простыми словами — что происходит с портфелем
+          {% if data.ai_model_used %}<span style="font-weight:400; color:#6b9fd4; margin-left:8px;">🤖 {{ data.ai_model_used }}</span>{% endif %}
+        </div>
         {{ data.ai_plain_summary }}
       </div>
       {% endif %}
@@ -459,7 +462,10 @@
       <!-- AI bullets -->
       {% if data.ai_bullets %}
       <div class="bullets-block">
-        <div class="bullets-label">Выводы Quant Engine</div>
+        <div class="bullets-label">
+          Анализ ИИ-агента
+          {% if data.ai_model_used %}<span style="font-size:7.5px; font-weight:400; color:#b45309; margin-left:6px;">🤖 {{ data.ai_model_used }}</span>{% endif %}
+        </div>
         <ul>{% for b in data.ai_bullets %}<li>{{ b }}</li>{% endfor %}</ul>
       </div>
       {% endif %}
@@ -468,6 +474,7 @@
       {% if data.ai_stock_picks %}
       <div style="font-size:9px; font-weight:700; letter-spacing:0.12em; text-transform:uppercase; color:#0d2240; margin: 10px 0 6px;">
         Идеи ИИ-агента — 3 сценария (advisory only)
+        {% if data.ai_model_used %}<span style="font-size:8px; font-weight:400; letter-spacing:0; text-transform:none; color:#6b8aaa; margin-left:6px;">🤖 {{ data.ai_model_used }}</span>{% endif %}
       </div>
       <div class="scenario-grid">
 
