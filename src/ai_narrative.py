@@ -191,15 +191,36 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
 
     rag_block = ""
     rag_rule  = ""
-    if tier == "deep" and market_context:
+    if market_context:
+        ctx_limit = 6000 if tier == "deep" else 2000
         rag_block = (
             "\n\n=== АНАЛИТИКА БАНКОВ (RAG) ===\n"
-            f"{market_context[:6000]}\n"
+            f"{market_context[:ctx_limit]}\n"
             "=== КОНЕЦ АНАЛИТИКИ БАНКОВ ==="
         )
         rag_rule = (
             "Если используешь факт из АНАЛИТИКИ БАНКОВ — цитируй "
             "[RAG: <имя_файла>]. Не выдумывай файлы.\n"
+        )
+
+    # Build list of tickers that are on Sell/Trim in action_plan
+    sell_tickers: set[str] = set()
+    for ap in (summary.get("action_plan") or []):
+        act = str(ap.get("action", "")).lower()
+        if act in ("sell", "trim", "сократить", "продать"):
+            sell_tickers.add(str(ap.get("ticker", "")).upper())
+    # Also check holdings with action Sell/Trim
+    for h in (summary.get("holdings") or []):
+        act = str(h.get("action", "")).lower()
+        if act in ("sell", "trim", "сократить", "продать"):
+            sell_tickers.add(str(h.get("ticker", "")).upper())
+    
+    contradiction_rule = ""
+    if sell_tickers:
+        contradiction_rule = (
+            f"КРИТИЧНО: тикеры {', '.join(sorted(sell_tickers))} имеют статус Sell/Trim в action_plan. "
+            "НЕ предлагай их в stock_picks (ни в boost_alpha, ни в rebalance). "
+            "Это противоречит сигналам Quant Engine.\n"
         )
 
     # ── Base tier: compact prompt, 1 pick per scenario, 3 bullets ──
@@ -222,11 +243,14 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
             '"picks": [{"ticker": "...", "name": "...", "why": "≤100 знаков", "type": "Stock"}]}\n'
             '  }\n'
             '}\n\n'
-            "ПРАВИЛА: русский язык. Без «RAMP». Каждое число — [Quant Engine]/[SEC EDGAR]/[Regime].\n"
+            "ПРАВИЛА: русский язык. Без «RAMP». Каждое число — [Quant Engine]/[SEC EDGAR]/[Regime]/[RAG].\n"
             f"Риск-профиль: {user_profile}. Режим: {regime_label}.\n"
             "Stock picks: РЕАЛЬНЫЕ АКЦИИ (PLTR, JNJ, KO и т.п.), не только ETF. "
-            "why ≤100 знаков с цифрами.\n\n"
+            "why ≤100 знаков с цифрами.\n"
+            f"{contradiction_rule}"
+            f"{rag_rule}\n"
             f"=== ДАННЫЕ ===\n{json.dumps(summary, ensure_ascii=False)[:7000]}"
+            f"{rag_block}"
         )
 
     # ── Deep tier: full prompt with per-section comments ──
@@ -278,6 +302,7 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
         f"- Риск-профиль: {user_profile}.\n"
         "- РЕАЛЬНЫЕ АКЦИИ: PLTR, CRWD, JNJ, COST, KO и т.п. — не только ETF.\n"
         "- why: конкретные цифры (ROE, маржа, Beta, P/E) с [источник].\n"
+        f"{contradiction_rule}"
         f"{rag_rule}"
         f"\n=== ДАННЫЕ ПОРТФЕЛЯ ===\n{json.dumps(summary, ensure_ascii=False)[:9000]}"
         f"{rag_block}"
@@ -518,6 +543,8 @@ def generate_narrative(results: dict, tier: str = "base",
 
         # Normalise stock_picks structure.
         stock_picks = _normalise_stock_picks(stock_picks, tier, market_context)
+        # Post-generation contradiction check: remove Sell/Trim tickers from buy picks.
+        stock_picks = _check_pick_contradictions(stock_picks, results)
         total_picks = sum(len(s.get("picks", [])) for s in stock_picks.values())
 
         logger.info("AI narrative: SUCCESS model=%s verdict=%d chars bullets=%d picks=%d",
@@ -578,6 +605,45 @@ def _normalise_stock_picks(raw: dict, tier: str, market_context: str) -> dict:
             "picks": clean_picks,
         }
     return result
+
+
+def _check_pick_contradictions(stock_picks: dict, results: dict) -> dict:
+    """
+    Post-generation sanity check: remove picks that contradict the action_plan.
+    If action_plan says Sell/Trim for a ticker, it should NOT appear in
+    boost_alpha or rebalance picks (but protect_capital is OK for hedging).
+    """
+    sell_tickers: set[str] = set()
+    # From action_plan
+    for ap in (results.get("action_plan") or []):
+        act = str(ap.get("action", "")).lower()
+        if act in ("sell", "trim", "сократить", "продать"):
+            sell_tickers.add(str(ap.get("ticker", "")).upper().split(".")[0])
+    # From performance table
+    perf = results.get("performance_table")
+    if perf is not None and not perf.empty and "Score_Action" in perf.columns:
+        for _, row in perf.iterrows():
+            act = str(row.get("Score_Action", "")).lower()
+            if act in ("sell", "trim"):
+                sell_tickers.add(str(row.get("Ticker", "")).upper().split(".")[0])
+
+    if not sell_tickers:
+        return stock_picks
+
+    for scenario_key in ("boost_alpha", "rebalance"):
+        scenario = stock_picks.get(scenario_key)
+        if not scenario:
+            continue
+        original = scenario.get("picks", [])
+        filtered = [p for p in original
+                    if p.get("ticker", "").upper().split(".")[0] not in sell_tickers]
+        if len(filtered) < len(original):
+            removed = [p["ticker"] for p in original if p not in filtered]
+            logger.info("Contradiction check: removed %s from %s (Sell/Trim in action_plan)",
+                        removed, scenario_key)
+        scenario["picks"] = filtered
+
+    return stock_picks
 
 
 __all__ = ["generate_narrative"]

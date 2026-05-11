@@ -519,13 +519,10 @@ def _build_pdf_payload(results: dict, tier: str,
     report.html keeps rendering without code changes elsewhere.
     """
     if os.getenv("REPORT_VERSION", "v2").lower() != "v1":
-        # Deep tier pulls RAG context (macro + micro + regime confirmation).
-        # Base tier skips RAG to keep latency low.
-        regime_rag_confirm: list[str] = []
-        if tier == TIER_DEEP:
-            market_context, regime_rag_confirm = _fetch_rag_context(results)
-        else:
-            market_context = ""
+        # Both tiers pull RAG context (macro + micro + regime confirmation).
+        # Deep tier gets full 6000-char context; base tier gets 2000-char
+        # version (truncated in ai_narrative) to keep latency reasonable.
+        market_context, regime_rag_confirm = _fetch_rag_context(results)
 
         ai_summary = generate_narrative(
             results,
