@@ -1,0 +1,35 @@
+name: Cloud Run Logs Check
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  get-logs:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write' # Критически важно для работы без ключей
+
+    steps:
+    - uses: 'actions/checkout@v4'
+
+    - id: 'auth'
+      name: 'Authenticate to Google Cloud'
+      uses: 'google-github-actions/auth@v2'
+      with:
+        workload_identity_provider: 'projects/462015542414/locations/global/workloadIdentityPools/github-pool/providers/github-provider'
+        service_account: 'log-reader-service@project-01c031b1-bf6d-4305-a01.iam.gserviceaccount.com'
+
+    - name: 'Check Cloud Run Logs'
+      run: |
+        # Устанавливаем библиотеку и запускаем ваш Python скрипт
+        pip install google-cloud-logging
+        python -c "
+        from google.cloud import logging
+        client = logging.Client()
+        # Замените 'your-service' на имя вашего сервиса в Cloud Run
+        log_filter = 'resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"your-service\"'
+        for entry in client.list_entries(filter_=log_filter, page_size=5):
+            print(f'{entry.timestamp}: {entry.payload}')
+        "
