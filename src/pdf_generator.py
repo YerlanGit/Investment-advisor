@@ -122,8 +122,9 @@ async def generate_portfolio_pdf(
 def _render_pdf_sync(html_string: str, output_path: str) -> None:
     """
     Blocking Playwright render — runs Chromium in a child subprocess so that
-    Chromium's SIGTRAP on --single-process exit (Cloud Run / gVisor) does not
-    propagate to the parent aiogram process and cause container restarts.
+    Chromium crashes during teardown don't propagate to the parent aiogram
+    process. Без `--single-process` Chromium на Cloud Run / gVisor завершается
+    чисто; флаг оставили только сетевые/sandbox-обходы.
     """
     # Inline runner script passed via stdin to avoid temp-file race conditions.
     runner_code = r"""
@@ -139,8 +140,6 @@ with sync_playwright() as pw:
             "--disable-setuid-sandbox",
             "--disable-dev-shm-usage",
             "--disable-gpu",
-            "--no-zygote",
-            "--single-process",
             "--disable-extensions",
         ],
     )
@@ -153,18 +152,43 @@ with sync_playwright() as pw:
     browser.close()
 """
     payload = json.dumps({"html": html_string, "output": output_path})
-    result = subprocess.run(
-        [sys.executable, "-c", runner_code],
-        input=payload.encode(),
-        capture_output=True,
-        timeout=90,
-    )
-    # Non-zero exit is expected when Chromium raises SIGTRAP on --single-process
-    # cleanup (signal 5 → exit code 133 on Linux).  The PDF is already written
-    # at that point — only raise if the output file is missing.
-    if result.returncode not in (0, 133) and not Path(output_path).exists():
-        stderr = result.stderr.decode(errors="replace")[:600]
-        raise RuntimeError(f"PDF subprocess failed (rc={result.returncode}): {stderr}")
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", runner_code],
+            input=payload.encode(),
+            capture_output=True,
+            timeout=120,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(
+            f"PDF subprocess timed out after {exc.timeout}s — Chromium завис"
+        ) from exc
+
+    pdf_ok = Path(output_path).exists() and Path(output_path).stat().st_size > 0
+
+    # SIGTRAP / signal-kill: subprocess.run returns returncode = -signal (e.g. -5).
+    # Exit code 133 only happens when wrapped by a shell. The PDF is normally
+    # written before teardown, so we accept the run as long as the file exists.
+    if pdf_ok and result.returncode != 0:
+        logger.warning(
+            "PDF subprocess exited with rc=%s but PDF was written (size=%d). "
+            "stderr_tail=%r",
+            result.returncode,
+            Path(output_path).stat().st_size,
+            result.stderr.decode(errors="replace")[-300:],
+        )
+        return
+
+    if not pdf_ok:
+        stderr = result.stderr.decode(errors="replace")[:800]
+        stdout = result.stdout.decode(errors="replace")[:200]
+        raise RuntimeError(
+            f"PDF subprocess failed (rc={result.returncode}, "
+            f"pdf_exists={Path(output_path).exists()}): "
+            f"stderr={stderr!r} stdout={stdout!r}"
+        )
+
+
 
 
 # ── CLI smoke-test ────────────────────────────────────────────────────────────
