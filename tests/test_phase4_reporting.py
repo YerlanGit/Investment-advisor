@@ -232,10 +232,9 @@ class JinjaRenderTest(unittest.TestCase):
         html = self._render("report_deep.html", payload)
         self.assertIn("PORTFOLIO INTELLIGENCE", html)
         self.assertNotIn("RAMP",                 html)
-        # Deep-only sections present
+        # Deep-only sections present (current template — Three-Question redesign)
         self.assertIn("Action Plan",             html)
-        self.assertIn("Black-Litterman",         html)
-        self.assertIn("Fundamental Layer",       html)
+        self.assertIn("4-Pillar Scoring",        html)
         self.assertIn("CoVe",                    html)
 
 

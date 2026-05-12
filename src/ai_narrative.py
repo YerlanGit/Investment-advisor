@@ -508,19 +508,27 @@ def generate_narrative(results: dict, tier: str = "base",
                     model, usage.input_tokens, usage.output_tokens, len(raw))
 
         first_brace = raw.find("{")
-        last_brace  = raw.rfind("}")
-        if first_brace == -1 or last_brace == -1:
+        if first_brace == -1:
             raise ValueError(f"JSON-объект не найден в ответе (raw[:200]={raw[:200]!r})")
-        json_str = raw[first_brace:last_brace + 1]
+        last_brace = raw.rfind("}")
+        # Truncation by max_tokens can swallow the closing brace entirely —
+        # feed everything from the first '{' to the end into the repair pass.
+        json_str = raw[first_brace:last_brace + 1] if last_brace > first_brace else raw[first_brace:]
         try:
             parsed = json.loads(json_str)
         except json.JSONDecodeError:
-            # Likely truncated by max_tokens — attempt repair
-            logger.info("AI narrative: JSON невалиден, пробуем repair (output=%d tok)",
-                        usage.output_tokens)
+            logger.info("AI narrative: JSON невалиден, пробуем repair (output=%d tok, "
+                        "closing_brace_found=%s)",
+                        usage.output_tokens, last_brace > first_brace)
             repaired = _repair_truncated_json(json_str)
-            parsed = json.loads(repaired)  # will raise if repair failed
-            logger.info("AI narrative: JSON repair УСПЕШЕН")
+            try:
+                parsed = json.loads(repaired)
+                logger.info("AI narrative: JSON repair УСПЕШЕН")
+            except json.JSONDecodeError as je:
+                raise ValueError(
+                    f"JSON repair не удался (output={usage.output_tokens} tok, "
+                    f"raw_tail={raw[-200:]!r}): {je}"
+                ) from je
 
         verdict       = str(parsed.get("verdict", "")).strip()
         plain_summary = str(parsed.get("plain_summary", "")).strip()
