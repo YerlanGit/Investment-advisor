@@ -1,15 +1,41 @@
 name: Cloud Run Logs Check
 
+# Запускается:
+#   • вручную через GitHub UI (workflow_dispatch) — основной режим
+#   • автоматически при push в main — sanity-check после деплоя
 on:
+  workflow_dispatch:
+    inputs:
+      service:
+        description: 'Имя Cloud Run сервиса'
+        required: false
+        default: 'ramp-bot'
+      hours:
+        description: 'За сколько часов назад тянуть логи'
+        required: false
+        default: '6'
+      severity:
+        description: 'Минимальный уровень: DEFAULT | INFO | WARNING | ERROR'
+        required: false
+        default: 'WARNING'
+      limit:
+        description: 'Максимум записей'
+        required: false
+        default: '200'
   push:
     branches: [ main ]
 
 jobs:
   get-logs:
     runs-on: ubuntu-latest
+    env:
+      # Opt into Node.js 24 runtime — silences deprecation warning for
+      # actions/checkout@v4 and google-github-actions/auth@v2 until they
+      # publish Node 24 native versions. Безопасно убрать после Sep 2026.
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
     permissions:
       contents: 'read'
-      id-token: 'write' # Критически важно для работы без ключей
+      id-token: 'write'  # Критически важно для работы без ключей
 
     steps:
     - uses: 'actions/checkout@v4'
@@ -21,15 +47,71 @@ jobs:
         workload_identity_provider: 'projects/462015542414/locations/global/workloadIdentityPools/github-pool/providers/github-provider'
         service_account: 'log-reader-service@project-01c031b1-bf6d-4305-a01.iam.gserviceaccount.com'
 
-    - name: 'Check Cloud Run Logs'
+    - name: 'Install dependencies'
+      run: pip install --quiet google-cloud-logging
+
+    - name: 'Fetch Cloud Run logs'
+      env:
+        SERVICE:  ${{ github.event.inputs.service  || 'ramp-bot' }}
+        HOURS:    ${{ github.event.inputs.hours    || '6' }}
+        SEVERITY: ${{ github.event.inputs.severity || 'WARNING' }}
+        LIMIT:    ${{ github.event.inputs.limit    || '200' }}
       run: |
-        # Устанавливаем библиотеку и запускаем ваш Python скрипт
-        pip install google-cloud-logging
-        python -c "
-        from google.cloud import logging
-        client = logging.Client()
-        # Замените 'your-service' на имя вашего сервиса в Cloud Run
-        log_filter = 'resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"your-service\"'
-        for entry in client.list_entries(filter_=log_filter, page_size=5):
-            print(f'{entry.timestamp}: {entry.payload}')
-        "
+        python <<'PY'
+        import os
+        from datetime import datetime, timedelta, timezone
+        from google.cloud import logging as gcl
+
+        service  = os.environ["SERVICE"]
+        hours    = int(os.environ["HOURS"])
+        severity = os.environ["SEVERITY"].upper()
+        limit    = int(os.environ["LIMIT"])
+
+        since = (datetime.now(timezone.utc) - timedelta(hours=hours)).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+        log_filter = (
+            f'resource.type="cloud_run_revision" '
+            f'AND resource.labels.service_name="{service}" '
+            f'AND severity>="{severity}" '
+            f'AND timestamp>="{since}"'
+        )
+
+        print(f"Filter: {log_filter}")
+        print(f"Limit:  {limit}")
+        print("-" * 80)
+
+        client = gcl.Client()
+        entries = list(client.list_entries(
+            filter_=log_filter,
+            order_by=gcl.DESCENDING,
+            page_size=limit,
+            max_results=limit,
+        ))
+
+        summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+        out_lines = [f"### Cloud Run logs — `{service}` (severity ≥ {severity}, last {hours}h)\n",
+                     f"Найдено записей: **{len(entries)}**\n"]
+
+        if not entries:
+            print("Нет записей по фильтру — сервис работает чисто или фильтр слишком узкий.")
+            out_lines.append("> Нет записей по заданному фильтру.\n")
+        else:
+            out_lines.append("```")
+            for e in entries:
+                ts = e.timestamp.isoformat() if e.timestamp else "?"
+                sev = (e.severity or "DEFAULT")
+                if isinstance(e.payload, dict):
+                    msg = e.payload.get("message") or str(e.payload)
+                else:
+                    msg = str(e.payload)
+                msg = msg.strip().replace("\n", " ")[:500]
+                line = f"[{ts}] {sev:8s} {msg}"
+                print(line)
+                out_lines.append(line)
+            out_lines.append("```")
+
+        if summary_path:
+            with open(summary_path, "a", encoding="utf-8") as fh:
+                fh.write("\n".join(out_lines) + "\n")
+        PY
