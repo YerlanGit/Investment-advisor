@@ -13,7 +13,7 @@ on:
       hours:
         description: 'За сколько часов назад тянуть логи'
         required: false
-        default: '6'
+        default: '12'
       severity:
         description: 'Минимальный уровень: DEFAULT | INFO | WARNING | ERROR'
         required: false
@@ -53,7 +53,7 @@ jobs:
     - name: 'Fetch Cloud Run logs'
       env:
         SERVICE:  ${{ github.event.inputs.service  || 'ramp-bot' }}
-        HOURS:    ${{ github.event.inputs.hours    || '6' }}
+        HOURS:    ${{ github.event.inputs.hours    || '12' }}
         SEVERITY: ${{ github.event.inputs.severity || 'WARNING' }}
         LIMIT:    ${{ github.event.inputs.limit    || '200' }}
       run: |
