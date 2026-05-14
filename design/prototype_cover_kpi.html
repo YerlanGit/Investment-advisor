@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<!--
+  ─────────────────────────────────────────────────────────────────────────
+  ПРОТОТИП (design-only, НЕ подключён к боту)
+  Секция: COVER + KPI STRIP
+  Дизайн-система: Functional Techno-Minimalism (AI-Native)
+  Тариф в примере: BASE (комментирует Haiku)
+  Открыть: просто в браузере. Все данные — статичные заглушки.
+  ─────────────────────────────────────────────────────────────────────────
+-->
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Portfolio Report — Прототип секции Cover + KPI</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  /* ═══════════════ ДИЗАЙН-ТОКЕНЫ ═══════════════ */
+  :root {
+    --bg:          #FAFAF9;
+    --navy:        #0A192F;
+    --tech-blue:   #007AFF;
+    --amber:       #FF9500;
+    --ai-bg:       #F0F6FF;
+    --hairline:    rgba(10, 25, 47, 0.20);
+    --hairline-2:  rgba(10, 25, 47, 0.10);
+    --navy-60:     rgba(10, 25, 47, 0.60);
+    --navy-40:     rgba(10, 25, 47, 0.40);
+    --pos:         #1A7F4B;
+    --neg:         #C62828;
+
+    --font-ui:   'IBM Plex Sans', -apple-system, sans-serif;
+    --font-data: 'IBM Plex Mono', monospace;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    background: var(--bg);
+    color: var(--navy);
+    font-family: var(--font-ui);
+    font-size: 13px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .sheet {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 0 32px 48px;
+  }
+
+  /* ═══════════════ ТЕХНИЧЕСКИЙ ХЕДЕР ═══════════════ */
+  .tech-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 8px;
+    font-family: var(--font-data);
+    font-size: 11px;
+    color: var(--navy-60);
+    letter-spacing: 0.02em;
+    padding: 18px 0 10px;
+    border-bottom: 0.5pt solid var(--hairline);
+  }
+  .tech-header .id-string { font-weight: 500; color: var(--navy); }
+  .tech-header .ts { color: var(--navy-40); }
+
+  /* ═══════════════ COVER ═══════════════ */
+  .cover {
+    display: grid;
+    grid-template-columns: 1.55fr 1fr;
+    gap: 28px;
+    padding: 28px 0 8px;
+    border-bottom: 0.5pt solid var(--hairline);
+  }
+
+  .verdict-label {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--navy-60);
+    margin-bottom: 8px;
+  }
+  h1.verdict {
+    font-size: 27px;
+    font-weight: 700;
+    line-height: 1.28;
+    letter-spacing: -0.01em;
+    color: var(--navy);
+  }
+  h1.verdict .hl { color: var(--tech-blue); }
+
+  /* ── AI INSIGHT BOX (терминал-лог) ── */
+  .ai-box {
+    margin-top: 18px;
+    background: var(--ai-bg);
+    border: 0.5pt solid var(--hairline-2);
+    border-left: 2px solid var(--tech-blue);
+    border-radius: 2px;
+    padding: 12px 16px 13px;
+  }
+  .ai-box .ai-head {
+    font-family: var(--font-data);
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    color: var(--tech-blue);
+    margin-bottom: 6px;
+  }
+  .ai-box .ai-body {
+    font-style: italic;
+    font-size: 12.5px;
+    line-height: 1.62;
+    color: var(--navy);
+  }
+  .ai-box .ai-body .src {
+    font-style: normal;
+    font-family: var(--font-data);
+    font-size: 10.5px;
+    color: var(--tech-blue);
+    background: rgba(0,122,255,0.08);
+    padding: 0 4px;
+    border-radius: 2px;
+    white-space: nowrap;
+  }
+
+  /* ── RISK SCALE 0–100 ── */
+  .risk-panel {
+    border: 0.5pt solid var(--hairline);
+    border-radius: 2px;
+    padding: 16px 18px 14px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+  .risk-panel .rp-label {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--navy-60);
+    margin-bottom: 12px;
+  }
+  .risk-readout {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .risk-readout .val {
+    font-family: var(--font-data);
+    font-size: 38px;
+    font-weight: 600;
+    line-height: 1;
+    color: var(--navy);
+  }
+  .risk-readout .scale-max {
+    font-family: var(--font-data);
+    font-size: 14px;
+    color: var(--navy-40);
+  }
+  .risk-readout .tier {
+    margin-left: auto;
+    font-family: var(--font-data);
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--amber);
+    border: 0.5pt solid var(--amber);
+    border-radius: 2px;
+    padding: 2px 7px;
+    align-self: center;
+  }
+  .risk-track-wrap { margin-top: 2px; }
+  .risk-ticks {
+    display: flex;
+    justify-content: space-between;
+    font-family: var(--font-data);
+    font-size: 9px;
+    color: var(--navy-40);
+    margin-top: 5px;
+  }
+
+  /* ═══════════════ KPI STRIP ═══════════════ */
+  .strip-label {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--navy-60);
+    padding: 22px 0 10px;
+  }
+  .kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+  .kpi {
+    border: 0.5pt solid var(--hairline);
+    border-radius: 2px;
+    padding: 14px 16px 13px;
+    display: flex;
+    flex-direction: column;
+    min-height: 168px;
+  }
+  /* status-accent: тонкая верхняя кромка-индикатор */
+  .kpi.st-normal { border-top: 1.5px solid var(--pos); }
+  .kpi.st-good   { border-top: 1.5px solid var(--tech-blue); }
+  .kpi.st-watch  { border-top: 1.5px solid var(--amber); }
+
+  .kpi-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+  }
+  .kpi-name {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.10em;
+    text-transform: uppercase;
+    color: var(--navy-60);
+  }
+  .kpi-tag {
+    font-family: var(--font-data);
+    font-size: 9.5px;
+    font-weight: 500;
+    padding: 1.5px 6px;
+    border-radius: 2px;
+    border: 0.5pt solid currentColor;
+    white-space: nowrap;
+  }
+  .kpi-tag.st-normal { color: var(--pos); }
+  .kpi-tag.st-good   { color: var(--tech-blue); }
+  .kpi-tag.st-watch  { color: var(--amber); }
+
+  .kpi-value {
+    font-family: var(--font-data);
+    font-size: 33px;
+    font-weight: 600;
+    line-height: 1.05;
+    color: var(--navy);
+    letter-spacing: -0.01em;
+  }
+  .kpi-value .unit { font-size: 18px; color: var(--navy-40); }
+  .kpi-money {
+    font-size: 11.5px;
+    color: var(--navy-60);
+    margin-top: 3px;
+  }
+  .kpi-money b { font-family: var(--font-data); font-weight: 500; color: var(--navy); }
+
+  .kpi-spark-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: auto;
+    padding-top: 10px;
+  }
+  .kpi-spark-row svg { display: block; }
+  .kpi-mom {
+    font-family: var(--font-data);
+    font-size: 10px;
+    white-space: nowrap;
+  }
+  .kpi-mom.up   { color: var(--neg); }
+  .kpi-mom.down { color: var(--pos); }
+  .kpi-mom.flat { color: var(--navy-40); }
+
+  .kpi-explainer {
+    font-size: 10.5px;
+    color: var(--navy-60);
+    line-height: 1.45;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 0.5pt solid var(--hairline-2);
+  }
+
+  /* per-KPI inline AI comment */
+  .kpi-ai {
+    display: flex;
+    gap: 8px;
+    margin-top: 9px;
+    padding-left: 8px;
+    border-left: 2px solid var(--tech-blue);
+  }
+  .kpi-ai .tag {
+    font-family: var(--font-data);
+    font-size: 9px;
+    color: var(--tech-blue);
+    flex-shrink: 0;
+    padding-top: 1px;
+  }
+  .kpi-ai .txt {
+    font-style: italic;
+    font-size: 10.5px;
+    line-height: 1.5;
+    color: var(--navy);
+  }
+  .kpi-ai .txt .src {
+    font-style: normal;
+    font-family: var(--font-data);
+    font-size: 9px;
+    color: var(--tech-blue);
+  }
+
+  /* ═══════════════ АДАПТИВ ═══════════════ */
+  @media (max-width: 880px) {
+    .cover { grid-template-columns: 1fr; gap: 20px; }
+    .kpi-grid { grid-template-columns: 1fr; gap: 14px; }
+    .kpi { min-height: auto; }
+  }
+  @media (max-width: 480px) {
+    body { font-size: 15px; }
+    .sheet { padding: 0 16px 32px; }
+    .tech-header { font-size: 10px; }
+    h1.verdict { font-size: 22px; }
+    .risk-readout .val { font-size: 32px; }
+    .kpi-value { font-size: 30px; }
+    .ai-box .ai-body { font-size: 14px; }
+    .kpi-explainer, .kpi-ai .txt { font-size: 12px; }
+  }
+</style>
+</head>
+<body>
+<div class="sheet">
+
+  <!-- ═══ ТЕХНИЧЕСКИЙ ХЕДЕР ═══ -->
+  <div class="tech-header">
+    <span class="id-string">[ PORTFOLIO_REPORT // TIER: BASE // ID: 2026-05-14-U1042 // ENGINE: MAC3 ]</span>
+    <span class="ts">GENERATED 2026-05-14 09:24 UTC+5</span>
+  </div>
+
+  <!-- ═══ COVER ═══ -->
+  <section class="cover">
+    <div class="cover-main">
+      <div class="verdict-label">Вердикт по портфелю</div>
+      <h1 class="verdict">
+        Портфель в зоне <span class="hl">умеренного риска</span> —
+        держать можно, но риск собран в двух позициях.
+      </h1>
+
+      <div class="ai-box">
+        <div class="ai-head">[ 🤖 AI_ANALYSIS // HAIKU ]</div>
+        <div class="ai-body">
+          Ваш профиль — «умеренный», и портфель ему соответствует: общий риск
+          62 из 100 — это середина шкалы. Главное, на что смотреть дальше в
+          отчёте: почти весь риск сидит в 2 бумагах из 9. Аналитика
+          <span class="src">[RAG: GS_Q2_2026]</span> отдельно отмечает рост
+          колебаний в технологическом секторе — а у вас там перевес, поэтому
+          концентрацию стоит держать под контролем.
+        </div>
+      </div>
+    </div>
+
+    <!-- RISK SCALE 0–100 -->
+    <div class="risk-panel">
+      <div class="rp-label">Насколько рискованный ваш портфель</div>
+      <div class="risk-readout">
+        <span class="val">62</span>
+        <span class="scale-max">/ 100</span>
+        <span class="tier">УМЕРЕННЫЙ</span>
+      </div>
+      <div class="risk-track-wrap">
+        <!-- wireframe-шкала: hairline-рамка, деления, маркер-needle -->
+        <svg width="100%" height="26" viewBox="0 0 320 26" preserveAspectRatio="none"
+             xmlns="http://www.w3.org/2000/svg">
+          <!-- рамка трека -->
+          <rect x="0.5" y="8" width="319" height="10" fill="none"
+                stroke="#0A192F" stroke-opacity="0.35" stroke-width="0.5"/>
+          <!-- деления зон: 33 и 66 -->
+          <line x1="105.6" y1="8" x2="105.6" y2="18" stroke="#0A192F"
+                stroke-opacity="0.20" stroke-width="0.5"/>
+          <line x1="211.2" y1="8" x2="211.2" y2="18" stroke="#0A192F"
+                stroke-opacity="0.20" stroke-width="0.5"/>
+          <!-- заполнение до значения 62 (8% opacity, без градиента) -->
+          <rect x="0.5" y="8" width="197.9" height="10" fill="#007AFF" fill-opacity="0.10"/>
+          <!-- маркер-needle на 62 -->
+          <line x1="198.4" y1="3" x2="198.4" y2="23" stroke="#0A192F" stroke-width="1.5"/>
+        </svg>
+        <div class="risk-ticks">
+          <span>0 · низкий</span>
+          <span>33</span>
+          <span>66</span>
+          <span>высокий · 100</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ KPI STRIP ═══ -->
+  <div class="strip-label">Ключевые показатели</div>
+  <div class="kpi-grid">
+
+    <!-- KPI 1 — WORST DAY / CVaR -->
+    <div class="kpi st-normal">
+      <div class="kpi-top">
+        <span class="kpi-name">Худший день</span>
+        <span class="kpi-tag st-normal">◆ В НОРМЕ</span>
+      </div>
+      <div class="kpi-value">−5.2<span class="unit">%</span></div>
+      <div class="kpi-money">≈ <b>−$1 240</b> при портфеле <b>$24 000</b></div>
+
+      <div class="kpi-spark-row">
+        <!-- sparkline: распределение хвоста -->
+        <svg width="120" height="26" viewBox="0 0 120 26" xmlns="http://www.w3.org/2000/svg">
+          <polyline points="2,22 14,20 26,17 38,12 50,6 62,4 74,8 86,14 98,19 110,22 118,24"
+                    fill="none" stroke="#0A192F" stroke-width="1"/>
+          <line x1="50" y1="2" x2="50" y2="24" stroke="#FF9500" stroke-width="1"
+                stroke-dasharray="2 2"/>
+        </svg>
+        <span class="kpi-mom down">↓ 0.3 пп за мес</span>
+      </div>
+      <div class="kpi-explainer">
+        В 1 из 20 худших дней портфель теряет примерно столько. 95% дней не бывают хуже.
+      </div>
+      <div class="kpi-ai">
+        <span class="tag">🤖</span>
+        <span class="txt">
+          Потери в пределах нормы для вашего профиля; за месяц риск даже снизился.
+          <span class="src">[Quant Engine]</span>
+        </span>
+      </div>
+    </div>
+
+    <!-- KPI 2 — RISK REWARD / Sharpe -->
+    <div class="kpi st-good">
+      <div class="kpi-top">
+        <span class="kpi-name">Награда за риск</span>
+        <span class="kpi-tag st-good">◆ ХОРОШО</span>
+      </div>
+      <div class="kpi-value">1.18</div>
+      <div class="kpi-money">Sortino <b>1.60</b> · бенчмарк <b>0.74</b></div>
+
+      <div class="kpi-spark-row">
+        <svg width="120" height="26" viewBox="0 0 120 26" xmlns="http://www.w3.org/2000/svg">
+          <polyline points="2,20 14,21 26,18 38,16 50,17 62,13 74,11 86,12 98,8 110,7 118,6"
+                    fill="none" stroke="#0A192F" stroke-width="1"/>
+        </svg>
+        <span class="kpi-mom down">↑ 0.06 за мес</span>
+      </div>
+      <div class="kpi-explainer">
+        На каждую единицу взятого риска портфель приносит 1.18 доходности — выше рынка.
+      </div>
+      <div class="kpi-ai">
+        <span class="tag">🤖</span>
+        <span class="txt">
+          Доходность оправдывает риск и обгоняет ваш бенчмарк — это устойчивый сигнал, не шум.
+          <span class="src">[Quant Engine]</span>
+        </span>
+      </div>
+    </div>
+
+    <!-- KPI 3 — BIGGEST DROP / Max Drawdown -->
+    <div class="kpi st-watch">
+      <div class="kpi-top">
+        <span class="kpi-name">Самое сильное падение</span>
+        <span class="kpi-tag st-watch">◆ ВНИМАНИЕ</span>
+      </div>
+      <div class="kpi-value">−12.8<span class="unit">%</span></div>
+      <div class="kpi-money">≈ <b>−$3 070</b> от пика до дна</div>
+
+      <div class="kpi-spark-row">
+        <!-- sparkline: equity с провалом -->
+        <svg width="120" height="26" viewBox="0 0 120 26" xmlns="http://www.w3.org/2000/svg">
+          <polyline points="2,8 14,6 26,9 38,7 50,12 62,20 74,22 86,18 98,13 110,10 118,9"
+                    fill="none" stroke="#0A192F" stroke-width="1"/>
+          <circle cx="74" cy="22" r="1.8" fill="#FF9500"/>
+        </svg>
+        <span class="kpi-mom flat">= без изменений</span>
+      </div>
+      <div class="kpi-explainer">
+        Так глубоко портфель проседал в худший период. Сейчас он уже восстановился.
+      </div>
+      <div class="kpi-ai">
+        <span class="tag">🤖</span>
+        <span class="txt">
+          Просадка заметная — её основной источник те же 2 концентрированные позиции
+          (раздел «Где сосредоточен риск»). <span class="src">[Quant Engine]</span>
+        </span>
+      </div>
+    </div>
+
+  </div>
+</div>
+</body>
+</html>
