@@ -220,6 +220,7 @@
   }
   .wf-legend .sw { display: inline-block; width: 9px; height: 9px; margin-right: 4px; vertical-align: -1px; }
   .wf-legend .sw.amber { background: var(--amber); }
+  .wf-legend .sw.green { background: var(--green); }
   .wf-legend .sw.blue  { background: var(--tech-blue); }
 
   /* связующий AI-комментарий под рядом */
@@ -457,67 +458,95 @@
       </table>
     </div>
 
-    <!-- Waterfall: вес vs вклад в риск -->
+    <!-- Waterfall: разложение риска (стиль референса) -->
     <div class="panel">
-      <div class="sec-title">Вес в портфеле против веса в риске</div>
+      <div class="sec-title">Разложение риска портфеля</div>
       <div class="wf-legend">
-        <span><span class="sw amber"></span>усиливает риск (риск&nbsp;&gt;&nbsp;вес)</span>
-        <span><span class="sw blue"></span>снижает риск (риск&nbsp;&lt;&nbsp;вес)</span>
+        <span><span class="sw amber"></span>риск позиции отдельно</span>
+        <span><span class="sw green"></span>эффект диверсификации</span>
+        <span><span class="sw blue"></span>итоговый риск</span>
       </div>
       <!--
-        Floating-bar waterfall. Для каждого актива столбик "плавает" между
-        весом% и вкладом в риск%. Вверх (амбер) = риск больше веса.
-        Вниз (синий) = риск меньше веса. Шкала Y: 0..32%.
-        x: PLTR,CRWD,AAPL,JNJ,KO  — шаг 64, ширина бара 30.
-        y-маппинг: y = 150 - pct * 4   (32% → 22px, 0% → 150px)
+        Классический waterfall разложения риска (как на референс-изображении):
+        индивидуальные риски позиций набираются стопкой вверх → зелёный шаг
+        "эффект диверсификации" вычитает → синий "итоговый риск" — полный бар.
+        Шкала Y: 0..20% годовой волатильности.
+        plot: x 38..350, y 165(0%)..18(20%); 7.35 px на 1%.  y(p)=165-7.35p
+        7 слотов, шаг 44.57, бар 30.
+        Значения (вклад в годовую волатильность, %):
+          PLTR 6.2  CRWD 5.0  AAPL 3.4  JNJ 2.0  KO 1.8  → сумма 18.4
+          Диверсификация −4.2  →  Итоговый риск 14.2
       -->
-      <svg width="100%" height="190" viewBox="0 0 340 190" xmlns="http://www.w3.org/2000/svg">
-        <!-- сетка Y: 0,10,20,30 % -->
-        <g font-family="IBM Plex Mono" font-size="8" fill="rgba(42,46,51,0.4)">
-          <line x1="28" y1="150" x2="332" y2="150" stroke="#2A2E33" stroke-opacity="0.18" stroke-width="0.5"/>
-          <text x="24" y="153" text-anchor="end">0</text>
-          <line x1="28" y1="110" x2="332" y2="110" stroke="#2A2E33" stroke-opacity="0.10" stroke-width="0.5"/>
-          <text x="24" y="113" text-anchor="end">10</text>
-          <line x1="28" y1="70"  x2="332" y2="70"  stroke="#2A2E33" stroke-opacity="0.10" stroke-width="0.5"/>
-          <text x="24" y="73" text-anchor="end">20</text>
-          <line x1="28" y1="30"  x2="332" y2="30"  stroke="#2A2E33" stroke-opacity="0.10" stroke-width="0.5"/>
-          <text x="24" y="33" text-anchor="end">30</text>
+      <svg width="100%" height="218" viewBox="0 0 360 218" xmlns="http://www.w3.org/2000/svg">
+        <!-- сетка Y: 0/5/10/15/20 % -->
+        <g font-family="IBM Plex Mono" font-size="8" fill="rgba(42,46,51,0.45)">
+          <line x1="34" y1="165"   x2="352" y2="165"   stroke="#2A2E33" stroke-opacity="0.20" stroke-width="0.5"/>
+          <text x="30" y="168" text-anchor="end">0%</text>
+          <line x1="34" y1="128.25" x2="352" y2="128.25" stroke="#2A2E33" stroke-opacity="0.10" stroke-width="0.5"/>
+          <text x="30" y="131" text-anchor="end">5%</text>
+          <line x1="34" y1="91.5"  x2="352" y2="91.5"  stroke="#2A2E33" stroke-opacity="0.10" stroke-width="0.5"/>
+          <text x="30" y="94" text-anchor="end">10%</text>
+          <line x1="34" y1="54.75" x2="352" y2="54.75" stroke="#2A2E33" stroke-opacity="0.10" stroke-width="0.5"/>
+          <text x="30" y="57" text-anchor="end">15%</text>
+          <line x1="34" y1="18"    x2="352" y2="18"    stroke="#2A2E33" stroke-opacity="0.10" stroke-width="0.5"/>
+          <text x="30" y="21" text-anchor="end">20%</text>
         </g>
 
-        <!-- PLTR: вес 18 (y=78) → риск 24.4 (y=52.4) — усиливает (амбер, вверх) -->
-        <rect x="44"  y="52.4" width="30" height="25.6" fill="#C77B2C" fill-opacity="0.85"/>
-        <line x1="40" y1="78" x2="78" y2="78" stroke="#2A2E33" stroke-width="1"/>
-        <!-- CRWD: вес 14 (y=94) → риск 20.8 (y=66.8) — усиливает -->
-        <rect x="108" y="66.8" width="30" height="27.2" fill="#C77B2C" fill-opacity="0.85"/>
-        <line x1="104" y1="94" x2="142" y2="94" stroke="#2A2E33" stroke-width="1"/>
-        <!-- AAPL: вес 16 (y=86) → риск 17.5 (y=80) — слегка усиливает -->
-        <rect x="172" y="80" width="30" height="6" fill="#C77B2C" fill-opacity="0.85"/>
-        <line x1="168" y1="86" x2="206" y2="86" stroke="#2A2E33" stroke-width="1"/>
-        <!-- JNJ: вес 22 (y=62) → риск 11 (y=106) — снижает (синий, вниз) -->
-        <rect x="236" y="62" width="30" height="44" fill="#2F6FB3" fill-opacity="0.80"/>
-        <line x1="232" y1="62" x2="270" y2="62" stroke="#2A2E33" stroke-width="1"/>
-        <!-- KO: вес 30 (y=30) → риск 9.8 (y=110.8) — сильно снижает -->
-        <rect x="300" y="30" width="30" height="80.8" fill="#2F6FB3" fill-opacity="0.80"/>
-        <line x1="296" y1="30" x2="334" y2="30" stroke="#2A2E33" stroke-width="1"/>
+        <!-- затенённая зона за индивидуальными рисками (PLTR..KO), плоская заливка -->
+        <rect x="45" y="26" width="209" height="139" fill="#C77B2C" fill-opacity="0.07"/>
 
-        <!-- подписи тикеров + дельты -->
-        <g font-family="IBM Plex Mono" font-size="9" fill="#2A2E33">
-          <text x="59"  y="166" text-anchor="middle">PLTR</text>
-          <text x="123" y="166" text-anchor="middle">CRWD</text>
-          <text x="187" y="166" text-anchor="middle">AAPL</text>
-          <text x="251" y="166" text-anchor="middle">JNJ</text>
-          <text x="315" y="166" text-anchor="middle">KO</text>
+        <!-- связующие хвосты waterfall (тонкие hairline) -->
+        <g stroke="#2A2E33" stroke-opacity="0.45" stroke-width="0.5">
+          <line x1="75.3"  y1="119.4" x2="89.9"  y2="119.4"/>
+          <line x1="119.9" y1="82.7"  x2="134.4" y2="82.7"/>
+          <line x1="164.4" y1="57.7"  x2="179.0" y2="57.7"/>
+          <line x1="209.0" y1="43.0"  x2="223.6" y2="43.0"/>
+          <line x1="253.6" y1="29.8"  x2="268.1" y2="29.8"/>
+          <line x1="298.1" y1="60.6"  x2="312.7" y2="60.6"/>
         </g>
-        <g font-family="IBM Plex Mono" font-size="8">
-          <text x="59"  y="180" text-anchor="middle" fill="#C77B2C">+6.4 пп</text>
-          <text x="123" y="180" text-anchor="middle" fill="#C77B2C">+6.8 пп</text>
-          <text x="187" y="180" text-anchor="middle" fill="#C77B2C">+1.5 пп</text>
-          <text x="251" y="180" text-anchor="middle" fill="#2F6FB3">−11.0 пп</text>
-          <text x="315" y="180" text-anchor="middle" fill="#2F6FB3">−20.2 пп</text>
+
+        <!-- индивидуальные риски — амбер, набираются вверх -->
+        <rect x="45.3"  y="119.4" width="30" height="45.6" fill="#C77B2C" fill-opacity="0.88"/>
+        <rect x="89.9"  y="82.7"  width="30" height="36.7" fill="#C77B2C" fill-opacity="0.88"/>
+        <rect x="134.4" y="57.7"  width="30" height="25.0" fill="#C77B2C" fill-opacity="0.88"/>
+        <rect x="179.0" y="43.0"  width="30" height="14.7" fill="#C77B2C" fill-opacity="0.88"/>
+        <rect x="223.6" y="29.8"  width="30" height="13.2" fill="#C77B2C" fill-opacity="0.88"/>
+        <!-- эффект диверсификации — зелёный, шаг вниз -->
+        <rect x="268.1" y="29.8"  width="30" height="30.8" fill="#3F8F5F" fill-opacity="0.90"/>
+        <!-- итоговый риск — синий, полный бар от нуля -->
+        <rect x="312.7" y="60.6"  width="30" height="104.4" fill="#2F6FB3" fill-opacity="0.90"/>
+
+        <!-- значения над барами -->
+        <g font-family="IBM Plex Mono" font-size="8.5" fill="#2A2E33">
+          <text x="60.3"  y="115" text-anchor="middle">6.2%</text>
+          <text x="104.9" y="78"  text-anchor="middle">5.0%</text>
+          <text x="149.4" y="53"  text-anchor="middle">3.4%</text>
+          <text x="194.0" y="38"  text-anchor="middle">2.0%</text>
+          <text x="238.6" y="25"  text-anchor="middle">1.8%</text>
+          <text x="283.1" y="25"  text-anchor="middle" fill="#3F8F5F">−4.2%</text>
+          <text x="327.7" y="56"  text-anchor="middle" fill="#2F6FB3" font-weight="600">14.2%</text>
         </g>
-        <!-- легенда: чёрная риска = «вес», верх/низ бара = «риск» -->
-        <text x="332" y="14" text-anchor="end" font-family="IBM Plex Sans" font-size="8.5"
-              fill="rgba(42,46,51,0.55)">— чёрная риска = вес · столбик = сдвиг к риску</text>
+
+        <!-- подписи баров -->
+        <g font-family="IBM Plex Mono" font-size="8.5" fill="#2A2E33">
+          <text x="60.3"  y="178" text-anchor="middle">PLTR</text>
+          <text x="104.9" y="178" text-anchor="middle">CRWD</text>
+          <text x="149.4" y="178" text-anchor="middle">AAPL</text>
+          <text x="194.0" y="178" text-anchor="middle">JNJ</text>
+          <text x="238.6" y="178" text-anchor="middle">KO</text>
+        </g>
+        <g font-family="IBM Plex Sans" font-size="7.5" fill="rgba(42,46,51,0.7)">
+          <text x="283.1" y="176" text-anchor="middle">Диверси-</text>
+          <text x="283.1" y="184" text-anchor="middle">фикация</text>
+          <text x="327.7" y="176" text-anchor="middle">Итоговый</text>
+          <text x="327.7" y="184" text-anchor="middle">риск</text>
+        </g>
+
+        <!-- скобка под индивидуальными рисками -->
+        <path d="M45.3,192 L45.3,197 L147,200 L147,203 L147,200 L253.6,197 L253.6,192"
+              fill="none" stroke="#2A2E33" stroke-opacity="0.50" stroke-width="0.5"/>
+        <text x="149.4" y="214" text-anchor="middle" font-family="IBM Plex Sans"
+              font-size="8.5" fill="rgba(42,46,51,0.65)">Риск каждой позиции по отдельности</text>
       </svg>
     </div>
 
@@ -525,11 +554,12 @@
     <div class="conc-ai">
       <div class="ai-head">[ 🤖 AI_ANALYSIS // HAIKU ]</div>
       <div class="ai-body">
-        «Простыми словами: <span class="flag">PLTR и CRWD весят в портфеле немного,
-        но риска создают непропорционально много</span> — оба столбика тянутся
-        вверх. А вот KO занимает 30% портфеля, но в риск вносит меньше 10% — это
-        ваш "тихий" защитный актив. Если цель — снизить общий риск, логичнее
-        работать с верхними двумя, а не с тем, что просто крупное по весу.
+        «Простыми словами: если бы вы держали каждую бумагу <span class="flag">по
+        отдельности, их риски сложились бы в 18.4%</span> годовых колебаний. Но
+        бумаги не падают одновременно — этот «эффект диверсификации» снижает риск
+        на 4.2 пункта, и реальный риск портфеля — 14.2%. В таблице слева видно,
+        кто вносит больше всего: те же PLTR и CRWD. Диверсификация уже работает
+        на вас, но усилить её можно, добавив активы из других секторов.
         <span class="src">[Quant Engine]</span>»
       </div>
     </div>
