@@ -7,8 +7,9 @@
          плоские заливки БЕЗ градиентов, AI-блок терминал-лог.
   Интерактив: клик по карточке разворачивает детали.
     Свёрнуто:  категория, приоритет, № идеи, заголовок, обоснование,
-               «Идеи по замене» — тикеры бумаг вне портфеля.
-    Развёрнуто: конвейер Factor→Regime→RAG, эффект, источники.
+               «Идеи по замене» — тикеры вне портфеля + общее пояснение.
+    Развёрнуто: конвейер Factor→Regime→RAG, разбор выбора бумаг,
+               эффект, источники.
   Данные: статичные заглушки. Открыть просто в браузере.
   ─────────────────────────────────────────────────────────────────────────
 -->
@@ -158,6 +159,12 @@
     border: 0.5pt solid rgba(47,111,179,0.22);
     padding: 1.5px 6px; border-radius: 2px;
   }
+  .swap-note {
+    margin-top: 7px;
+    font-size: 10px; line-height: 1.5; color: var(--ink-60);
+    font-style: italic;
+  }
+  .swap-note .expand-hint { color: var(--tech-blue); font-style: normal; }
 
   /* ── ПЕРЕКЛЮЧАТЕЛЬ РАЗВОРОТА ── */
   .idea-toggle {
@@ -204,9 +211,30 @@
     padding: 0 7px; color: var(--tech-blue); font-size: 11px;
   }
 
+  /* ── ПОЧЕМУ ИМЕННО ЭТИ БУМАГИ (разбор кандидатов вне портфеля) ── */
+  .cand-list { margin-top: 10px; }
+  .cand-label {
+    font-family: var(--font-mono); font-size: 8px; font-weight: 600;
+    letter-spacing: 0.05em; color: var(--ink-60); text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+  .cand { display: flex; gap: 8px; padding: 6px 0; align-items: baseline; }
+  .cand + .cand { border-top: 0.5pt solid var(--hairline-2); }
+  .cand-tk {
+    font-family: var(--font-mono); font-size: 11px; font-weight: 600;
+    color: var(--ink); width: 48px; flex-shrink: 0;
+  }
+  .cand-body { font-size: 10px; line-height: 1.45; color: var(--ink); }
+  .cand-name { font-weight: 600; }
+  .cand-scn {
+    display: inline-block; font-family: var(--font-mono); font-size: 8.5px;
+    color: var(--tech-blue); background: var(--tech-blue-08);
+    padding: 0 4px; border-radius: 2px; margin-top: 2px;
+  }
+
   /* ── ОЖИДАЕМЫЙ ЭФФЕКТ ── */
   .idea-effect {
-    margin-top: 8px; padding: 7px 9px;
+    margin-top: 10px; padding: 7px 9px;
     background: rgba(42,46,51,0.035); border-radius: 2px;
     border: 0.5pt solid var(--hairline-2);
   }
@@ -327,10 +355,15 @@
             <span class="tk-chip">CSCO</span>
             <span class="tk-chip">ACN</span>
           </div>
+          <div class="swap-note">
+            Бумаги выше — не из вашего портфеля: ИИ подбирает их под смысл идеи,
+            с лучшим балансом риска и качества.
+            <span class="expand-hint">Разверните карточку — внутри разбор, почему выбран именно этот список.</span>
+          </div>
         </div>
         <div class="idea-toggle">
           <span class="idea-caret">▸</span>
-          <span class="t-more">Конвейер · эффект · источники</span>
+          <span class="t-more">Конвейер · разбор бумаг · эффект · источники</span>
           <span class="t-less">Свернуть детали</span>
         </div>
       </div>
@@ -352,6 +385,24 @@
               <div class="pl-stage-name">RAG</div>
               <div class="pl-stage-text">Morgan Stanley: фиксировать прибыль</div>
             </div>
+          </div>
+        </div>
+        <div class="cand-list">
+          <div class="cand-label">Почему именно эти бумаги — нет в портфеле</div>
+          <div class="cand">
+            <span class="cand-tk">TXN</span>
+            <span class="cand-body"><span class="cand-name">Texas Instruments</span> — стабильный производитель чипов, волатильность вдвое ниже PLTR.<br />
+              <span class="cand-scn">сценарий: спрос на качество в IT</span></span>
+          </div>
+          <div class="cand">
+            <span class="cand-tk">CSCO</span>
+            <span class="cand-body"><span class="cand-name">Cisco</span> — зрелый тех с дивидендом и низкой бетой.<br />
+              <span class="cand-scn">сценарий: ротация в защитный тех</span></span>
+          </div>
+          <div class="cand">
+            <span class="cand-tk">ACN</span>
+            <span class="cand-body"><span class="cand-name">Accenture</span> — IT-консалтинг с устойчивой выручкой, мягче в просадке.<br />
+              <span class="cand-scn">сценарий: замедление без рецессии</span></span>
           </div>
         </div>
         <div class="idea-effect">
@@ -391,10 +442,15 @@
             <span class="tk-chip">MRK</span>
             <span class="tk-chip">PEP</span>
           </div>
+          <div class="swap-note">
+            Бумаги выше — не из вашего портфеля: ИИ подбирает их под смысл идеи,
+            с лучшим балансом риска и качества.
+            <span class="expand-hint">Разверните карточку — внутри разбор, почему выбран именно этот список.</span>
+          </div>
         </div>
         <div class="idea-toggle">
           <span class="idea-caret">▸</span>
-          <span class="t-more">Конвейер · эффект · источники</span>
+          <span class="t-more">Конвейер · разбор бумаг · эффект · источники</span>
           <span class="t-less">Свернуть детали</span>
         </div>
       </div>
@@ -416,6 +472,24 @@
               <div class="pl-stage-name">RAG</div>
               <div class="pl-stage-text">JPMorgan: healthcare и staples устойчивы</div>
             </div>
+          </div>
+        </div>
+        <div class="cand-list">
+          <div class="cand-label">Почему именно эти бумаги — нет в портфеле</div>
+          <div class="cand">
+            <span class="cand-tk">PG</span>
+            <span class="cand-body"><span class="cand-name">Procter &amp; Gamble</span> — потребтовары, очень низкая бета, стабильный денежный поток.<br />
+              <span class="cand-scn">сценарий: коррекция рынка</span></span>
+          </div>
+          <div class="cand">
+            <span class="cand-tk">MRK</span>
+            <span class="cand-body"><span class="cand-name">Merck</span> — крупная фарма, защитный сектор, недорогие мультипликаторы.<br />
+              <span class="cand-scn">сценарий: ротация в защиту</span></span>
+          </div>
+          <div class="cand">
+            <span class="cand-tk">PEP</span>
+            <span class="cand-body"><span class="cand-name">PepsiCo</span> — staples с дивидендом, слабая связь с IT.<br />
+              <span class="cand-scn">сценарий: рост волатильности</span></span>
           </div>
         </div>
         <div class="idea-effect">
@@ -454,10 +528,15 @@
             <span class="tk-chip">DUK</span>
             <span class="tk-chip">SO</span>
           </div>
+          <div class="swap-note">
+            Бумаги выше — не из вашего портфеля: ИИ подбирает их под смысл идеи,
+            с лучшим балансом риска и качества.
+            <span class="expand-hint">Разверните карточку — внутри разбор, почему выбран именно этот список.</span>
+          </div>
         </div>
         <div class="idea-toggle">
           <span class="idea-caret">▸</span>
-          <span class="t-more">Конвейер · эффект · источники</span>
+          <span class="t-more">Конвейер · разбор бумаг · эффект · источники</span>
           <span class="t-less">Свернуть детали</span>
         </div>
       </div>
@@ -479,6 +558,24 @@
               <div class="pl-stage-name">RAG</div>
               <div class="pl-stage-text">банки осторожны по ценам на нефть</div>
             </div>
+          </div>
+        </div>
+        <div class="cand-list">
+          <div class="cand-label">Почему именно эти бумаги — нет в портфеле</div>
+          <div class="cand">
+            <span class="cand-tk">NEE</span>
+            <span class="cand-body"><span class="cand-name">NextEra Energy</span> — коммунальщик и ВИЭ, стабильный спрос вместо цикличной нефти.<br />
+              <span class="cand-scn">сценарий: слабый цикл в энергетике</span></span>
+          </div>
+          <div class="cand">
+            <span class="cand-tk">DUK</span>
+            <span class="cand-body"><span class="cand-name">Duke Energy</span> — регулируемая коммуналка, предсказуемый доход.<br />
+              <span class="cand-scn">сценарий: уход от сырьевого риска</span></span>
+          </div>
+          <div class="cand">
+            <span class="cand-tk">SO</span>
+            <span class="cand-body"><span class="cand-name">Southern Company</span> — высокий дивиденд, низкая бета.<br />
+              <span class="cand-scn">сценарий: спрос на доходные защитные бумаги</span></span>
           </div>
         </div>
         <div class="idea-effect">
@@ -517,10 +614,15 @@
             <span class="tk-chip">LLY</span>
             <span class="tk-chip">V</span>
           </div>
+          <div class="swap-note">
+            Бумаги выше — не из вашего портфеля: ИИ подбирает их под смысл идеи,
+            с лучшим балансом риска и качества.
+            <span class="expand-hint">Разверните карточку — внутри разбор, почему выбран именно этот список.</span>
+          </div>
         </div>
         <div class="idea-toggle">
           <span class="idea-caret">▸</span>
-          <span class="t-more">Конвейер · эффект · источники</span>
+          <span class="t-more">Конвейер · разбор бумаг · эффект · источники</span>
           <span class="t-less">Свернуть детали</span>
         </div>
       </div>
@@ -542,6 +644,24 @@
               <div class="pl-stage-name">RAG</div>
               <div class="pl-stage-text">сверка с Goldman Sachs и JPMorgan</div>
             </div>
+          </div>
+        </div>
+        <div class="cand-list">
+          <div class="cand-label">Почему именно эти бумаги — нет в портфеле</div>
+          <div class="cand">
+            <span class="cand-tk">GOOGL</span>
+            <span class="cand-body"><span class="cand-name">Alphabet</span> — качество и ИИ-экспозиция дешевле по мультипликаторам, чем PLTR.<br />
+              <span class="cand-scn">сценарий: ИИ-цикл продолжается</span></span>
+          </div>
+          <div class="cand">
+            <span class="cand-tk">LLY</span>
+            <span class="cand-body"><span class="cand-name">Eli Lilly</span> — структурный рост в здравоохранении, слабая связь с вашим IT-ядром.<br />
+              <span class="cand-scn">сценарий: ротация в защитный рост</span></span>
+          </div>
+          <div class="cand">
+            <span class="cand-tk">V</span>
+            <span class="cand-body"><span class="cand-name">Visa</span> — компаундер высокого качества, добавляет сектор финансов.<br />
+              <span class="cand-scn">сценарий: мягкая посадка экономики</span></span>
           </div>
         </div>
         <div class="idea-effect">
