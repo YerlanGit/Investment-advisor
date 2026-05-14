@@ -97,8 +97,8 @@
   }
   .idea-card.risk      { border-left-color: var(--amber); }
   .idea-card.diversify { border-left-color: var(--tech-blue); }
-  .idea-card.rebalance { border-left-color: var(--green); }
-  .idea-card.protect   { border-left-color: var(--ink-60); }
+  .idea-card.rebalance { border-left-color: var(--ink-60); }
+  .idea-card.grow      { border-left-color: var(--green); }
 
   .idea-top {
     display: flex; justify-content: space-between; align-items: center;
@@ -111,8 +111,8 @@
   }
   .idea-card.risk      .idea-cat { color: var(--amber); }
   .idea-card.diversify .idea-cat { color: var(--tech-blue); }
-  .idea-card.rebalance .idea-cat { color: var(--green); }
-  .idea-card.protect   .idea-cat { color: var(--ink-60); }
+  .idea-card.rebalance .idea-cat { color: var(--ink-60); }
+  .idea-card.grow      .idea-cat { color: var(--green); }
 
   .idea-prio {
     font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.02em;
@@ -155,8 +155,52 @@
   }
   .idea-effect-val .arrow { color: var(--tech-blue); }
 
+  /* ── КОНВЕЙЕР ОТБОРА: FACTOR → REGIME → RAG ── */
+  .idea-pipeline {
+    margin-top: 8px; padding: 9px 10px;
+    background: var(--tech-blue-08); border-radius: 2px;
+  }
+  .pl-label {
+    font-family: var(--font-mono); font-size: 8px; font-weight: 600;
+    letter-spacing: 0.05em; color: var(--tech-blue); text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .pl-step { display: flex; gap: 7px; align-items: flex-start; }
+  .pl-stage {
+    font-family: var(--font-mono); font-size: 8px; font-weight: 600;
+    color: var(--tech-blue); border: 0.5pt solid var(--tech-blue);
+    border-radius: 2px; padding: 2px 0; width: 52px; text-align: center;
+    flex-shrink: 0;
+  }
+  .pl-desc { font-size: 10px; line-height: 1.42; color: var(--ink); }
+  .pl-arrow {
+    width: 52px; text-align: center; color: var(--tech-blue);
+    font-size: 9px; line-height: 1; margin: 2px 0;
+  }
+
+  /* ── КАНДИДАТЫ ВНЕ ПОРТФЕЛЯ ── */
+  .cand-list { margin-top: 9px; }
+  .cand-label {
+    font-family: var(--font-mono); font-size: 8px; font-weight: 600;
+    letter-spacing: 0.05em; color: var(--ink-60); text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+  .cand { display: flex; gap: 8px; padding: 6px 0; align-items: baseline; }
+  .cand + .cand { border-top: 0.5pt solid var(--hairline-2); }
+  .cand-tk {
+    font-family: var(--font-mono); font-size: 11px; font-weight: 600;
+    color: var(--ink); width: 46px; flex-shrink: 0;
+  }
+  .cand-body { font-size: 10px; line-height: 1.45; color: var(--ink); }
+  .cand-name { font-weight: 600; }
+  .cand-scn {
+    display: inline-block; font-family: var(--font-mono); font-size: 8.5px;
+    color: var(--tech-blue); background: var(--tech-blue-08);
+    padding: 0 4px; border-radius: 2px; margin-top: 2px;
+  }
+
   .idea-src {
-    margin-top: 8px; padding-top: 8px;
+    margin-top: auto; padding-top: 10px;
     border-top: 0.5pt solid var(--hairline-2);
     display: flex; flex-wrap: wrap; gap: 5px;
   }
@@ -320,28 +364,69 @@
     </div>
 
     <!-- ИДЕЯ 4 -->
-    <div class="idea-card protect">
+    <div class="idea-card grow">
       <div class="idea-top">
-        <span class="idea-cat">Подушка</span>
+        <span class="idea-cat">Увеличение риска</span>
         <span class="idea-prio mid">Средний приоритет</span>
       </div>
       <div class="idea-num">ИДЕЯ 04</div>
-      <div class="idea-title">Нарастить облигации (BND) с 2% до ~8%</div>
+      <div class="idea-title">Увеличить риск качественно — 3 бумаги вне портфеля</div>
       <div class="idea-why">
-        Сейчас BND — всего 2% портфеля. У фонда почти нулевая бета (0.12), это
-        ваш главный стабилизатор. На фоне ожидаемой волатильности в IT (Goldman
-        Sachs) подушку стоит увеличить — она гасит просадку в стресс-сценарии.
+        Защитный блок в норме — есть запас, чтобы аккуратно добавить
+        доходности. Но наращивать риск стоит <b>через качество и новые
+        сектора</b>, а не через ещё больше того же IT. Кандидаты ниже отобраны
+        конвейером Factor → Regime → RAG.
       </div>
+
+      <div class="idea-pipeline">
+        <div class="pl-label">Конвейер отбора</div>
+        <div class="pl-step">
+          <span class="pl-stage">FACTOR</span>
+          <span class="pl-desc">фильтр по качеству: высокий ROE, низкий долг, стабильная маржа</span>
+        </div>
+        <div class="pl-arrow">↓</div>
+        <div class="pl-step">
+          <span class="pl-stage">REGIME</span>
+          <span class="pl-desc">режим рынка — поздний цикл, ожидание снижения ставок → перевес в качество и не-IT</span>
+        </div>
+        <div class="pl-arrow">↓</div>
+        <div class="pl-step">
+          <span class="pl-stage">RAG</span>
+          <span class="pl-desc">сверка с обзорами Goldman Sachs и JPMorgan для подтверждения</span>
+        </div>
+      </div>
+
+      <div class="cand-list">
+        <div class="cand-label">Кандидаты — нет в портфеле</div>
+        <div class="cand">
+          <span class="cand-tk">GOOGL</span>
+          <span class="cand-body"><span class="cand-name">Alphabet</span> — качество и ИИ-экспозиция дешевле по мультипликаторам, чем PLTR.<br />
+            <span class="cand-scn">сценарий: ИИ-цикл продолжается</span></span>
+        </div>
+        <div class="cand">
+          <span class="cand-tk">LLY</span>
+          <span class="cand-body"><span class="cand-name">Eli Lilly</span> — структурный рост в здравоохранении, слабая связь с вашим IT-ядром.<br />
+            <span class="cand-scn">сценарий: ротация в защитный рост</span></span>
+        </div>
+        <div class="cand">
+          <span class="cand-tk">V</span>
+          <span class="cand-body"><span class="cand-name">Visa</span> — компаундер высокого качества, добавляет сектор финансов.<br />
+            <span class="cand-scn">сценарий: мягкая посадка экономики</span></span>
+        </div>
+      </div>
+
       <div class="idea-effect">
         <div class="idea-effect-label">Ожидаемый эффект</div>
         <div class="idea-effect-val">
-          Доля облигаций: 2% <span class="arrow">→</span> ~8%<br />
-          Просадка в стресс-тесте: смягчается
+          Потенциал доходности: <span class="arrow">↑</span> при контролируемом риске<br />
+          Сектора: +финансы, +здравоохранение · корреляция с IT-ядром: <span class="arrow">↓</span>
         </div>
       </div>
       <div class="idea-src">
-        <span class="src-chip data">[Quant Engine]</span>
+        <span class="src-chip data">[Factor Engine]</span>
+        <span class="src-chip data">[Regime Model]</span>
         <span class="src-chip">[RAG: GS_Q2_2026]</span>
+        <span class="src-chip">[RAG: JPM_Strategy_Q2_2026]</span>
       </div>
     </div>
 
@@ -361,6 +446,8 @@
     ИСТОЧНИКИ:
     <b>SEC EDGAR</b> — публичная отчётность эмитентов ·
     <b>Quant Engine MAC3</b> — расчёт риска и сигналов ·
+    <b>Factor Engine</b> — фактор-скрининг качества ·
+    <b>Regime Model</b> — определение режима рынка ·
     <b>Goldman Sachs</b> «Q2 2026 Market Outlook» ·
     <b>Morgan Stanley</b> «Technology Sector Outlook 2026» ·
     <b>JPMorgan</b> «Q2 2026 Strategy &amp; Allocation»
@@ -368,7 +455,7 @@
 
   <!-- ФУТЕР -->
   <div class="foot">
-    CONFIDENTIAL // ADVISORY-ONLY — NOT A RECOMMENDATION // PAGE 4 OF 4 // CoVe: 6 SOURCES VERIFIED
+    CONFIDENTIAL // ADVISORY-ONLY — NOT A RECOMMENDATION // PAGE 4 OF 4 // CoVe: 7 SOURCES VERIFIED
   </div>
 
 </div>

@@ -85,11 +85,18 @@
   .gv-value.blue { color: var(--tech-blue); }
   .gv-note { font-size: 10px; color: var(--ink-40); margin-top: 4px; }
 
+  /* ── ГРАФИК + ТАБЛИЦА РЯДОМ ── */
+  .gv-main {
+    margin-top: 10px;
+    display: flex; gap: 10px; align-items: stretch;
+  }
+
   /* ── КАРТОЧКА ГРАФИКА ── */
   .chart-card {
-    margin-top: 10px;
+    flex: 1.6 1 0; min-width: 0;
     border: 0.5pt solid var(--hairline); border-radius: 2px;
     background: var(--panel); overflow: hidden;
+    display: flex; flex-direction: column;
   }
   .chart-head {
     padding: 8px 14px; border-bottom: 0.5pt solid var(--hairline);
@@ -108,21 +115,27 @@
   .cl-line { width: 16px; height: 0; border-top: 2px solid; }
   .cl-line.port { border-color: var(--tech-blue); }
   .cl-line.mkt  { border-color: var(--ink-40); border-top-style: dashed; }
-  .chart-body { padding: 10px 14px 4px; }
+  .chart-body {
+    flex: 1 1 auto; padding: 12px 14px;
+    display: flex; align-items: center;
+  }
   .chart-body svg { display: block; width: 100%; height: auto; }
 
   /* ── ТАБЛИЦА ПЕРИОДОВ ── */
   .pr-card {
-    margin-top: 10px;
+    flex: 1 1 0; min-width: 240px;
     border: 0.5pt solid var(--hairline); border-radius: 2px;
     background: var(--panel); overflow: hidden;
+    display: flex; flex-direction: column;
   }
   .pr-row {
-    display: grid; grid-template-columns: 1.3fr 1fr 1fr 1fr;
-    align-items: center; gap: 8px; padding: 9px 14px;
+    display: grid; grid-template-columns: 1.2fr 1fr 1fr 1fr;
+    align-items: center; gap: 6px; padding: 9px 13px;
+    flex: 1 1 auto;
   }
   .pr-row + .pr-row { border-top: 0.5pt solid var(--hairline-2); }
   .pr-head {
+    flex: 0 0 auto;
     border-bottom: 0.5pt solid var(--hairline);
     font-family: var(--font-mono); font-size: 9px; font-weight: 600;
     letter-spacing: 0.04em; color: var(--ink-60); text-transform: uppercase;
@@ -172,6 +185,7 @@
   /* ─────────── АДАПТИВ ─────────── */
   @media (max-width: 720px) {
     .gv-stats { grid-template-columns: repeat(2, 1fr); }
+    .gv-main { flex-direction: column; }
     .pr-head { display: none; }
     .pr-row {
       grid-template-columns: 1fr 1fr; gap: 7px 14px; padding: 12px 14px;
@@ -233,7 +247,9 @@
     </div>
   </div>
 
-  <!-- ГРАФИК -->
+  <!-- ГРАФИК + ТАБЛИЦА ПЕРИОДОВ -->
+  <div class="gv-main">
+
   <div class="chart-card">
     <div class="chart-head">
       <span class="chart-title">Накопленная доходность · 12 месяцев</span>
@@ -297,7 +313,6 @@
     </div>
   </div>
 
-  <!-- ТАБЛИЦА ПЕРИОДОВ -->
   <div class="pr-card">
     <div class="pr-row pr-head">
       <span>Период</span>
@@ -318,6 +333,12 @@
       <span class="num"><span class="pr-cell-label">Опереж.</span><span class="blue">+1.9 пп</span></span>
     </div>
     <div class="pr-row">
+      <span class="pr-period">YTD</span>
+      <span class="num"><span class="pr-cell-label">Портфель</span><span class="pos">+7.1%</span></span>
+      <span class="num"><span class="pr-cell-label">S&amp;P 500</span>+4.4%</span>
+      <span class="num"><span class="pr-cell-label">Опереж.</span><span class="blue">+2.7 пп</span></span>
+    </div>
+    <div class="pr-row">
       <span class="pr-period">6 месяцев</span>
       <span class="num"><span class="pr-cell-label">Портфель</span><span class="pos">+9.4%</span></span>
       <span class="num"><span class="pr-cell-label">S&amp;P 500</span>+6.0%</span>
@@ -329,7 +350,9 @@
       <span class="num"><span class="pr-cell-label">S&amp;P 500</span>+9.1%</span>
       <span class="num"><span class="pr-cell-label">Опереж.</span><span class="blue">+5.1 пп</span></span>
     </div>
-  </div>
+  </div><!-- /.pr-card -->
+
+  </div><!-- /.gv-main -->
 
   <!-- СВОДНЫЙ AI-БЛОК -->
   <div class="sec-ai">
