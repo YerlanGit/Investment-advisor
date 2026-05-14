@@ -63,16 +63,22 @@
   .sec-title { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
   .sec-sub { font-size: 11.5px; color: var(--ink-60); margin-top: 3px; }
 
+  /* ── РАСКЛАДКА: ТАБЛИЦА + ПАНЕЛЬ СЕКТОРОВ ── */
+  .holdings-layout {
+    margin-top: 14px;
+    display: flex; gap: 14px; align-items: flex-start;
+  }
+
   /* ── ТАБЛИЦА HOLDINGS ── */
   .holdings {
-    margin-top: 14px;
+    flex: 1 1 auto; min-width: 0;
     border: 0.5pt solid var(--hairline); border-radius: 2px;
     background: var(--panel); overflow: hidden;
   }
   .h-head, .h-row {
     display: grid;
-    grid-template-columns: 1.5fr 1.25fr 0.7fr 0.85fr 0.8fr 0.95fr 1.05fr 0.35fr;
-    align-items: center; gap: 8px;
+    grid-template-columns: 1.5fr 1.25fr 0.7fr 0.85fr 0.8fr 0.95fr 1.05fr 0.4fr;
+    align-items: center; gap: 10px;
   }
   .h-head {
     padding: 8px 14px;
@@ -82,12 +88,24 @@
   }
   .h-head .num, .h-row .num { text-align: right; }
 
+  /* разделитель перед колонкой «Действие» */
+  .h-head .sep, .h-cell.action {
+    border-left: 0.5pt solid var(--hairline); padding-left: 11px;
+  }
+
   .h-row {
     padding: 10px 14px;
     border-bottom: 0.5pt solid var(--hairline-2);
-    cursor: pointer; transition: background 0.08s;
+    cursor: pointer; transition: background 0.1s, box-shadow 0.1s;
   }
-  .h-row:hover { background: var(--tech-blue-08); }
+  .h-row:hover {
+    background: var(--tech-blue-08);
+    box-shadow: inset 3px 0 0 var(--tech-blue);
+  }
+  .h-row.open {
+    background: var(--tech-blue-08);
+    box-shadow: inset 3px 0 0 var(--tech-blue);
+  }
   .h-group:last-child .h-row { border-bottom: none; }
 
   .h-cell { font-size: 12px; }
@@ -114,11 +132,24 @@
   .badge.trim   { color: var(--amber); }
   .badge.sell   { color: var(--neg); }
 
+  .caret-cell { display: flex; justify-content: flex-end; }
   .caret {
-    font-family: var(--font-mono); font-size: 11px; color: var(--ink-40);
-    text-align: center; transition: transform 0.12s;
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 22px; height: 22px;
+    border: 0.5pt solid var(--hairline); border-radius: 3px;
+    background: var(--bg);
+    font-family: var(--font-mono); font-size: 10px; color: var(--ink-60);
+    transition: transform 0.12s, color 0.12s, border-color 0.12s, background 0.12s;
   }
-  .h-row.open .caret { transform: rotate(90deg); color: var(--tech-blue); }
+  .h-row:hover .caret {
+    border-color: var(--tech-blue); color: var(--tech-blue);
+    background: var(--panel);
+  }
+  .h-row.open .caret {
+    transform: rotate(90deg);
+    border-color: var(--tech-blue); color: var(--tech-blue);
+    background: var(--panel);
+  }
 
   /* ── РАЗВОРОТ: SEC-ФУНДАМЕНТАЛ ── */
   .h-detail { display: none; padding: 0 14px 14px; }
@@ -157,6 +188,63 @@
     color: var(--tech-blue);
   }
 
+  /* ── ПАНЕЛЬ СЕКТОРОВ + PIE ── */
+  .sector-panel {
+    flex: 0 0 234px;
+    border: 0.5pt solid var(--hairline); border-radius: 2px;
+    background: var(--panel); padding: 14px;
+  }
+  .sp-title {
+    font-family: var(--font-mono); font-size: 9px; font-weight: 600;
+    letter-spacing: 0.04em; color: var(--ink-60); text-transform: uppercase;
+  }
+  .sp-sub { font-size: 10px; color: var(--ink-40); margin-top: 2px; }
+
+  .pie-wrap { display: flex; justify-content: center; margin: 14px 0 12px; }
+  .pie {
+    position: relative; width: 152px; height: 152px; border-radius: 50%;
+    background: conic-gradient(
+      var(--amber)      0      62%,
+      var(--tech-blue)  62%    76%,
+      var(--green)      76%    92%,
+      var(--ink-60)     92%    98%,
+      var(--ink-40)     98%    100%
+    );
+  }
+  .pie::after {
+    content: ''; position: absolute; inset: 30%;
+    background: var(--panel); border-radius: 50%;
+    border: 0.5pt solid var(--hairline-2);
+  }
+  .pie-center {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; text-align: center;
+  }
+  .pie-center .pc-pct {
+    font-family: var(--font-mono); font-size: 16px; font-weight: 600;
+    color: var(--amber); line-height: 1;
+  }
+  .pie-center .pc-lbl {
+    font-family: var(--font-mono); font-size: 7.5px; color: var(--ink-60);
+    letter-spacing: 0.05em; margin-top: 2px;
+  }
+
+  .pie-legend { display: flex; flex-direction: column; gap: 5px; }
+  .lg-item { display: flex; align-items: center; gap: 7px; font-size: 11px; }
+  .lg-sw { width: 9px; height: 9px; border-radius: 2px; flex-shrink: 0; }
+  .lg-name { flex: 1; color: var(--ink); }
+  .lg-pct { font-family: var(--font-mono); font-size: 11px; color: var(--ink-60); }
+  .lg-item.over .lg-name,
+  .lg-item.over .lg-pct { color: var(--amber); font-weight: 600; }
+
+  .sp-warn {
+    margin-top: 12px; padding: 8px 9px;
+    background: var(--amber-08); border: 0.5pt solid var(--amber);
+    border-radius: 2px; display: flex; gap: 6px;
+    font-size: 10.5px; line-height: 1.42; color: var(--amber);
+  }
+  .sp-warn b { font-weight: 600; }
+
   /* ── СВОДНЫЙ AI-БЛОК ── */
   .sec-ai {
     margin-top: 16px;
@@ -183,7 +271,15 @@
     border-top: 0.5pt solid var(--hairline); letter-spacing: 0.05em;
   }
 
-  /* ─────────── АДАПТИВ: ТАБЛИЦА → КАРТОЧКИ ─────────── */
+  /* ─────────── АДАПТИВ ─────────── */
+  /* панель секторов уходит под таблицу */
+  @media (max-width: 900px) {
+    .holdings-layout { flex-direction: column; }
+    .sector-panel { flex: 1 1 auto; width: 100%; }
+    .pie-wrap { margin: 12px 0; }
+  }
+
+  /* таблица → карточки */
   @media (max-width: 720px) {
     .h-head { display: none; }
     .h-row {
@@ -198,7 +294,10 @@
       text-transform: uppercase; letter-spacing: 0.03em;
     }
     .h-cell.ticker  { grid-column: 1 / -1; }
-    .h-cell.action  { grid-column: 1 / -1; justify-content: flex-start; }
+    .h-cell.action  {
+      grid-column: 1 / -1; justify-content: flex-start;
+      border-left: none; padding-left: 0;
+    }
     .h-cell.caret-cell {
       grid-column: 1 / -1; justify-content: flex-end;
       border-top: 0.5pt solid var(--hairline-2); padding-top: 6px;
@@ -230,7 +329,9 @@
     <div class="sec-sub">9 позиций · нажмите на строку, чтобы увидеть фундаментал бумаги</div>
   </div>
 
-  <!-- ТАБЛИЦА -->
+  <!-- ТАБЛИЦА + ПАНЕЛЬ СЕКТОРОВ -->
+  <div class="holdings-layout">
+
   <div class="holdings">
     <!-- шапка -->
     <div class="h-head">
@@ -240,7 +341,7 @@
       <span class="num">Риск</span>
       <span class="num">P/L %</span>
       <span class="num">P/L $</span>
-      <span>Действие</span>
+      <span class="sep">Действие</span>
       <span></span>
     </div>
 
@@ -559,7 +660,59 @@
       </div>
     </div>
 
-  </div>
+  </div><!-- /.holdings -->
+
+  <!-- ПАНЕЛЬ СЕКТОРОВ -->
+  <div class="sector-panel">
+    <div class="sp-title">Структура по секторам</div>
+    <div class="sp-sub">доля капитала · 9 позиций</div>
+
+    <div class="pie-wrap">
+      <div class="pie">
+        <div class="pie-center">
+          <span class="pc-pct">62%</span>
+          <span class="pc-lbl">ТЕХНОЛОГИИ</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="pie-legend">
+      <div class="lg-item over">
+        <span class="lg-sw" style="background:var(--amber)"></span>
+        <span class="lg-name">Технологии</span>
+        <span class="lg-pct">62%</span>
+      </div>
+      <div class="lg-item">
+        <span class="lg-sw" style="background:var(--tech-blue)"></span>
+        <span class="lg-name">Здравоохранение</span>
+        <span class="lg-pct">14%</span>
+      </div>
+      <div class="lg-item">
+        <span class="lg-sw" style="background:var(--green)"></span>
+        <span class="lg-name">Потреб. товары</span>
+        <span class="lg-pct">16%</span>
+      </div>
+      <div class="lg-item">
+        <span class="lg-sw" style="background:var(--ink-60)"></span>
+        <span class="lg-name">Энергетика</span>
+        <span class="lg-pct">6%</span>
+      </div>
+      <div class="lg-item">
+        <span class="lg-sw" style="background:var(--ink-40)"></span>
+        <span class="lg-name">Облигации</span>
+        <span class="lg-pct">2%</span>
+      </div>
+    </div>
+
+    <div class="sp-warn">
+      <span>⚠</span>
+      <span><b>Перенасыщение сектора.</b> Технологии — 62% портфеля при
+        ориентире ≤ 40%. 6 из 9 бумаг в одном секторе: просадка в IT
+        ударит сразу по большей части капитала.</span>
+    </div>
+  </div><!-- /.sector-panel -->
+
+  </div><!-- /.holdings-layout -->
 
   <!-- СВОДНЫЙ AI-БЛОК -->
   <div class="sec-ai">
