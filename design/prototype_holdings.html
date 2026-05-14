@@ -77,7 +77,7 @@
   }
   .h-head, .h-row {
     display: grid;
-    grid-template-columns: 1.5fr 1.25fr 0.7fr 0.85fr 0.8fr 0.95fr 1.05fr 0.4fr;
+    grid-template-columns: 1.35fr 1.1fr 0.7fr 0.85fr 0.8fr 0.95fr 1.05fr 0.95fr;
     align-items: center; gap: 10px;
   }
   .h-head {
@@ -133,23 +133,21 @@
   .badge.sell   { color: var(--neg); }
 
   .caret-cell { display: flex; justify-content: flex-end; }
-  .caret {
-    display: inline-flex; align-items: center; justify-content: center;
-    width: 22px; height: 22px;
-    border: 0.5pt solid var(--hairline); border-radius: 3px;
-    background: var(--bg);
-    font-family: var(--font-mono); font-size: 10px; color: var(--ink-60);
-    transition: transform 0.12s, color 0.12s, border-color 0.12s, background 0.12s;
+  /* заметная кнопка разворота строки */
+  .h-toggle {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3.5px 9px; border-radius: 3px;
+    background: var(--tech-blue);
+    font-family: var(--font-mono); font-size: 9px; font-weight: 600;
+    color: #fff; letter-spacing: 0.02em; white-space: nowrap;
+    transition: background 0.12s;
   }
-  .h-row:hover .caret {
-    border-color: var(--tech-blue); color: var(--tech-blue);
-    background: var(--panel);
-  }
-  .h-row.open .caret {
-    transform: rotate(90deg);
-    border-color: var(--tech-blue); color: var(--tech-blue);
-    background: var(--panel);
-  }
+  .h-row:hover .h-toggle { background: #25557F; }
+  .h-caret { font-size: 9px; transition: transform 0.15s; }
+  .h-row.open .h-caret { transform: rotate(90deg); }
+  .h-toggle .t-less { display: none; }
+  .h-row.open .h-toggle .t-more { display: none; }
+  .h-row.open .h-toggle .t-less { display: inline; }
 
   /* ── РАЗВОРОТ: SEC-ФУНДАМЕНТАЛ ── */
   .h-detail { display: none; padding: 0 14px 14px; }
@@ -379,7 +377,7 @@
         <div class="h-cell num"><span class="h-cell-label">P/L %</span><span class="pnl pos">+32.1%</span></div>
         <div class="h-cell num"><span class="h-cell-label">P/L $</span><span class="pnl pos">+$2 140</span></div>
         <div class="h-cell action"><span class="badge buy">BUY</span></div>
-        <div class="h-cell caret-cell"><span class="caret">▸</span></div>
+        <div class="h-cell caret-cell"><span class="h-toggle"><span class="t-more">Детали</span><span class="t-less">Свернуть</span><span class="h-caret">▸</span></span></div>
       </div>
       <div class="h-detail">
         <div class="h-detail-inner">
@@ -414,7 +412,7 @@
         <div class="h-cell num"><span class="h-cell-label">P/L %</span><span class="pnl pos">+18.5%</span></div>
         <div class="h-cell num"><span class="h-cell-label">P/L $</span><span class="pnl pos">+$890</span></div>
         <div class="h-cell action"><span class="badge hold">HOLD</span></div>
-        <div class="h-cell caret-cell"><span class="caret">▸</span></div>
+        <div class="h-cell caret-cell"><span class="h-toggle"><span class="t-more">Детали</span><span class="t-less">Свернуть</span><span class="h-caret">▸</span></span></div>
       </div>
       <div class="h-detail">
         <div class="h-detail-inner">
@@ -449,7 +447,7 @@
         <div class="h-cell num"><span class="h-cell-label">P/L %</span><span class="pnl pos">+12.3%</span></div>
         <div class="h-cell num"><span class="h-cell-label">P/L $</span><span class="pnl pos">+$640</span></div>
         <div class="h-cell action"><span class="badge buy">BUY</span></div>
-        <div class="h-cell caret-cell"><span class="caret">▸</span></div>
+        <div class="h-cell caret-cell"><span class="h-toggle"><span class="t-more">Детали</span><span class="t-less">Свернуть</span><span class="h-caret">▸</span></span></div>
       </div>
       <div class="h-detail">
         <div class="h-detail-inner">
@@ -484,7 +482,7 @@
         <div class="h-cell num"><span class="h-cell-label">P/L %</span><span class="pnl pos">+4.2%</span></div>
         <div class="h-cell num"><span class="h-cell-label">P/L $</span><span class="pnl pos">+$310</span></div>
         <div class="h-cell action"><span class="badge buy">STRONG BUY</span></div>
-        <div class="h-cell caret-cell"><span class="caret">▸</span></div>
+        <div class="h-cell caret-cell"><span class="h-toggle"><span class="t-more">Детали</span><span class="t-less">Свернуть</span><span class="h-caret">▸</span></span></div>
       </div>
       <div class="h-detail">
         <div class="h-detail-inner">
@@ -519,7 +517,7 @@
         <div class="h-cell num"><span class="h-cell-label">P/L %</span><span class="pnl neg">−1.8%</span></div>
         <div class="h-cell num"><span class="h-cell-label">P/L $</span><span class="pnl neg">−$190</span></div>
         <div class="h-cell action"><span class="badge hold">HOLD</span></div>
-        <div class="h-cell caret-cell"><span class="caret">▸</span></div>
+        <div class="h-cell caret-cell"><span class="h-toggle"><span class="t-more">Детали</span><span class="t-less">Свернуть</span><span class="h-caret">▸</span></span></div>
       </div>
       <div class="h-detail">
         <div class="h-detail-inner">
@@ -554,7 +552,7 @@
         <div class="h-cell num"><span class="h-cell-label">P/L %</span><span class="pnl pos">+9.4%</span></div>
         <div class="h-cell num"><span class="h-cell-label">P/L $</span><span class="pnl pos">+$420</span></div>
         <div class="h-cell action"><span class="badge buy">BUY</span></div>
-        <div class="h-cell caret-cell"><span class="caret">▸</span></div>
+        <div class="h-cell caret-cell"><span class="h-toggle"><span class="t-more">Детали</span><span class="t-less">Свернуть</span><span class="h-caret">▸</span></span></div>
       </div>
       <div class="h-detail">
         <div class="h-detail-inner">
@@ -589,7 +587,7 @@
         <div class="h-cell num"><span class="h-cell-label">P/L %</span><span class="pnl neg">−3.1%</span></div>
         <div class="h-cell num"><span class="h-cell-label">P/L $</span><span class="pnl neg">−$160</span></div>
         <div class="h-cell action"><span class="badge trim">TRIM</span></div>
-        <div class="h-cell caret-cell"><span class="caret">▸</span></div>
+        <div class="h-cell caret-cell"><span class="h-toggle"><span class="t-more">Детали</span><span class="t-less">Свернуть</span><span class="h-caret">▸</span></span></div>
       </div>
       <div class="h-detail">
         <div class="h-detail-inner">
@@ -624,7 +622,7 @@
         <div class="h-cell num"><span class="h-cell-label">P/L %</span><span class="pnl pos">+44.0%</span></div>
         <div class="h-cell num"><span class="h-cell-label">P/L $</span><span class="pnl pos">+$1 210</span></div>
         <div class="h-cell action"><span class="badge hold">HOLD</span></div>
-        <div class="h-cell caret-cell"><span class="caret">▸</span></div>
+        <div class="h-cell caret-cell"><span class="h-toggle"><span class="t-more">Детали</span><span class="t-less">Свернуть</span><span class="h-caret">▸</span></span></div>
       </div>
       <div class="h-detail">
         <div class="h-detail-inner">
@@ -659,7 +657,7 @@
         <div class="h-cell num"><span class="h-cell-label">P/L %</span><span class="pnl pos">+0.8%</span></div>
         <div class="h-cell num"><span class="h-cell-label">P/L $</span><span class="pnl pos">+$20</span></div>
         <div class="h-cell action"><span class="badge hold">HOLD</span></div>
-        <div class="h-cell caret-cell"><span class="caret">▸</span></div>
+        <div class="h-cell caret-cell"><span class="h-toggle"><span class="t-more">Детали</span><span class="t-less">Свернуть</span><span class="h-caret">▸</span></span></div>
       </div>
       <div class="h-detail">
         <div class="h-detail-inner">
