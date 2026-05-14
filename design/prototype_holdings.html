@@ -270,6 +270,15 @@
     color: var(--tech-blue); margin-bottom: 6px;
   }
   .sec-ai .ai-body { font-style: italic; font-size: 12.5px; line-height: 1.62; }
+  .sec-ai .ai-body p { margin: 0; }
+  .sec-ai .ai-body p + p { margin-top: 8px; }
+  .ai-sources {
+    margin-top: 10px; padding-top: 8px;
+    border-top: 0.5pt solid var(--hairline-2);
+    font-family: var(--font-mono); font-size: 9px; color: var(--ink-60);
+    letter-spacing: 0.02em; line-height: 1.7;
+  }
+  .ai-sources b { color: var(--tech-blue); font-weight: 600; }
   .src-inline {
     font-style: normal; font-family: var(--font-mono); font-size: 10px;
     color: var(--tech-blue); background: var(--tech-blue-08);
@@ -735,19 +744,35 @@
   <div class="sec-ai">
     <div class="ai-head">[ 🤖 AI_ANALYSIS // HAIKU ]</div>
     <div class="ai-body">
-      «Простыми словами: портфель двигают две бумаги — <span class="flag-inline">PLTR
+      <p>«Простыми словами: портфель двигают две бумаги — <span class="flag-inline">PLTR
       и CRWD</span>. Они приносят лучшую доходность, но именно они помечены
       HOTSPOT — на них вместе приходится почти половина риска. С другого края —
-      JNJ, KO и BND: спокойные позиции с низкой бетой, которые этот риск гасят.
-      По данным <span class="src-inline">[RAG: GS_Q2_2026]</span> Goldman Sachs
-      ждёт повышенной волатильности в технологиях — а у вас 6 из 9 бумаг именно
-      там. Подробности концентрации — на странице «Где сосредоточен риск».»
+      JNJ, KO и BND: спокойные позиции с низкой бетой, которые этот риск гасят.</p>
+
+      <p>По секторам портфель сильно перевешен в технологиях —
+      <span class="flag-inline">62% против ~30% у рынка</span>. Goldman Sachs
+      ждёт повышенной волатильности в IT в этом квартале
+      <span class="src-inline">[RAG: GS_Q2_2026]</span>, а Morgan Stanley в обзоре
+      сектора понижает прогноз роста на 2026 и советует фиксировать часть прибыли
+      в перегретых именах <span class="src-inline">[RAG: MS_TechOutlook_2026]</span> —
+      это прямо про ваши PLTR, CRWD и NVDA. Зато ваши защитные сектора —
+      здравоохранение (14%) и потребительские товары (16%) — JPMorgan называет
+      «островками стабильности» на случай коррекции
+      <span class="src-inline">[RAG: JPM_Strategy_Q2_2026]</span>. По энергетике
+      (6%) банки осторожны при текущих ценах на нефть — и XOM у вас уже помечен на
+      сокращение. Подробности концентрации — на странице «Где сосредоточен риск».»</p>
+    </div>
+    <div class="ai-sources">
+      ИСТОЧНИКИ — ОТЧЁТЫ ИНВЕСТБАНКОВ:
+      <b>Goldman Sachs</b> «Q2 2026 Market Outlook» ·
+      <b>Morgan Stanley</b> «Technology Sector Outlook 2026» ·
+      <b>JPMorgan</b> «Q2 2026 Strategy &amp; Allocation»
     </div>
   </div>
 
   <!-- ФУТЕР -->
   <div class="foot">
-    CONFIDENTIAL // ADVISORY-ONLY — NOT A RECOMMENDATION // PAGE 2 OF 4 // CoVe: 4 SOURCES VERIFIED
+    CONFIDENTIAL // ADVISORY-ONLY — NOT A RECOMMENDATION // PAGE 2 OF 4 // CoVe: 6 SOURCES VERIFIED
   </div>
 
 </div>
