@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<!--
+  ─────────────────────────────────────────────────────────────────────────
+  ПРОТОТИП (design-only, НЕ подключён к боту)
+  Секция: «ИДЕИ ИИ» (AI-generated ideas) — BASE-отчёт
+  Стиль: утверждённый — тёплый кремовый фон, моно тех-строки, hairline,
+         плоские заливки БЕЗ градиентов, AI-блок терминал-лог.
+  Идеи — карточки с категорией, приоритетом, обоснованием, эффектом и
+  ссылками на источники (SEC / Quant Engine / отчёты инвестбанков).
+  Данные: статичные заглушки. Открыть просто в браузере.
+  ─────────────────────────────────────────────────────────────────────────
+-->
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>BASE Report — «Идеи ИИ» — Прототип</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg:          #F4F2EC;
+    --panel:       #FBFAF7;
+    --ink:         #2A2E33;
+    --ink-60:      rgba(42,46,51,0.60);
+    --ink-40:      rgba(42,46,51,0.40);
+    --hairline:    rgba(42,46,51,0.18);
+    --hairline-2:  rgba(42,46,51,0.10);
+    --tech-blue:   #2F6FB3;
+    --tech-blue-08:rgba(47,111,179,0.08);
+    --ai-bg:       #F0F6FF;
+    --amber:       #C77B2C;
+    --amber-08:    rgba(199,123,44,0.10);
+    --green:       #3F8F5F;
+    --green-08:    rgba(63,143,95,0.10);
+    --neg:         #C0492F;
+
+    --font-ui:   'IBM Plex Sans', -apple-system, sans-serif;
+    --font-mono: 'IBM Plex Mono', monospace;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    background: var(--bg); color: var(--ink);
+    font-family: var(--font-ui); font-size: 13px; line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  .sheet { max-width: 1100px; margin: 0 auto; padding: 20px 30px 28px; }
+
+  /* ТЕХ-ХЕДЕР */
+  .tech-header {
+    font-family: var(--font-mono); font-size: 11px; color: var(--ink-60);
+    letter-spacing: 0.03em; padding-bottom: 12px;
+    border-bottom: 0.5pt solid var(--hairline);
+    display: flex; justify-content: space-between; flex-wrap: wrap; gap: 6px;
+  }
+  .tech-header b { color: var(--ink); font-weight: 600; }
+  .tech-header .ts { color: var(--ink-40); }
+
+  /* ЗАГОЛОВОК СЕКЦИИ */
+  .sec-head { padding: 22px 0 4px; }
+  .sec-title { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
+  .sec-sub { font-size: 11.5px; color: var(--ink-60); margin-top: 3px; }
+
+  /* ── ВВОДНЫЙ AI-БЛОК ── */
+  .sec-ai {
+    margin-top: 14px;
+    background: var(--ai-bg); border: 0.5pt solid var(--hairline-2);
+    border-left: 2px solid var(--tech-blue); border-radius: 2px;
+    padding: 12px 15px;
+  }
+  .sec-ai .ai-head {
+    font-family: var(--font-mono); font-size: 10.5px; font-weight: 600;
+    color: var(--tech-blue); margin-bottom: 6px;
+  }
+  .sec-ai .ai-body { font-style: italic; font-size: 12.5px; line-height: 1.62; }
+  .src-inline {
+    font-style: normal; font-family: var(--font-mono); font-size: 10px;
+    color: var(--tech-blue); background: var(--tech-blue-08);
+    padding: 0 4px; border-radius: 2px;
+  }
+  .flag-inline { font-style: normal; font-weight: 600; color: var(--amber); }
+
+  /* ── СЕТКА ИДЕЙ ── */
+  .ideas-grid {
+    margin-top: 12px;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+  }
+  .idea-card {
+    border: 0.5pt solid var(--hairline); border-radius: 2px;
+    background: var(--panel);
+    border-left: 2px solid var(--ink-40);
+    padding: 13px 15px 14px;
+    display: flex; flex-direction: column;
+  }
+  .idea-card.risk      { border-left-color: var(--amber); }
+  .idea-card.diversify { border-left-color: var(--tech-blue); }
+  .idea-card.rebalance { border-left-color: var(--green); }
+  .idea-card.protect   { border-left-color: var(--ink-60); }
+
+  .idea-top {
+    display: flex; justify-content: space-between; align-items: center;
+    gap: 8px; margin-bottom: 8px;
+  }
+  .idea-cat {
+    font-family: var(--font-mono); font-size: 9px; font-weight: 600;
+    letter-spacing: 0.03em; text-transform: uppercase;
+    padding: 2px 7px; border-radius: 2px; border: 0.5pt solid currentColor;
+  }
+  .idea-card.risk      .idea-cat { color: var(--amber); }
+  .idea-card.diversify .idea-cat { color: var(--tech-blue); }
+  .idea-card.rebalance .idea-cat { color: var(--green); }
+  .idea-card.protect   .idea-cat { color: var(--ink-60); }
+
+  .idea-prio {
+    font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.02em;
+    display: flex; align-items: center; gap: 5px;
+  }
+  .idea-prio::before {
+    content: ''; width: 6px; height: 6px; border-radius: 50%;
+    background: currentColor; display: inline-block;
+  }
+  .idea-prio.high { color: var(--amber); }
+  .idea-prio.mid  { color: var(--ink-40); }
+
+  .idea-num {
+    font-family: var(--font-mono); font-size: 9px; color: var(--ink-40);
+    margin-bottom: 3px;
+  }
+  .idea-title {
+    font-size: 13.5px; font-weight: 600; line-height: 1.35;
+    letter-spacing: -0.01em;
+  }
+  .idea-why {
+    font-size: 11.5px; color: var(--ink); line-height: 1.56;
+    margin-top: 7px;
+  }
+  .idea-why b { font-weight: 600; }
+
+  .idea-effect {
+    margin-top: 10px; padding: 8px 10px;
+    background: rgba(42,46,51,0.035); border-radius: 2px;
+    border: 0.5pt solid var(--hairline-2);
+  }
+  .idea-effect-label {
+    font-family: var(--font-mono); font-size: 8px; font-weight: 600;
+    letter-spacing: 0.05em; color: var(--ink-60); text-transform: uppercase;
+    margin-bottom: 3px;
+  }
+  .idea-effect-val {
+    font-family: var(--font-mono); font-size: 11px; color: var(--ink);
+    line-height: 1.5;
+  }
+  .idea-effect-val .arrow { color: var(--tech-blue); }
+
+  .idea-src {
+    margin-top: 10px; padding-top: 9px;
+    border-top: 0.5pt solid var(--hairline-2);
+    display: flex; flex-wrap: wrap; gap: 5px;
+  }
+  .src-chip {
+    font-family: var(--font-mono); font-size: 8.5px;
+    color: var(--tech-blue); background: var(--tech-blue-08);
+    padding: 1.5px 5px; border-radius: 2px;
+  }
+  .src-chip.data { color: var(--ink-60); background: rgba(42,46,51,0.05); }
+
+  /* ── ДИСКЛЕЙМЕР ── */
+  .disclaimer {
+    margin-top: 14px; padding: 11px 14px;
+    background: var(--amber-08); border: 0.5pt solid var(--amber);
+    border-radius: 2px; display: flex; gap: 9px;
+    font-size: 11.5px; line-height: 1.5; color: var(--ink);
+  }
+  .disclaimer .dc-icon { color: var(--amber); flex-shrink: 0; }
+  .disclaimer b { font-weight: 600; color: var(--amber); }
+
+  /* ── ПОЛОСА ИСТОЧНИКОВ ── */
+  .ai-sources {
+    margin-top: 12px; padding: 9px 14px;
+    border: 0.5pt solid var(--hairline-2); border-radius: 2px;
+    background: var(--panel);
+    font-family: var(--font-mono); font-size: 9px; color: var(--ink-60);
+    letter-spacing: 0.02em; line-height: 1.7;
+  }
+  .ai-sources b { color: var(--tech-blue); font-weight: 600; }
+
+  /* ФУТЕР */
+  .foot {
+    font-family: var(--font-mono); font-size: 10px; color: var(--ink-40);
+    text-align: center; padding-top: 14px; margin-top: 22px;
+    border-top: 0.5pt solid var(--hairline); letter-spacing: 0.05em;
+  }
+
+  /* ─────────── АДАПТИВ ─────────── */
+  @media (max-width: 720px) {
+    .ideas-grid { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 480px) {
+    body { font-size: 15px; }
+    .sheet { padding: 14px 16px 22px; }
+    .tech-header { font-size: 9.5px; }
+    .sec-title { font-size: 15px; }
+    .sec-ai .ai-body { font-size: 14px; }
+    .idea-title { font-size: 15px; }
+    .idea-why { font-size: 13px; }
+  }
+</style>
+</head>
+<body>
+<div class="sheet">
+
+  <!-- ТЕХ-ХЕДЕР -->
+  <div class="tech-header">
+    <span><b>PORTFOLIO RISK REPORT</b> // TIER: BASE // ID: 2026-05-14-U1042 // RISK_ENGINE: MAC3 // SESSION: [A6C7B1F3]</span>
+    <span class="ts">PAGE 4 OF 4</span>
+  </div>
+
+  <!-- ЗАГОЛОВОК СЕКЦИИ -->
+  <div class="sec-head">
+    <div class="sec-title">Идеи ИИ</div>
+    <div class="sec-sub">4 идеи на основе данных портфеля, отчётности SEC и обзоров инвестбанков</div>
+  </div>
+
+  <!-- ВВОДНЫЙ AI-БЛОК -->
+  <div class="sec-ai">
+    <div class="ai-head">[ 🤖 AI_ANALYSIS // HAIKU ]</div>
+    <div class="ai-body">
+      «Главная мысль одной строкой: портфель зарабатывает, но риск собран в
+      одном углу — <span class="flag-inline">62% в технологиях</span>. Идеи ниже
+      — про то, как сохранить рост и при этом сделать портфель устойчивее к
+      просадке. Каждая идея отсортирована по приоритету и снабжена источником.»
+    </div>
+  </div>
+
+  <!-- СЕТКА ИДЕЙ -->
+  <div class="ideas-grid">
+
+    <!-- ИДЕЯ 1 -->
+    <div class="idea-card risk">
+      <div class="idea-top">
+        <span class="idea-cat">Снижение риска</span>
+        <span class="idea-prio high">Высокий приоритет</span>
+      </div>
+      <div class="idea-num">ИДЕЯ 01</div>
+      <div class="idea-title">Сократить долю PLTR с 18% до ~12%</div>
+      <div class="idea-why">
+        PLTR помечен <b>HOTSPOT</b> — одна бумага даёт 24% всего риска портфеля.
+        Morgan Stanley советует фиксировать прибыль в перегретых техах, а позиция
+        сейчас в плюсе <b>+32%</b> — есть что зафиксировать без убытка.
+      </div>
+      <div class="idea-effect">
+        <div class="idea-effect-label">Ожидаемый эффект</div>
+        <div class="idea-effect-val">
+          Вклад PLTR в риск: 24.4% <span class="arrow">→</span> ~16%<br />
+          Доля IT-сектора: 62% <span class="arrow">→</span> ~56%
+        </div>
+      </div>
+      <div class="idea-src">
+        <span class="src-chip data">[Quant Engine]</span>
+        <span class="src-chip data">[SEC EDGAR]</span>
+        <span class="src-chip">[RAG: MS_TechOutlook_2026]</span>
+      </div>
+    </div>
+
+    <!-- ИДЕЯ 2 -->
+    <div class="idea-card diversify">
+      <div class="idea-top">
+        <span class="idea-cat">Диверсификация</span>
+        <span class="idea-prio high">Высокий приоритет</span>
+      </div>
+      <div class="idea-num">ИДЕЯ 02</div>
+      <div class="idea-title">Усилить защитные сектора — здравоохранение и товары</div>
+      <div class="idea-why">
+        6 из 9 бумаг — технологии. JPMorgan называет здравоохранение и
+        потребительские товары <b>«островками стабильности»</b> на случай
+        коррекции. У вас уже есть JNJ и KO с низкой бетой — их логично нарастить
+        за счёт высвобождаемого капитала.
+      </div>
+      <div class="idea-effect">
+        <div class="idea-effect-label">Ожидаемый эффект</div>
+        <div class="idea-effect-val">
+          Доля IT-сектора: 62% <span class="arrow">→</span> ~50%<br />
+          Бета портфеля: 1.18 <span class="arrow">→</span> ~1.05
+        </div>
+      </div>
+      <div class="idea-src">
+        <span class="src-chip data">[Quant Engine]</span>
+        <span class="src-chip">[RAG: JPM_Strategy_Q2_2026]</span>
+      </div>
+    </div>
+
+    <!-- ИДЕЯ 3 -->
+    <div class="idea-card rebalance">
+      <div class="idea-top">
+        <span class="idea-cat">Ребалансировка</span>
+        <span class="idea-prio mid">Средний приоритет</span>
+      </div>
+      <div class="idea-num">ИДЕЯ 03</div>
+      <div class="idea-title">Сократить или закрыть позицию XOM</div>
+      <div class="idea-why">
+        Выручка Exxon снижается (<b>−6% г/г</b> по данным SEC), риск-движок дал
+        сигнал <b>Trim</b>, банки осторожны по энергетике при текущих ценах на
+        нефть. Позиция небольшая (6%) и сейчас в минусе — закрытие почти не
+        затронет доходность.
+      </div>
+      <div class="idea-effect">
+        <div class="idea-effect-label">Ожидаемый эффект</div>
+        <div class="idea-effect-val">
+          Высвобождает ~6% капитала<br />
+          под защитный блок (идея 02)
+        </div>
+      </div>
+      <div class="idea-src">
+        <span class="src-chip data">[SEC EDGAR]</span>
+        <span class="src-chip data">[Quant Engine]</span>
+      </div>
+    </div>
+
+    <!-- ИДЕЯ 4 -->
+    <div class="idea-card protect">
+      <div class="idea-top">
+        <span class="idea-cat">Подушка</span>
+        <span class="idea-prio mid">Средний приоритет</span>
+      </div>
+      <div class="idea-num">ИДЕЯ 04</div>
+      <div class="idea-title">Нарастить облигации (BND) с 2% до ~8%</div>
+      <div class="idea-why">
+        Сейчас BND — всего 2% портфеля. У фонда почти нулевая бета (0.12), это
+        ваш главный стабилизатор. На фоне ожидаемой волатильности в IT (Goldman
+        Sachs) подушку стоит увеличить — она гасит просадку в стресс-сценарии.
+      </div>
+      <div class="idea-effect">
+        <div class="idea-effect-label">Ожидаемый эффект</div>
+        <div class="idea-effect-val">
+          Доля облигаций: 2% <span class="arrow">→</span> ~8%<br />
+          Просадка в стресс-тесте: смягчается
+        </div>
+      </div>
+      <div class="idea-src">
+        <span class="src-chip data">[Quant Engine]</span>
+        <span class="src-chip">[RAG: GS_Q2_2026]</span>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ДИСКЛЕЙМЕР -->
+  <div class="disclaimer">
+    <span class="dc-icon">⚠</span>
+    <span><b>Это аналитические идеи, а не инвестиционная рекомендация.</b>
+      Расчёты основаны на исторических данных и публичной отчётности; они не
+      учитывают вашу налоговую ситуацию, горизонт и цели. Окончательное решение —
+      за вами или вашим финансовым консультантом.</span>
+  </div>
+
+  <!-- ПОЛОСА ИСТОЧНИКОВ -->
+  <div class="ai-sources">
+    ИСТОЧНИКИ:
+    <b>SEC EDGAR</b> — публичная отчётность эмитентов ·
+    <b>Quant Engine MAC3</b> — расчёт риска и сигналов ·
+    <b>Goldman Sachs</b> «Q2 2026 Market Outlook» ·
+    <b>Morgan Stanley</b> «Technology Sector Outlook 2026» ·
+    <b>JPMorgan</b> «Q2 2026 Strategy &amp; Allocation»
+  </div>
+
+  <!-- ФУТЕР -->
+  <div class="foot">
+    CONFIDENTIAL // ADVISORY-ONLY — NOT A RECOMMENDATION // PAGE 4 OF 4 // CoVe: 6 SOURCES VERIFIED
+  </div>
+
+</div>
+</body>
+</html>

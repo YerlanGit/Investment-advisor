@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<!--
+  ─────────────────────────────────────────────────────────────────────────
+  ПРОТОТИП (design-only, НЕ подключён к боту)
+  Секция: «РОСТ ПРОТИВ РЫНКА» (growth vs benchmark) — BASE-отчёт
+  Стиль: утверждённый — тёплый кремовый фон, моно тех-строки, hairline,
+         плоские заливки БЕЗ градиентов, AI-блок терминал-лог.
+  График: inline SVG, две линии (портфель vs S&P 500).
+  Данные: статичные заглушки. Открыть просто в браузере.
+  ─────────────────────────────────────────────────────────────────────────
+-->
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>BASE Report — «Рост против рынка» — Прототип</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg:          #F4F2EC;
+    --panel:       #FBFAF7;
+    --ink:         #2A2E33;
+    --ink-60:      rgba(42,46,51,0.60);
+    --ink-40:      rgba(42,46,51,0.40);
+    --hairline:    rgba(42,46,51,0.18);
+    --hairline-2:  rgba(42,46,51,0.10);
+    --tech-blue:   #2F6FB3;
+    --tech-blue-08:rgba(47,111,179,0.08);
+    --ai-bg:       #F0F6FF;
+    --amber:       #C77B2C;
+    --amber-08:    rgba(199,123,44,0.10);
+    --green:       #3F8F5F;
+    --neg:         #C0492F;
+
+    --font-ui:   'IBM Plex Sans', -apple-system, sans-serif;
+    --font-mono: 'IBM Plex Mono', monospace;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    background: var(--bg); color: var(--ink);
+    font-family: var(--font-ui); font-size: 13px; line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  .sheet { max-width: 1100px; margin: 0 auto; padding: 20px 30px 28px; }
+
+  /* ТЕХ-ХЕДЕР */
+  .tech-header {
+    font-family: var(--font-mono); font-size: 11px; color: var(--ink-60);
+    letter-spacing: 0.03em; padding-bottom: 12px;
+    border-bottom: 0.5pt solid var(--hairline);
+    display: flex; justify-content: space-between; flex-wrap: wrap; gap: 6px;
+  }
+  .tech-header b { color: var(--ink); font-weight: 600; }
+  .tech-header .ts { color: var(--ink-40); }
+
+  /* ЗАГОЛОВОК СЕКЦИИ */
+  .sec-head { padding: 22px 0 4px; }
+  .sec-title { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
+  .sec-sub { font-size: 11.5px; color: var(--ink-60); margin-top: 3px; }
+
+  /* ── СТАТ-КАРТОЧКИ ── */
+  .gv-stats {
+    margin-top: 14px;
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;
+  }
+  .gv-stat {
+    border: 0.5pt solid var(--hairline); border-radius: 2px;
+    background: var(--panel); padding: 11px 13px;
+  }
+  .gv-stat.accent { border-left: 2px solid var(--tech-blue); }
+  .gv-label {
+    font-family: var(--font-mono); font-size: 8.5px; font-weight: 600;
+    letter-spacing: 0.04em; color: var(--ink-60); text-transform: uppercase;
+  }
+  .gv-value {
+    font-family: var(--font-mono); font-size: 21px; font-weight: 600;
+    margin-top: 5px; line-height: 1;
+  }
+  .gv-value.pos { color: var(--green); }
+  .gv-value.neu { color: var(--ink); }
+  .gv-value.blue { color: var(--tech-blue); }
+  .gv-note { font-size: 10px; color: var(--ink-40); margin-top: 4px; }
+
+  /* ── КАРТОЧКА ГРАФИКА ── */
+  .chart-card {
+    margin-top: 12px;
+    border: 0.5pt solid var(--hairline); border-radius: 2px;
+    background: var(--panel); overflow: hidden;
+  }
+  .chart-head {
+    padding: 8px 14px; border-bottom: 0.5pt solid var(--hairline);
+    display: flex; justify-content: space-between; align-items: center;
+    flex-wrap: wrap; gap: 6px;
+  }
+  .chart-title {
+    font-family: var(--font-mono); font-size: 9px; font-weight: 600;
+    letter-spacing: 0.04em; color: var(--ink-60); text-transform: uppercase;
+  }
+  .chart-legend { display: flex; gap: 14px; }
+  .cl-item {
+    display: flex; align-items: center; gap: 6px;
+    font-family: var(--font-mono); font-size: 9.5px; color: var(--ink-60);
+  }
+  .cl-line { width: 16px; height: 0; border-top: 2px solid; }
+  .cl-line.port { border-color: var(--tech-blue); }
+  .cl-line.mkt  { border-color: var(--ink-40); border-top-style: dashed; }
+  .chart-body { padding: 12px 14px 6px; }
+  .chart-body svg { display: block; width: 100%; height: auto; }
+
+  /* ── ТАБЛИЦА ПЕРИОДОВ ── */
+  .pr-card {
+    margin-top: 12px;
+    border: 0.5pt solid var(--hairline); border-radius: 2px;
+    background: var(--panel); overflow: hidden;
+  }
+  .pr-row {
+    display: grid; grid-template-columns: 1.3fr 1fr 1fr 1fr;
+    align-items: center; gap: 8px; padding: 9px 14px;
+  }
+  .pr-row + .pr-row { border-top: 0.5pt solid var(--hairline-2); }
+  .pr-head {
+    border-bottom: 0.5pt solid var(--hairline);
+    font-family: var(--font-mono); font-size: 9px; font-weight: 600;
+    letter-spacing: 0.04em; color: var(--ink-60); text-transform: uppercase;
+  }
+  .pr-row .num { text-align: right; font-family: var(--font-mono); font-size: 12px; }
+  .pr-period { font-size: 12px; }
+  .pr-cell-label { display: none; }
+  .pos { color: var(--green); }
+  .neg { color: var(--neg); }
+  .blue { color: var(--tech-blue); }
+
+  /* ── СВОДНЫЙ AI-БЛОК ── */
+  .sec-ai {
+    margin-top: 16px;
+    background: var(--ai-bg); border: 0.5pt solid var(--hairline-2);
+    border-left: 2px solid var(--tech-blue); border-radius: 2px;
+    padding: 12px 15px;
+  }
+  .sec-ai .ai-head {
+    font-family: var(--font-mono); font-size: 10.5px; font-weight: 600;
+    color: var(--tech-blue); margin-bottom: 6px;
+  }
+  .sec-ai .ai-body { font-style: italic; font-size: 12.5px; line-height: 1.62; }
+  .sec-ai .ai-body p { margin: 0; }
+  .sec-ai .ai-body p + p { margin-top: 8px; }
+  .src-inline {
+    font-style: normal; font-family: var(--font-mono); font-size: 10px;
+    color: var(--tech-blue); background: var(--tech-blue-08);
+    padding: 0 4px; border-radius: 2px;
+  }
+  .flag-inline { font-style: normal; font-weight: 600; color: var(--amber); }
+  .ai-sources {
+    margin-top: 10px; padding-top: 8px;
+    border-top: 0.5pt solid var(--hairline-2);
+    font-family: var(--font-mono); font-size: 9px; color: var(--ink-60);
+    letter-spacing: 0.02em; line-height: 1.7;
+  }
+  .ai-sources b { color: var(--tech-blue); font-weight: 600; }
+
+  /* ФУТЕР */
+  .foot {
+    font-family: var(--font-mono); font-size: 10px; color: var(--ink-40);
+    text-align: center; padding-top: 14px; margin-top: 22px;
+    border-top: 0.5pt solid var(--hairline); letter-spacing: 0.05em;
+  }
+
+  /* ─────────── АДАПТИВ ─────────── */
+  @media (max-width: 720px) {
+    .gv-stats { grid-template-columns: repeat(2, 1fr); }
+    .pr-head { display: none; }
+    .pr-row {
+      grid-template-columns: 1fr 1fr; gap: 7px 14px; padding: 12px 14px;
+    }
+    .pr-row + .pr-row { border-top: 0.5pt solid var(--hairline-2); }
+    .pr-period { grid-column: 1 / -1; font-weight: 600; font-family: var(--font-mono); }
+    .pr-row .num { text-align: left; display: flex; justify-content: space-between; }
+    .pr-cell-label {
+      display: inline; font-size: 9px; color: var(--ink-60);
+      text-transform: uppercase; letter-spacing: 0.03em;
+    }
+  }
+  @media (max-width: 480px) {
+    body { font-size: 15px; }
+    .sheet { padding: 14px 16px 22px; }
+    .tech-header { font-size: 9.5px; }
+    .sec-title { font-size: 15px; }
+    .gv-stats { grid-template-columns: 1fr 1fr; }
+    .sec-ai .ai-body { font-size: 14px; }
+  }
+</style>
+</head>
+<body>
+<div class="sheet">
+
+  <!-- ТЕХ-ХЕДЕР -->
+  <div class="tech-header">
+    <span><b>PORTFOLIO RISK REPORT</b> // TIER: BASE // ID: 2026-05-14-U1042 // RISK_ENGINE: MAC3 // SESSION: [A6C7B1F3]</span>
+    <span class="ts">PAGE 3 OF 4</span>
+  </div>
+
+  <!-- ЗАГОЛОВОК СЕКЦИИ -->
+  <div class="sec-head">
+    <div class="sec-title">Рост против рынка</div>
+    <div class="sec-sub">накопленная доходность портфеля в сравнении с S&amp;P 500 · 12 месяцев</div>
+  </div>
+
+  <!-- СТАТ-КАРТОЧКИ -->
+  <div class="gv-stats">
+    <div class="gv-stat">
+      <div class="gv-label">Доходность портфеля</div>
+      <div class="gv-value pos">+14.2%</div>
+      <div class="gv-note">за 12 мес</div>
+    </div>
+    <div class="gv-stat">
+      <div class="gv-label">Рынок · S&amp;P 500</div>
+      <div class="gv-value neu">+9.1%</div>
+      <div class="gv-note">за 12 мес</div>
+    </div>
+    <div class="gv-stat accent">
+      <div class="gv-label">Опережение рынка</div>
+      <div class="gv-value blue">+5.1 пп</div>
+      <div class="gv-note">портфель быстрее рынка</div>
+    </div>
+    <div class="gv-stat">
+      <div class="gv-label">Волатильность портф.</div>
+      <div class="gv-value neu">14.8%</div>
+      <div class="gv-note">рынок: 11.2% — выше рынка</div>
+    </div>
+  </div>
+
+  <!-- ГРАФИК -->
+  <div class="chart-card">
+    <div class="chart-head">
+      <span class="chart-title">Накопленная доходность · 12 месяцев</span>
+      <div class="chart-legend">
+        <span class="cl-item"><span class="cl-line port"></span>Ваш портфель</span>
+        <span class="cl-item"><span class="cl-line mkt"></span>S&amp;P 500</span>
+      </div>
+    </div>
+    <div class="chart-body">
+      <svg viewBox="0 0 820 262" role="img" aria-label="График накопленной доходности портфеля против S&amp;P 500">
+        <!-- горизонтальная сетка -->
+        <g stroke="rgba(42,46,51,0.12)" stroke-width="0.5">
+          <line x1="50" y1="20"    x2="720" y2="20" />
+          <line x1="50" y1="72.5"  x2="720" y2="72.5" />
+          <line x1="50" y1="125"   x2="720" y2="125" />
+          <line x1="50" y1="177.5" x2="720" y2="177.5" />
+          <line x1="50" y1="230"   x2="720" y2="230" stroke="rgba(42,46,51,0.25)" />
+        </g>
+        <!-- подписи оси Y -->
+        <g font-family="'IBM Plex Mono', monospace" font-size="9" fill="rgba(42,46,51,0.6)" text-anchor="end">
+          <text x="42" y="23">+16%</text>
+          <text x="42" y="75.5">+12%</text>
+          <text x="42" y="128">+8%</text>
+          <text x="42" y="180.5">+4%</text>
+          <text x="42" y="233">0%</text>
+        </g>
+        <!-- область под линией портфеля -->
+        <path d="M50,230 L111,202.4 L172,211.6 L233,167 L294,148.6 L355,164.4 L415,121.1 L476,97.4 L537,109.3 L598,65.9 L659,75.1 L720,43.6 L720,230 L50,230 Z"
+              fill="rgba(47,111,179,0.07)" />
+        <!-- линия S&P 500 (пунктир) -->
+        <path d="M50,230 L111,210.3 L172,219.5 L233,191.9 L294,182.8 L355,189.3 L415,167 L476,151.3 L537,157.8 L598,135.5 L659,125 L720,110.6"
+              fill="none" stroke="rgba(42,46,51,0.45)" stroke-width="1.5"
+              stroke-dasharray="4 3" stroke-linejoin="round" />
+        <!-- линия портфеля -->
+        <path d="M50,230 L111,202.4 L172,211.6 L233,167 L294,148.6 L355,164.4 L415,121.1 L476,97.4 L537,109.3 L598,65.9 L659,75.1 L720,43.6"
+              fill="none" stroke="#2F6FB3" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />
+        <!-- конечные точки -->
+        <circle cx="720" cy="110.6" r="3" fill="rgba(42,46,51,0.55)" />
+        <circle cx="720" cy="43.6"  r="3.2" fill="#2F6FB3" />
+        <!-- конечные подписи -->
+        <text x="729" y="46.6" font-family="'IBM Plex Mono', monospace" font-size="11"
+              font-weight="600" fill="#2F6FB3">+14.2%</text>
+        <text x="729" y="114" font-family="'IBM Plex Mono', monospace" font-size="11"
+              fill="rgba(42,46,51,0.6)">+9.1%</text>
+        <!-- подписи оси X -->
+        <g font-family="'IBM Plex Mono', monospace" font-size="8" fill="rgba(42,46,51,0.5)" text-anchor="middle">
+          <text x="50"  y="247">Июн</text>
+          <text x="111" y="247">Июл</text>
+          <text x="172" y="247">Авг</text>
+          <text x="233" y="247">Сен</text>
+          <text x="294" y="247">Окт</text>
+          <text x="355" y="247">Ноя</text>
+          <text x="415" y="247">Дек</text>
+          <text x="476" y="247">Янв</text>
+          <text x="537" y="247">Фев</text>
+          <text x="598" y="247">Мар</text>
+          <text x="659" y="247">Апр</text>
+          <text x="720" y="247">Май</text>
+        </g>
+      </svg>
+    </div>
+  </div>
+
+  <!-- ТАБЛИЦА ПЕРИОДОВ -->
+  <div class="pr-card">
+    <div class="pr-row pr-head">
+      <span>Период</span>
+      <span class="num">Портфель</span>
+      <span class="num">S&amp;P 500</span>
+      <span class="num">Опережение</span>
+    </div>
+    <div class="pr-row">
+      <span class="pr-period">1 месяц</span>
+      <span class="num"><span class="pr-cell-label">Портфель</span><span class="pos">+2.0%</span></span>
+      <span class="num"><span class="pr-cell-label">S&amp;P 500</span>+1.4%</span>
+      <span class="num"><span class="pr-cell-label">Опереж.</span><span class="blue">+0.6 пп</span></span>
+    </div>
+    <div class="pr-row">
+      <span class="pr-period">3 месяца</span>
+      <span class="num"><span class="pr-cell-label">Портфель</span><span class="pos">+5.5%</span></span>
+      <span class="num"><span class="pr-cell-label">S&amp;P 500</span>+3.6%</span>
+      <span class="num"><span class="pr-cell-label">Опереж.</span><span class="blue">+1.9 пп</span></span>
+    </div>
+    <div class="pr-row">
+      <span class="pr-period">6 месяцев</span>
+      <span class="num"><span class="pr-cell-label">Портфель</span><span class="pos">+9.4%</span></span>
+      <span class="num"><span class="pr-cell-label">S&amp;P 500</span>+6.0%</span>
+      <span class="num"><span class="pr-cell-label">Опереж.</span><span class="blue">+3.4 пп</span></span>
+    </div>
+    <div class="pr-row">
+      <span class="pr-period">12 месяцев</span>
+      <span class="num"><span class="pr-cell-label">Портфель</span><span class="pos">+14.2%</span></span>
+      <span class="num"><span class="pr-cell-label">S&amp;P 500</span>+9.1%</span>
+      <span class="num"><span class="pr-cell-label">Опереж.</span><span class="blue">+5.1 пп</span></span>
+    </div>
+  </div>
+
+  <!-- СВОДНЫЙ AI-БЛОК -->
+  <div class="sec-ai">
+    <div class="ai-head">[ 🤖 AI_ANALYSIS // HAIKU ]</div>
+    <div class="ai-body">
+      <p>«Простыми словами: за год портфель обошёл рынок на
+      <span class="flag-inline">+5.1 пункта</span> — и опережение есть на всех
+      отрезках, от месяца до года. Это хороший результат.</p>
+
+      <p>Но важно понимать, чем он куплен: рост дали в основном технологии —
+      PLTR, NVDA, MSFT. Те же бумаги делают портфель более «качающимся», чем
+      рынок (волатильность 14.8% против 11.2%). Goldman Sachs предупреждает: в
+      коррекцию перевес в IT так же быстро превращает опережение в отставание
+      <span class="src-inline">[RAG: GS_Q2_2026]</span>, а Morgan Stanley прямо
+      советует фиксировать часть прибыли в перегретых техах
+      <span class="src-inline">[RAG: MS_TechOutlook_2026]</span>. Идеи, что с
+      этим делать — на странице «Идеи ИИ».»</p>
+    </div>
+    <div class="ai-sources">
+      ИСТОЧНИКИ — ОТЧЁТЫ ИНВЕСТБАНКОВ:
+      <b>Goldman Sachs</b> «Q2 2026 Market Outlook» ·
+      <b>Morgan Stanley</b> «Technology Sector Outlook 2026»
+    </div>
+  </div>
+
+  <!-- ФУТЕР -->
+  <div class="foot">
+    CONFIDENTIAL // ADVISORY-ONLY — NOT A RECOMMENDATION // PAGE 3 OF 4 // CoVe: 5 SOURCES VERIFIED
+  </div>
+
+</div>
+</body>
+</html>
