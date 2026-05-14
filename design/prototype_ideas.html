@@ -157,25 +157,24 @@
 
   /* ── КОНВЕЙЕР ОТБОРА: FACTOR → REGIME → RAG ── */
   .idea-pipeline {
-    margin-top: 8px; padding: 9px 10px;
+    margin-top: 8px; padding: 8px 10px;
     background: var(--tech-blue-08); border-radius: 2px;
   }
   .pl-label {
     font-family: var(--font-mono); font-size: 8px; font-weight: 600;
-    letter-spacing: 0.05em; color: var(--tech-blue); text-transform: uppercase;
+    letter-spacing: 0.04em; color: var(--tech-blue); text-transform: uppercase;
     margin-bottom: 6px;
   }
-  .pl-step { display: flex; gap: 7px; align-items: flex-start; }
-  .pl-stage {
+  .pl-flow { display: flex; align-items: stretch; }
+  .pl-stage { flex: 1; min-width: 0; }
+  .pl-stage-name {
     font-family: var(--font-mono); font-size: 8px; font-weight: 600;
-    color: var(--tech-blue); border: 0.5pt solid var(--tech-blue);
-    border-radius: 2px; padding: 2px 0; width: 52px; text-align: center;
-    flex-shrink: 0;
+    letter-spacing: 0.03em; color: var(--tech-blue); margin-bottom: 3px;
   }
-  .pl-desc { font-size: 10px; line-height: 1.42; color: var(--ink); }
-  .pl-arrow {
-    width: 52px; text-align: center; color: var(--tech-blue);
-    font-size: 9px; line-height: 1; margin: 2px 0;
+  .pl-stage-text { font-size: 9px; line-height: 1.36; color: var(--ink); }
+  .pl-sep {
+    flex: 0 0 auto; display: flex; align-items: center;
+    padding: 0 7px; color: var(--tech-blue); font-size: 11px;
   }
 
   /* ── КАНДИДАТЫ ВНЕ ПОРТФЕЛЯ ── */
@@ -295,6 +294,25 @@
         Morgan Stanley советует фиксировать прибыль в перегретых техах, а позиция
         сейчас в плюсе <b>+32%</b> — есть что зафиксировать без убытка.
       </div>
+      <div class="idea-pipeline">
+        <div class="pl-label">Конвейер отбора · Factor → Regime → RAG</div>
+        <div class="pl-flow">
+          <div class="pl-stage">
+            <div class="pl-stage-name">FACTOR</div>
+            <div class="pl-stage-text">PLTR даёт 24% риска, HOTSPOT</div>
+          </div>
+          <div class="pl-sep">→</div>
+          <div class="pl-stage">
+            <div class="pl-stage-name">REGIME</div>
+            <div class="pl-stage-text">ждём роста волатильности в IT</div>
+          </div>
+          <div class="pl-sep">→</div>
+          <div class="pl-stage">
+            <div class="pl-stage-name">RAG</div>
+            <div class="pl-stage-text">Morgan Stanley: фиксировать прибыль</div>
+          </div>
+        </div>
+      </div>
       <div class="idea-effect">
         <div class="idea-effect-label">Ожидаемый эффект</div>
         <div class="idea-effect-val">
@@ -323,6 +341,25 @@
         коррекции. У вас уже есть JNJ и KO с низкой бетой — их логично нарастить
         за счёт высвобождаемого капитала.
       </div>
+      <div class="idea-pipeline">
+        <div class="pl-label">Конвейер отбора · Factor → Regime → RAG</div>
+        <div class="pl-flow">
+          <div class="pl-stage">
+            <div class="pl-stage-name">FACTOR</div>
+            <div class="pl-stage-text">6 из 9 бумаг в IT, бета 1.18</div>
+          </div>
+          <div class="pl-sep">→</div>
+          <div class="pl-stage">
+            <div class="pl-stage-name">REGIME</div>
+            <div class="pl-stage-text">поздний цикл — спрос на защиту</div>
+          </div>
+          <div class="pl-sep">→</div>
+          <div class="pl-stage">
+            <div class="pl-stage-name">RAG</div>
+            <div class="pl-stage-text">JPMorgan: healthcare и staples устойчивы</div>
+          </div>
+        </div>
+      </div>
       <div class="idea-effect">
         <div class="idea-effect-label">Ожидаемый эффект</div>
         <div class="idea-effect-val">
@@ -349,6 +386,25 @@
         сигнал <b>Trim</b>, банки осторожны по энергетике при текущих ценах на
         нефть. Позиция небольшая (6%) и сейчас в минусе — закрытие почти не
         затронет доходность.
+      </div>
+      <div class="idea-pipeline">
+        <div class="pl-label">Конвейер отбора · Factor → Regime → RAG</div>
+        <div class="pl-flow">
+          <div class="pl-stage">
+            <div class="pl-stage-name">FACTOR</div>
+            <div class="pl-stage-text">выручка XOM −6% г/г, сигнал Trim</div>
+          </div>
+          <div class="pl-sep">→</div>
+          <div class="pl-stage">
+            <div class="pl-stage-name">REGIME</div>
+            <div class="pl-stage-text">слабый цикл в энергетике</div>
+          </div>
+          <div class="pl-sep">→</div>
+          <div class="pl-stage">
+            <div class="pl-stage-name">RAG</div>
+            <div class="pl-stage-text">банки осторожны по ценам на нефть</div>
+          </div>
+        </div>
       </div>
       <div class="idea-effect">
         <div class="idea-effect-label">Ожидаемый эффект</div>
@@ -379,20 +435,22 @@
       </div>
 
       <div class="idea-pipeline">
-        <div class="pl-label">Конвейер отбора</div>
-        <div class="pl-step">
-          <span class="pl-stage">FACTOR</span>
-          <span class="pl-desc">фильтр по качеству: высокий ROE, низкий долг, стабильная маржа</span>
-        </div>
-        <div class="pl-arrow">↓</div>
-        <div class="pl-step">
-          <span class="pl-stage">REGIME</span>
-          <span class="pl-desc">режим рынка — поздний цикл, ожидание снижения ставок → перевес в качество и не-IT</span>
-        </div>
-        <div class="pl-arrow">↓</div>
-        <div class="pl-step">
-          <span class="pl-stage">RAG</span>
-          <span class="pl-desc">сверка с обзорами Goldman Sachs и JPMorgan для подтверждения</span>
+        <div class="pl-label">Конвейер отбора · Factor → Regime → RAG</div>
+        <div class="pl-flow">
+          <div class="pl-stage">
+            <div class="pl-stage-name">FACTOR</div>
+            <div class="pl-stage-text">фильтр качества: ROE↑, долг↓, маржа</div>
+          </div>
+          <div class="pl-sep">→</div>
+          <div class="pl-stage">
+            <div class="pl-stage-name">REGIME</div>
+            <div class="pl-stage-text">поздний цикл → качество и не-IT</div>
+          </div>
+          <div class="pl-sep">→</div>
+          <div class="pl-stage">
+            <div class="pl-stage-name">RAG</div>
+            <div class="pl-stage-text">сверка с Goldman Sachs и JPMorgan</div>
+          </div>
         </div>
       </div>
 
