@@ -5,8 +5,10 @@
   Секция: «ИДЕИ ИИ» (AI-generated ideas) — BASE-отчёт
   Стиль: утверждённый — тёплый кремовый фон, моно тех-строки, hairline,
          плоские заливки БЕЗ градиентов, AI-блок терминал-лог.
-  Интерактив: клик по карточке разворачивает детали (конвейер отбора,
-  кандидаты, эффект, источники). Свёрнуто видно «что и почему».
+  Интерактив: клик по карточке разворачивает детали.
+    Свёрнуто:  категория, приоритет, № идеи, заголовок, обоснование,
+               «Идеи по замене» — тикеры бумаг вне портфеля.
+    Развёрнуто: конвейер Factor→Regime→RAG, эффект, источники.
   Данные: статичные заглушки. Открыть просто в браузере.
   ─────────────────────────────────────────────────────────────────────────
 -->
@@ -142,6 +144,21 @@
   }
   .idea-why b { font-weight: 600; }
 
+  /* ── ИДЕИ ПО ЗАМЕНЕ — ТИКЕРЫ ВНЕ ПОРТФЕЛЯ (видны свёрнуто) ── */
+  .idea-swap { margin-top: 9px; }
+  .swap-label {
+    font-family: var(--font-mono); font-size: 8px; font-weight: 600;
+    letter-spacing: 0.04em; color: var(--ink-60); text-transform: uppercase;
+    margin-bottom: 5px;
+  }
+  .swap-tickers { display: flex; flex-wrap: wrap; gap: 5px; }
+  .tk-chip {
+    font-family: var(--font-mono); font-size: 9.5px; font-weight: 600;
+    color: var(--tech-blue); background: var(--tech-blue-08);
+    border: 0.5pt solid rgba(47,111,179,0.22);
+    padding: 1.5px 6px; border-radius: 2px;
+  }
+
   /* ── ПЕРЕКЛЮЧАТЕЛЬ РАЗВОРОТА ── */
   .idea-toggle {
     margin-top: 9px; padding-top: 8px;
@@ -165,25 +182,9 @@
   .idea-detail { display: none; }
   .idea-card.open .idea-detail { display: block; }
 
-  .idea-effect {
-    margin-top: 8px; padding: 7px 9px;
-    background: rgba(42,46,51,0.035); border-radius: 2px;
-    border: 0.5pt solid var(--hairline-2);
-  }
-  .idea-effect-label {
-    font-family: var(--font-mono); font-size: 8px; font-weight: 600;
-    letter-spacing: 0.05em; color: var(--ink-60); text-transform: uppercase;
-    margin-bottom: 3px;
-  }
-  .idea-effect-val {
-    font-family: var(--font-mono); font-size: 11px; color: var(--ink);
-    line-height: 1.5;
-  }
-  .idea-effect-val .arrow { color: var(--tech-blue); }
-
   /* ── КОНВЕЙЕР ОТБОРА: FACTOR → REGIME → RAG ── */
   .idea-pipeline {
-    margin-top: 8px; padding: 8px 10px;
+    margin-top: 10px; padding: 8px 10px;
     background: var(--tech-blue-08); border-radius: 2px;
   }
   .pl-label {
@@ -203,27 +204,24 @@
     padding: 0 7px; color: var(--tech-blue); font-size: 11px;
   }
 
-  /* ── КАНДИДАТЫ ВНЕ ПОРТФЕЛЯ ── */
-  .cand-list { margin-top: 9px; }
-  .cand-label {
+  /* ── ОЖИДАЕМЫЙ ЭФФЕКТ ── */
+  .idea-effect {
+    margin-top: 8px; padding: 7px 9px;
+    background: rgba(42,46,51,0.035); border-radius: 2px;
+    border: 0.5pt solid var(--hairline-2);
+  }
+  .idea-effect-label {
     font-family: var(--font-mono); font-size: 8px; font-weight: 600;
     letter-spacing: 0.05em; color: var(--ink-60); text-transform: uppercase;
-    margin-bottom: 4px;
+    margin-bottom: 3px;
   }
-  .cand { display: flex; gap: 8px; padding: 6px 0; align-items: baseline; }
-  .cand + .cand { border-top: 0.5pt solid var(--hairline-2); }
-  .cand-tk {
-    font-family: var(--font-mono); font-size: 11px; font-weight: 600;
-    color: var(--ink); width: 46px; flex-shrink: 0;
+  .idea-effect-val {
+    font-family: var(--font-mono); font-size: 11px; color: var(--ink);
+    line-height: 1.5;
   }
-  .cand-body { font-size: 10px; line-height: 1.45; color: var(--ink); }
-  .cand-name { font-weight: 600; }
-  .cand-scn {
-    display: inline-block; font-family: var(--font-mono); font-size: 8.5px;
-    color: var(--tech-blue); background: var(--tech-blue-08);
-    padding: 0 4px; border-radius: 2px; margin-top: 2px;
-  }
+  .idea-effect-val .arrow { color: var(--tech-blue); }
 
+  /* ── ИСТОЧНИКИ ── */
   .idea-src {
     margin-top: 10px; padding-top: 10px;
     border-top: 0.5pt solid var(--hairline-2);
@@ -322,6 +320,14 @@
           техах, а позиция сейчас в плюсе <b>+32%</b> — есть что зафиксировать
           без убытка.
         </div>
+        <div class="idea-swap">
+          <div class="swap-label">Идеи по замене — нет в портфеле</div>
+          <div class="swap-tickers">
+            <span class="tk-chip">TXN</span>
+            <span class="tk-chip">CSCO</span>
+            <span class="tk-chip">ACN</span>
+          </div>
+        </div>
         <div class="idea-toggle">
           <span class="idea-caret">▸</span>
           <span class="t-more">Конвейер · эффект · источники</span>
@@ -378,6 +384,14 @@
           коррекции. У вас уже есть JNJ и KO с низкой бетой — их логично
           нарастить за счёт высвобождаемого капитала.
         </div>
+        <div class="idea-swap">
+          <div class="swap-label">Идеи по замене — нет в портфеле</div>
+          <div class="swap-tickers">
+            <span class="tk-chip">PG</span>
+            <span class="tk-chip">MRK</span>
+            <span class="tk-chip">PEP</span>
+          </div>
+        </div>
         <div class="idea-toggle">
           <span class="idea-caret">▸</span>
           <span class="t-more">Конвейер · эффект · источники</span>
@@ -432,6 +446,14 @@
           дал сигнал <b>Trim</b>, банки осторожны по энергетике при текущих
           ценах на нефть. Позиция небольшая (6%) и сейчас в минусе — закрытие
           почти не затронет доходность.
+        </div>
+        <div class="idea-swap">
+          <div class="swap-label">Идеи по замене — нет в портфеле</div>
+          <div class="swap-tickers">
+            <span class="tk-chip">NEE</span>
+            <span class="tk-chip">DUK</span>
+            <span class="tk-chip">SO</span>
+          </div>
         </div>
         <div class="idea-toggle">
           <span class="idea-caret">▸</span>
@@ -488,9 +510,17 @@
           сектора</b>, а не через ещё больше того же IT. Кандидаты отобраны
           конвейером Factor → Regime → RAG.
         </div>
+        <div class="idea-swap">
+          <div class="swap-label">Идеи по замене — нет в портфеле</div>
+          <div class="swap-tickers">
+            <span class="tk-chip">GOOGL</span>
+            <span class="tk-chip">LLY</span>
+            <span class="tk-chip">V</span>
+          </div>
+        </div>
         <div class="idea-toggle">
           <span class="idea-caret">▸</span>
-          <span class="t-more">Конвейер · кандидаты · эффект · источники</span>
+          <span class="t-more">Конвейер · эффект · источники</span>
           <span class="t-less">Свернуть детали</span>
         </div>
       </div>
@@ -512,24 +542,6 @@
               <div class="pl-stage-name">RAG</div>
               <div class="pl-stage-text">сверка с Goldman Sachs и JPMorgan</div>
             </div>
-          </div>
-        </div>
-        <div class="cand-list">
-          <div class="cand-label">Кандидаты — нет в портфеле</div>
-          <div class="cand">
-            <span class="cand-tk">GOOGL</span>
-            <span class="cand-body"><span class="cand-name">Alphabet</span> — качество и ИИ-экспозиция дешевле по мультипликаторам, чем PLTR.<br />
-              <span class="cand-scn">сценарий: ИИ-цикл продолжается</span></span>
-          </div>
-          <div class="cand">
-            <span class="cand-tk">LLY</span>
-            <span class="cand-body"><span class="cand-name">Eli Lilly</span> — структурный рост в здравоохранении, слабая связь с вашим IT-ядром.<br />
-              <span class="cand-scn">сценарий: ротация в защитный рост</span></span>
-          </div>
-          <div class="cand">
-            <span class="cand-tk">V</span>
-            <span class="cand-body"><span class="cand-name">Visa</span> — компаундер высокого качества, добавляет сектор финансов.<br />
-              <span class="cand-scn">сценарий: мягкая посадка экономики</span></span>
           </div>
         </div>
         <div class="idea-effect">
