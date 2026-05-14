@@ -66,7 +66,7 @@
   /* ── РАСКЛАДКА: ТАБЛИЦА + ПАНЕЛЬ СЕКТОРОВ ── */
   .holdings-layout {
     margin-top: 14px;
-    display: flex; gap: 14px; align-items: flex-start;
+    display: flex; gap: 14px; align-items: stretch;
   }
 
   /* ── ТАБЛИЦА HOLDINGS ── */
@@ -192,7 +192,13 @@
   .sector-panel {
     flex: 0 0 234px;
     border: 0.5pt solid var(--hairline); border-radius: 2px;
-    background: var(--panel); padding: 14px;
+    background: var(--panel); overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+  /* заголовок-бар — зеркалит шапку таблицы */
+  .sp-head {
+    padding: 8px 14px;
+    border-bottom: 0.5pt solid var(--hairline);
   }
   .sp-title {
     font-family: var(--font-mono); font-size: 9px; font-weight: 600;
@@ -200,7 +206,13 @@
   }
   .sp-sub { font-size: 10px; color: var(--ink-40); margin-top: 2px; }
 
-  .pie-wrap { display: flex; justify-content: center; margin: 14px 0 12px; }
+  /* тело панели растягивается и центрирует pie+легенду */
+  .sp-body {
+    flex: 1 1 auto;
+    display: flex; flex-direction: column; justify-content: center;
+    padding: 16px 14px;
+  }
+  .pie-wrap { display: flex; justify-content: center; margin-bottom: 14px; }
   .pie {
     position: relative; width: 152px; height: 152px; border-radius: 50%;
     background: conic-gradient(
@@ -237,8 +249,9 @@
   .lg-item.over .lg-name,
   .lg-item.over .lg-pct { color: var(--amber); font-weight: 600; }
 
+  /* предупреждение прижато к нижней кромке — вровень с таблицей */
   .sp-warn {
-    margin-top: 12px; padding: 8px 9px;
+    margin: 0 14px 14px; padding: 8px 9px;
     background: var(--amber-08); border: 0.5pt solid var(--amber);
     border-radius: 2px; display: flex; gap: 6px;
     font-size: 10.5px; line-height: 1.42; color: var(--amber);
@@ -664,9 +677,12 @@
 
   <!-- ПАНЕЛЬ СЕКТОРОВ -->
   <div class="sector-panel">
-    <div class="sp-title">Структура по секторам</div>
-    <div class="sp-sub">доля капитала · 9 позиций</div>
+    <div class="sp-head">
+      <div class="sp-title">Структура по секторам</div>
+      <div class="sp-sub">доля капитала · 9 позиций</div>
+    </div>
 
+    <div class="sp-body">
     <div class="pie-wrap">
       <div class="pie">
         <div class="pie-center">
@@ -703,6 +719,7 @@
         <span class="lg-pct">2%</span>
       </div>
     </div>
+    </div><!-- /.sp-body -->
 
     <div class="sp-warn">
       <span>⚠</span>
