@@ -128,6 +128,23 @@
     display: flex; justify-content: space-between;
     font-family: var(--font-mono); font-size: 9px; color: var(--ink-40); margin-top: 5px;
   }
+  /* объяснение индекса — что это, откуда число, шкала */
+  .risk-explain {
+    margin-top: 12px; padding-top: 10px;
+    border-top: 0.5pt solid var(--hairline-2);
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .rx-row {
+    display: grid; grid-template-columns: 78px 1fr; gap: 10px;
+    align-items: baseline;
+  }
+  .rx-label {
+    font-family: var(--font-mono); font-size: 8.5px; font-weight: 600;
+    letter-spacing: 0.05em; color: var(--ink-60); text-transform: uppercase;
+  }
+  .rx-text { font-size: 10.5px; line-height: 1.5; color: var(--ink); }
+  .rx-text b { font-family: var(--font-mono); font-weight: 500; color: var(--ink); }
+  .rx-text .src { font-size: 9px; }
 
   /* ═══ KPI STRIP ═══ */
   .kpi-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 16px; margin-top: 22px; }
@@ -136,8 +153,10 @@
     border: 0.5pt solid var(--hairline);
     border-radius: 2px;
     padding: 13px 16px 14px;
-    display: flex; flex-direction: column; min-height: 196px;
+    display: flex; flex-direction: column;
   }
+  /* AI-блок прижат к нижней кромке — карточки выравниваются по grid-stretch */
+  .kpi .kpi-ai { margin-top: auto; }
   /* статус-кромка сверху — без теней */
   .kpi.st-normal { border-top: 2px solid var(--green); }
   .kpi.st-good   { border-top: 2px solid var(--tech-blue); }
@@ -173,16 +192,15 @@
   .kpi-mom.down { color: var(--green); }
   .kpi-mom.flat { color: var(--ink-40); }
 
-  .kpi-explainer {
-    font-size: 10.5px; color: var(--ink-60); line-height: 1.45;
-    margin-top: 8px; padding-top: 8px; border-top: 0.5pt solid var(--hairline-2);
-  }
   .kpi-ai {
-    display: flex; gap: 7px; margin-top: 9px;
-    padding-left: 8px; border-left: 2px solid var(--tech-blue);
+    display: flex; gap: 7px;
+    margin-top: 10px; padding: 8px 10px 8px 10px;
+    background: var(--ai-bg); border-left: 2px solid var(--tech-blue);
+    border-radius: 0 2px 2px 0;
   }
   .kpi-ai .tag { font-size: 10px; flex-shrink: 0; }
-  .kpi-ai .txt { font-style: italic; font-size: 10.5px; line-height: 1.5; }
+  .kpi-ai .txt { font-style: italic; font-size: 10.5px; line-height: 1.55; }
+  .kpi-ai .txt b { font-style: normal; font-weight: 600; }
   .kpi-ai .txt .src { font-size: 9px; }
 
   /* ═══ RISK CONCENTRATION ═══ */
@@ -260,7 +278,7 @@
     .risk-readout .val { font-size: 32px; }
     .kpi-value { font-size: 30px; }
     .ai-box .ai-body { font-size: 14px; }
-    .kpi-explainer, .kpi-ai .txt { font-size: 12px; }
+    .kpi-ai .txt { font-size: 12px; }
     table { font-size: 13px; }
     thead th, tbody td { padding: 6px 4px; }
   }
@@ -1096,7 +1114,7 @@
 
     <!-- RISK SCALE 0–100 -->
     <div class="risk-panel">
-      <div class="block-label">Насколько рискованный ваш портфель</div>
+      <div class="block-label">Индекс риска портфеля (0–100)</div>
       <div class="risk-readout">
         <span class="val">62</span>
         <span class="scale-max">/ 100</span>
@@ -1118,6 +1136,31 @@
       <div class="risk-ticks">
         <span>0 · низкий</span><span>33</span><span>66</span><span>высокий · 100</span>
       </div>
+
+      <!-- Что означает индекс, откуда берётся число -->
+      <div class="risk-explain">
+        <div class="rx-row">
+          <span class="rx-label">Что это</span>
+          <span class="rx-text">сводный индекс риска портфеля по шкале 0–100. Объединяет три измерения риска
+            в одно число, чтобы сравнивать портфели и отслеживать динамику.</span>
+        </div>
+        <div class="rx-row">
+          <span class="rx-label">Шкала</span>
+          <span class="rx-text">0–33 — консервативный · 33–66 — умеренный · 66–100 — агрессивный.
+            Ваш профиль «умеренный», и 62 попадает в верхнюю часть «умеренной» зоны.</span>
+        </div>
+        <div class="rx-row">
+          <span class="rx-label">Откуда 62</span>
+          <span class="rx-text">формула: <b>0.4 × волатильность</b> + <b>0.4 × |CVaR&nbsp;95%|</b> + <b>0.2 × максимальный
+            вклад одной позиции в риск</b>. Сейчас входы: волатильность <b>14.8%</b>, CVaR <b>5.2%</b>,
+            максимальный TRC <b>24.4%</b> (PLTR). <span class="src">[Quant Engine MAC3]</span></span>
+        </div>
+        <div class="rx-row">
+          <span class="rx-label">Динамика</span>
+          <span class="rx-text">−1 пункт за месяц — риск немного снизился; основной вклад в число
+            продолжают давать концентрированные технологические позиции PLTR и CRWD.</span>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -1125,10 +1168,10 @@
   <div class="block-label" style="margin-top:24px;">Ключевые показатели риска</div>
   <div class="kpi-grid">
 
-    <!-- KPI 1 — Худший день / CVaR -->
+    <!-- KPI 1 — CVaR 95% -->
     <div class="kpi st-normal">
       <div class="kpi-top">
-        <span class="kpi-name">Худший день</span>
+        <span class="kpi-name">CVaR&nbsp;95%</span>
         <span class="kpi-tag st-normal">◆ В НОРМЕ</span>
       </div>
       <div class="kpi-value">−5.2<span class="unit">%</span></div>
@@ -1142,22 +1185,24 @@
         </svg>
         <span class="kpi-mom down">↓ 0.3 пп за мес</span>
       </div>
-      <div class="kpi-explainer">
-        Технически — CVaR&nbsp;95%. В 1 из 20 худших дней портфель теряет примерно столько.
-      </div>
       <div class="kpi-ai">
         <span class="tag">🤖</span>
         <span class="txt">
-          Простыми словами: даже в плохой день потери терпимы для вашего профиля,
-          и за месяц этот риск стал чуть меньше. <span class="src">[Quant Engine]</span>
+          Простыми словами: CVaR&nbsp;95% — это средняя потеря в 5% худших дней (примерно
+          1 день из 20). У вашего портфеля это ≈ <b>−5.2%</b> или около <b>−$1&nbsp;240</b>
+          от текущей стоимости. Чем меньше это число по модулю — тем мягче «провал»
+          в плохой день. За месяц значение снизилось на 0.3 пп: риск глубокой просадки
+          стал чуть меньше. Для умеренного профиля показатель в зоне «терпимо»;
+          сократить его можно, уменьшая HOTSPOT-позиции, которые сильнее всего падают
+          в стрессовые дни. <span class="src">[Quant Engine]</span>
         </span>
       </div>
     </div>
 
-    <!-- KPI 2 — Награда за риск / Sharpe -->
+    <!-- KPI 2 — Sharpe Ratio -->
     <div class="kpi st-good">
       <div class="kpi-top">
-        <span class="kpi-name">Награда за риск</span>
+        <span class="kpi-name">Sharpe Ratio</span>
         <span class="kpi-tag st-good">◆ ХОРОШО</span>
       </div>
       <div class="kpi-value">1.18</div>
@@ -1169,22 +1214,25 @@
         </svg>
         <span class="kpi-mom down">↑ 0.06 за мес</span>
       </div>
-      <div class="kpi-explainer">
-        Технически — Sharpe Ratio. Сколько доходности портфель даёт на единицу риска.
-      </div>
       <div class="kpi-ai">
         <span class="tag">🤖</span>
         <span class="txt">
-          Простыми словами: вы получаете достойную отдачу за тот риск, что берёте —
-          и обгоняете рынок-ориентир. <span class="src">[Quant Engine]</span>
+          Простыми словами: Sharpe&nbsp;Ratio показывает, сколько доходности
+          (сверх безрисковой ставки) портфель приносит на каждую единицу взятого
+          риска. У вас <b>1.18</b> — то есть на каждый процент колебаний
+          приходится 1.18 пункта «лишней» доходности. Это заметно выше рынка-ориентира
+          (<b>0.74</b>), а Sortino <b>1.60</b> подтверждает, что портфель ловко
+          избегает именно «плохих» колебаний. За месяц коэффициент подрос на 0.06 —
+          риск работает эффективнее. Ориентир: ≥&nbsp;1.0 — приемлемо,
+          ≥&nbsp;1.5 — отлично. <span class="src">[Quant Engine]</span>
         </span>
       </div>
     </div>
 
-    <!-- KPI 3 — Самое сильное падение / Max Drawdown -->
+    <!-- KPI 3 — Max Drawdown -->
     <div class="kpi st-watch">
       <div class="kpi-top">
-        <span class="kpi-name">Самое сильное падение</span>
+        <span class="kpi-name">Max Drawdown</span>
         <span class="kpi-tag st-watch">◆ ВНИМАНИЕ</span>
       </div>
       <div class="kpi-value">−12.8<span class="unit">%</span></div>
@@ -1197,14 +1245,18 @@
         </svg>
         <span class="kpi-mom flat">= без изменений</span>
       </div>
-      <div class="kpi-explainer">
-        Технически — Max Drawdown. Самая глубокая просадка за всю историю портфеля.
-      </div>
       <div class="kpi-ai">
         <span class="tag">🤖</span>
         <span class="txt">
-          Простыми словами: в худший период портфель падал ощутимо — и причина та же,
-          две концентрированные позиции (см. ниже). <span class="src">[Quant Engine]</span>
+          Простыми словами: Max&nbsp;Drawdown — самое глубокое падение портфеля от
+          пика до последующего дна за всю историю. У вас <b>−12.8%</b>
+          (≈ <b>−$3&nbsp;070</b>): в худший момент капитал просел почти на восьмую
+          часть. Это «болевой потолок» — ориентир, на сколько может уйти портфель
+          в стрессовом сценарии до восстановления. Метка <b>ВНИМАНИЕ</b>: глубину
+          разогнали те же концентрированные позиции <b>PLTR</b> и <b>CRWD</b>;
+          снижение их веса делает будущие просадки заметно мягче. За месяц без
+          изменений — нового минимума портфель не ставил.
+          <span class="src">[Quant Engine]</span>
         </span>
       </div>
     </div>
@@ -1365,10 +1417,6 @@
 
   </div>
 
-  <!-- ═══ ФУТЕР ═══ -->
-  <div class="foot">
-    CONFIDENTIAL // ADVISORY-ONLY — NOT A RECOMMENDATION // PAGE 1 OF 4 // CoVe: 4 SOURCES VERIFIED
-  </div>
 
 </div>
 
@@ -1807,10 +1855,6 @@
     </div>
   </div>
 
-  <!-- ФУТЕР -->
-  <div class="foot">
-    CONFIDENTIAL // ADVISORY-ONLY — NOT A RECOMMENDATION // PAGE 2 OF 4 // CoVe: 6 SOURCES VERIFIED
-  </div>
 
 </div>
 
@@ -1985,10 +2029,6 @@
     </div>
   </div>
 
-  <!-- ФУТЕР -->
-  <div class="foot">
-    CONFIDENTIAL // ADVISORY-ONLY — NOT A RECOMMENDATION // PAGE 3 OF 4 // CoVe: 5 SOURCES VERIFIED
-  </div>
 
 </div>
 
@@ -2392,10 +2432,6 @@
     <b>JPMorgan</b> «Q2 2026 Strategy &amp; Allocation»
   </div>
 
-  <!-- ФУТЕР -->
-  <div class="foot">
-    CONFIDENTIAL // ADVISORY-ONLY — NOT A RECOMMENDATION // PAGE 4 OF 4 // CoVe: 7 SOURCES VERIFIED
-  </div>
 
 </div>
 
