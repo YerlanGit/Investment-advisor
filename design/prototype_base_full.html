@@ -115,7 +115,7 @@
     justify-content: center; text-align: center;
   }
   .risk-panel .block-label { align-self: flex-start; margin-bottom: 4px; }
-  .risk-gauge-svg { width: 100%; max-width: 260px; height: auto; display: block; }
+  .risk-gauge-svg { width: 100%; max-width: 300px; height: auto; display: block; margin-top: 4px; }
   .risk-readout-big {
     margin-top: 8px;
     font-family: var(--font-mono); font-size: 16px; font-weight: 500;
@@ -1079,38 +1079,83 @@
     <!-- RISK GAUGE 0–100 -->
     <div class="risk-panel">
       <div class="block-label">Индекс риска портфеля (0–100)</div>
-      <svg class="risk-gauge-svg" viewBox="0 0 220 138" xmlns="http://www.w3.org/2000/svg"
+      <svg class="risk-gauge-svg" viewBox="0 0 280 178"
+           xmlns="http://www.w3.org/2000/svg"
            role="img" aria-label="Индекс риска портфеля: 62 из 100, умеренный">
         <defs>
+          <!-- 5-стоп градиент шкалы — банковая палитра отчёта -->
           <linearGradient id="riskGrad" x1="0" y1="0" x2="1" y2="0">
             <stop offset="0%"   stop-color="#3F8F5F"/>
-            <stop offset="32%"  stop-color="#A8B83A"/>
-            <stop offset="55%"  stop-color="#D9A03B"/>
-            <stop offset="78%"  stop-color="#C77B2C"/>
+            <stop offset="24%"  stop-color="#8FB44C"/>
+            <stop offset="50%"  stop-color="#D9A03B"/>
+            <stop offset="76%"  stop-color="#C77B2C"/>
             <stop offset="100%" stop-color="#C0492F"/>
           </linearGradient>
+          <!-- объёмная заклёпка-пивот: тёмная сталь со светлым бликом -->
+          <radialGradient id="pivotGrad" cx="35%" cy="30%" r="80%">
+            <stop offset="0%"   stop-color="#6A7079"/>
+            <stop offset="55%"  stop-color="#2A2E33"/>
+            <stop offset="100%" stop-color="#0E1013"/>
+          </radialGradient>
+          <!-- конусная стрелка: лёгкий вертикальный градиент -->
+          <linearGradient id="needleGrad" x1="0.5" y1="0" x2="0.5" y2="1">
+            <stop offset="0%"   stop-color="#15171A"/>
+            <stop offset="100%" stop-color="#3A3F47"/>
+          </linearGradient>
+          <!-- мягкая тень стрелки -->
+          <filter id="ndlShadow" x="-30%" y="-30%" width="160%" height="160%">
+            <feDropShadow dx="0.6" dy="1.4" stdDeviation="1.2" flood-opacity="0.32"/>
+          </filter>
         </defs>
-        <!-- дуга-шкала -->
-        <path d="M 20 110 A 90 90 0 0 1 200 110"
+
+        <!-- внешний и внутренний hairline-обод (бель «прибора») -->
+        <path d="M 28 138 A 112 112 0 0 1 252 138"
+              fill="none" stroke="rgba(42,46,51,0.22)" stroke-width="0.6"/>
+        <path d="M 52 138 A 88 88 0 0 1 228 138"
+              fill="none" stroke="rgba(42,46,51,0.16)" stroke-width="0.6"/>
+
+        <!-- основная цветная дуга шкалы -->
+        <path d="M 40 138 A 100 100 0 0 1 240 138"
               fill="none" stroke="url(#riskGrad)" stroke-width="22" stroke-linecap="butt"/>
-        <!-- риски 0 / 33 / 50 / 66 / 100 -->
-        <g stroke="#2A2E33" stroke-opacity="0.35" stroke-width="0.6">
-          <line x1="20"  y1="124" x2="20"  y2="130"/>
-          <line x1="49"  y1="36"  x2="52"  y2="42"/>
-          <line x1="110" y1="13"  x2="110" y2="20"/>
-          <line x1="168" y1="36"  x2="171" y2="42"/>
-          <line x1="200" y1="124" x2="200" y2="130"/>
+        <!-- внутренний светлый ободок шкалы (rim-light, эффект объёма) -->
+        <path d="M 50.4 138 A 89.6 89.6 0 0 1 229.6 138"
+              fill="none" stroke="rgba(255,255,255,0.40)" stroke-width="1.2"/>
+        <!-- внешний тёмный ободок шкалы (тень, эффект глубины) -->
+        <path d="M 29.6 138 A 110.4 110.4 0 0 1 250.4 138"
+              fill="none" stroke="rgba(42,46,51,0.18)" stroke-width="1.2"/>
+
+        <!-- мажорные тики и подписи: 0 / 25 / 50 / 75 / 100 -->
+        <g stroke="#2A2E33" stroke-opacity="0.55" stroke-width="0.8">
+          <line x1="22"    y1="138"  x2="29"    y2="138"/>
+          <line x1="52.0"  y1="50.0" x2="56.9"  y2="54.9"/>
+          <line x1="140"   y1="20"   x2="140"   y2="27"/>
+          <line x1="223.1" y1="54.9" x2="228.0" y2="50.0"/>
+          <line x1="251"   y1="138"  x2="258"   y2="138"/>
         </g>
-        <!-- подписи краёв -->
-        <g font-family="IBM Plex Mono" font-size="9" fill="rgba(42,46,51,0.55)">
-          <text x="20"  y="137" text-anchor="middle">0</text>
-          <text x="200" y="137" text-anchor="middle">100</text>
+        <g font-family="IBM Plex Mono" font-size="9.5" fill="rgba(42,46,51,0.62)">
+          <text x="14"  y="155" text-anchor="middle">0</text>
+          <text x="45"  y="42"  text-anchor="middle">25</text>
+          <text x="140" y="13"  text-anchor="middle">50</text>
+          <text x="235" y="42"  text-anchor="middle">75</text>
+          <text x="266" y="155" text-anchor="middle">100</text>
         </g>
-        <!-- стрелка на 62 (угол 291.6°) -->
-        <line x1="110" y1="110" x2="141.6" y2="31.7"
-              stroke="#2A2E33" stroke-width="2.5" stroke-linecap="round"/>
-        <circle cx="110" cy="110" r="6.5" fill="#2A2E33"/>
-        <circle cx="110" cy="110" r="2.5" fill="#FBFAF7"/>
+
+        <!-- зональные подписи внутри полукруга -->
+        <g font-family="IBM Plex Mono" font-size="7.5" fill="rgba(42,46,51,0.42)" letter-spacing="0.04em">
+          <text x="80"  y="120" text-anchor="middle">НИЗКИЙ</text>
+          <text x="140" y="86"  text-anchor="middle">УМЕРЕННЫЙ</text>
+          <text x="200" y="120" text-anchor="middle">ВЫСОКИЙ</text>
+        </g>
+
+        <!-- Стрелка на значении 62 (угол 291.6°) — конусный полигон с тенью -->
+        <polygon points="176.81,45.02 146.51,140.58 133.49,135.42"
+                 fill="url(#needleGrad)" filter="url(#ndlShadow)"/>
+
+        <!-- Пивот-хаб: объёмная заклёпка с обводкой и бликом -->
+        <circle cx="140" cy="138" r="10.5" fill="url(#pivotGrad)"
+                stroke="rgba(42,46,51,0.45)" stroke-width="0.6"/>
+        <ellipse cx="136.5" cy="134.5" rx="3.2" ry="2.2"
+                 fill="rgba(255,255,255,0.32)"/>
       </svg>
       <div class="risk-readout-big">62 / 100 — <span class="tier-text">Умеренный</span></div>
     </div>
@@ -1137,7 +1182,8 @@
       <div class="kpi-ai">
         <span class="tag">🤖</span>
         <span class="txt">«Средняя потеря в один из 20 худших дней. У вас ≈ <b>−5.2%</b>
-          (−$1&nbsp;240 от $24&nbsp;000). За месяц −0.3&nbsp;пп — стало мягче.»
+          (−$1&nbsp;240 от $24&nbsp;000). За месяц −0.3&nbsp;пп — стало мягче.
+          CVaR отвечает на вопрос «насколько глубоким будет провал», а не «как часто он случится».»
           <span class="src">[Quant Engine]</span></span>
       </div>
     </div>
@@ -1158,7 +1204,9 @@
       <div class="kpi-ai">
         <span class="tag">🤖</span>
         <span class="txt">«Доходность на единицу риска. <b>1.18</b> заметно выше
-          бенчмарка (0.74), за месяц +0.06. Норма ≥&nbsp;1.0, ≥&nbsp;1.5 — отлично.»
+          бенчмарка (0.74), за месяц +0.06. Норма ≥&nbsp;1.0, ≥&nbsp;1.5 — отлично.
+          Высокий Sharpe значит, что взятый риск окупается доходностью, а не просто
+          увеличивает колебания капитала.»
           <span class="src">[Quant Engine]</span></span>
       </div>
     </div>
@@ -1180,7 +1228,8 @@
       <div class="kpi-ai">
         <span class="tag">🤖</span>
         <span class="txt">«Самое глубокое падение от пика. <b>−12.8%</b> (≈ −$3&nbsp;070).
-          Основной вклад — <b>PLTR</b> и <b>CRWD</b>: снижение их веса сгладит будущие просадки.»
+          Основной вклад — <b>PLTR</b> и <b>CRWD</b>: снижение их веса сгладит будущие просадки.
+          Это «болевой потолок» портфеля — ориентир, на сколько он может уйти вниз до восстановления.»
           <span class="src">[Quant Engine]</span></span>
       </div>
     </div>
