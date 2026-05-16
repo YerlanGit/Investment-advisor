@@ -12,6 +12,10 @@ from freedom_portfolio import TradernetClient, get_history_frame
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger("Antigravity_RiskEngine")
 
+# Multi-period (1м / 3м / 6м / 12м / YTD) returns live in a separate module
+# so they can be unit-tested without pulling in sklearn / engine dependencies.
+from finance.period_returns import compute_period_returns_table as _compute_period_returns_table
+
 class MAC3RiskEngine:
     """
     Институциональный движок рисков (RAMP Style).
@@ -916,6 +920,44 @@ class UniversalPortfolioManager:
                         "Beating_Benchmark":    port_return > bm_return,
                     }
 
+        # ═══════════════ MULTI-PERIOD RETURNS TABLE ═══════════════
+        # Builds the 1м / 3м / 6м / 12м / YTD table for the v2 report's
+        # "Рост против рынка" section.  We rebuild port_daily once here from
+        # the same source frame the benchmark loop used, so the windows are
+        # always sliced against the SAME aligned series — no risk that the
+        # 12m row uses a different cleaning policy than Tracking-Error above.
+        period_returns_table: dict[str, dict] = {}
+        try:
+            port_resolved = self.engine.resolve_tickers(actual_risky)
+            port_cols_idx = [(orig, res) for orig, res in zip(actual_risky, port_resolved)
+                              if res in all_data.columns]
+            if port_cols_idx:
+                port_cols   = [res for _, res in port_cols_idx]
+                port_origs  = [orig for orig, _ in port_cols_idx]
+                w_for_cols  = np.array([weights_dict.get(t, 0.0) for t in port_origs], dtype=float)
+                port_prices = all_data[port_cols].dropna()
+                if len(port_prices) >= 2 and w_for_cols.size:
+                    port_log_df = np.log(port_prices / port_prices.shift(1)).dropna()
+                    port_log_series = pd.Series(
+                        port_log_df.values @ w_for_cols,
+                        index=port_log_df.index,
+                        name="port_log",
+                    )
+                    bm_logs: dict[str, pd.Series] = {}
+                    for bm_name, bm_ticker in benchmarks.items():
+                        if bm_ticker in all_data.columns:
+                            bm_prices = all_data[bm_ticker].dropna()
+                            if len(bm_prices) >= 2:
+                                bm_logs[bm_name] = (
+                                    np.log(bm_prices / bm_prices.shift(1)).dropna()
+                                )
+                    period_returns_table = _compute_period_returns_table(
+                        port_log_series, bm_logs
+                    )
+        except Exception as exc:  # never block the rest of the pipeline
+            logger.warning("period_returns_table build failed: %s", exc)
+            period_returns_table = {}
+
         # Sector exposure analysis
         sector_exposure = self.engine.get_sector_exposure(list(df.index), weights_dict)
 
@@ -1093,6 +1135,7 @@ class UniversalPortfolioManager:
             "portfolio_metrics": port_metrics,
             "risk_free_rate": self.engine.current_rfr_annual,
             "benchmark_comparison": benchmark_results,
+            "period_returns_table": period_returns_table,
             "history_result": history_result,
             "sector_exposure": sector_exposure,
             "factor_scores": factor_scores,
