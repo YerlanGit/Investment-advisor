@@ -299,6 +299,9 @@ def build_payload(results: dict, tier: str,
     # ── Multi-period performance (1м / 3м / 6м / 12м / YTD) ────────────────
     period_returns_table = results.get("period_returns_table") or {}
 
+    # ── Stress scenarios (parametric factor shocks, 7-row default catalog) ─
+    stress_scenarios = results.get("stress_scenarios") or []
+
     # ── Macro regime (Cover) ───────────────────────────────────────────────
     regime_block = None
     regime = results.get("regime")
@@ -424,6 +427,8 @@ def build_payload(results: dict, tier: str,
         "risk_waterfall":       risk_waterfall,
         # Multi-period performance table {bm_name: {periods: [...], window_*}}
         "period_returns_table": period_returns_table,
+        # Stress scenarios (parametric factor shocks — list of dicts)
+        "stress_scenarios":     stress_scenarios,
         # Regime
         "regime":            regime_block,
         "regime_rag_confirm": regime_rag_confirm or [],

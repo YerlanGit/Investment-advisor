@@ -8,6 +8,7 @@ rendering is exercised manually via `python -m src.pdf_generator`.
 """
 from __future__ import annotations
 
+import math
 import os
 import sys
 import unittest
@@ -414,6 +415,304 @@ class PeriodReturnsHelperTest(unittest.TestCase):
         table = _compute_period_returns_table(port_log, {"BM": bm_log})
         # n_days_total reflects the intersection, not the longer side.
         self.assertEqual(table["BM"]["n_days_total"], 200)
+
+
+# ── 4.1.d  Stress engine (Step 2 — parametric factor shocks) ────────────────
+
+class StressEngineTest(unittest.TestCase):
+    """
+    Hand-checked tests for src/finance/stress.py.
+
+    The math is small enough that every expected value is computed in the
+    docstring of each test, so regressions show up immediately as a numeric
+    mismatch rather than a silent semantic drift.
+    """
+
+    def _perf_single(self) -> pd.DataFrame:
+        """One asset, full weight, betas only to Market and Momentum."""
+        return pd.DataFrame([{
+            "Ticker": "AAPL", "Current_Value": 1000.0,
+            "Beta_Market": 1.20, "Beta_Momentum": 0.80,
+        }])
+
+    def _perf_two_assets(self) -> pd.DataFrame:
+        """Two assets, $700 + $300 = $1000, varying betas."""
+        return pd.DataFrame([
+            {"Ticker": "AAPL", "Current_Value": 700.0,
+             "Beta_Market": 1.10, "Beta_Momentum": 0.50, "Beta_Quality": 0.30},
+            {"Ticker": "JNJ",  "Current_Value": 300.0,
+             "Beta_Market": 0.65, "Beta_Momentum": -0.10, "Beta_Quality": 0.80},
+        ])
+
+    # ─── apply_scenario math ────────────────────────────────────────────
+
+    def test_apply_scenario_single_asset_single_factor(self) -> None:
+        """
+        AAPL @ 100% weight, Beta_Market = 1.20.  Market shock = -10%.
+            ΔPnL_pct = 1.0 · 1.20 · (-0.10) = -0.120 → -12.0%
+            ΔPnL_$   = -0.120 · 1000 = -$120
+        """
+        from finance.stress import apply_scenario, ScenarioSpec
+        sc = ScenarioSpec("Test", {"Market": -0.10})
+        out = apply_scenario(self._perf_single(), 1000.0, sc, port_vol_ann=0.20)
+        self.assertAlmostEqual(out["port_pct"],    -0.12,    places=4)
+        self.assertAlmostEqual(out["port_dollar"], -120.0,   places=2)
+        # Coverage: 1 of 1 factor present.
+        self.assertEqual(out["coverage_pct"], 100.0)
+        self.assertEqual(out["factors_used"],    ["Market"])
+        self.assertEqual(out["factors_missing"], [])
+
+    def test_apply_scenario_two_factors_per_asset_math(self) -> None:
+        """
+        Hand calculation with two assets and two factors:
+            shock = {Market: -0.10, Momentum: -0.15}
+            AAPL: w=0.7, β_M=1.10, β_Mo=0.50
+              δ_AAPL = 1.10·(-0.10) + 0.50·(-0.15) = -0.110 - 0.075 = -0.185 → -18.5%
+              contrib = 0.7 · -0.185 = -0.1295 → -12.95%
+            JNJ:  w=0.3, β_M=0.65, β_Mo=-0.10
+              δ_JNJ  = 0.65·(-0.10) + (-0.10)·(-0.15) = -0.065 + 0.015 = -0.050 → -5.0%
+              contrib = 0.3 · -0.050 = -0.015 → -1.5%
+            port_pct = -0.1295 + -0.015 = -0.1445 → -14.45%
+            port_$   = -0.1445 · 1000 = -$144.50
+        Also verifies per-asset asset_delta_pct AND sorting by |contrib|.
+        """
+        from finance.stress import apply_scenario, ScenarioSpec
+        sc = ScenarioSpec("Test", {"Market": -0.10, "Momentum": -0.15})
+        out = apply_scenario(self._perf_two_assets(), 1000.0, sc, port_vol_ann=0.16)
+
+        self.assertAlmostEqual(out["port_pct"],    -0.1445, places=4)
+        self.assertAlmostEqual(out["port_dollar"], -144.50, places=2)
+
+        # Per-asset (sorted by |contrib_dollar| descending → AAPL first).
+        self.assertEqual(out["by_asset"][0]["ticker"], "AAPL")
+        self.assertAlmostEqual(out["by_asset"][0]["asset_delta_pct"], -18.5,  places=2)
+        self.assertAlmostEqual(out["by_asset"][0]["contrib_pct"],    -12.95, places=2)
+        self.assertAlmostEqual(out["by_asset"][0]["contrib_dollar"], -129.50, places=2)
+        self.assertEqual(out["by_asset"][1]["ticker"], "JNJ")
+        self.assertAlmostEqual(out["by_asset"][1]["asset_delta_pct"],  -5.0,  places=2)
+        self.assertAlmostEqual(out["by_asset"][1]["contrib_dollar"],  -15.00, places=2)
+
+    def test_apply_scenario_missing_factor_is_skipped(self) -> None:
+        """
+        Shock references "Rates" but perf_df has no Beta_Rates column.
+        That factor contributes 0 to the PnL, and coverage_pct reflects it.
+            shock = {Market: -0.05, Rates: +0.02}
+            AAPL only sees Market: contrib = 1.0 · 1.20 · -0.05 = -0.060 → -6.0%
+            coverage = 1/2 = 50%
+            factors_missing = ["Rates"]
+        """
+        from finance.stress import apply_scenario, ScenarioSpec
+        sc = ScenarioSpec("Test", {"Market": -0.05, "Rates": +0.02})
+        out = apply_scenario(self._perf_single(), 1000.0, sc, port_vol_ann=0.20)
+        self.assertAlmostEqual(out["port_pct"], -0.060, places=4)
+        self.assertEqual(out["coverage_pct"], 50.0)
+        self.assertEqual(out["factors_used"],    ["Market"])
+        self.assertEqual(out["factors_missing"], ["Rates"])
+
+    def test_apply_scenario_handles_nan_betas_as_zero(self) -> None:
+        """A position whose regression failed (NaN betas) contributes 0, not NaN."""
+        from finance.stress import apply_scenario, ScenarioSpec
+        perf = pd.DataFrame([
+            {"Ticker": "GOOD", "Current_Value": 500.0,
+             "Beta_Market": 1.00, "Beta_Momentum": 0.30},
+            {"Ticker": "NAN",  "Current_Value": 500.0,
+             "Beta_Market": float("nan"), "Beta_Momentum": float("nan")},
+        ])
+        sc = ScenarioSpec("Test", {"Market": -0.10})
+        out = apply_scenario(perf, 1000.0, sc)
+        # Only GOOD contributes: 0.5 · 1.0 · -0.10 = -0.05 → -5%
+        self.assertAlmostEqual(out["port_pct"], -0.05, places=4)
+        # NAN appears in by_asset with 0 contribution (visible to the report).
+        nan_row = next(r for r in out["by_asset"] if r["ticker"] == "NAN")
+        self.assertEqual(nan_row["contrib_dollar"], 0.0)
+
+    # ─── Drawdown / Recovery heuristics ─────────────────────────────────
+
+    def test_drawdown_heuristic_subtracts_quarterly_sigma(self) -> None:
+        """
+        Losing scenario: max_dd_pct = port_pct − σ_quarterly,
+        where σ_quarterly = σ_ann · √0.25 = σ_ann / 2.
+
+        port_pct = -0.10, σ_ann = 0.20 → σ_q = 0.10
+        → est_dd = -0.10 - 0.10 = -0.20
+        """
+        from finance.stress import apply_scenario, ScenarioSpec
+        # Synthesise a perf_df where the Market shock produces exactly -10%:
+        # weight 1.0, β_Market = 1.0, shock -10%.
+        perf = pd.DataFrame([{
+            "Ticker": "X", "Current_Value": 1000.0, "Beta_Market": 1.0,
+        }])
+        sc = ScenarioSpec("Test", {"Market": -0.10})
+        out = apply_scenario(perf, 1000.0, sc, port_vol_ann=0.20)
+        self.assertAlmostEqual(out["port_pct"],    -0.10, places=4)
+        self.assertAlmostEqual(out["max_dd_pct"],  -0.20, places=4)
+
+    def test_recovery_months_formula(self) -> None:
+        """
+        recovery_months = |max_dd| / (ann_return / 12)
+        With ann_return = 0.08: monthly = 0.08/12 ≈ 0.006667
+        max_dd = -0.20 → recovery = 0.20 / 0.006667 ≈ 30.0
+        """
+        from finance.stress import apply_scenario, ScenarioSpec
+        perf = pd.DataFrame([{
+            "Ticker": "X", "Current_Value": 1000.0, "Beta_Market": 1.0,
+        }])
+        sc = ScenarioSpec("Test", {"Market": -0.10})
+        out = apply_scenario(perf, 1000.0, sc,
+                              port_vol_ann=0.20, ann_return_baseline=0.08)
+        # max_dd = -0.20 (verified above) → recovery ≈ 30.0 months
+        self.assertAlmostEqual(out["recovery_months"], 30.0, places=1)
+
+    def test_positive_scenario_has_no_drawdown_and_no_recovery(self) -> None:
+        """Gains never trigger the drawdown/recovery branch."""
+        from finance.stress import apply_scenario, ScenarioSpec
+        perf = pd.DataFrame([{
+            "Ticker": "X", "Current_Value": 1000.0, "Beta_Market": 1.0,
+        }])
+        sc = ScenarioSpec("Test", {"Market": +0.05})
+        out = apply_scenario(perf, 1000.0, sc, port_vol_ann=0.20)
+        self.assertGreater(out["port_pct"], 0)
+        self.assertEqual(out["max_dd_pct"],     0.0)
+        self.assertIsNone(out["recovery_months"])
+
+    # ─── Edge cases ────────────────────────────────────────────────────
+
+    def test_apply_scenario_handles_empty_perf(self) -> None:
+        """Empty perf_df → zeroed result, no crash."""
+        from finance.stress import apply_scenario, ScenarioSpec
+        sc = ScenarioSpec("Test", {"Market": -0.10})
+        out = apply_scenario(pd.DataFrame(), 1000.0, sc)
+        self.assertEqual(out["port_pct"], 0.0)
+        self.assertEqual(out["by_asset"], [])
+
+    def test_apply_scenario_handles_zero_total_value(self) -> None:
+        """total_value = 0 → safe zeros."""
+        from finance.stress import apply_scenario, ScenarioSpec
+        sc = ScenarioSpec("Test", {"Market": -0.10})
+        out = apply_scenario(self._perf_single(), 0.0, sc)
+        self.assertEqual(out["port_pct"], 0.0)
+
+    # ─── Default catalog + run_stress_scenarios ─────────────────────────
+
+    def test_default_catalog_has_7_scenarios_with_required_fields(self) -> None:
+        """Catalog ships 7 scenarios; 2 marked as proxy; all carry a note."""
+        from finance.stress import DEFAULT_SCENARIOS
+        self.assertEqual(len(DEFAULT_SCENARIOS), 7)
+        names = [s.name for s in DEFAULT_SCENARIOS]
+        # Both proxy scenarios are present.
+        self.assertTrue(any("USD" in n for n in names))
+        self.assertTrue(any("CPI" in n for n in names))
+        # Proxy flag is set on exactly the 2 macro scenarios.
+        proxies = [s for s in DEFAULT_SCENARIOS if s.coverage == "proxy"]
+        self.assertEqual(len(proxies), 2)
+        for s in DEFAULT_SCENARIOS:
+            self.assertTrue(s.note, msg=f"missing note for {s.name}")
+            self.assertTrue(s.shocks, msg=f"empty shocks for {s.name}")
+
+    def test_run_stress_scenarios_full_table(self) -> None:
+        """
+        Full pipeline: 7 default scenarios against a 2-asset perf_df with all
+        9 factor betas.  Each row must come back with the same keys and a
+        finite port_pct.
+        """
+        from finance.stress import run_stress_scenarios
+        # Cover every factor referenced by DEFAULT_SCENARIOS.
+        perf = pd.DataFrame([
+            {"Ticker": "AAPL", "Current_Value": 700.0,
+             "Beta_Market": 1.10, "Beta_Momentum": 0.50, "Beta_Quality": 0.30,
+             "Beta_Value":  -0.10, "Beta_Size":     -0.05, "Beta_Commodities": 0.0,
+             "Beta_Rates":  -0.20, "Beta_EM_Equity": 0.10, "Beta_EM_Bond":     0.05},
+            {"Ticker": "JNJ",  "Current_Value": 300.0,
+             "Beta_Market": 0.65, "Beta_Momentum": -0.10, "Beta_Quality": 0.80,
+             "Beta_Value":   0.40, "Beta_Size":      0.0,  "Beta_Commodities": 0.0,
+             "Beta_Rates":   0.10, "Beta_EM_Equity": 0.05, "Beta_EM_Bond":     0.0},
+        ])
+        rows = run_stress_scenarios(
+            perf_df      = perf,
+            total_value  = 1000.0,
+            port_metrics = {"Total_Volatility_Ann": 0.16},
+        )
+        self.assertEqual(len(rows), 7)
+        required_keys = {"name", "category", "coverage", "shocks",
+                         "port_pct", "port_dollar", "max_dd_pct",
+                         "recovery_months", "by_asset", "coverage_pct",
+                         "factors_used", "factors_missing"}
+        for row in rows:
+            self.assertTrue(required_keys.issubset(row.keys()),
+                             f"missing keys in {row['name']}: {required_keys - row.keys()}")
+            self.assertFalse(math.isnan(row["port_pct"]))
+            self.assertFalse(math.isinf(row["port_pct"]))
+            # All scenarios should have 100% coverage given our complete betas.
+            self.assertEqual(row["coverage_pct"], 100.0,
+                             f"{row['name']}: missing {row['factors_missing']}")
+
+    def test_run_stress_scenarios_realistic_directional_signs(self) -> None:
+        """
+        Sanity: directional signs of port_pct must match scenario intent.
+          • Tech sell-off  → port_pct < 0
+          • Credit blow-out → port_pct < 0
+          • Fed +50 bps     → port_pct < 0
+          • Geo risk-off    → port_pct < 0 (β_Market dominates)
+          • Fed cut         → port_pct > 0
+          • USD +5%         → port_pct < 0 for an EM-exposed book
+          • CPI shock       → port_pct < 0 for a non-defensive book
+        """
+        from finance.stress import run_stress_scenarios
+        perf = pd.DataFrame([
+            {"Ticker": "AAPL", "Current_Value": 800.0,
+             "Beta_Market": 1.20, "Beta_Momentum": 0.40, "Beta_Quality": 0.10,
+             "Beta_Value":  -0.20, "Beta_Size":     -0.10, "Beta_Commodities": 0.05,
+             "Beta_Rates":  -0.30, "Beta_EM_Equity": 0.20, "Beta_EM_Bond":     0.10},
+            {"Ticker": "EEM-like", "Current_Value": 200.0,
+             "Beta_Market": 0.80, "Beta_Momentum": 0.20, "Beta_Quality": -0.10,
+             "Beta_Value":   0.30, "Beta_Size":      0.40, "Beta_Commodities": 0.20,
+             "Beta_Rates":   0.0,  "Beta_EM_Equity": 1.20, "Beta_EM_Bond":     0.80},
+        ])
+        rows = {r["name"]: r for r in run_stress_scenarios(
+            perf, 1000.0, {"Total_Volatility_Ann": 0.20}
+        )}
+        self.assertLess(   rows["Tech sell-off (как Q2 2022)"]["port_pct"],     0)
+        self.assertLess(   rows["Credit blow-out (+200 bps HY)"]["port_pct"],   0)
+        self.assertLess(   rows["Fed +50 bps surprise"]["port_pct"],            0)
+        self.assertLess(   rows["Geopolitical risk-off"]["port_pct"],           0)
+        self.assertGreater(rows["Fed cut surprise (−50 bps)"]["port_pct"],      0)
+        self.assertLess(   rows["USD +5% rally"]["port_pct"],                   0)
+        self.assertLess(   rows["CPI shock (+1 пп surprise)"]["port_pct"],      0)
+
+    def test_run_stress_scenarios_handles_partial_coverage(self) -> None:
+        """When only the Market beta is present, scenarios referencing other
+        factors still run but with coverage_pct < 100 — never crash."""
+        from finance.stress import run_stress_scenarios
+        perf = pd.DataFrame([{
+            "Ticker": "X", "Current_Value": 1000.0, "Beta_Market": 1.0,
+        }])
+        rows = run_stress_scenarios(perf, 1000.0,
+                                     {"Total_Volatility_Ann": 0.15})
+        # Tech sell-off has 3 factors; only Market is present → coverage 33.3%.
+        tech = next(r for r in rows if r["name"].startswith("Tech sell-off"))
+        self.assertAlmostEqual(tech["coverage_pct"], 33.3, places=1)
+        self.assertEqual(tech["factors_used"], ["Market"])
+
+    # ─── Payload passthrough ───────────────────────────────────────────
+
+    def test_payload_passes_through_stress_scenarios(self) -> None:
+        """Engine output reaches payload unchanged."""
+        from pdf_payload import build_payload
+        from pdf_payload import TIER_BASE, TIER_DEEP
+        # Re-use the BASE fixture from the upper test class.
+        results = ConcentrationAndWaterfallTest()._base_results()
+        results["stress_scenarios"] = [
+            {"name": "Foo", "port_pct": -0.05, "port_dollar": -200.0,
+             "max_dd_pct": -0.10, "recovery_months": 15.0,
+             "by_asset": [], "coverage": "direct", "coverage_pct": 100.0,
+             "category": "equity", "shocks": {"Market": -0.05},
+             "factors_used": ["Market"], "factors_missing": []},
+        ]
+        for tier in (TIER_BASE, TIER_DEEP):
+            p = build_payload(results, tier)
+            self.assertEqual(len(p["stress_scenarios"]), 1)
+            self.assertEqual(p["stress_scenarios"][0]["name"], "Foo")
+            self.assertAlmostEqual(p["stress_scenarios"][0]["port_pct"], -0.05, places=4)
 
 
 # ── 4.2  SVG charts ─────────────────────────────────────────────────────────

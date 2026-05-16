@@ -15,6 +15,8 @@ logger = logging.getLogger("Antigravity_RiskEngine")
 # Multi-period (1м / 3м / 6м / 12м / YTD) returns live in a separate module
 # so they can be unit-tested without pulling in sklearn / engine dependencies.
 from finance.period_returns import compute_period_returns_table as _compute_period_returns_table
+# Stress engine (parametric factor shocks) — also sklearn-free.
+from finance.stress import run_stress_scenarios as _run_stress_scenarios
 
 class MAC3RiskEngine:
     """
@@ -958,6 +960,21 @@ class UniversalPortfolioManager:
             logger.warning("period_returns_table build failed: %s", exc)
             period_returns_table = {}
 
+        # ═══════════════ STRESS SCENARIOS ═══════════════
+        # Parametric factor-shock scenarios using the betas just fitted.  The
+        # default catalog ships 7 scenarios (5 direct, 2 proxy).  Result is a
+        # list[dict] — always present, possibly empty when perf_df is too
+        # thin to support any scenario.
+        try:
+            stress_scenarios = _run_stress_scenarios(
+                perf_df      = df.reset_index(),
+                total_value  = total_portfolio_value,
+                port_metrics = port_metrics,
+            )
+        except Exception as exc:
+            logger.warning("stress scenarios build failed: %s", exc)
+            stress_scenarios = []
+
         # Sector exposure analysis
         sector_exposure = self.engine.get_sector_exposure(list(df.index), weights_dict)
 
@@ -1136,6 +1153,7 @@ class UniversalPortfolioManager:
             "risk_free_rate": self.engine.current_rfr_annual,
             "benchmark_comparison": benchmark_results,
             "period_returns_table": period_returns_table,
+            "stress_scenarios": stress_scenarios,
             "history_result": history_result,
             "sector_exposure": sector_exposure,
             "factor_scores": factor_scores,
