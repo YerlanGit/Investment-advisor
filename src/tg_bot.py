@@ -401,6 +401,7 @@ def _build_equity_curve_svg(results: dict) -> str:
 # user sees that 7/9 factors are loaded, not that we have only 7 factors.
 _RADAR_FACTOR_AXES = [
     "Market", "Momentum", "Value", "Quality", "Size",
+    "Volatility",   # SPLV.US — low-vol factor (Step 5)
     "Commodities", "Rates", "EM_Equity", "EM_Bond",
 ]
 

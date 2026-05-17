@@ -12,7 +12,7 @@ import math
 import os
 import sys
 import unittest
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 import numpy as np
@@ -1361,6 +1361,254 @@ class MacroFeedTest(unittest.TestCase):
             self.assertIn("macro_drivers", p)
             self.assertEqual(p["macro_drivers"]["vix"]["value"], 14.2)
             self.assertEqual(p["macro_drivers"]["vix"]["status"], "ok")
+
+
+# ── 4.1.g  CoVe data-lineage + Volatility-фактор (Step 5 — final) ──────────
+
+class DataLineageTest(unittest.TestCase):
+    """
+    Hand-checked tests for src/finance/data_lineage.py.
+
+    Every row in the runtime CoVe table carries {name, source, method,
+    status, as_of, freshness_days, note}.  The tests inject various
+    `results` shapes (full / partial / empty) and verify the status flag
+    moves through the expected ok → warn → stale → missing → error path.
+    """
+
+    def _full_results(self) -> dict:
+        """A 'happy path' results fixture with every source populated."""
+        # Synthetic history with a recent last date so Tradernet status = ok.
+        dates = pd.date_range("2026-04-15", periods=30, freq="B")
+        prices = pd.DataFrame({"AAPL": np.linspace(180, 195, 30)},
+                              index=dates)
+        class _History:
+            def __init__(self, data):
+                self.data = data
+        hist = _History(prices)
+
+        perf = pd.DataFrame([
+            {"Ticker": "AAPL", "Current_Value": 1000.0,
+             "Fundamental_Sector": "Technology",
+             "SEC_Filing_Date":   "2026-02-01"},   # 3 months old → ok
+            {"Ticker": "JNJ",  "Current_Value": 500.0,
+             "Fundamental_Sector": "Healthcare",
+             "SEC_Filing_Date":   "2025-12-15"},   # 5 months old → ok
+        ])
+
+        return {
+            "history_result":      hist,
+            "performance_table":   perf,
+            "action_plan":         [{"ticker": "AAPL", "action": "Buy"}],
+            "black_litterman":     [{"ticker": "AAPL", "target_w": 0.6}],
+            "regime":              {"regime": "Slowdown", "confidence": 0.72},
+            "stress_scenarios":    [
+                {"name": "Tech sell-off", "coverage": "direct"},
+                {"name": "USD rally",     "coverage": "proxy"},
+            ],
+            "macro_drivers":       {
+                "vix": {"label": "CBOE VIX", "series_id": "VIXCLS",
+                        "status": "ok", "publish_cadence": "daily",
+                        "as_of": "2026-05-14", "freshness_days": 1,
+                        "note": ""},
+            },
+            "cds_summary":         {"loaded": 5, "gated_out": 0},
+        }
+
+    # ─── status flags per source ───────────────────────────────────────
+
+    def test_tradernet_status_ok_when_data_fresh(self) -> None:
+        from finance.data_lineage import build_lineage
+        # Fix a "today" that's right after the synthetic data — 5-day window.
+        rows = build_lineage(self._full_results(), None,
+                              today=date(2026, 5, 27))
+        tradernet = next(r for r in rows if r["source"] == "Tradernet (Freedom Broker)")
+        self.assertEqual(tradernet["status"], "ok")
+        self.assertIsNotNone(tradernet["as_of"])
+        self.assertLessEqual(tradernet["freshness_days"], 5)
+
+    def test_tradernet_status_stale_when_old(self) -> None:
+        from finance.data_lineage import build_lineage
+        # Move "today" far ahead so last close is > 5 cal days old.
+        rows = build_lineage(self._full_results(), None,
+                              today=date(2026, 7, 1))
+        tradernet = next(r for r in rows if r["source"] == "Tradernet (Freedom Broker)")
+        self.assertEqual(tradernet["status"], "stale")
+        self.assertGreater(tradernet["freshness_days"], 5)
+
+    def test_tradernet_status_error_when_no_data(self) -> None:
+        from finance.data_lineage import build_lineage
+        rows = build_lineage({}, None, today=date(2026, 5, 17))
+        tradernet = next(r for r in rows if r["source"] == "Tradernet (Freedom Broker)")
+        self.assertEqual(tradernet["status"], "error")
+
+    def test_sec_warn_when_tickers_missing_coverage(self) -> None:
+        """Two tickers with default/EM_Proxy sector → status='warn'."""
+        from finance.data_lineage import build_lineage
+        r = self._full_results()
+        r["performance_table"] = pd.DataFrame([
+            {"Ticker": "AAPL", "Fundamental_Sector": "Technology",
+             "SEC_Filing_Date": "2026-02-01"},
+            {"Ticker": "KSPI", "Fundamental_Sector": "EM_Proxy",
+             "SEC_Filing_Date": "2025-08-01"},
+            {"Ticker": "FXKZ", "Fundamental_Sector": "default",
+             "SEC_Filing_Date": None},
+        ])
+        rows = build_lineage(r, None, today=date(2026, 5, 17))
+        sec_rows = [x for x in rows if x["source"] == "SEC EDGAR CompanyFacts"]
+        self.assertEqual(len(sec_rows), 2)
+        for s in sec_rows:
+            self.assertEqual(s["status"], "warn")
+            self.assertIn("2 тикеров", s["note"])
+
+    def test_sec_stale_when_oldest_filing_over_30_months(self) -> None:
+        """Filing older than SEC_FILING_STALE_MONTHS triggers 'stale'."""
+        from finance.data_lineage import build_lineage
+        r = self._full_results()
+        r["performance_table"] = pd.DataFrame([
+            {"Ticker": "AAPL", "Fundamental_Sector": "Technology",
+             "SEC_Filing_Date": "2023-01-01"},     # ~40 months old
+        ])
+        rows = build_lineage(r, None, today=date(2026, 5, 17))
+        sec_rows = [x for x in rows if x["source"] == "SEC EDGAR CompanyFacts"]
+        for s in sec_rows:
+            self.assertEqual(s["status"], "stale")
+            self.assertIn("AAPL", s["note"])
+
+    def test_macro_drivers_status_flows_through(self) -> None:
+        """When MacroFeed reports 'stale' for VIX, lineage reflects it."""
+        from finance.data_lineage import build_lineage
+        r = self._full_results()
+        r["macro_drivers"]["vix"]["status"] = "stale"
+        r["macro_drivers"]["vix"]["note"]   = "FRED 503"
+        rows = build_lineage(r, None, today=date(2026, 5, 17))
+        vix_row = next(x for x in rows if x["name"] == "CBOE VIX")
+        self.assertEqual(vix_row["status"], "stale")
+        self.assertEqual(vix_row["note"],   "FRED 503")
+
+    def test_macro_drivers_missing_when_no_key(self) -> None:
+        """No macro_drivers in results → single 'missing' row."""
+        from finance.data_lineage import build_lineage
+        r = self._full_results()
+        r.pop("macro_drivers")
+        rows = build_lineage(r, None, today=date(2026, 5, 17))
+        # The macro placeholder row carries the literal label "Макро-драйверы"
+        # so it can be matched without confusing it with the CDS row that
+        # *also* references FRED (for the HY proxy).
+        macro = [x for x in rows if x["name"].startswith("Макро-драйверы")]
+        self.assertEqual(len(macro), 1)
+        self.assertEqual(macro[0]["status"], "missing")
+        self.assertIn("FRED_API_KEY", macro[0]["note"])
+
+    def test_action_plan_missing_when_empty(self) -> None:
+        from finance.data_lineage import build_lineage
+        r = self._full_results()
+        r["action_plan"] = []
+        rows = build_lineage(r, None, today=date(2026, 5, 17))
+        ap = next(x for x in rows if x["name"].startswith("Action levels"))
+        self.assertEqual(ap["status"], "missing")
+
+    def test_bl_missing_when_no_records(self) -> None:
+        from finance.data_lineage import build_lineage
+        r = self._full_results()
+        r["black_litterman"] = None
+        rows = build_lineage(r, None, today=date(2026, 5, 17))
+        bl = next(x for x in rows if x["name"].startswith("Black-Litterman"))
+        self.assertEqual(bl["status"], "missing")
+
+    def test_stress_warn_when_proxy_scenarios_present(self) -> None:
+        """At least one proxy-coverage scenario → status='warn' (not 'ok')."""
+        from finance.data_lineage import build_lineage
+        rows = build_lineage(self._full_results(), None,
+                              today=date(2026, 5, 17))
+        stress = next(x for x in rows if x["name"] == "Стресс-сценарии")
+        self.assertEqual(stress["status"], "warn")
+        self.assertIn("proxy", stress["note"])
+
+    def test_stress_ok_when_all_direct_coverage(self) -> None:
+        from finance.data_lineage import build_lineage
+        r = self._full_results()
+        r["stress_scenarios"] = [
+            {"name": "Tech sell-off", "coverage": "direct"},
+            {"name": "Fed +50",       "coverage": "direct"},
+        ]
+        rows = build_lineage(r, None, today=date(2026, 5, 17))
+        stress = next(x for x in rows if x["name"] == "Стресс-сценарии")
+        self.assertEqual(stress["status"], "ok")
+
+    def test_rag_status_reflects_used_rag_flag(self) -> None:
+        from finance.data_lineage import build_lineage
+        rows_yes = build_lineage(self._full_results(),
+                                   {"used_rag": True},
+                                   today=date(2026, 5, 17))
+        rag_yes = next(x for x in rows_yes if x["name"] == "Bank RAG (выдержки)")
+        self.assertEqual(rag_yes["status"], "ok")
+
+        rows_no = build_lineage(self._full_results(),
+                                  {"used_rag": False},
+                                  today=date(2026, 5, 17))
+        rag_no = next(x for x in rows_no if x["name"] == "Bank RAG (выдержки)")
+        self.assertEqual(rag_no["status"], "missing")
+
+    def test_lineage_always_returns_stable_schema(self) -> None:
+        """Every row has the SAME keys — renderer can iterate without checks."""
+        from finance.data_lineage import build_lineage
+        rows = build_lineage(self._full_results(), {"verdict": "x", "bullets": ["a"]},
+                              today=date(2026, 5, 17))
+        required = {"name", "source", "method", "status",
+                    "as_of", "freshness_days", "note"}
+        for r in rows:
+            self.assertTrue(required.issubset(r.keys()),
+                             f"missing keys in {r['name']}: {required - r.keys()}")
+            self.assertIn(r["status"], {"ok", "warn", "stale", "missing", "error"})
+
+    def test_lineage_renders_even_on_empty_results(self) -> None:
+        """Catastrophic case: empty results → lineage still returns rows
+        with 'missing'/'error' statuses; never raises."""
+        from finance.data_lineage import build_lineage
+        rows = build_lineage({}, None, today=date(2026, 5, 17))
+        self.assertGreater(len(rows), 5)
+        # Must contain at least one row per major source category.
+        names = {r["name"] for r in rows}
+        self.assertIn("Vol · CVaR · TE · IR · Max DD", names)
+
+    # ─── Volatility factor expansion ───────────────────────────────────
+
+    def test_factor_etfs_includes_splv(self) -> None:
+        """pdf_payload._FACTOR_ETFS must include SPLV.US (Step 5 expansion)."""
+        from pdf_payload import _FACTOR_ETFS
+        self.assertIn("SPLV.US", _FACTOR_ETFS)
+        # Count = 10 (was 9 before Step 5).
+        self.assertEqual(len(_FACTOR_ETFS), 10)
+
+    def test_radar_factor_axes_includes_volatility(self) -> None:
+        """tg_bot._RADAR_FACTOR_AXES must include the new Volatility axis."""
+        # Lazy import — tg_bot has heavy imports we don't actually exercise.
+        import importlib
+        try:
+            tg = importlib.import_module("tg_bot")
+        except Exception:
+            self.skipTest("tg_bot imports not available in this env")
+        self.assertIn("Volatility", tg._RADAR_FACTOR_AXES)
+        # Count = 10 axes.
+        self.assertEqual(len(tg._RADAR_FACTOR_AXES), 10)
+
+    # ─── Payload passthrough ───────────────────────────────────────────
+
+    def test_payload_includes_cove_lineage(self) -> None:
+        """build_payload calls build_lineage and surfaces it under cove_lineage."""
+        from pdf_payload import build_payload, TIER_BASE, TIER_DEEP
+        # Re-use the basic concentration fixture and bolt on the lineage inputs.
+        results = ConcentrationAndWaterfallTest()._base_results()
+        results["macro_drivers"] = {}
+        for tier in (TIER_BASE, TIER_DEEP):
+            p = build_payload(results, tier,
+                              ai_summary={"verdict": "v", "bullets": ["a"]})
+            self.assertIn("cove_lineage", p)
+            self.assertGreater(len(p["cove_lineage"]), 5)
+            # Stable schema sanity at payload level.
+            for row in p["cove_lineage"]:
+                self.assertIn("status", row)
+                self.assertIn("name",   row)
 
 
 # ── 4.2  SVG charts ─────────────────────────────────────────────────────────

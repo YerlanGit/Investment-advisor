@@ -164,6 +164,7 @@ class MAC3RiskEngine:
             'Value':       'VLUE.US',
             'Quality':     'QUAL.US',
             'Size':        'IWM.US',
+            'Volatility':  'SPLV.US',   # Invesco S&P 500 Low Volatility — low-vol factor
             'Commodities': 'DBC.US',
             'Rates':       'IEF.US',    # 7-10y Treasury — фактор процентных ставок
             'EM_Equity':   'EEM.US',    # MSCI Emerging Markets — EM equity premium

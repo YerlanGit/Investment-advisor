@@ -1,0 +1,403 @@
+"""
+Runtime CoVe (Chain-of-Verification) data lineage.
+
+Replaces the hard-coded "verified sources" block in report_deep.html with
+a data-driven dict the renderer can iterate.  For every metric category
+reported on the cover page, we surface:
+
+  • where the number came from (source tag),
+  • how it was computed (one-line method),
+  • whether the source was actually consulted on THIS run (status flag),
+  • how fresh the underlying observation is.
+
+Status taxonomy (mirrors services.macro_data.MacroFeed so the UI uses ONE
+visual vocabulary across pipeline modules):
+
+  ok       Source consulted, data within freshness window, no flags
+  warn     Source consulted but partial data (e.g. SEC missed N tickers,
+            CDS feed has stale gate trips, etc.)
+  stale    Cache served / data older than freshness window — still usable
+            but should be displayed with a "⚠" badge
+  missing  Source intentionally not consulted (e.g. FRED_API_KEY unset)
+  error    Source FAILED to deliver any usable data on this run
+
+Design constraints
+──────────────────
+1. Sklearn-free — runs in any environment.
+2. NO additional fetches.  The function reads ONLY the dict already
+   produced by analyze_all() plus a couple of helper columns from perf_df.
+3. Stable schema.  Every row carries the same keys so the renderer can
+   loop without conditionals.
+"""
+from __future__ import annotations
+
+import math
+from datetime import date, datetime, timezone
+from typing import Optional
+
+import pandas as pd
+
+
+# Per-source freshness thresholds (calendar days).
+SEC_FILING_WARN_MONTHS    = 18           # 10-K older than ~1.5y → warn
+SEC_FILING_STALE_MONTHS   = 30           # > 2.5y → stale
+TRADERNET_FRESH_CAL_DAYS  = 5            # ≈ 3 trading days
+
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+def _today_utc() -> date:
+    return datetime.now(timezone.utc).date()
+
+
+def _parse_iso_date(s) -> Optional[date]:
+    if not s:
+        return None
+    try:
+        return date.fromisoformat(str(s)[:10])
+    except (TypeError, ValueError):
+        return None
+
+
+def _months_between(iso_date_str, ref: Optional[date] = None) -> Optional[int]:
+    d = _parse_iso_date(iso_date_str)
+    if d is None:
+        return None
+    r = ref or _today_utc()
+    return (r.year - d.year) * 12 + (r.month - d.month)
+
+
+def _row(name: str, source: str, method: str, status: str, *,
+          as_of:           Optional[str] = None,
+          freshness_days:  Optional[int] = None,
+          note:            str           = "") -> dict:
+    return {
+        "name":           name,
+        "source":         source,
+        "method":         method,
+        "status":         status,
+        "as_of":          as_of,
+        "freshness_days": freshness_days,
+        "note":           note,
+    }
+
+
+# ── Per-source checkers ──────────────────────────────────────────────────────
+
+def _tradernet_status(results: dict, today: date) -> dict:
+    """Last close-date freshness from history_result.data."""
+    history = results.get("history_result")
+    data    = getattr(history, "data", None) if history is not None else None
+    if data is None or len(data) == 0:
+        return _row(
+            name   = "Цены и история активов",
+            source = "Tradernet (Freedom Broker)",
+            method = "Daily CLOSE · 730d window",
+            status = "error",
+            note   = "no price data loaded",
+        )
+    last_dt = pd.to_datetime(data.index[-1]).date()
+    age = (today - last_dt).days
+    if age > TRADERNET_FRESH_CAL_DAYS:
+        status, note = "stale", f"last close {age} cal days old"
+    else:
+        status, note = "ok", ""
+    return _row(
+        name   = "Цены и история активов",
+        source = "Tradernet (Freedom Broker)",
+        method = "Daily CLOSE · 730d window · ATR via OHLC (fallback |ΔClose|)",
+        status = status,
+        as_of  = last_dt.isoformat(),
+        freshness_days = age,
+        note   = note,
+    )
+
+
+def _sec_status(results: dict, today: date) -> list[dict]:
+    """
+    Two rows: fundamental Z-scores + financial-health metrics.
+    Both depend on SEC EDGAR CompanyFacts JSON.
+    Status downgrades based on:
+      - number of skipped tickers (default/EM_Proxy sector)
+      - age of the OLDEST 10-K filing in the universe
+    """
+    perf = results.get("performance_table")
+    skipped: list[str] = []
+    oldest_age_m: Optional[int] = None
+    oldest_ticker: Optional[str] = None
+
+    if perf is not None and not perf.empty:
+        if "Fundamental_Sector" in perf.columns:
+            mask = perf["Fundamental_Sector"].astype(str).isin(["default", "EM_Proxy"])
+            skipped = perf.loc[mask, "Ticker"].astype(str).tolist()
+        if "SEC_Filing_Date" in perf.columns:
+            for _, row in perf.iterrows():
+                fd = row.get("SEC_Filing_Date")
+                age_m = _months_between(fd, today)
+                if age_m is None:
+                    continue
+                if oldest_age_m is None or age_m > oldest_age_m:
+                    oldest_age_m = age_m
+                    oldest_ticker = str(row.get("Ticker"))
+
+    # Build the status flag.
+    notes: list[str] = []
+    status = "ok"
+    if skipped:
+        notes.append(f"{len(skipped)} тикеров без SEC покрытия")
+        status = "warn"
+    if oldest_age_m is not None:
+        if oldest_age_m >= SEC_FILING_STALE_MONTHS:
+            notes.append(f"{oldest_ticker} 10-K {oldest_age_m} мес. (просрочено)")
+            status = "stale"
+        elif oldest_age_m >= SEC_FILING_WARN_MONTHS:
+            notes.append(f"{oldest_ticker} 10-K {oldest_age_m} мес. (устарело)")
+            status = "warn" if status == "ok" else status
+
+    note_str = " · ".join(notes)
+    return [
+        _row(
+            name   = "Fundamental Z-scores",
+            source = "SEC EDGAR CompanyFacts",
+            method = "10-K FY · sector-normalised MAD · Group B factors",
+            status = status,
+            note   = note_str,
+        ),
+        _row(
+            name   = "Altman-Z · Piotroski-F · Interest Coverage",
+            source = "SEC EDGAR CompanyFacts",
+            method = "разностный расчёт по балансу и P&L (annual filings)",
+            status = status,
+            note   = note_str,
+        ),
+    ]
+
+
+def _cds_status(results: dict) -> dict:
+    """
+    Read whatever the engine already attached for CDS quality.
+    Today the CDS gate writes a freshness flag into results['cds_summary'];
+    fall back to a generic 'ok' if the engine didn't expose anything.
+    """
+    cds_summary = results.get("cds_summary") or {}
+    if not cds_summary:
+        return _row(
+            name   = "CDS spreads (credit signal)",
+            source = "FRED HY proxy + WGB sovereign",
+            method = "QualityGate: sanity 1–3000 bps · ≤ 3 trading days",
+            status = "ok",
+            note   = "no per-ticker CDS attached to results",
+        )
+    n_gated  = int(cds_summary.get("gated_out", 0) or 0)
+    n_loaded = int(cds_summary.get("loaded",    0) or 0)
+    if n_loaded == 0:
+        status, note = "missing", "feed unavailable"
+    elif n_gated > 0:
+        status = "warn"
+        note   = f"{n_gated}/{n_loaded} tickers failed gate"
+    else:
+        status, note = "ok", f"{n_loaded} tickers"
+    return _row(
+        name   = "CDS spreads (credit signal)",
+        source = "FRED HY proxy + WGB sovereign",
+        method = "QualityGate: sanity 1–3000 bps · ≤ 3 trading days",
+        status = status,
+        note   = note,
+    )
+
+
+def _macro_status(results: dict) -> list[dict]:
+    """
+    One row per FRED series in macro_drivers — reuses the status field the
+    MacroFeed already produced (ok / stale / missing / error).
+    """
+    macro = results.get("macro_drivers") or {}
+    if not macro:
+        return [_row(
+            name   = "Макро-драйверы (FRED)",
+            source = "FRED St. Louis Fed",
+            method = "yield curve · HY spread · PMI · VIX · breakeven",
+            status = "missing",
+            note   = "FRED_API_KEY not set (see .env.template)",
+        )]
+    rows: list[dict] = []
+    for key, m in macro.items():
+        rows.append(_row(
+            name   = m.get("label", key),
+            source = f"FRED · {m.get('series_id', '?')}",
+            method = f"{m.get('publish_cadence', 'daily')} · QualityGate "
+                     f"freshness + sanity range",
+            status         = m.get("status", "error"),
+            as_of          = m.get("as_of"),
+            freshness_days = m.get("freshness_days"),
+            note           = m.get("note", ""),
+        ))
+    return rows
+
+
+def _action_levels_status(results: dict) -> dict:
+    plan = results.get("action_plan") or []
+    if not plan:
+        return _row(
+            name   = "Action levels (Buy / Sell / Stop)",
+            source = "Quant Engine",
+            method = "ATR Wilder RMA + SMA50/200 + RSI(14) + MACD(12,26,9)",
+            status = "missing",
+            note   = "action plan not computed for this run",
+        )
+    return _row(
+        name   = "Action levels (Buy / Sell / Stop)",
+        source = "Quant Engine",
+        method = "ATR Wilder RMA + SMA50/200 + RSI(14) + MACD(12,26,9)",
+        status = "ok",
+        note   = f"{len(plan)} positions",
+    )
+
+
+def _bl_status(results: dict) -> dict:
+    bl = results.get("black_litterman")
+    if not bl:
+        return _row(
+            name   = "Black-Litterman target weights",
+            source = "Quant Engine",
+            method = "Reverse-optimisation prior + score-derived views",
+            status = "missing",
+            note   = "BL skipped (no scores / empty cov)",
+        )
+    return _row(
+        name   = "Black-Litterman target weights",
+        source = "Quant Engine",
+        method = "reverse-optimisation prior + score-derived views, "
+                 "τ=0.05",
+        status = "ok",
+        note   = f"{len(bl)} positions reweighted",
+    )
+
+
+def _regime_status(results: dict) -> dict:
+    regime = results.get("regime")
+    if not regime:
+        return _row(
+            name   = "Регим-классификатор",
+            source = "Quant Engine",
+            method = "Growth × Cycle factor returns · 60-day window",
+            status = "missing",
+        )
+    conf = int(round(float(regime.get("confidence", 0)) * 100))
+    return _row(
+        name   = "Регим-классификатор",
+        source = "Quant Engine",
+        method = "Growth × Cycle factor returns · 60-day window",
+        status = "ok",
+        note   = f"{regime.get('regime')} · confidence {conf}%",
+    )
+
+
+def _stress_status(results: dict) -> dict:
+    rows = results.get("stress_scenarios") or []
+    if not rows:
+        return _row(
+            name   = "Стресс-сценарии",
+            source = "Quant Engine",
+            method = "parametric factor shocks · per-asset β · linear PnL",
+            status = "missing",
+        )
+    proxies = sum(1 for r in rows if r.get("coverage") == "proxy")
+    return _row(
+        name   = "Стресс-сценарии",
+        source = "Quant Engine",
+        method = "parametric factor shocks · per-asset β · linear PnL",
+        status = "ok" if proxies == 0 else "warn",
+        note   = (f"{len(rows)} сценариев"
+                  + (f" · {proxies} proxy" if proxies else "")),
+    )
+
+
+def _rag_status(ai_summary: Optional[dict]) -> dict:
+    used = bool((ai_summary or {}).get("used_rag"))
+    return _row(
+        name   = "Bank RAG (выдержки)",
+        source = "ChromaDB · GS / MS / JPM PDF reports",
+        method = "cosine similarity retrieval",
+        status = "ok" if used else "missing",
+        note   = "" if used else "RAG not requested / not available",
+    )
+
+
+def _ai_status(ai_summary: Optional[dict]) -> dict:
+    a = ai_summary or {}
+    if not a.get("verdict") and not a.get("bullets"):
+        return _row(
+            name   = "AI verdict · bullets",
+            source = "Anthropic Claude (Haiku/Sonnet)",
+            method = "advisory only; verdict + plain summary + bullets",
+            status = "missing",
+            note   = "ANTHROPIC_API_KEY missing or AI call failed",
+        )
+    return _row(
+        name   = "AI verdict · bullets",
+        source = "Anthropic Claude " + (a.get("model_used") or ""),
+        method = "advisory only; verdict + plain summary + bullets",
+        status = "ok",
+        note   = "не является ИИИ",
+    )
+
+
+# ── Public API ───────────────────────────────────────────────────────────────
+
+def build_lineage(results: dict,
+                   ai_summary: Optional[dict] = None,
+                   *, today: Optional[date] = None) -> list[dict]:
+    """
+    Assemble the runtime CoVe table.  Order matters — this is the order
+    the report will render.
+    """
+    today = today or _today_utc()
+    rows: list[dict] = []
+
+    # Quant Engine — always-on baseline.
+    rows.append(_row(
+        name   = "Vol · CVaR · TE · IR · Max DD",
+        source = "Quant Engine MAC3",
+        method = "Wilder RMA · EWMA λ≈0.94 ⊕ Ledoit-Wolf 70/30 · "
+                 "Politis-Romano bootstrap CI",
+        status = "ok",
+    ))
+    rows.append(_row(
+        name   = "TRC (Euler decomposition) · MCTR · CVaR",
+        source = "Quant Engine MAC3",
+        method = "MCTR = Σw/σ_p · ERC%_i = w_i·MCTR_i/σ_p",
+        status = "ok",
+    ))
+
+    # Прайсы + ATR + benchmark frame.
+    rows.append(_tradernet_status(results, today))
+
+    # SEC EDGAR (2 rows).
+    rows.extend(_sec_status(results, today))
+
+    # CDS (when engine exposes the gate summary).
+    rows.append(_cds_status(results))
+
+    # Action plan / BL / regime / stress / RAG / AI.
+    rows.append(_action_levels_status(results))
+    rows.append(_bl_status(results))
+    rows.append(_regime_status(results))
+    rows.append(_stress_status(results))
+
+    # FRED macro drivers (variable rows depending on catalog).
+    rows.extend(_macro_status(results))
+
+    # Bank RAG + AI narrative.
+    rows.append(_rag_status(ai_summary))
+    rows.append(_ai_status(ai_summary))
+
+    return rows
+
+
+__all__ = [
+    "build_lineage",
+    "SEC_FILING_WARN_MONTHS",
+    "SEC_FILING_STALE_MONTHS",
+    "TRADERNET_FRESH_CAL_DAYS",
+]

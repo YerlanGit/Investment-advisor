@@ -126,9 +126,10 @@ TIER_BASE = "base"
 TIER_DEEP = "deep"
 
 # Factor ETFs the engine attempts to load (keep in sync with MAC3RiskEngine).
+# SPLV adds the Volatility (low-vol) factor — Step 5 expansion.
 _FACTOR_ETFS = [
     "SPY.US", "MTUM.US", "VLUE.US", "QUAL.US", "IWM.US",
-    "DBC.US", "IEF.US", "EEM.US", "EMB.US",
+    "SPLV.US", "DBC.US", "IEF.US", "EEM.US", "EMB.US",
 ]
 
 # Benchmark display-name → Tradernet ticker (reverse used to filter scenarios).
@@ -308,6 +309,15 @@ def build_payload(results: dict, tier: str,
     # ── Macro drivers from FRED (5-series pack for DEEP P5) ────────────────
     macro_drivers = results.get("macro_drivers") or {}
 
+    # ── CoVe data-lineage (runtime status per source) ──────────────────────
+    # Build a uniform list[dict] over all data sources consumed by this
+    # run — used by the DEEP P4 "CoVe" panel.  Pure-function, never throws.
+    try:
+        from finance.data_lineage import build_lineage as _build_lineage
+        cove_lineage = _build_lineage(results, ai_summary)
+    except Exception:
+        cove_lineage = []
+
     # ── Macro regime (Cover) ───────────────────────────────────────────────
     regime_block = None
     regime = results.get("regime")
@@ -439,6 +449,8 @@ def build_payload(results: dict, tier: str,
         "expected_effect":      expected_effect,
         # Macro drivers — FRED 5-series pack for DEEP P5 regime page
         "macro_drivers":        macro_drivers,
+        # CoVe data-lineage (runtime status per source — DEEP P4 panel)
+        "cove_lineage":         cove_lineage,
         # Regime
         "regime":            regime_block,
         "regime_rag_confirm": regime_rag_confirm or [],
