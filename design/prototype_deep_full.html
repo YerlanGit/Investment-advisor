@@ -2332,7 +2332,7 @@
       <!-- Radar SVG -->
       <div class="factor-radar-wrap">
         <svg class="factor-radar-svg" viewBox="0 0 320 280" xmlns="http://www.w3.org/2000/svg"
-             role="img" aria-label="Факторный радар портфеля: 6 факторов">
+             role="img" aria-label="Факторный радар портфеля: 8 факторов">
           <defs>
             <linearGradient id="radarFill" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%"   stop-color="#2F6FB3" stop-opacity="0.32"/>
@@ -2347,21 +2347,23 @@
             </filter>
           </defs>
 
-          <!-- концентрические сетки 0.25 / 0.5 / 0.75 / 1.0 -->
+          <!-- концентрические сетки 0.25 / 0.5 / 0.75 / 1.0 (8-gon) -->
           <g fill="none" stroke="rgba(42,46,51,0.18)" stroke-width="0.5">
-            <polygon points="160,115 181.65,127.5 181.65,152.5 160,165 138.35,152.5 138.35,127.5"/>
-            <polygon points="160,90  203.3,115   203.3,165   160,190 116.7,165   116.7,115"/>
-            <polygon points="160,65  224.95,102.5 224.95,177.5 160,215 95.05,177.5 95.05,102.5"/>
-            <polygon points="160,40  246.6,90    246.6,190   160,240 73.4,190    73.4,90" stroke-opacity="0.32"/>
+            <polygon points="160,115 177.68,122.32 185,140 177.68,157.68 160,165 142.32,157.68 135,140 142.32,122.32"/>
+            <polygon points="160,90  195.36,104.64 210,140 195.36,175.36 160,190 124.64,175.36 110,140 124.64,104.64"/>
+            <polygon points="160,65  213.03,86.97 235,140 213.03,193.03 160,215 106.97,193.03 85,140 106.97,86.97"/>
+            <polygon points="160,40  230.71,69.29 260,140 230.71,210.71 160,240 89.29,210.71 60,140 89.29,69.29" stroke-opacity="0.32"/>
           </g>
-          <!-- радиальные оси -->
+          <!-- 8 радиальных осей (каждые 45°) -->
           <g stroke="rgba(42,46,51,0.20)" stroke-width="0.5">
-            <line x1="160" y1="140" x2="160"   y2="40"/>
-            <line x1="160" y1="140" x2="246.6" y2="90"/>
-            <line x1="160" y1="140" x2="246.6" y2="190"/>
-            <line x1="160" y1="140" x2="160"   y2="240"/>
-            <line x1="160" y1="140" x2="73.4"  y2="190"/>
-            <line x1="160" y1="140" x2="73.4"  y2="90"/>
+            <line x1="160" y1="140" x2="160"    y2="40"/>
+            <line x1="160" y1="140" x2="230.71" y2="69.29"/>
+            <line x1="160" y1="140" x2="260"    y2="140"/>
+            <line x1="160" y1="140" x2="230.71" y2="210.71"/>
+            <line x1="160" y1="140" x2="160"    y2="240"/>
+            <line x1="160" y1="140" x2="89.29"  y2="210.71"/>
+            <line x1="160" y1="140" x2="60"     y2="140"/>
+            <line x1="160" y1="140" x2="89.29"  y2="69.29"/>
           </g>
 
           <!-- метки шкалы (вдоль оси Market) -->
@@ -2371,42 +2373,50 @@
             <text x="164" y="44"  text-anchor="start">1.5</text>
           </g>
 
-          <!-- метки факторов на тиках -->
-          <g font-family="IBM Plex Mono" font-size="9.5" fill="rgba(42,46,51,0.85)" font-weight="600">
-            <text x="160"   y="28"  text-anchor="middle">MARKET</text>
-            <text x="259.6" y="86"  text-anchor="middle">VALUE</text>
-            <text x="259.6" y="201" text-anchor="middle">QUALITY</text>
-            <text x="160"   y="258" text-anchor="middle">MOMENTUM</text>
-            <text x="60.4"  y="201" text-anchor="middle">SIZE</text>
-            <text x="60.4"  y="86"  text-anchor="middle">VOLATILITY</text>
+          <!-- 8 меток факторов на тиках -->
+          <g font-family="IBM Plex Mono" font-size="9" fill="rgba(42,46,51,0.85)" font-weight="600">
+            <text x="160"    y="28"  text-anchor="middle">MARKET</text>
+            <text x="241.32" y="60"  text-anchor="middle">VALUE</text>
+            <text x="277"    y="143" text-anchor="middle">QUALITY</text>
+            <text x="241.32" y="223" text-anchor="middle">COMMOD</text>
+            <text x="160"    y="258" text-anchor="middle">MOMENTUM</text>
+            <text x="78.68"  y="223" text-anchor="middle">RATES</text>
+            <text x="42"     y="143" text-anchor="middle">SIZE</text>
+            <text x="78.68"  y="60"  text-anchor="middle">VOLATIL</text>
           </g>
 
-          <!-- бенчмарк (SPX-like): гексагон рядом с центром, лёгкая заливка -->
-          <polygon points="160,73.33 217.74,123.33 217.74,156.67 160,206.67 102.26,156.67 102.26,123.33"
+          <!-- бенчмарк (SPX-like): октагон 0.5 baseline, dashed -->
+          <polygon points="160,90 195.36,104.64 210,140 195.36,175.36 160,190 124.64,175.36 110,140 124.64,104.64"
                    fill="rgba(42,46,51,0.06)" stroke="rgba(42,46,51,0.35)" stroke-width="0.6"
                    stroke-dasharray="3 2"/>
 
-          <!-- портфель: сглаженный полигон с градиентом + тенью -->
-          <polygon points="160,61.33 174.43,131.67 195.79,160.67 160,210 135.75,154 109.19,110.67"
+          <!-- портфель: 8-вершинный полигон с градиентом + тенью.            -->
+          <!-- β: MARKET 1.18 · VALUE 0.25 · QUALITY 0.62 · COMMOD 0.15 ·     -->
+          <!--    MOMENTUM 1.05 · RATES |−0.30|=0.30 · SIZE 0.42 · VOL 0.88   -->
+          <polygon points="160,61.33 171.79,128.21 201.33,140 167.07,147.07 160,210 145.86,154.14 132,140 118.51,98.51"
                    fill="url(#radarFill)" stroke="url(#radarStroke)" stroke-width="1.8"
                    stroke-linejoin="round" filter="url(#radarShadow)"/>
 
           <!-- вершины данных -->
           <g fill="#2F6FB3">
             <circle cx="160"    cy="61.33"  r="3.0"/>
-            <circle cx="174.43" cy="131.67" r="3.0"/>
-            <circle cx="195.79" cy="160.67" r="3.0"/>
+            <circle cx="171.79" cy="128.21" r="3.0"/>
+            <circle cx="201.33" cy="140"    r="3.0"/>
+            <circle cx="167.07" cy="147.07" r="3.0"/>
             <circle cx="160"    cy="210"    r="3.0"/>
-            <circle cx="135.75" cy="154"    r="3.0"/>
-            <circle cx="109.19" cy="110.67" r="3.0"/>
+            <circle cx="145.86" cy="154.14" r="3.0"/>
+            <circle cx="132"    cy="140"    r="3.0"/>
+            <circle cx="118.51" cy="98.51"  r="3.0"/>
           </g>
           <g fill="#FBFAF7">
             <circle cx="160"    cy="61.33"  r="1.3"/>
-            <circle cx="174.43" cy="131.67" r="1.3"/>
-            <circle cx="195.79" cy="160.67" r="1.3"/>
+            <circle cx="171.79" cy="128.21" r="1.3"/>
+            <circle cx="201.33" cy="140"    r="1.3"/>
+            <circle cx="167.07" cy="147.07" r="1.3"/>
             <circle cx="160"    cy="210"    r="1.3"/>
-            <circle cx="135.75" cy="154"    r="1.3"/>
-            <circle cx="109.19" cy="110.67" r="1.3"/>
+            <circle cx="145.86" cy="154.14" r="1.3"/>
+            <circle cx="132"    cy="140"    r="1.3"/>
+            <circle cx="118.51" cy="98.51"  r="1.3"/>
           </g>
 
           <!-- легенда внизу -->
@@ -2419,19 +2429,22 @@
         </svg>
       </div>
 
-      <!-- Factor table -->
+      <!-- Factor table — 8 rows (EM_Equity / EM_Bond опущены: корреляция     -->
+      <!-- EM_Equity↔MARKET ≈ 0.85, EM_Bond↔RATES ≈ 0.50 — дублируют сигнал)  -->
       <div class="factor-table-wrap">
         <table class="factor-table">
           <thead>
             <tr><th>Фактор</th><th>β портф.</th><th>Бенч.</th><th>Δ</th></tr>
           </thead>
           <tbody>
-            <tr><td>Market</td><td>1.18</td><td>1.00</td><td class="delta-pos">+0.18</td></tr>
-            <tr><td>Value</td><td>0.25</td><td>0.00</td><td class="delta-pos">+0.25</td></tr>
-            <tr><td>Quality</td><td>0.62</td><td>0.00</td><td class="delta-pos">+0.62</td></tr>
-            <tr><td>Momentum</td><td>1.05</td><td>0.00</td><td class="delta-pos">+1.05</td></tr>
-            <tr><td>Size</td><td>0.42</td><td>0.00</td><td class="delta-pos">+0.42</td></tr>
-            <tr><td>Volatility</td><td>0.88</td><td>0.00</td><td class="delta-pos">+0.88</td></tr>
+            <tr><td>Market</td>      <td>1.18</td><td>1.00</td><td class="delta-pos">+0.18</td></tr>
+            <tr><td>Value</td>       <td>0.25</td><td>0.00</td><td class="delta-pos">+0.25</td></tr>
+            <tr><td>Quality</td>     <td>0.62</td><td>0.00</td><td class="delta-pos">+0.62</td></tr>
+            <tr><td>Commodities</td> <td>0.15</td><td>0.00</td><td class="delta-pos">+0.15</td></tr>
+            <tr><td>Momentum</td>    <td>1.05</td><td>0.00</td><td class="delta-pos">+1.05</td></tr>
+            <tr><td>Rates</td>       <td>−0.30</td><td>0.00</td><td class="delta-neg">−0.30</td></tr>
+            <tr><td>Size</td>        <td>0.42</td><td>0.00</td><td class="delta-pos">+0.42</td></tr>
+            <tr><td>Volatility</td>  <td>0.88</td><td>0.00</td><td class="delta-pos">+0.88</td></tr>
           </tbody>
         </table>
         <div style="margin-top:8px; font-size:9.5px; color:var(--ink-60); line-height:1.5;">
@@ -2447,11 +2460,13 @@
       <div class="ai-head">[ 🤖 AI_ANALYSIS // HAIKU ]</div>
       <div class="ai-body">
         «Портфель сильно тянет <span class="flag">Momentum (β=1.05)</span> и
-        <span class="flag">Market (β=1.18)</span> — это уже знакомый перевес в IT.
+        <span class="flag">Market (β=1.18)</span> — знакомый перевес в IT.
         Quality 0.62 и Volatility 0.88 говорят, что бумаги дорогие/«разогретые»:
-        в коррекцию они корректируются глубже. Низкий Value (0.25) — портфель не
-        выглядит «дешёвым» по фундаменталу. Эти 4 фактора — главная скрытая ставка
-        одновременно идут вместе с PLTR · CRWD · NVDA.
+        в коррекцию корректируются глубже. Низкий Value (0.25) — портфель не
+        выглядит «дешёвым» по фундаменталу. Отрицательная Rates β (−0.30) —
+        чувствительность к росту ставок (growth stocks страдают на hawkish surprise);
+        Commodities 0.15 — нет hedge против инфляции. Эти 5 факторов — главная
+        скрытая ставка, движутся синхронно вместе с PLTR · CRWD · NVDA.
         <span class="src">[Quant Engine]</span>»
       </div>
     </div>
@@ -3025,41 +3040,41 @@
     </div>
 
     <div class="cove-grid">
+      <!-- ─── Quant Engine (always-on) ─── -->
       <div class="cove-item">
         <span class="cove-check">✓</span>
         <span class="cove-body"><b>Vol · CVaR · TE · IR · Max DD</b><br>
-          <span class="cove-meta">Quant Engine · 730d daily · Wilder RMA · EWMA λ≈0.94 ⊕ Ledoit-Wolf</span></span>
+          <span class="cove-meta">Quant Engine MAC3 · Wilder RMA · EWMA λ≈0.94 ⊕ Ledoit-Wolf · Politis-Romano bootstrap CI</span></span>
       </div>
       <div class="cove-item">
         <span class="cove-check">✓</span>
-        <span class="cove-body"><b>Tracking Error</b><br>
-          <span class="cove-meta">σ(port − bm, ddof=1) × √252 · отличается от Vol портфеля √(w'Σw)·√252</span></span>
+        <span class="cove-body"><b>TRC (Euler decomposition) · MCTR</b><br>
+          <span class="cove-meta">MCTR = Σw/σ_p · ERC%ᵢ = wᵢ·MCTRᵢ/σ_p</span></span>
       </div>
+      <!-- ─── Prices + technicals ─── -->
       <div class="cove-item">
         <span class="cove-check">✓</span>
-        <span class="cove-body"><b>Information Ratio</b><br>
-          <span class="cove-meta">Excess_Return_Ann ÷ Tracking_Error — обе годовые</span></span>
+        <span class="cove-body"><b>Цены и история активов</b><br>
+          <span class="cove-meta">Tradernet (Freedom Broker) · Daily CLOSE 730d · ATR via OHLC, fallback |ΔClose|</span></span>
       </div>
+      <!-- ─── SEC EDGAR (2 rows) ─── -->
       <div class="cove-item">
         <span class="cove-check">✓</span>
         <span class="cove-body"><b>Fundamental Z-scores</b><br>
-          <span class="cove-meta">SEC EDGAR · 10-K FY · sector-normalised MAD</span></span>
+          <span class="cove-meta">SEC EDGAR · 10-K FY · sector-normalised MAD · Group B factors</span></span>
       </div>
       <div class="cove-item">
         <span class="cove-check">✓</span>
         <span class="cove-body"><b>Altman-Z · Piotroski-F · Interest Coverage</b><br>
-          <span class="cove-meta">SEC EDGAR CompanyFacts JSON</span></span>
+          <span class="cove-meta">SEC EDGAR CompanyFacts · разностный расчёт по балансу и P&amp;L</span></span>
       </div>
+      <!-- ─── CDS ─── -->
       <div class="cove-item warn">
         <span class="cove-check">!</span>
-        <span class="cove-body"><b>CDS spreads</b><br>
-          <span class="cove-meta">FRED HY proxy · WGB sovereign · QualityGate 1–3000 bps, ≤3 trading days</span></span>
+        <span class="cove-body"><b>CDS spreads (credit signal)</b><br>
+          <span class="cove-meta">FRED HY proxy + WGB sovereign · QualityGate 1–3000 bps, ≤3 trading days · <i>5/8 loaded · 3 gated out</i></span></span>
       </div>
-      <div class="cove-item">
-        <span class="cove-check">✓</span>
-        <span class="cove-body"><b>Режим рынка</b><br>
-          <span class="cove-meta">Quant Engine · Growth / Cycle factor returns · окно 60 дней</span></span>
-      </div>
+      <!-- ─── Actions + BL ─── -->
       <div class="cove-item">
         <span class="cove-check">✓</span>
         <span class="cove-body"><b>Action levels (Buy / Sell / Stop)</b><br>
@@ -3067,21 +3082,59 @@
       </div>
       <div class="cove-item">
         <span class="cove-check">✓</span>
-        <span class="cove-body"><b>Bank RAG</b><br>
-          <span class="cove-meta">ChromaDB · публичные PDF-отчёты GS/MS/JPM · cosine similarity ≥ 0.72</span></span>
+        <span class="cove-body"><b>Black-Litterman target weights</b><br>
+          <span class="cove-meta">reverse-optimisation prior + score-derived views · τ = 0.05</span></span>
+      </div>
+      <!-- ─── Regime + stress ─── -->
+      <div class="cove-item">
+        <span class="cove-check">✓</span>
+        <span class="cove-body"><b>Регим-классификатор</b><br>
+          <span class="cove-meta">Quant Engine · Growth × Cycle returns · окно 60 дней · Expansion · confidence 72%</span></span>
+      </div>
+      <div class="cove-item warn">
+        <span class="cove-check">!</span>
+        <span class="cove-body"><b>Стресс-сценарии</b><br>
+          <span class="cove-meta">parametric factor shocks · 7 сценариев · 2 proxy (USD rally, CPI shock — нужен UUP/TIP)</span></span>
+      </div>
+      <!-- ─── FRED macro drivers (5 rows) ─── -->
+      <div class="cove-item">
+        <span class="cove-check">✓</span>
+        <span class="cove-body"><b>Yield curve 10Y−2Y</b><br>
+          <span class="cove-meta">FRED · T10Y2Y · daily · QualityGate ≤5 cal days, sanity [-5, +5] pp · as_of 2026-05-14</span></span>
       </div>
       <div class="cove-item">
         <span class="cove-check">✓</span>
-        <span class="cove-body"><b>Идеи ИИ-агента</b><br>
-          <span class="cove-meta">advisory only · все тикеры проверены на ценовую историю в Tradernet</span></span>
+        <span class="cove-body"><b>HY OAS (ICE BofA)</b><br>
+          <span class="cove-meta">FRED · BAMLH0A0HYM2 · daily · QualityGate ≤5 cal days, sanity [0.5, 30] pp · as_of 2026-05-14</span></span>
+      </div>
+      <div class="cove-item">
+        <span class="cove-check">✓</span>
+        <span class="cove-body"><b>ISM Manufacturing PMI</b><br>
+          <span class="cove-meta">FRED · NAPM · monthly · QualityGate ≤45 cal days, sanity [25, 80] · as_of 2026-04-01</span></span>
+      </div>
+      <div class="cove-item">
+        <span class="cove-check">✓</span>
+        <span class="cove-body"><b>CBOE VIX · 10Y Breakeven Inflation</b><br>
+          <span class="cove-meta">FRED · VIXCLS + T10YIE · daily · QualityGate ≤5 cal days · as_of 2026-05-14</span></span>
+      </div>
+      <!-- ─── Bank RAG ─── -->
+      <div class="cove-item">
+        <span class="cove-check">✓</span>
+        <span class="cove-body"><b>Bank RAG (выдержки)</b><br>
+          <span class="cove-meta">ChromaDB · публичные PDF GS/MS/JPM · cosine similarity retrieval ≥ 0.72</span></span>
+      </div>
+      <!-- ─── AI narrative ─── -->
+      <div class="cove-item">
+        <span class="cove-check">✓</span>
+        <span class="cove-body"><b>AI verdict · plain summary · bullets</b><br>
+          <span class="cove-meta">Anthropic Claude Haiku 4.5 · advisory only · не является ИИИ</span></span>
       </div>
     </div>
     <div style="margin-top:10px; font-size:9px; color:var(--ink-60); line-height:1.5;">
-      <b style="color:var(--ink);">✓</b> — данные прошли все проверки качества ·
-      <b style="color:var(--amber);">!</b> — данные есть, но один из чек-стоп-листов
-      сработал (см. meta) ·
-      <b style="color:var(--neg);">✗</b> — источник недоступен или забракован
-      QualityGate. Документ не является ИИИ; только аналитическая рекомендация.
+      <b style="color:var(--ink);">✓</b> — данные прошли QualityGate ·
+      <b style="color:var(--amber);">!</b> — частичное покрытие или fallback на устаревший кэш ·
+      <b style="color:var(--neg);">✗</b> — источник недоступен.
+      Документ не является ИИИ — только аналитическая рекомендация.
     </div>
   </div>
 
