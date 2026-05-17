@@ -35,7 +35,6 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import (
-    BufferedInputFile,
     CallbackQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
@@ -67,7 +66,8 @@ from finance.broker_api import (
 from finance.investment_logic import UniversalPortfolioManager
 from finance.security import SecureVault
 from agent.gatekeeper import run_gatekeeper
-from pdf_generator import MOCK_DATA, generate_portfolio_pdf
+from html_renderer import MOCK_DATA, render_report_html, write_report_html
+from services.report_storage import upload_report
 from pdf_payload import build_payload as _build_v2_payload, TIER_BASE, TIER_DEEP
 from pdf_charts import equity_curve_svg, factor_radar_svg
 from ai_narrative import generate_narrative
@@ -1210,28 +1210,37 @@ async def _send_pdf(
     tier: str,
     payload: dict | None = None,
 ) -> None:
+    """
+    Render the HTML report, push to GCS, send the user a signed URL.
+
+    Function name kept as `_send_pdf` for now to minimise call-site churn;
+    will be renamed once all references are updated.  The underlying
+    delivery is HTML + signed URL — no PDF, no Chromium.
+    """
     report_type = TIER_LABEL[tier]
-    pdf_path    = await generate_portfolio_pdf(
-        payload, user_id=user_id, report_type=report_type, tier=tier,
-    )
 
-    today_str = datetime.now().strftime("%Y-%m-%d")
-    with open(pdf_path, "rb") as fh:
-        doc = BufferedInputFile(
-            fh.read(),
-            filename=f"Portfolio_Report_{user_id}_{today_str}.pdf",
-        )
+    # Render Jinja → HTML string and write to /tmp.  Both ops are sync
+    # and fast (<50 ms total); no need for executor offload.
+    html       = render_report_html(payload, user_id=user_id,
+                                     report_type=report_type, tier=tier)
+    local_path = write_report_html(html, user_id=user_id, tier=tier)
 
-    await bot.send_document(
+    # Push to GCS (or fall back to file:// in local-dev mode).
+    url = upload_report(local_path, user_id=user_id, tier=tier)
+
+    # Tell the user.  The link is a plain markdown URL — Telegram renders
+    # it as a preview card on most clients.
+    await bot.send_message(
         chat_id,
-        document=doc,
-        caption=(
-            f"📄 *{report_type}* готов.\n\n"
-            "Отчёт сформирован институциональным риск-движком "
-            "(Euler Decomposition · Bootstrap CVaR · 4-pillar Scoring · "
-            "Black-Litterman). Штурвал всегда у вас."
+        text=(
+            f"📊 *{report_type}* готов.\n\n"
+            f"[Открыть отчёт]({url})\n\n"
+            "Ссылка действительна 7 дней.  Отчёт сформирован институциональным "
+            "риск-движком (Euler Decomposition · Bootstrap CVaR · 4-pillar "
+            "Scoring · Black-Litterman).  Штурвал всегда у вас."
         ),
-        parse_mode=ParseMode.MARKDOWN,
+        parse_mode               = ParseMode.MARKDOWN,
+        disable_web_page_preview = False,
     )
 
 

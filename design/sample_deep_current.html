@@ -1,0 +1,934 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<title>Portfolio Intelligence — Deep Report</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@600&display=swap" rel="stylesheet" />
+
+<style>
+  :root {
+    --bg-page:     #FFFFFF;
+    --bg-card:     #F8FAFC;
+    --bg-table:    #F1F5F9;
+    --border:      #E2E8F0;
+    --border-soft: #F1F5F9;
+    --text-1:      #0F172A;
+    --text-2:      #475569;
+    --text-3:      #94A3B8;
+    --accent:      #0F4C81;
+    --accent-hi:   #1E6BB8;
+    --gold:        #B7873B;
+    --positive:    #047857;
+    --negative:    #B91C1C;
+    --neutral:     #B45309;
+    --warn:        #C2410C;
+    --highlight:   #FEF3C7;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    background: var(--bg-page);
+    color: var(--text-1);
+    font-family: 'Inter', -apple-system, sans-serif;
+    font-size: 10.5px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page {
+    max-width: 920px;
+    margin: 0 auto;
+    padding: 18px 26px 22px;
+    page-break-after: always;
+  }
+  .page:last-child { page-break-after: auto; }
+
+  /* Header */
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 14px;
+  }
+  .brand-wordmark {
+    font-size: 19px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    color: var(--accent);
+  }
+  .brand-tagline {
+    font-size: 8.5px;
+    font-weight: 600;
+    color: var(--text-2);
+    letter-spacing: 0.20em;
+    text-transform: uppercase;
+    margin-top: 2px;
+  }
+  .header-meta { text-align: right; font-size: 9px; color: var(--text-2); line-height: 1.5; }
+  .report-badge {
+    display: inline-block;
+    background: var(--accent);
+    color: #FFFFFF;
+    font-size: 8.5px;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    padding: 3px 10px;
+    border-radius: 3px;
+    margin-bottom: 4px;
+  }
+
+  /* Verdict */
+  .verdict {
+    background: var(--bg-card);
+    border-left: 3px solid var(--gold);
+    border-radius: 5px;
+    padding: 10px 14px;
+    margin-bottom: 12px;
+    font-size: 11px;
+    color: var(--text-1);
+  }
+  .verdict-label {
+    font-size: 8.5px;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--gold);
+    margin-bottom: 3px;
+  }
+
+  /* Regime line */
+  .regime-line {
+    display: flex;
+    justify-content: space-between;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 7px 12px;
+    margin-bottom: 12px;
+    font-size: 10px;
+  }
+  .regime-line strong { color: var(--accent); }
+
+  /* Section title */
+  .section-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 8.5px;
+    font-weight: 700;
+    letter-spacing: 0.20em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 14px 0 7px;
+  }
+  .section-title::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(90deg, var(--border) 0%, transparent 100%);
+  }
+
+  /* KPIs */
+  .kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+  }
+  .kpi-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 12px 8px;
+  }
+  .kpi-label {
+    font-size: 8px;
+    font-weight: 600;
+    color: var(--text-2);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+  .kpi-value { font-size: 18px; font-weight: 700; letter-spacing: -0.02em; line-height: 1; }
+  .kpi-sub   { font-size: 8.5px; color: var(--text-2); margin-top: 3px; }
+  .kpi-value.neg  { color: var(--negative); }
+  .kpi-value.pos  { color: var(--positive); }
+  .kpi-value.warn { color: var(--neutral);  }
+  .kpi-value.neut { color: var(--text-1);   }
+
+  /* Risk gauge */
+  .risk-panel {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 14px;
+    margin-top: 8px;
+  }
+  .risk-track {
+    background: var(--bg-table);
+    border-radius: 99px;
+    height: 7px;
+    position: relative;
+    overflow: hidden;
+    margin: 5px 0 4px;
+  }
+  .risk-fill {
+    height: 100%;
+    border-radius: 99px;
+    background: linear-gradient(90deg, var(--positive) 0%, var(--neutral) 50%, var(--negative) 100%);
+  }
+  .risk-scale {
+    display: flex;
+    justify-content: space-between;
+    font-size: 8.5px;
+    color: var(--text-3);
+  }
+
+  /* Tables */
+  .table-wrap {
+    background: var(--bg-page);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  table { width: 100%; border-collapse: collapse; }
+  thead tr { background: var(--bg-table); }
+  thead th {
+    padding: 6px 10px;
+    text-align: left;
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-2);
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  tbody tr   { border-bottom: 1px solid var(--border-soft); }
+  tbody tr:last-child { border-bottom: none; }
+  tbody td   {
+    padding: 6px 10px;
+    color: var(--text-1);
+    font-size: 10px;
+    vertical-align: middle;
+  }
+  .ticker {
+    display: inline-block;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 7px;
+    font-family: 'JetBrains Mono', 'Courier New', monospace;
+    font-size: 9.5px;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: 0.04em;
+  }
+  .pos   { color: var(--positive); font-weight: 600; }
+  .neg   { color: var(--negative); font-weight: 600; }
+  .neut  { color: var(--text-2);   }
+  .warn  { color: var(--warn);     font-weight: 600; }
+  .muted { color: var(--text-2); }
+  .hot   { background: var(--highlight); }
+  .pill  {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 99px;
+    font-size: 9px;
+    font-weight: 700;
+  }
+  .pill.pos  { background: #ECFDF5; color: var(--positive); }
+  .pill.neg  { background: #FEF2F2; color: var(--negative); }
+  .pill.neut { background: var(--bg-card); color: var(--text-2); }
+  .pill.warn { background: #FFEDD5; color: var(--warn); }
+
+  /* AI bullets */
+  .ai-block { background: var(--bg-card); border: 1px solid var(--border);
+              border-radius: 6px; padding: 10px 14px; }
+  .ai-block ul { padding-left: 16px; margin-top: 4px; }
+  .ai-block li { font-size: 10px; margin-bottom: 3px; line-height: 1.45; }
+
+  /* Sector bars */
+  .sector-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; font-size: 10px; }
+  .sector-bar-name  { width: 130px; color: var(--text-1); }
+  .sector-bar-track { flex: 1; height: 8px; background: var(--bg-table); border-radius: 4px; overflow: hidden; }
+  .sector-bar-fill  { height: 100%; background: var(--accent); border-radius: 4px; }
+  .sector-bar-pct   { width: 42px; text-align: right; color: var(--text-2); font-size: 9.5px; }
+
+  /* Holdings PnL summary */
+  .pnl-summary {
+    display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 8px;
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 6px; padding: 8px 12px; margin-bottom: 10px;
+    font-size: 10px;
+  }
+  .pnl-summary .label { font-size: 8px; color: var(--text-2); letter-spacing: 0.12em; text-transform: uppercase; }
+  .pnl-summary .val   { font-size: 13px; font-weight: 700; margin-top: 1px; }
+
+  /* Extreme-value highlighting */
+  .kpi-card.extreme {
+    border-color: var(--negative);
+    box-shadow: inset 3px 0 0 var(--negative);
+  }
+  .extreme-icon {
+    color: var(--negative);
+    font-weight: 700;
+    margin-left: 4px;
+  }
+  td.extreme-cell { background: #FEF2F2; }
+  .extreme-tag {
+    display: inline-block;
+    background: #FEF2F2;
+    color: var(--negative);
+    font-size: 8px;
+    font-weight: 700;
+    padding: 1px 5px;
+    border-radius: 99px;
+    margin-left: 3px;
+    border: 1px solid #FECACA;
+  }
+
+  /* Data-quality strip */
+  .data-quality {
+    background: #F8FAFC;
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 5px;
+    padding: 8px 12px;
+    margin-bottom: 10px;
+    font-size: 9px;
+    color: var(--text-2);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+  }
+  .dq-pill {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 99px;
+    font-weight: 600;
+    background: #ECFDF5;
+    color: var(--positive);
+  }
+  .dq-pill.warn { background: #FFEDD5; color: var(--warn); }
+
+  /* RAG-citation visual marker */
+  .rag-tag {
+    display: inline-block;
+    background: #EEF2FF;
+    color: var(--accent);
+    font-size: 8.5px;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 3px;
+    margin-left: 4px;
+    border: 1px solid #DBEAFE;
+  }
+
+  /* Regime explainer block */
+  .regime-explain { font-size: 9px; color: var(--text-2); margin-top: 5px; }
+  .regime-explain ul { margin: 0; padding-left: 16px; }
+  .regime-explain li { margin: 2px 0; }
+
+  /* Footer */
+  .footer {
+    margin-top: 16px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border-soft);
+    display: flex;
+    justify-content: space-between;
+    font-size: 8px;
+    color: var(--text-3);
+  }
+
+  /* Print */
+  @media print {
+    body { background: white; }
+    .page { padding: 0 18px; }
+  }
+</style>
+<style>
+/* ── Snapshot bar ── */
+.snapshot-bar {
+  display: flex; justify-content: space-between; align-items: center;
+  background: #0d2240; border-radius: 8px; padding: 12px 18px;
+  margin: 10px 0 14px; color: #fff;
+}
+.snap-item { text-align: center; }
+.snap-label { font-size: 8px; letter-spacing: 0.14em; text-transform: uppercase; color: #8aadcc; margin-bottom: 3px; }
+.snap-value { font-family: 'JetBrains Mono', monospace; font-size: 16px; font-weight: 700; }
+.snap-value.pos { color: #4ade80; }
+.snap-value.neg { color: #f87171; }
+.snap-value.neut { color: #fbbf24; }
+.snap-value.white { color: #fff; }
+.snap-sub { font-size: 9px; color: #8aadcc; margin-top: 2px; }
+.snap-divider { width: 1px; background: rgba(255,255,255,0.15); height: 40px; }
+
+/* ── Three-Question blocks ── */
+.q-block { margin: 10px 0; }
+.q-header {
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 12px; border-radius: 6px 6px 0 0;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.05em;
+}
+.q-header.q1 { background: #0d2240; color: #fff; }
+.q-header.q2 { background: #1e3a5f; color: #fff; }
+.q-header.q3 { background: #163045; color: #fff; }
+.q-num { font-family: 'JetBrains Mono', monospace; font-size: 10px; opacity: 0.7; }
+.q-status { font-size: 14px; margin-left: auto; }
+.q-body {
+  border: 1px solid #d0dce8; border-top: none; border-radius: 0 0 6px 6px;
+  padding: 12px 14px; background: #f8fbff;
+}
+
+/* ── Dollar impact ── */
+.dollar-impact { display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+.di-card {
+  flex: 1; min-width: 90px; background: #fff; border: 1px solid #d0dce8;
+  border-radius: 6px; padding: 8px 10px; text-align: center;
+}
+.di-label { font-size: 8px; letter-spacing: 0.12em; text-transform: uppercase; color: #6b8aaa; margin-bottom: 4px; }
+.di-value { font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 700; }
+.di-value.neg { color: #dc2626; }
+.di-value.pos { color: #16a34a; }
+.di-sub { font-size: 8.5px; color: #8a9db0; margin-top: 2px; }
+
+/* ── Metric chips ── */
+.metric-chips { display: flex; gap: 7px; flex-wrap: wrap; margin: 8px 0; }
+.metric-chip {
+  background: #fff; border: 1px solid #ccd8e4; border-radius: 20px;
+  padding: 5px 11px; font-size: 9px; white-space: nowrap;
+}
+.metric-chip .mc-label { color: #6b8aaa; margin-right: 4px; }
+.metric-chip .mc-val { font-weight: 700; color: #0d2240; }
+.metric-chip .mc-val.bad { color: #dc2626; }
+.metric-chip .mc-val.warn { color: #d97706; }
+.metric-chip .mc-val.good { color: #16a34a; }
+.metric-chip .mc-note { font-size: 7.5px; color: #9aabb8; margin-left: 3px; }
+
+/* ── Risk gauge ── */
+.risk-gauge-wrap { margin: 8px 0; }
+.risk-gauge-track {
+  height: 10px; border-radius: 5px;
+  background: linear-gradient(to right, #22c55e 0%, #f59e0b 50%, #ef4444 100%);
+  position: relative; margin: 4px 0;
+}
+.risk-gauge-needle {
+  position: absolute; top: -3px;
+  width: 4px; height: 16px; background: #0d2240;
+  border-radius: 2px; transform: translateX(-50%);
+}
+.risk-gauge-labels { display: flex; justify-content: space-between; font-size: 8px; color: #8a9db0; }
+.delta-chip {
+  display: inline-block; padding: 2px 7px; border-radius: 10px;
+  font-size: 8.5px; font-weight: 600;
+}
+.delta-chip.up { background: #fee2e2; color: #b91c1c; }
+.delta-chip.down { background: #dcfce7; color: #15803d; }
+.delta-chip.flat { background: #f1f5f9; color: #64748b; }
+
+/* ── Plain summary hero ── */
+.plain-hero {
+  background: #eff6ff; border-left: 4px solid #3b82f6;
+  border-radius: 0 6px 6px 0; padding: 11px 14px; margin: 10px 0;
+  font-size: 11px; line-height: 1.65; color: #1e3a5c;
+}
+.plain-hero-label {
+  font-size: 8px; font-weight: 700; letter-spacing: 0.15em;
+  text-transform: uppercase; color: #3b82f6; margin-bottom: 6px;
+}
+
+/* ── Hotspot alerts ── */
+.hotspot-alert {
+  background: #fff7ed; border: 1px solid #fdba74; border-radius: 5px;
+  padding: 7px 11px; margin: 6px 0; font-size: 9.5px; color: #92400e;
+}
+
+/* ── Benchmark row ── */
+.bm-row {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  background: #fff; border: 1px solid #d0dce8; border-radius: 6px;
+  padding: 10px 14px; margin: 8px 0;
+}
+.bm-item .bl { font-size: 8px; color: #6b8aaa; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 3px; }
+.bm-item .bv { font-size: 13px; font-weight: 700; color: #0d2240; }
+.bm-item .bv.pos { color: #16a34a; }
+.bm-item .bv.neg { color: #dc2626; }
+.bm-note { font-size: 8px; color: #9aabb8; margin-top: 2px; }
+.bm-divider { width: 1px; height: 36px; background: #e0e8f0; }
+
+/* ── Regime box ── */
+.regime-box {
+  background: #fff; border: 1px solid #d0dce8; border-radius: 6px;
+  padding: 10px 14px; margin: 8px 0;
+}
+.regime-header { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.regime-label-tag {
+  font-size: 9px; font-weight: 700; letter-spacing: 0.12em;
+  text-transform: uppercase; color: #6b8aaa;
+}
+.regime-name { font-size: 14px; font-weight: 700; color: #0d2240; }
+.regime-conf { font-size: 9px; color: #8a9db0; }
+.regime-rag { margin-top: 7px; padding-top: 7px; border-top: 1px solid #e8f0f8; }
+.regime-rag-label { font-size: 8px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: #d97706; margin-bottom: 5px; }
+.regime-rag-item {
+  font-size: 9px; color: #374151; line-height: 1.55;
+  padding: 3px 0 3px 8px; border-left: 2px solid #fbbf24; margin-bottom: 3px;
+}
+
+/* ── Priority action box ── */
+.priority-box {
+  background: #0d2240; color: #fff; border-radius: 7px;
+  padding: 12px 16px; margin: 10px 0;
+}
+.priority-label { font-size: 8px; letter-spacing: 0.16em; text-transform: uppercase; color: #8aadcc; margin-bottom: 5px; }
+.priority-text { font-size: 12px; font-weight: 600; line-height: 1.5; }
+
+/* ── AI bullets ── */
+.bullets-block { margin: 8px 0; }
+.bullets-label { font-size: 8px; font-weight: 700; letter-spacing: 0.15em; text-transform: uppercase; color: #d97706; margin-bottom: 6px; }
+.bullets-block ul { margin: 0; padding-left: 16px; }
+.bullets-block li { font-size: 10px; line-height: 1.6; margin-bottom: 3px; color: #1e293b; }
+
+/* ── Scenario grid ── */
+.scenario-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin: 10px 0; }
+.scenario-card {
+  background: #fff; border: 1px solid #d0dce8; border-radius: 7px;
+  padding: 10px 11px;
+}
+.sc-icon { font-size: 16px; margin-bottom: 5px; }
+.sc-title { font-size: 8.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #0d2240; margin-bottom: 4px; }
+.sc-desc { font-size: 8px; color: #6b8aaa; margin-bottom: 8px; line-height: 1.5; }
+.sc-pick {
+  background: #f8fbff; border: 1px solid #e0eaf5;
+  border-radius: 5px; padding: 6px 8px; margin-bottom: 5px;
+}
+.sc-ticker { font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 700; color: #0d2240; }
+.sc-name { font-size: 8.5px; color: #475569; margin: 2px 0; }
+.sc-why { font-size: 8px; color: #64748b; line-height: 1.5; }
+.sc-badge {
+  display: inline-block; padding: 1px 6px; border-radius: 8px;
+  font-size: 7.5px; font-weight: 600; text-transform: uppercase; margin-top: 3px;
+}
+.sc-badge.etf { background: #dbeafe; color: #1d4ed8; }
+.sc-badge.stock { background: #dcfce7; color: #15803d; }
+.sc-badge.bond { background: #fef3c7; color: #92400e; }
+.sc-badge.crypto { background: #fce7f3; color: #9d174d; }
+.sc-badge.commodity { background: #f5f3ff; color: #6d28d9; }
+
+/* ── Deep-specific: scoring ── */
+.scoring-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 6px; margin-top: 8px;
+}
+.scoring-card {
+  background: #fff; border: 1px solid #d0dce8; border-radius: 5px; padding: 7px 10px;
+}
+.scoring-card .s-ticker { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; color: #0d2240; }
+.scoring-card .s-scores { font-size: 9px; color: #6b8aaa; margin-top: 3px; }
+.scoring-card .s-total { font-size: 11px; font-weight: 700; margin-top: 2px; }
+
+/* ── RAG insights ── */
+.rag-insights {
+  background: #fffbeb; border-left: 3px solid #fbbf24;
+  border-radius: 0 6px 6px 0; padding: 10px 14px; margin: 10px 0;
+}
+.rag-insights-label {
+  font-size: 8.5px; font-weight: 700; letter-spacing: 0.15em;
+  text-transform: uppercase; color: #d97706; margin-bottom: 6px;
+}
+.rag-item {
+  font-size: 9.5px; color: #374151; line-height: 1.6;
+  padding: 3px 0 3px 8px; border-left: 2px solid #fbbf24; margin-bottom: 4px;
+}
+
+/* ── Factor radar placeholder ── */
+.factor-wrap {
+  display: flex; align-items: flex-start; gap: 14px;
+  background: #fff; border: 1px solid #d0dce8; border-radius: 6px; padding: 10px;
+}
+.factor-notes { font-size: 9.5px; max-width: 360px; line-height: 1.6; }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════ PAGE 1 — Q1 & Q2 ════════════════════════════════════ -->
+<div class="page">
+
+  <div class="header">
+    <div>
+      <div class="brand-wordmark">PORTFOLIO INTELLIGENCE</div>
+      <div class="brand-tagline">Инвестиционный советник и риск-аналитика — Глубокий анализ</div>
+    </div>
+    <div class="header-meta">
+      <div class="report-badge">Базовый отчёт</div>
+      <div>Клиент #sample</div>
+      <div>17.05.2026 18:45 UTC+5</div>
+      <div style="color: var(--text-3);">Конфиденциально</div>
+    </div>
+  </div>
+
+  <!-- Snapshot bar -->
+  <div class="snapshot-bar">
+    <div class="snap-item">
+      <div class="snap-label">Стоимость портфеля</div>
+      <div class="snap-value white">$50,000</div>
+      <div class="snap-sub">+4.2% total P/L</div>
+    </div>
+    <div class="snap-divider"></div>
+    <div class="snap-item">
+      <div class="snap-label">Доходность с входа</div>
+      <div class="snap-value pos">+4.2%</div>
+      <div class="snap-sub">+2,000</div>
+    </div>
+    <div class="snap-divider"></div>
+    <div class="snap-item">
+      <div class="snap-label">Риск-индекс</div>
+      <div class="snap-value neut">
+        62/100
+      </div>
+      
+    </div>
+    <div class="snap-divider"></div>
+    <div class="snap-item">
+      <div class="snap-label">Bank RAG</div>
+      <div class="snap-value white" style="font-size:12px;">—</div>
+      <div class="snap-sub">17.05.2026 18:45 UTC+5</div>
+    </div>
+  </div>
+
+  <!-- Q1: Ваши деньги в безопасности? -->
+  <div class="q-block">
+    <div class="q-header q1">
+      <span class="q-num">Q1</span>
+      <span>Ваши деньги в безопасности?</span>
+      <span class="q-status">
+        ✅
+      </span>
+    </div>
+    <div class="q-body">
+
+      <div class="dollar-impact">
+        <div class="di-card">
+          <div class="di-label">CVaR 95% · 1д (в деньгах)</div>
+          <div class="di-value neg">$2,600</div>
+          <div class="di-sub">-5.2% от портфеля</div>
+        </div>
+        <div class="di-card">
+          <div class="di-label">Max Drawdown (реализованный)</div>
+          <div class="di-value neg">$6,400</div>
+          <div class="di-sub">-12.8% от пика до дна [Quant Engine]</div>
+        </div>
+        <div class="di-card">
+          <div class="di-label">VaR 95% · 1д</div>
+          <div class="di-value neg">$1,200</div>
+          <div class="di-sub">-2.4% вероятный максимум</div>
+        </div>
+        <div class="di-card">
+          <div class="di-label">P/L с момента входа</div>
+          <div class="di-value pos">+2,000</div>
+          <div class="di-sub">+4.2%</div>
+        </div>
+      </div>
+
+      <div class="metric-chips">
+        <div class="metric-chip">
+          <span class="mc-label">Sharpe</span>
+          <span class="mc-val good">1.34</span>
+          <span class="mc-note">норма ≥1.0</span>
+        </div>
+        <div class="metric-chip">
+          <span class="mc-label">Sortino</span>
+          <span class="mc-val">1.62</span>
+        </div>
+        <div class="metric-chip">
+          <span class="mc-label">Волатильность (годовая)</span>
+          <span class="mc-val ">14.2%</span>
+          <span class="mc-note">σ портфеля</span>
+        </div>
+        <div class="metric-chip">
+          <span class="mc-label">Tracking Error</span>
+          <span class="mc-val">—</span>
+          <span class="mc-note">σ(excess returns) ≠ vol</span>
+        </div>
+        <div class="metric-chip">
+          <span class="mc-label">CVaR 95%</span>
+          <span class="mc-val ">-5.2%</span>
+          <span class="mc-note">CI: CI: -7.0% … -4.5%</span>
+        </div>
+        <div class="metric-chip">
+          <span class="mc-label">Max Drawdown</span>
+          <span class="mc-val ">-12.8%</span>
+        </div>
+      </div>
+
+      <div class="risk-gauge-wrap">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:3px;">
+          <span style="font-size:9px; color:#6b8aaa;">Риск-индекс: <strong style="color:#0d2240;">62/100 · Умеренный</strong></span>
+          
+        </div>
+        <div class="risk-gauge-track">
+          <div class="risk-gauge-needle" style="left: 62%;"></div>
+        </div>
+        <div class="risk-gauge-labels"><span>Консервативный</span><span>Умеренный</span><span>Агрессивный</span></div>
+        <div style="font-size:8px; color:#9aabb8; margin-top:3px;">0.4×Vol + 0.4×|CVaR| + 0.2×max TRC [Quant Engine]</div>
+      </div>
+
+      
+
+      
+
+      
+      <div class="plain-hero">
+        <div class="plain-hero-label">
+          Простыми словами — что происходит с портфелем
+          
+        </div>
+        За месяц портфель прибавил +5.8%.  Главные риски — перевес в технологиях и KSPI hotspot (TRC 22%).
+      </div>
+      
+
+    </div>
+  </div>
+
+  <!-- Q2: Вы обгоняете рынок? -->
+  <div class="q-block">
+    <div class="q-header q2">
+      <span class="q-num">Q2</span>
+      <span>Вы обгоняете рынок?</span>
+      <span class="q-status">⚠️</span>
+    </div>
+    <div class="q-body">
+
+      
+
+      
+      
+
+      
+
+    </div>
+  </div>
+
+  
+  <div class="data-quality">
+    <span><strong>Источник:</strong> Daily CLOSE из Tradernet (730d). ATR — OHLC, fallback |ΔClose|.</span>
+    <span class="dq-pill warn">
+      Факторы: 0/10
+    </span>
+    <span class="dq-pill warn">
+      Бенчмарки: 0
+    </span>
+    
+    
+  </div>
+  
+
+  <div class="footer"><span>1 / 4 · Portfolio Intelligence © 2026 — Конфиденциально.</span><span>Не является ИИИ. Только рекомендации.</span></div>
+</div>
+
+<!-- ═══════════════════════════ PAGE 2 — Q3 & Holdings ═══════════════════ -->
+<div class="page">
+
+  <!-- Q3: Что делать прямо сейчас? -->
+  <div class="q-block">
+    <div class="q-header q3">
+      <span class="q-num">Q3</span>
+      <span>Что делать прямо сейчас?</span>
+      <span class="q-status">ℹ️</span>
+    </div>
+    <div class="q-body">
+
+      
+
+      
+      <div class="bullets-block">
+        <div class="bullets-label">
+          Анализ ИИ-агента
+          
+        </div>
+        <ul><li>AAPL +25% от входа — крупнейший вклад</li><li>KSPI просел −16.7%, TRC 22% — пересмотр позиции</li></ul>
+      </div>
+      
+
+      <!-- Stock picks — 5 picks for deep (2+2+1) -->
+      
+
+    </div>
+  </div>
+
+  <!-- Holdings table -->
+  <div class="section-title">Структура портфеля и P/L по позициям</div>
+
+  
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th style="width:4%">#</th>
+          <th>Тикер</th>
+          <th>Класс</th>
+          <th>Вес <span class="muted" style="font-weight:400;">лимит 15%</span></th>
+          <th>TRC <span class="muted" style="font-weight:400;">лимит 20%</span></th>
+          <th>ATR <span class="muted" style="font-weight:400;">&gt;3% ⚠</span></th>
+          <th>P/L</th>
+          <th>Скоринг · Действие</th>
+        </tr>
+      </thead>
+      <tbody>
+        
+        <tr >
+          <td class="muted">1</td>
+          <td><span class="ticker">AAPL</span></td>
+          <td class="muted">Акции США</td>
+          <td class="extreme-cell">50.0% <span class="extreme-icon">⚠</span></td>
+          <td>18.4%</td>
+          <td>1.40%</td>
+          <td class="pos">+25.0%<br><span class="muted" style="font-size:9px;">+5,000</span></td>
+          <td><span class="neut">—</span> · <span class="pill neut">Hold</span></td>
+        </tr>
+        
+        <tr >
+          <td class="muted">2</td>
+          <td><span class="ticker">KSPI</span></td>
+          <td class="muted">Акции США</td>
+          <td class="extreme-cell">30.0% <span class="extreme-icon">⚠</span></td>
+          <td class="extreme-cell">22.1% <span class="extreme-icon">⚠</span></td>
+          <td>2.10%</td>
+          <td class="neg">-16.7%<br><span class="muted" style="font-size:9px;">-3,000</span></td>
+          <td><span class="neut">—</span> · <span class="pill neut">Hold</span></td>
+        </tr>
+        
+        <tr >
+          <td class="muted">3</td>
+          <td><span class="ticker">BND</span></td>
+          <td class="muted">Облигации</td>
+          <td class="extreme-cell">20.0% <span class="extreme-icon">⚠</span></td>
+          <td>3.2%</td>
+          <td>0.40%</td>
+          <td class="pos">+0.0%<br><span class="muted" style="font-size:9px;">+0</span></td>
+          <td><span class="neut">—</span> · <span class="pill neut">Hold</span></td>
+        </tr>
+        
+      </tbody>
+    </table>
+  </div>
+  <div class="muted" style="font-size:8.5px; margin-top:5px;">
+    <em>TRC</em> — % риска портфеля (Euler) [Quant Engine]; <em>ATR</em> — дневной диапазон % цены [Quant Engine];
+    <em>Скоринг</em> — Fund+Val+Tech+Credit ∈ [−6, +6] [Quant Engine + SEC EDGAR]; 🔥 — Hotspot (TRC &gt; 20%).
+  </div>
+
+  
+
+  
+  <div class="section-title">Секторное распределение</div>
+  <div>
+    
+    <div class="sector-bar">
+      <div class="sector-bar-name">Technology</div>
+      <div class="sector-bar-track">
+        <div class="sector-bar-fill" style="width: 50.0%;"></div>
+      </div>
+      <div class="sector-bar-pct">50%</div>
+    </div>
+    
+    <div class="sector-bar">
+      <div class="sector-bar-name">EM_Kazakhstan</div>
+      <div class="sector-bar-track">
+        <div class="sector-bar-fill" style="width: 30.0%;"></div>
+      </div>
+      <div class="sector-bar-pct">30%</div>
+    </div>
+    
+    <div class="sector-bar">
+      <div class="sector-bar-name">Fixed_Income</div>
+      <div class="sector-bar-track">
+        <div class="sector-bar-fill" style="width: 20.0%;"></div>
+      </div>
+      <div class="sector-bar-pct">20%</div>
+    </div>
+    
+  </div>
+
+  
+  
+
+  <div class="footer"><span>2 / 4 · Portfolio Intelligence © 2026</span><span>Источники: [Quant Engine] · [Tradernet] · [Bank RAG]</span></div>
+</div>
+
+<!-- ══════════════════ PAGE 3 — Factor & Scoring ════════════════════════ -->
+<div class="page">
+
+  
+
+  
+
+  
+
+  <!-- Benchmark detailed breakdown for deep -->
+  
+
+  <div class="footer"><span>3 / 4 · Portfolio Intelligence © 2026</span><span>Источники: [Quant Engine] · [SEC EDGAR] · [Bank RAG]</span></div>
+</div>
+
+<!-- ══════════════════ PAGE 4 — Action Plan & CoVe ══════════════════════ -->
+<div class="page">
+
+  <div class="section-title">Action Plan — уровни Buy / Sell / Stop</div>
+  <div class="muted" style="margin-bottom:6px; font-size:9.5px;">
+    Уровни рассчитаны из ATR (Wilder RMA) + SMA50/200 + RSI(14) + MACD. Без внешних таргет-прайсов. [Quant Engine]
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr>
+        <th>Тикер</th><th>Action</th><th>Δw, п.п.</th><th>Qty Δ</th>
+        <th>Buy zone</th><th>Sell target</th><th>Stop loss</th><th>Причина</th>
+      </tr></thead>
+      <tbody>
+        
+      </tbody>
+    </table>
+  </div>
+
+  
+
+  
+
+  <!-- CoVe: Chain-of-Verification sources -->
+  <div class="section-title">CoVe — верификация источников данных</div>
+  <div class="ai-block" style="font-size:9px;">
+    <strong>Риск-метрики</strong> (Vol, CVaR, TE, IR, Max DD):
+    <strong>[Quant Engine · 730d daily · Wilder RMA · EWMA λ≈0.94 ⊕ Ledoit-Wolf]</strong><br>
+    <strong>Tracking Error</strong>: σ(port_daily − bm_daily, ddof=1) × √252 —
+    <em>отличается от Volatility портфеля</em>: √(w'Σw) × √252<br>
+    <strong>Information Ratio</strong>: Excess_Return_Ann ÷ Tracking_Error — обе в годовой шкале.<br>
+    <strong>Fundamental Z-scores</strong>:
+    <strong>[SEC EDGAR · 10-K FY · sector-normalised MAD]</strong><br>
+    <strong>Altman-Z, Piotroski-F, Interest Coverage</strong>:
+    <strong>[SEC EDGAR · CompanyFacts JSON]</strong><br>
+    <strong>CDS spreads</strong>:
+    <strong>[FRED HY proxy · WGB sovereign · QualityGate: sanity 1–3000 bps, ≤3 trading days]</strong><br>
+    <strong>Режим рынка</strong>:
+    <strong>[Quant Engine: Growth/Cycle factor returns · 60d window]</strong><br>
+    <strong>Action levels</strong> (Buy zone / Sell target / Stop loss):
+    <strong>[ATR Wilder RMA + SMA50/200 + RSI(14) + MACD(12,26,9)]</strong><br>
+    
+    <strong>Идеи ИИ-агента</strong>: Advisory only. Не является ИИИ или рекомендацией к покупке.<br>
+    
+  </div>
+
+  <div class="footer">
+    <span>4 / 4 · Portfolio Intelligence © 2026 — Не является ИИИ.</span>
+    <span>Только рекомендации. Документ создан автоматически.</span>
+  </div>
+</div>
+
+</body>
+</html>

@@ -4,7 +4,7 @@ and Jinja rendering of both v2 templates.
 
 The tests do not invoke Playwright/Chromium — they only verify that the
 templates render to valid HTML against a synthetic payload.  Browser
-rendering is exercised manually via `python -m src.pdf_generator`.
+rendering is exercised manually via `python -m src.html_renderer`.
 """
 from __future__ import annotations
 
