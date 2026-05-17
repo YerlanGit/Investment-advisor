@@ -19,6 +19,10 @@ from finance.period_returns import compute_period_returns_table as _compute_peri
 from finance.stress import run_stress_scenarios as _run_stress_scenarios
 # Simulator (Black-Litterman "after-plan" portfolio metrics) — sklearn-free.
 from finance.simulate import simulate_after_plan as _simulate_after_plan
+# FRED macro feed (yield curve / HY spread / PMI / VIX / breakeven) — also
+# sklearn-free; gracefully degrades when FRED_API_KEY is missing or network
+# is unreachable.
+from services.macro_data import MacroFeed as _MacroFeed
 
 class MAC3RiskEngine:
     """
@@ -1017,6 +1021,18 @@ class UniversalPortfolioManager:
             logger.warning("Regime classification skipped: %s", exc)
             regime_reading = None
 
+        # ═══════════════ MACRO DRIVERS (FRED) ═══════════════
+        # 5-series pack (yield curve / HY OAS / PMI / VIX / breakeven) used
+        # by the DEEP P5 regime page.  Disk-cached for 12h; gracefully
+        # degrades to status="missing" when FRED_API_KEY is unset and to
+        # status="stale" on transient network failures.
+        macro_drivers: dict = {}
+        try:
+            macro_drivers = _MacroFeed().get_regime_drivers()
+        except Exception as exc:
+            logger.warning("Macro drivers fetch skipped: %s", exc)
+            macro_drivers = {}
+
         # ═══════════════ TECHNICALS (pillar C) ═══════════════
         # Computes RSI/MACD/SMA/Bollinger/52w-Hi/Mom-12m1m per-asset.
         # Uses the same close-price frame already loaded; no new fetches.
@@ -1211,6 +1227,7 @@ class UniversalPortfolioManager:
             "factor_scores": factor_scores,
             # Phase 2 additions
             "regime":            regime_reading.as_dict() if regime_reading else None,
+            "macro_drivers":     macro_drivers,
             "technicals":        {t: {"score": r.score, "raw": r.raw,
                                        "components": r.components}
                                   for t, r in technicals_map.items()},

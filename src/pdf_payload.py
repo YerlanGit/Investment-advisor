@@ -305,6 +305,9 @@ def build_payload(results: dict, tier: str,
     # ── Expected effect — before/after simulation under BL target weights ──
     expected_effect = results.get("expected_effect")
 
+    # ── Macro drivers from FRED (5-series pack for DEEP P5) ────────────────
+    macro_drivers = results.get("macro_drivers") or {}
+
     # ── Macro regime (Cover) ───────────────────────────────────────────────
     regime_block = None
     regime = results.get("regime")
@@ -434,6 +437,8 @@ def build_payload(results: dict, tier: str,
         "stress_scenarios":     stress_scenarios,
         # Expected effect — DEEP P4 8-card before/after panel
         "expected_effect":      expected_effect,
+        # Macro drivers — FRED 5-series pack for DEEP P5 regime page
+        "macro_drivers":        macro_drivers,
         # Regime
         "regime":            regime_block,
         "regime_rag_confirm": regime_rag_confirm or [],

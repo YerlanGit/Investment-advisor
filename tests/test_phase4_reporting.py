@@ -1107,6 +1107,262 @@ class SimulatorTest(unittest.TestCase):
                 0.142, places=4)
 
 
+# ── 4.1.f  MacroFeed (Step 4 — FRED-backed macro drivers for DEEP P5) ───────
+
+class _FakeResponse:
+    """Minimal stand-in for requests.Response used in MacroFeed tests."""
+    def __init__(self, payload: dict, status: int = 200):
+        self._payload = payload
+        self.status_code = status
+    def raise_for_status(self) -> None:
+        if self.status_code >= 400:
+            raise RuntimeError(f"HTTP {self.status_code}")
+    def json(self) -> dict:
+        return self._payload
+
+
+def _fake_fred_observations(values_by_date: list[tuple[str, float]]) -> dict:
+    """Build a FRED-shaped {observations:[...]} body."""
+    return {"observations": [{"date": d, "value": (str(v) if v is not None else ".")}
+                              for d, v in values_by_date]}
+
+
+class MacroFeedTest(unittest.TestCase):
+    """
+    All HTTP is injected — these tests never touch the real FRED API.
+    Cache lives in a tempdir created per test.
+    """
+
+    def setUp(self) -> None:
+        # Per-test cache dir under /tmp, unique by test id.
+        import tempfile
+        self._cache_dir = Path(tempfile.mkdtemp(prefix="macro_test_"))
+
+    def tearDown(self) -> None:
+        import shutil
+        shutil.rmtree(self._cache_dir, ignore_errors=True)
+
+    def _now(self) -> "datetime":
+        # Fixed clock so freshness checks are deterministic.
+        from datetime import datetime, timezone
+        return datetime(2026, 5, 15, 12, 0, 0, tzinfo=timezone.utc)
+
+    # ─── missing key path ──────────────────────────────────────────────
+
+    def test_no_api_key_returns_missing_status_without_network(self) -> None:
+        """No FRED_API_KEY → every series reports status=missing; no HTTP."""
+        from services.macro_data import MacroFeed
+        calls = {"n": 0}
+        def boom(*a, **kw):
+            calls["n"] += 1
+            raise AssertionError("must not be called when api_key is empty")
+        feed = MacroFeed(api_key="", cache_dir=self._cache_dir,
+                          http_get=boom, now=self._now)
+        out = feed.get_regime_drivers()
+        self.assertEqual(calls["n"], 0)
+        # All 5 series present, all with missing status.
+        self.assertEqual(len(out), 5)
+        for k, row in out.items():
+            self.assertEqual(row["status"], "missing", f"{k} status")
+            self.assertIsNone(row["value"])
+
+    # ─── happy path ────────────────────────────────────────────────────
+
+    def test_happy_path_fetches_parses_caches(self) -> None:
+        """Fresh fetch returns value, writes cache, reports status=ok."""
+        from services.macro_data import MacroFeed
+
+        # FRED responses keyed by series_id — values within sanity ranges
+        # and dated within the freshness window of the fake clock.
+        fred = {
+            "T10Y2Y":       _fake_fred_observations([("2026-05-13", 0.18),
+                                                       ("2026-05-14", 0.20)]),
+            "BAMLH0A0HYM2": _fake_fred_observations([("2026-05-13", 3.12),
+                                                       ("2026-05-14", 3.05)]),
+            "NAPM":         _fake_fred_observations([("2026-04-01", 51.4)]),
+            "VIXCLS":       _fake_fred_observations([("2026-05-14", 14.2)]),
+            "T10YIE":       _fake_fred_observations([("2026-05-14", 2.32)]),
+        }
+        calls = []
+        def fake_get(url, params=None, timeout=None):
+            sid = params["series_id"]
+            calls.append(sid)
+            return _FakeResponse(fred[sid])
+
+        feed = MacroFeed(api_key="REAL_KEY", cache_dir=self._cache_dir,
+                          http_get=fake_get, now=self._now)
+        out = feed.get_regime_drivers()
+
+        # All 5 series fetched.
+        self.assertEqual(sorted(calls),
+                          sorted(["T10Y2Y", "BAMLH0A0HYM2", "NAPM",
+                                   "VIXCLS", "T10YIE"]))
+        # Values flow through correctly.
+        self.assertAlmostEqual(out["yield_curve_10y2y"]["value"],   0.20, places=4)
+        self.assertAlmostEqual(out["hy_credit_spread"]["value"],    3.05, places=4)
+        self.assertAlmostEqual(out["pmi_manufacturing"]["value"],   51.4, places=2)
+        self.assertAlmostEqual(out["vix"]["value"],                 14.2, places=2)
+        self.assertAlmostEqual(out["breakeven_inflation"]["value"], 2.32, places=2)
+        # Status ok everywhere; freshness within window.
+        for k, row in out.items():
+            self.assertEqual(row["status"], "ok",
+                              f"{k}: status={row['status']}, freshness={row['freshness_days']}")
+            self.assertGreaterEqual(row["freshness_days"], 0)
+        # Cache files written.
+        self.assertTrue((self._cache_dir / "T10Y2Y.json").exists())
+
+    def test_cache_hit_skips_network(self) -> None:
+        """Within ttl, no HTTP call is made."""
+        from services.macro_data import MacroFeed
+        fake = {"T10Y2Y": _fake_fred_observations([("2026-05-14", 0.20)])}
+        def fake_get(url, params=None, timeout=None):
+            return _FakeResponse(fake[params["series_id"]])
+
+        # First call — populates cache.
+        feed1 = MacroFeed(api_key="K", cache_dir=self._cache_dir,
+                           http_get=fake_get, now=self._now,
+                           catalog=[s for s in __import__('services.macro_data',
+                                                            fromlist=['MACRO_SERIES_CATALOG']).MACRO_SERIES_CATALOG
+                                     if s.series_id == "T10Y2Y"])
+        feed1.get_regime_drivers()
+
+        # Second call — must NOT call HTTP.
+        boom_calls = {"n": 0}
+        def boom(*a, **kw):
+            boom_calls["n"] += 1
+            raise AssertionError("cache should have served this request")
+        feed2 = MacroFeed(api_key="K", cache_dir=self._cache_dir,
+                           http_get=boom, now=self._now,
+                           catalog=feed1._catalog)
+        out = feed2.get_regime_drivers()
+        self.assertEqual(boom_calls["n"], 0)
+        self.assertEqual(out["yield_curve_10y2y"]["status"], "ok")
+        self.assertAlmostEqual(out["yield_curve_10y2y"]["value"], 0.20, places=4)
+
+    # ─── graceful degradation ──────────────────────────────────────────
+
+    def test_http_failure_falls_back_to_stale_cache(self) -> None:
+        """Fresh cache → refresh fails → serve stale (better than nothing)."""
+        from services.macro_data import MacroFeed, MACRO_SERIES_CATALOG
+        catalog_single = [s for s in MACRO_SERIES_CATALOG if s.series_id == "VIXCLS"]
+        fake_ok = {"VIXCLS": _fake_fred_observations([("2026-05-14", 14.5)])}
+
+        # Step 1: prime cache with a successful fetch.
+        feed = MacroFeed(api_key="K", cache_dir=self._cache_dir,
+                          http_get=lambda u, params=None, timeout=None: _FakeResponse(fake_ok[params["series_id"]]),
+                          now=self._now, catalog=catalog_single)
+        feed.get_regime_drivers()
+
+        # Step 2: advance clock past TTL, simulate FRED outage.
+        from datetime import datetime, timezone, timedelta
+        later = datetime(2026, 5, 16, 12, 0, 0, tzinfo=timezone.utc)
+        def boom(*a, **kw):
+            raise RuntimeError("FRED 503")
+        feed2 = MacroFeed(api_key="K", cache_dir=self._cache_dir,
+                           http_get=boom, now=lambda: later,
+                           catalog=catalog_single)
+        out = feed2.get_regime_drivers()
+        # Value still served from cache, status downgraded to stale.
+        self.assertAlmostEqual(out["vix"]["value"], 14.5, places=4)
+        self.assertEqual(out["vix"]["status"], "stale")
+        self.assertIn("FRED 503", out["vix"]["note"])
+
+    def test_http_failure_without_cache_reports_error(self) -> None:
+        """First-ever fetch fails AND no cache → status=error, value=None."""
+        from services.macro_data import MacroFeed, MACRO_SERIES_CATALOG
+        catalog_single = [s for s in MACRO_SERIES_CATALOG if s.series_id == "VIXCLS"]
+        def boom(*a, **kw):
+            raise ConnectionError("name resolution failed")
+        feed = MacroFeed(api_key="K", cache_dir=self._cache_dir,
+                          http_get=boom, now=self._now, catalog=catalog_single)
+        out = feed.get_regime_drivers()
+        self.assertEqual(out["vix"]["status"], "error")
+        self.assertIsNone(out["vix"]["value"])
+        self.assertIn("name resolution failed", out["vix"]["note"])
+
+    # ─── status downgrades ─────────────────────────────────────────────
+
+    def test_value_out_of_sanity_range_downgrades_to_stale(self) -> None:
+        """A value beyond the sanity_range (e.g. VIX = 200) signals bad data."""
+        from services.macro_data import MacroFeed, MACRO_SERIES_CATALOG
+        catalog_single = [s for s in MACRO_SERIES_CATALOG if s.series_id == "VIXCLS"]
+        # VIX sanity_range is (5, 120) → 200 trips it.
+        body = _fake_fred_observations([("2026-05-14", 200.0)])
+        feed = MacroFeed(api_key="K", cache_dir=self._cache_dir,
+                          http_get=lambda u, params=None, timeout=None: _FakeResponse(body),
+                          now=self._now, catalog=catalog_single)
+        out = feed.get_regime_drivers()
+        self.assertEqual(out["vix"]["status"], "stale")
+        self.assertAlmostEqual(out["vix"]["value"], 200.0, places=2)
+
+    def test_observation_older_than_freshness_window_downgrades(self) -> None:
+        """Daily series with 10-day-old last observation → status=stale."""
+        from services.macro_data import MacroFeed, MACRO_SERIES_CATALOG
+        catalog_single = [s for s in MACRO_SERIES_CATALOG if s.series_id == "VIXCLS"]
+        body = _fake_fred_observations([("2026-05-01", 14.0)])   # 14 days back
+        feed = MacroFeed(api_key="K", cache_dir=self._cache_dir,
+                          http_get=lambda u, params=None, timeout=None: _FakeResponse(body),
+                          now=self._now, catalog=catalog_single)
+        out = feed.get_regime_drivers()
+        self.assertEqual(out["vix"]["status"], "stale")
+        self.assertGreater(out["vix"]["freshness_days"], 5)
+
+    def test_missing_value_marker_ignored(self) -> None:
+        """
+        FRED uses '.' for missing values — they must be SKIPPED, not parsed
+        as NaN.  The last NON-MISSING value should be reported.
+        """
+        from services.macro_data import MacroFeed, MACRO_SERIES_CATALOG
+        catalog_single = [s for s in MACRO_SERIES_CATALOG if s.series_id == "VIXCLS"]
+        body = _fake_fred_observations([
+            ("2026-05-13", 14.1),
+            ("2026-05-14", None),     # missing
+        ])
+        feed = MacroFeed(api_key="K", cache_dir=self._cache_dir,
+                          http_get=lambda u, params=None, timeout=None: _FakeResponse(body),
+                          now=self._now, catalog=catalog_single)
+        out = feed.get_regime_drivers()
+        self.assertAlmostEqual(out["vix"]["value"], 14.1, places=2)
+        self.assertEqual(out["vix"]["as_of"], "2026-05-13")
+
+    def test_zero_observations_reports_error(self) -> None:
+        """Empty observations payload → error, not silent zero."""
+        from services.macro_data import MacroFeed, MACRO_SERIES_CATALOG
+        catalog_single = [s for s in MACRO_SERIES_CATALOG if s.series_id == "VIXCLS"]
+        body = {"observations": []}
+        feed = MacroFeed(api_key="K", cache_dir=self._cache_dir,
+                          http_get=lambda u, params=None, timeout=None: _FakeResponse(body),
+                          now=self._now, catalog=catalog_single)
+        out = feed.get_regime_drivers()
+        self.assertEqual(out["vix"]["status"], "error")
+        self.assertIsNone(out["vix"]["value"])
+
+    # ─── catalog completeness ──────────────────────────────────────────
+
+    def test_default_catalog_covers_all_5_drivers(self) -> None:
+        from services.macro_data import MACRO_SERIES_CATALOG
+        keys = {s.key for s in MACRO_SERIES_CATALOG}
+        self.assertEqual(keys, {"yield_curve_10y2y", "hy_credit_spread",
+                                  "pmi_manufacturing", "vix", "breakeven_inflation"})
+
+    # ─── payload passthrough ───────────────────────────────────────────
+
+    def test_payload_passes_through_macro_drivers(self) -> None:
+        """results["macro_drivers"] flows into payload unchanged."""
+        from pdf_payload import build_payload, TIER_BASE, TIER_DEEP
+        results = ConcentrationAndWaterfallTest()._base_results()
+        results["macro_drivers"] = {
+            "vix": {"value": 14.2, "status": "ok", "freshness_days": 1,
+                    "as_of": "2026-05-14", "label": "CBOE VIX",
+                    "unit": "index", "history_30d": []},
+        }
+        for tier in (TIER_BASE, TIER_DEEP):
+            p = build_payload(results, tier)
+            self.assertIn("macro_drivers", p)
+            self.assertEqual(p["macro_drivers"]["vix"]["value"], 14.2)
+            self.assertEqual(p["macro_drivers"]["vix"]["status"], "ok")
+
+
 # ── 4.2  SVG charts ─────────────────────────────────────────────────────────
 
 class ChartsSVGTest(unittest.TestCase):
