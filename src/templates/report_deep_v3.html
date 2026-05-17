@@ -1911,375 +1911,168 @@
       <span></span>
     </div>
 
-    <!-- ── PLTR ── -->
-    <div class="h-group">
-      <div class="h-row" onclick="tgRow(this)">
-        <div class="h-cell ticker">
-          <div class="h-ticker"><span class="tk">PLTR</span><span class="h-flag">HOTSPOT</span></div>
-        </div>
-        <div class="h-cell"><span class="h-cell-label">Класс</span>Технологии</div>
-        <div class="h-cell num"><span class="h-cell-label">Вес</span>18.0%</div>
-        <div class="h-cell num"><span class="h-cell-label">Риск</span>24.4%</div>
-        <div class="h-cell num"><span class="h-cell-label">P/L %</span><span class="pnl pos">+32.1%</span></div>
-        <div class="h-cell num"><span class="h-cell-label">P/L $</span><span class="pnl pos">+$2 140</span></div>
-        <div class="h-cell action"><span class="badge buy">BUY</span></div>
-        <div class="h-cell caret-cell"><span class="h-toggle"><span class="t-more">Детали</span><span class="t-less">Свернуть</span><span class="h-caret">▸</span></span></div>
-      </div>
-      <div class="h-detail">
-        <div class="h-detail-inner">
-          <div class="h-detail-name">Palantir Technologies · фундаментал по данным SEC EDGAR</div>
-          <div class="stat-grid">
-            <div class="stat"><div class="stat-label">Доходность капитала (ROE)</div><div class="stat-value pos">28.4%</div></div>
-            <div class="stat"><div class="stat-label">Операц. маржа</div><div class="stat-value pos">22.1%</div></div>
-            <div class="stat"><div class="stat-label">Долг / активы</div><div class="stat-value pos">0.18</div></div>
-            <div class="stat"><div class="stat-label">Рост выручки г/г</div><div class="stat-value pos">+30.4%</div></div>
-            <div class="stat"><div class="stat-label">ATR — дневная волатильность</div><div class="stat-value neg">3.1%</div></div>
-            <div class="stat"><div class="stat-label">Beta к рынку</div><div class="stat-value neg">1.81</div></div>
-          </div>
-          <div class="h-detail-ai">
-            <span class="tag">🤖</span>
-            <span class="txt">Сильный фундаментал и рост выручки, но дневные колебания высокие
-              (ATR 3.1%) и бета 1.81 — бумага усиливает риск портфеля.
-              <span class="h-cite">[SEC EDGAR] [Quant Engine]</span></span>
-          </div>
-        </div>
-      </div>
-    </div>
+    {# ─── Asset rows (data-driven loop) ──────────────────────────────────
+         Replaced 9 hardcoded h-groups with a {% for %} over data.assets.
+         Each row uses payload fields: ticker, asset_class, weight,
+         euler_risk, atr_pct, pnl_pct, pnl_abs, pnl_color, action,
+         hotspot, extremes.  Fundamentals (ROE, op-margin, debt/assets,
+         growth, ATR, beta) pulled from data.fundamental_layer via a
+         ticker → dict lookup built once per render. #}
+    {% set fund_by_ticker = {} %}
+    {% for f in (data.fundamental_layer or []) %}
+      {% if fund_by_ticker.update({f.ticker: f}) %}{% endif %}
+    {% endfor %}
 
-    <!-- ── CRWD ── -->
+    {% for asset in (data.assets or []) %}
+      {% set fund = fund_by_ticker.get(asset.ticker, {}) %}
+      {% set action_class = (asset.action or 'hold') | lower %}
+      {% set pnl_abs_raw  = asset.pnl_abs or '0' %}
     <div class="h-group">
       <div class="h-row" onclick="tgRow(this)">
         <div class="h-cell ticker">
-          <div class="h-ticker"><span class="tk">CRWD</span><span class="h-flag">HOTSPOT</span></div>
+          <div class="h-ticker">
+            <span class="tk">{{ asset.ticker }}</span>
+            {% if asset.hotspot %}<span class="h-flag">HOTSPOT</span>{% endif %}
+          </div>
         </div>
-        <div class="h-cell"><span class="h-cell-label">Класс</span>Технологии</div>
-        <div class="h-cell num"><span class="h-cell-label">Вес</span>14.0%</div>
-        <div class="h-cell num"><span class="h-cell-label">Риск</span>20.8%</div>
-        <div class="h-cell num"><span class="h-cell-label">P/L %</span><span class="pnl pos">+18.5%</span></div>
-        <div class="h-cell num"><span class="h-cell-label">P/L $</span><span class="pnl pos">+$890</span></div>
-        <div class="h-cell action"><span class="badge hold">HOLD</span></div>
-        <div class="h-cell caret-cell"><span class="h-toggle"><span class="t-more">Детали</span><span class="t-less">Свернуть</span><span class="h-caret">▸</span></span></div>
+        <div class="h-cell"><span class="h-cell-label">Класс</span>{{ asset.asset_class }}</div>
+        <div class="h-cell num"><span class="h-cell-label">Вес</span>{{ asset.weight }}</div>
+        <div class="h-cell num"><span class="h-cell-label">Риск</span>{{ asset.euler_risk }}</div>
+        <div class="h-cell num"><span class="h-cell-label">P/L %</span>
+          <span class="pnl {{ asset.pnl_color or 'neut' }}">{{ asset.pnl_pct or '—' }}</span>
+        </div>
+        <div class="h-cell num"><span class="h-cell-label">P/L $</span>
+          <span class="pnl {{ asset.pnl_color or 'neut' }}">{%-
+              if pnl_abs_raw.startswith('-') -%}
+                −${{ pnl_abs_raw[1:] }}
+              {%- elif pnl_abs_raw.startswith('+') -%}
+                +${{ pnl_abs_raw[1:] }}
+              {%- else -%}
+                ${{ pnl_abs_raw }}
+              {%- endif %}</span>
+        </div>
+        <div class="h-cell action"><span class="badge {{ action_class }}">{{ (asset.action or 'HOLD') | upper }}</span></div>
+        <div class="h-cell caret-cell">
+          <span class="h-toggle">
+            <span class="t-more">Детали</span>
+            <span class="t-less">Свернуть</span>
+            <span class="h-caret">▸</span>
+          </span>
+        </div>
       </div>
       <div class="h-detail">
         <div class="h-detail-inner">
-          <div class="h-detail-name">CrowdStrike Holdings · фундаментал по данным SEC EDGAR</div>
+          <div class="h-detail-name">{{ asset.ticker }} · фундаментал по данным SEC EDGAR</div>
           <div class="stat-grid">
-            <div class="stat"><div class="stat-label">Доходность капитала (ROE)</div><div class="stat-value pos">19.7%</div></div>
-            <div class="stat"><div class="stat-label">Операц. маржа</div><div class="stat-value pos">15.2%</div></div>
-            <div class="stat"><div class="stat-label">Долг / активы</div><div class="stat-value pos">0.22</div></div>
-            <div class="stat"><div class="stat-label">Рост выручки г/г</div><div class="stat-value pos">+33.1%</div></div>
-            <div class="stat"><div class="stat-label">ATR — дневная волатильность</div><div class="stat-value neg">2.8%</div></div>
-            <div class="stat"><div class="stat-label">Beta к рынку</div><div class="stat-value neg">1.55</div></div>
+            <div class="stat"><div class="stat-label">Доходность капитала (ROE)</div>
+              <div class="stat-value">{{ fund.roe if fund.roe and fund.roe != '—' else 'н/д' }}</div></div>
+            <div class="stat"><div class="stat-label">Операц. маржа</div>
+              <div class="stat-value">{{ fund.op_m if fund.op_m and fund.op_m != '—' else 'н/д' }}</div></div>
+            <div class="stat"><div class="stat-label">Долг / активы</div>
+              <div class="stat-value">{{ fund.dta if fund.dta and fund.dta != '—' else 'н/д' }}</div></div>
+            <div class="stat"><div class="stat-label">Рост выручки г/г</div>
+              <div class="stat-value">{{ fund.rev_g if fund.rev_g and fund.rev_g != '—' else 'н/д' }}</div></div>
+            <div class="stat"><div class="stat-label">ATR — дневная волатильность</div>
+              <div class="stat-value {% if asset.atr_extreme %}neg{% endif %}">{{ asset.atr_pct or 'н/д' }}</div></div>
+            <div class="stat"><div class="stat-label">Altman-Z (банкротство)</div>
+              <div class="stat-value">{{ fund.altman_z if fund.altman_z and fund.altman_z != '—' else 'н/д' }}</div></div>
           </div>
           <div class="h-detail-ai">
             <span class="tag">🤖</span>
-            <span class="txt">Растёт быстро, но движется почти синхронно с PLTR — вместе они
-              дают вторую по величине концентрацию риска.
-              <span class="h-cite">[SEC EDGAR] [Quant Engine]</span></span>
+            <span class="txt">
+              {%- if asset.hotspot -%}
+                Крупнейший вклад в риск портфеля — TRC {{ asset.euler_risk }}.  Концентрация
+                требует контроля; рассмотрите частичную фиксацию.
+              {%- elif asset.extremes -%}
+                Особенности: {{ asset.extremes | join(' · ') }}.
+              {%- else -%}
+                Вклад в риск умеренный (TRC {{ asset.euler_risk }}).
+              {%- endif %}
+              <span class="h-cite">[SEC EDGAR] [Quant Engine]</span>
+            </span>
           </div>
         </div>
       </div>
     </div>
-
-    <!-- ── AAPL ── -->
+    {% else %}
     <div class="h-group">
-      <div class="h-row" onclick="tgRow(this)">
-        <div class="h-cell ticker">
-          <div class="h-ticker"><span class="tk">AAPL</span></div>
-        </div>
-        <div class="h-cell"><span class="h-cell-label">Класс</span>Технологии</div>
-        <div class="h-cell num"><span class="h-cell-label">Вес</span>16.0%</div>
-        <div class="h-cell num"><span class="h-cell-label">Риск</span>17.5%</div>
-        <div class="h-cell num"><span class="h-cell-label">P/L %</span><span class="pnl pos">+12.3%</span></div>
-        <div class="h-cell num"><span class="h-cell-label">P/L $</span><span class="pnl pos">+$640</span></div>
-        <div class="h-cell action"><span class="badge buy">BUY</span></div>
-        <div class="h-cell caret-cell"><span class="h-toggle"><span class="t-more">Детали</span><span class="t-less">Свернуть</span><span class="h-caret">▸</span></span></div>
-      </div>
-      <div class="h-detail">
-        <div class="h-detail-inner">
-          <div class="h-detail-name">Apple Inc. · фундаментал по данным SEC EDGAR</div>
-          <div class="stat-grid">
-            <div class="stat"><div class="stat-label">Доходность капитала (ROE)</div><div class="stat-value pos">147%</div></div>
-            <div class="stat"><div class="stat-label">Операц. маржа</div><div class="stat-value pos">30.1%</div></div>
-            <div class="stat"><div class="stat-label">Долг / активы</div><div class="stat-value">0.31</div></div>
-            <div class="stat"><div class="stat-label">Рост выручки г/г</div><div class="stat-value">+2.0%</div></div>
-            <div class="stat"><div class="stat-label">ATR — дневная волатильность</div><div class="stat-value">1.6%</div></div>
-            <div class="stat"><div class="stat-label">Beta к рынку</div><div class="stat-value">1.21</div></div>
-          </div>
-          <div class="h-detail-ai">
-            <span class="tag">🤖</span>
-            <span class="txt">Очень прибыльная и стабильная — высокая маржа, умеренные колебания.
-              Рост выручки замедлился, но бумага «держит» портфель.
-              <span class="h-cite">[SEC EDGAR]</span></span>
-          </div>
+      <div class="h-row" style="opacity:0.6;">
+        <div class="h-cell" style="grid-column:1/-1; text-align:center; padding:18px;">
+          Нет позиций в портфеле — проверьте подключение брокера.
         </div>
       </div>
     </div>
-
-    <!-- ── JNJ ── -->
-    <div class="h-group">
-      <div class="h-row" onclick="tgRow(this)">
-        <div class="h-cell ticker">
-          <div class="h-ticker"><span class="tk">JNJ</span></div>
-        </div>
-        <div class="h-cell"><span class="h-cell-label">Класс</span>Здравоохранение</div>
-        <div class="h-cell num"><span class="h-cell-label">Вес</span>14.0%</div>
-        <div class="h-cell num"><span class="h-cell-label">Риск</span>11.0%</div>
-        <div class="h-cell num"><span class="h-cell-label">P/L %</span><span class="pnl pos">+4.2%</span></div>
-        <div class="h-cell num"><span class="h-cell-label">P/L $</span><span class="pnl pos">+$310</span></div>
-        <div class="h-cell action"><span class="badge buy">STRONG BUY</span></div>
-        <div class="h-cell caret-cell"><span class="h-toggle"><span class="t-more">Детали</span><span class="t-less">Свернуть</span><span class="h-caret">▸</span></span></div>
-      </div>
-      <div class="h-detail">
-        <div class="h-detail-inner">
-          <div class="h-detail-name">Johnson &amp; Johnson · фундаментал по данным SEC EDGAR</div>
-          <div class="stat-grid">
-            <div class="stat"><div class="stat-label">Доходность капитала (ROE)</div><div class="stat-value pos">24.8%</div></div>
-            <div class="stat"><div class="stat-label">Операц. маржа</div><div class="stat-value pos">25.3%</div></div>
-            <div class="stat"><div class="stat-label">Долг / активы</div><div class="stat-value pos">0.34</div></div>
-            <div class="stat"><div class="stat-label">Рост выручки г/г</div><div class="stat-value">+3.4%</div></div>
-            <div class="stat"><div class="stat-label">ATR — дневная волатильность</div><div class="stat-value pos">0.9%</div></div>
-            <div class="stat"><div class="stat-label">Beta к рынку</div><div class="stat-value pos">0.74</div></div>
-          </div>
-          <div class="h-detail-ai">
-            <span class="tag">🤖</span>
-            <span class="txt">Тихая, надёжная позиция: низкая бета, маленькие колебания, крепкий
-              фундаментал — снижает общий риск портфеля.
-              <span class="h-cite">[SEC EDGAR] [Quant Engine]</span></span>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ── KO ── -->
-    <div class="h-group">
-      <div class="h-row" onclick="tgRow(this)">
-        <div class="h-cell ticker">
-          <div class="h-ticker"><span class="tk">KO</span></div>
-        </div>
-        <div class="h-cell"><span class="h-cell-label">Класс</span>Потреб. товары</div>
-        <div class="h-cell num"><span class="h-cell-label">Вес</span>16.0%</div>
-        <div class="h-cell num"><span class="h-cell-label">Риск</span>9.8%</div>
-        <div class="h-cell num"><span class="h-cell-label">P/L %</span><span class="pnl neg">−1.8%</span></div>
-        <div class="h-cell num"><span class="h-cell-label">P/L $</span><span class="pnl neg">−$190</span></div>
-        <div class="h-cell action"><span class="badge hold">HOLD</span></div>
-        <div class="h-cell caret-cell"><span class="h-toggle"><span class="t-more">Детали</span><span class="t-less">Свернуть</span><span class="h-caret">▸</span></span></div>
-      </div>
-      <div class="h-detail">
-        <div class="h-detail-inner">
-          <div class="h-detail-name">The Coca-Cola Company · фундаментал по данным SEC EDGAR</div>
-          <div class="stat-grid">
-            <div class="stat"><div class="stat-label">Доходность капитала (ROE)</div><div class="stat-value pos">41.2%</div></div>
-            <div class="stat"><div class="stat-label">Операц. маржа</div><div class="stat-value pos">28.7%</div></div>
-            <div class="stat"><div class="stat-label">Долг / активы</div><div class="stat-value">0.46</div></div>
-            <div class="stat"><div class="stat-label">Рост выручки г/г</div><div class="stat-value">+1.1%</div></div>
-            <div class="stat"><div class="stat-label">ATR — дневная волатильность</div><div class="stat-value pos">0.7%</div></div>
-            <div class="stat"><div class="stat-label">Beta к рынку</div><div class="stat-value pos">0.61</div></div>
-          </div>
-          <div class="h-detail-ai">
-            <span class="tag">🤖</span>
-            <span class="txt">Самый «тихий» актив портфеля: минимальные колебания и низкая бета.
-              Сейчас в небольшом минусе, но именно он гасит общий риск.
-              <span class="h-cite">[SEC EDGAR] [Quant Engine]</span></span>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ── MSFT ── -->
-    <div class="h-group">
-      <div class="h-row" onclick="tgRow(this)">
-        <div class="h-cell ticker">
-          <div class="h-ticker"><span class="tk">MSFT</span></div>
-        </div>
-        <div class="h-cell"><span class="h-cell-label">Класс</span>Технологии</div>
-        <div class="h-cell num"><span class="h-cell-label">Вес</span>10.0%</div>
-        <div class="h-cell num"><span class="h-cell-label">Риск</span>8.1%</div>
-        <div class="h-cell num"><span class="h-cell-label">P/L %</span><span class="pnl pos">+9.4%</span></div>
-        <div class="h-cell num"><span class="h-cell-label">P/L $</span><span class="pnl pos">+$420</span></div>
-        <div class="h-cell action"><span class="badge buy">BUY</span></div>
-        <div class="h-cell caret-cell"><span class="h-toggle"><span class="t-more">Детали</span><span class="t-less">Свернуть</span><span class="h-caret">▸</span></span></div>
-      </div>
-      <div class="h-detail">
-        <div class="h-detail-inner">
-          <div class="h-detail-name">Microsoft Corp. · фундаментал по данным SEC EDGAR</div>
-          <div class="stat-grid">
-            <div class="stat"><div class="stat-label">Доходность капитала (ROE)</div><div class="stat-value pos">38.5%</div></div>
-            <div class="stat"><div class="stat-label">Операц. маржа</div><div class="stat-value pos">44.6%</div></div>
-            <div class="stat"><div class="stat-label">Долг / активы</div><div class="stat-value pos">0.25</div></div>
-            <div class="stat"><div class="stat-label">Рост выручки г/г</div><div class="stat-value pos">+15.7%</div></div>
-            <div class="stat"><div class="stat-label">ATR — дневная волатильность</div><div class="stat-value">1.4%</div></div>
-            <div class="stat"><div class="stat-label">Beta к рынку</div><div class="stat-value">1.08</div></div>
-          </div>
-          <div class="h-detail-ai">
-            <span class="tag">🤖</span>
-            <span class="txt">Высокая маржа и устойчивый рост при умеренной бете — качественная
-              технологическая позиция без перекоса риска.
-              <span class="h-cite">[SEC EDGAR]</span></span>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ── XOM ── -->
-    <div class="h-group">
-      <div class="h-row" onclick="tgRow(this)">
-        <div class="h-cell ticker">
-          <div class="h-ticker"><span class="tk">XOM</span></div>
-        </div>
-        <div class="h-cell"><span class="h-cell-label">Класс</span>Энергетика</div>
-        <div class="h-cell num"><span class="h-cell-label">Вес</span>6.0%</div>
-        <div class="h-cell num"><span class="h-cell-label">Риск</span>4.0%</div>
-        <div class="h-cell num"><span class="h-cell-label">P/L %</span><span class="pnl neg">−3.1%</span></div>
-        <div class="h-cell num"><span class="h-cell-label">P/L $</span><span class="pnl neg">−$160</span></div>
-        <div class="h-cell action"><span class="badge trim">TRIM</span></div>
-        <div class="h-cell caret-cell"><span class="h-toggle"><span class="t-more">Детали</span><span class="t-less">Свернуть</span><span class="h-caret">▸</span></span></div>
-      </div>
-      <div class="h-detail">
-        <div class="h-detail-inner">
-          <div class="h-detail-name">Exxon Mobil Corp. · фундаментал по данным SEC EDGAR</div>
-          <div class="stat-grid">
-            <div class="stat"><div class="stat-label">Доходность капитала (ROE)</div><div class="stat-value">14.1%</div></div>
-            <div class="stat"><div class="stat-label">Операц. маржа</div><div class="stat-value">12.8%</div></div>
-            <div class="stat"><div class="stat-label">Долг / активы</div><div class="stat-value pos">0.20</div></div>
-            <div class="stat"><div class="stat-label">Рост выручки г/г</div><div class="stat-value neg">−6.2%</div></div>
-            <div class="stat"><div class="stat-label">ATR — дневная волатильность</div><div class="stat-value">1.9%</div></div>
-            <div class="stat"><div class="stat-label">Beta к рынку</div><div class="stat-value">0.92</div></div>
-          </div>
-          <div class="h-detail-ai">
-            <span class="tag">🤖</span>
-            <span class="txt">Выручка снижается, позиция в небольшом минусе — движок предлагает
-              сократить (Trim). Вклад в риск при этом небольшой.
-              <span class="h-cite">[SEC EDGAR] [Quant Engine]</span></span>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ── NVDA ── -->
-    <div class="h-group">
-      <div class="h-row" onclick="tgRow(this)">
-        <div class="h-cell ticker">
-          <div class="h-ticker"><span class="tk">NVDA</span></div>
-        </div>
-        <div class="h-cell"><span class="h-cell-label">Класс</span>Технологии</div>
-        <div class="h-cell num"><span class="h-cell-label">Вес</span>4.0%</div>
-        <div class="h-cell num"><span class="h-cell-label">Риск</span>2.9%</div>
-        <div class="h-cell num"><span class="h-cell-label">P/L %</span><span class="pnl pos">+44.0%</span></div>
-        <div class="h-cell num"><span class="h-cell-label">P/L $</span><span class="pnl pos">+$1 210</span></div>
-        <div class="h-cell action"><span class="badge hold">HOLD</span></div>
-        <div class="h-cell caret-cell"><span class="h-toggle"><span class="t-more">Детали</span><span class="t-less">Свернуть</span><span class="h-caret">▸</span></span></div>
-      </div>
-      <div class="h-detail">
-        <div class="h-detail-inner">
-          <div class="h-detail-name">NVIDIA Corp. · фундаментал по данным SEC EDGAR</div>
-          <div class="stat-grid">
-            <div class="stat"><div class="stat-label">Доходность капитала (ROE)</div><div class="stat-value pos">91.5%</div></div>
-            <div class="stat"><div class="stat-label">Операц. маржа</div><div class="stat-value pos">54.1%</div></div>
-            <div class="stat"><div class="stat-label">Долг / активы</div><div class="stat-value pos">0.14</div></div>
-            <div class="stat"><div class="stat-label">Рост выручки г/г</div><div class="stat-value pos">+122%</div></div>
-            <div class="stat"><div class="stat-label">ATR — дневная волатильность</div><div class="stat-value neg">3.6%</div></div>
-            <div class="stat"><div class="stat-label">Beta к рынку</div><div class="stat-value neg">1.74</div></div>
-          </div>
-          <div class="h-detail-ai">
-            <span class="tag">🤖</span>
-            <span class="txt">Лучший рост в портфеле (+44%), но и колебания высокие. Доля небольшая
-              (4%), поэтому общий риск пока не раздувает.
-              <span class="h-cite">[SEC EDGAR] [Quant Engine]</span></span>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ── BND ── -->
-    <div class="h-group">
-      <div class="h-row" onclick="tgRow(this)">
-        <div class="h-cell ticker">
-          <div class="h-ticker"><span class="tk">BND</span></div>
-        </div>
-        <div class="h-cell"><span class="h-cell-label">Класс</span>Облигации</div>
-        <div class="h-cell num"><span class="h-cell-label">Вес</span>2.0%</div>
-        <div class="h-cell num"><span class="h-cell-label">Риск</span>1.5%</div>
-        <div class="h-cell num"><span class="h-cell-label">P/L %</span><span class="pnl pos">+0.8%</span></div>
-        <div class="h-cell num"><span class="h-cell-label">P/L $</span><span class="pnl pos">+$20</span></div>
-        <div class="h-cell action"><span class="badge hold">HOLD</span></div>
-        <div class="h-cell caret-cell"><span class="h-toggle"><span class="t-more">Детали</span><span class="t-less">Свернуть</span><span class="h-caret">▸</span></span></div>
-      </div>
-      <div class="h-detail">
-        <div class="h-detail-inner">
-          <div class="h-detail-name">Vanguard Total Bond Market ETF · облигационный фонд</div>
-          <div class="stat-grid">
-            <div class="stat"><div class="stat-label">Доходность капитала (ROE)</div><div class="stat-value">н/д</div></div>
-            <div class="stat"><div class="stat-label">Операц. маржа</div><div class="stat-value">н/д</div></div>
-            <div class="stat"><div class="stat-label">Долг / активы</div><div class="stat-value">н/д</div></div>
-            <div class="stat"><div class="stat-label">Рост выручки г/г</div><div class="stat-value">н/д</div></div>
-            <div class="stat"><div class="stat-label">ATR — дневная волатильность</div><div class="stat-value pos">0.3%</div></div>
-            <div class="stat"><div class="stat-label">Beta к рынку</div><div class="stat-value pos">0.12</div></div>
-          </div>
-          <div class="h-detail-ai">
-            <span class="tag">🤖</span>
-            <span class="txt">Облигационный фонд — фундаментала по эмитенту нет, но это сознательно:
-              почти нулевая бета, он стабилизирует портфель.
-              <span class="h-cite">[Quant Engine]</span></span>
-          </div>
-        </div>
-      </div>
-    </div>
+    {% endfor %}
 
   </div><!-- /.holdings -->
 
   <!-- ПАНЕЛЬ СЕКТОРОВ -->
+  {# ─── Sector panel ──────────────────────────────────────────────────────
+       Legend + warning are data-driven from data.sectors and
+       data.sector_warnings.  The pie's conic-gradient is computed
+       inline so the colours follow the real sector allocation —
+       largest gets amber (alert), then tech-blue, green, two greys
+       for the long tail.  1% separator between slices keeps the
+       banker-grade visual. #}
+  {% set _palette  = ['var(--amber)', 'var(--tech-blue)', 'var(--green)', 'var(--ink-60)', 'var(--ink-40)'] %}
+  {% set _sectors  = data.sectors or [] %}
+  {% set _gap_pp   = 1.0 %}
+  {% set _top_sec  = _sectors[0] if _sectors else None %}
+
   <div class="sector-panel">
     <div class="sp-head">
       <div class="sp-title">Структура по секторам</div>
-      <div class="sp-sub">доля капитала · 9 позиций</div>
+      <div class="sp-sub">доля капитала · {{ (data.assets or []) | length }} позиций</div>
     </div>
 
     <div class="sp-body">
     <div class="pie-wrap">
-      <div class="pie">
+      {# Inline conic-gradient — pie segments follow the real sector
+         allocation.  Cumulative percentages are built in a single pass
+         using a list mutation trick (Jinja can't do persistent assigns).
+         Output:  conic-gradient(color1 0% 50%, sep 50% 51%, color2 51% 75%, ...) #}
+      {% set ns = namespace(cum=0.0, parts=[]) %}
+      {% for s in _sectors %}
+        {% set col   = _palette[loop.index0 % _palette | length] %}
+        {% set start = ns.cum %}
+        {% set end   = ns.cum + (s.weight_pct or 0) - (_gap_pp if not loop.last else 0) %}
+        {% if ns.parts.append(col ~ ' ' ~ ('%.2f' % start) ~ '% ' ~ ('%.2f' % end) ~ '%') %}{% endif %}
+        {% if not loop.last %}
+          {% if ns.parts.append('rgba(255,255,255,0.85) ' ~ ('%.2f' % end) ~ '% ' ~ ('%.2f' % (end + _gap_pp)) ~ '%') %}{% endif %}
+        {% endif %}
+        {% set ns.cum = ns.cum + (s.weight_pct or 0) %}
+      {% endfor %}
+      <div class="pie" {% if ns.parts %}style="background:
+            radial-gradient(circle at 50% 8%,  rgba(255,255,255,0.55), rgba(255,255,255,0) 28%),
+            radial-gradient(circle at 50% 96%, rgba(42,46,51,0.16),  rgba(42,46,51,0) 32%),
+            conic-gradient({{ ns.parts | join(', ') }});"{% endif %}>
         <div class="pie-center">
-          <span class="pc-pct">62%</span>
-          <span class="pc-lbl">ТЕХНОЛОГИИ</span>
+          <span class="pc-pct">{{ _top_sec.weight_str if _top_sec else '—' }}</span>
+          <span class="pc-lbl">{{ (_top_sec.name if _top_sec else '—') | upper }}</span>
         </div>
       </div>
     </div>
 
     <div class="pie-legend">
-      <div class="lg-item over">
-        <span class="lg-sw" style="background:var(--amber)"></span>
-        <span class="lg-name">Технологии</span>
-        <span class="lg-pct">62%</span>
-      </div>
-      <div class="lg-item">
-        <span class="lg-sw" style="background:var(--tech-blue)"></span>
-        <span class="lg-name">Здравоохранение</span>
-        <span class="lg-pct">14%</span>
-      </div>
-      <div class="lg-item">
-        <span class="lg-sw" style="background:var(--green)"></span>
-        <span class="lg-name">Потреб. товары</span>
-        <span class="lg-pct">16%</span>
-      </div>
-      <div class="lg-item">
-        <span class="lg-sw" style="background:var(--ink-60)"></span>
-        <span class="lg-name">Энергетика</span>
-        <span class="lg-pct">6%</span>
-      </div>
-      <div class="lg-item">
-        <span class="lg-sw" style="background:var(--ink-40)"></span>
-        <span class="lg-name">Облигации</span>
-        <span class="lg-pct">2%</span>
-      </div>
+      {% for s in _sectors %}
+        {% set col = _palette[loop.index0 % _palette | length] %}
+        <div class="lg-item{% if (s.weight_pct or 0) > 40 %} over{% endif %}">
+          <span class="lg-sw" style="background:{{ col }}"></span>
+          <span class="lg-name">{{ s.name }}</span>
+          <span class="lg-pct">{{ s.weight_str }}</span>
+        </div>
+      {% endfor %}
     </div>
     </div><!-- /.sp-body -->
 
-    <div class="sp-warn">
-      <span>⚠</span>
-      <span><b>Перенасыщение сектора.</b> Технологии — 62% портфеля при
-        ориентире ≤ 40%. 6 из 9 бумаг в одном секторе: просадка в IT
-        ударит сразу по большей части капитала.</span>
-    </div>
+    {% if data.sector_warnings %}
+      {% for w in data.sector_warnings %}
+      <div class="sp-warn">
+        <span>⚠</span>
+        <span>{{ w }}</span>
+      </div>
+      {% endfor %}
+    {% endif %}
   </div><!-- /.sector-panel -->
 
   </div><!-- /.holdings-layout -->
