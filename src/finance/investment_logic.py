@@ -1066,6 +1066,23 @@ class UniversalPortfolioManager:
                 logger.info("CDS feed unavailable, continuing without it: %s", exc)
                 cds_lookup = None
 
+        # Tally CDS coverage so the CoVe lineage row reflects reality
+        # (instead of the silent "no per-ticker CDS attached" placeholder).
+        # Single extra pass over the cache — microseconds for ≤20 tickers.
+        cds_summary: dict = {"enabled": cds_lookup is not None,
+                              "checked": 0, "loaded": 0, "gated_out": 0}
+        if cds_lookup is not None:
+            try:
+                checked = list(actual_risky)
+                n_loaded = sum(1 for t in checked if cds_lookup(t))
+                cds_summary.update({
+                    "checked":   len(checked),
+                    "loaded":    n_loaded,
+                    "gated_out": len(checked) - n_loaded,
+                })
+            except Exception as exc:
+                logger.info("CDS coverage tally skipped: %s", exc)
+
         # ═══════════════ 4-PILLAR SCORING (F/V/T/C) ═══════════════
         # Produces AssetScore per ticker, including CDS signals when available.
         asset_scores: dict = {}
@@ -1223,6 +1240,7 @@ class UniversalPortfolioManager:
             "period_returns_table": period_returns_table,
             "stress_scenarios": stress_scenarios,
             "expected_effect": expected_effect,
+            "cds_summary":     cds_summary,
             "history_result": history_result,
             "sector_exposure": sector_exposure,
             "factor_scores": factor_scores,

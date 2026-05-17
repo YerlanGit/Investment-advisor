@@ -175,28 +175,39 @@ def _sec_status(results: dict, today: date) -> list[dict]:
 
 def _cds_status(results: dict) -> dict:
     """
-    Read whatever the engine already attached for CDS quality.
-    Today the CDS gate writes a freshness flag into results['cds_summary'];
-    fall back to a generic 'ok' if the engine didn't expose anything.
+    Read the CDS coverage summary attached by analyze_all.
+
+    `cds_summary` shape: {enabled, checked, loaded, gated_out}.
+      • enabled=False           → CDS_DISABLED=1 or feed import failed
+      • enabled=True, loaded=0  → all tickers gated out (or no coverage)
+      • loaded>0, gated_out>0   → partial coverage (warn)
+      • loaded>0, gated_out=0   → full coverage (ok)
     """
     cds_summary = results.get("cds_summary") or {}
-    if not cds_summary:
+    if not cds_summary or cds_summary.get("enabled") is False:
         return _row(
             name   = "CDS spreads (credit signal)",
             source = "FRED HY proxy + WGB sovereign",
             method = "QualityGate: sanity 1–3000 bps · ≤ 3 trading days",
-            status = "ok",
-            note   = "no per-ticker CDS attached to results",
+            status = "missing",
+            note   = "CDS_DISABLED=1" if cds_summary.get("enabled") is False
+                     else "no CDS summary attached",
         )
-    n_gated  = int(cds_summary.get("gated_out", 0) or 0)
-    n_loaded = int(cds_summary.get("loaded",    0) or 0)
-    if n_loaded == 0:
-        status, note = "missing", "feed unavailable"
+    n_loaded  = int(cds_summary.get("loaded",    0) or 0)
+    n_gated   = int(cds_summary.get("gated_out", 0) or 0)
+    n_checked = int(cds_summary.get("checked",   0) or 0)
+    if n_loaded == 0 and n_checked > 0:
+        status = "missing"
+        note   = f"0/{n_checked} tickers cleared the gate"
     elif n_gated > 0:
         status = "warn"
-        note   = f"{n_gated}/{n_loaded} tickers failed gate"
+        note   = f"{n_loaded}/{n_checked} loaded · {n_gated} gated out"
+    elif n_loaded > 0:
+        status = "ok"
+        note   = f"{n_loaded}/{n_checked} tickers"
     else:
-        status, note = "ok", f"{n_loaded} tickers"
+        status = "missing"
+        note   = "no tickers checked"
     return _row(
         name   = "CDS spreads (credit signal)",
         source = "FRED HY proxy + WGB sovereign",

@@ -1507,6 +1507,52 @@ class DataLineageTest(unittest.TestCase):
         ap = next(x for x in rows if x["name"].startswith("Action levels"))
         self.assertEqual(ap["status"], "missing")
 
+    # ─── CDS lineage states (Step 5 follow-up) ─────────────────────────
+
+    def test_cds_status_missing_when_disabled(self) -> None:
+        """CDS_DISABLED=1 path: cds_summary.enabled=False → missing."""
+        from finance.data_lineage import build_lineage
+        r = self._full_results()
+        r["cds_summary"] = {"enabled": False, "checked": 0,
+                            "loaded": 0, "gated_out": 0}
+        rows = build_lineage(r, None, today=date(2026, 5, 17))
+        cds = next(x for x in rows if x["name"].startswith("CDS"))
+        self.assertEqual(cds["status"], "missing")
+        self.assertIn("CDS_DISABLED", cds["note"])
+
+    def test_cds_status_ok_full_coverage(self) -> None:
+        """All checked tickers cleared the gate → status='ok'."""
+        from finance.data_lineage import build_lineage
+        r = self._full_results()
+        r["cds_summary"] = {"enabled": True, "checked": 5,
+                            "loaded": 5, "gated_out": 0}
+        rows = build_lineage(r, None, today=date(2026, 5, 17))
+        cds = next(x for x in rows if x["name"].startswith("CDS"))
+        self.assertEqual(cds["status"], "ok")
+        self.assertIn("5/5", cds["note"])
+
+    def test_cds_status_warn_partial_coverage(self) -> None:
+        """Some loaded, some gated → status='warn'."""
+        from finance.data_lineage import build_lineage
+        r = self._full_results()
+        r["cds_summary"] = {"enabled": True, "checked": 8,
+                            "loaded": 5, "gated_out": 3}
+        rows = build_lineage(r, None, today=date(2026, 5, 17))
+        cds = next(x for x in rows if x["name"].startswith("CDS"))
+        self.assertEqual(cds["status"], "warn")
+        self.assertIn("3 gated", cds["note"])
+
+    def test_cds_status_missing_when_all_gated(self) -> None:
+        """Feed enabled but ZERO tickers cleared the gate → status='missing'."""
+        from finance.data_lineage import build_lineage
+        r = self._full_results()
+        r["cds_summary"] = {"enabled": True, "checked": 5,
+                            "loaded": 0, "gated_out": 5}
+        rows = build_lineage(r, None, today=date(2026, 5, 17))
+        cds = next(x for x in rows if x["name"].startswith("CDS"))
+        self.assertEqual(cds["status"], "missing")
+        self.assertIn("0/5", cds["note"])
+
     def test_bl_missing_when_no_records(self) -> None:
         from finance.data_lineage import build_lineage
         r = self._full_results()
