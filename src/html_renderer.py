@@ -76,9 +76,16 @@ def _mock_results() -> dict:
 
 
 def _mock_payload(tier: str = "base") -> dict:
-    """Build a mock payload via build_payload so every key is present."""
+    """
+    Build a mock payload via build_payload so every key is present.
+
+    For DEEP tier we additionally inject `factor_radar_svg` and
+    `factor_betas` — these are normally produced inside tg_bot.py from
+    Beta_<axis> columns in the perf table, so the smoke fixture needs
+    to mimic that out-of-band wiring.
+    """
     from pdf_payload import build_payload
-    return build_payload(
+    payload = build_payload(
         _mock_results(),
         tier=tier,
         ai_summary={
@@ -91,6 +98,36 @@ def _mock_payload(tier: str = "base") -> dict:
             "used_rag":       False,
         },
     )
+    if tier == "deep":
+        # Mirror the post-build enrichment done in tg_bot._render_v2 so the
+        # new factor + CoVe sections actually populate in the smoke render.
+        try:
+            from tg_bot import (_build_equity_curve_svg,
+                                  _build_factor_radar_svg,
+                                  _build_factor_betas_table)
+            results = _mock_results()
+            payload["equity_curve_svg"] = _build_equity_curve_svg(results)
+            payload["factor_radar_svg"] = _build_factor_radar_svg(results)
+            payload["factor_betas"]     = _build_factor_betas_table(results)
+        except Exception as exc:
+            # tg_bot has many heavy deps (aiogram); fall back to a synthetic
+            # radar + an 8-row table so the template at least renders cleanly.
+            logger.warning("Smoke fallback for radar — tg_bot import failed: %s", exc)
+            from pdf_charts import factor_radar_svg
+            mock_betas = {
+                "Market":     1.18,  "Momentum": 1.05, "Value":      0.25,
+                "Quality":    0.62,  "Size":     0.42, "Volatility": 0.88,
+                "Commodities":0.15,  "Rates":   -0.30,
+            }
+            payload["factor_radar_svg"] = factor_radar_svg(mock_betas)
+            payload["factor_betas"]     = [
+                {"axis": a, "beta": b,
+                 "bench":  1.0 if a == "Market" else 0.0,
+                 "delta":  round(b - (1.0 if a == "Market" else 0.0), 2),
+                 "missing": False}
+                for a, b in mock_betas.items()
+            ]
+    return payload
 
 
 MOCK_DATA: dict = {}   # lazily filled by the CLI / smoke entry-point below.

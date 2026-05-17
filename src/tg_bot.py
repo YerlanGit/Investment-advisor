@@ -408,33 +408,81 @@ _RADAR_FACTOR_AXES = [
 
 def _build_factor_radar_svg(results: dict) -> str:
     """Inline factor-radar SVG with all 9 axes (missing factors flagged)."""
+    betas, missing = _compute_factor_betas(results)
     try:
-        perf = results.get("performance_table")
-        if perf is None or perf.empty:
-            return factor_radar_svg({})
-        total_val = float(results.get("total_value") or 1.0)
-        weights = (perf["Current_Value"].fillna(0).astype(float) / total_val).values
-
-        betas: dict[str, float] = {}
-        missing: list[str] = []
-        for axis in _RADAR_FACTOR_AXES:
-            col = f"Beta_{axis}"
-            if col in perf.columns:
-                vals = perf[col].fillna(0).astype(float).values
-                betas[axis] = float((vals * weights).sum())
-            else:
-                # Keep the axis but with value 0 — caller marks it as missing.
-                betas[axis] = 0.0
-                missing.append(axis)
-
-        if missing:
-            logger.info("Factor radar: %d/%d axes loaded; missing: %s",
-                        len(_RADAR_FACTOR_AXES) - len(missing),
-                        len(_RADAR_FACTOR_AXES), ", ".join(missing))
         return factor_radar_svg(betas, missing_axes=missing)
     except Exception as exc:
         logger.warning("factor_radar_svg build failed: %s", exc)
         return factor_radar_svg({})
+
+
+# Benchmark β profile for "Δ vs benchmark" column in the factor table.
+# S&P 500 has Market β ≈ 1.0 and ~0.0 on all other style/macro factors.
+_BENCH_FACTOR_BETAS = {axis: (1.0 if axis == "Market" else 0.0)
+                        for axis in _RADAR_FACTOR_AXES}
+
+
+def _compute_factor_betas(results: dict) -> tuple[dict[str, float], list[str]]:
+    """
+    Extract weighted-average factor β for each axis from the perf table.
+
+    Returns (betas_dict, missing_axes_list).  When an axis has no
+    Beta_<axis> column in the perf frame the engine never loaded that
+    factor ETF — keep the axis in betas at 0.0 and report it as missing
+    so downstream visualisations can render a dashed/grey spoke.
+    """
+    try:
+        perf = results.get("performance_table")
+        if perf is None or perf.empty:
+            return {}, list(_RADAR_FACTOR_AXES)
+        total_val = float(results.get("total_value") or 1.0)
+        weights   = (perf["Current_Value"].fillna(0).astype(float) / total_val).values
+
+        betas:   dict[str, float] = {}
+        missing: list[str]        = []
+        for axis in _RADAR_FACTOR_AXES:
+            col = f"Beta_{axis}"
+            if col in perf.columns:
+                vals       = perf[col].fillna(0).astype(float).values
+                betas[axis] = float((vals * weights).sum())
+            else:
+                betas[axis]  = 0.0
+                missing.append(axis)
+        if missing:
+            logger.info("Factor radar: %d/%d axes loaded; missing: %s",
+                         len(_RADAR_FACTOR_AXES) - len(missing),
+                         len(_RADAR_FACTOR_AXES), ", ".join(missing))
+        return betas, missing
+    except Exception as exc:
+        logger.warning("factor beta extraction failed: %s", exc)
+        return {}, list(_RADAR_FACTOR_AXES)
+
+
+def _build_factor_betas_table(results: dict) -> list[dict]:
+    """
+    Template-friendly factor-β table for the DEEP factor-radar section.
+
+    Each row: {axis, beta, bench, delta, missing}.  Bench is the SPX-like
+    baseline (Market = 1.0, rest = 0.0); delta = β_port − β_bench rounded
+    to 2 dp.  Missing axes get beta=0.0 + missing=True so the template
+    can render them as muted "n/a" rows instead of dropping them silently.
+    """
+    betas, missing = _compute_factor_betas(results)
+    if not betas:
+        return []
+    missing_set = set(missing)
+    rows: list[dict] = []
+    for axis in _RADAR_FACTOR_AXES:
+        b     = float(betas.get(axis, 0.0))
+        bench = float(_BENCH_FACTOR_BETAS.get(axis, 0.0))
+        rows.append({
+            "axis":    axis,
+            "beta":    round(b, 2),
+            "bench":   round(bench, 2),
+            "delta":   round(b - bench, 2),
+            "missing": axis in missing_set,
+        })
+    return rows
 
 
 def _safe_float(val, default: float = 0.0) -> float:
@@ -541,6 +589,7 @@ def _build_pdf_payload(results: dict, tier: str,
         if tier == TIER_DEEP:
             payload["equity_curve_svg"] = _build_equity_curve_svg(results)
             payload["factor_radar_svg"] = _build_factor_radar_svg(results)
+            payload["factor_betas"]     = _build_factor_betas_table(results)
             payload["used_rag"]         = bool(market_context)
         return payload
 

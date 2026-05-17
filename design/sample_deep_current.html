@@ -548,12 +548,82 @@
   padding: 3px 0 3px 8px; border-left: 2px solid #fbbf24; margin-bottom: 4px;
 }
 
-/* ── Factor radar placeholder ── */
+/* ── Factor radar (Step 6.2a — banker-grade 3-col layout) ───────────────── */
 .factor-wrap {
-  display: flex; align-items: flex-start; gap: 14px;
-  background: #fff; border: 1px solid #d0dce8; border-radius: 6px; padding: 10px;
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(220px, 1fr);
+  grid-template-areas: "radar table"
+                       "notes notes";
+  gap: 14px;
+  background: #fff; border: 1px solid #d0dce8; border-radius: 6px; padding: 12px;
 }
-.factor-notes { font-size: 9.5px; max-width: 360px; line-height: 1.6; }
+.factor-radar-col { grid-area: radar; }
+.factor-table-col { grid-area: table; }
+.factor-notes     { grid-area: notes; font-size: 9.5px; line-height: 1.6; color: #2a2e33; }
+
+.factor-table {
+  width: 100%; border-collapse: collapse;
+  font-family: 'JetBrains Mono', monospace; font-size: 10px;
+}
+.factor-table thead th {
+  text-align: right; font-weight: 600; padding: 4px 6px;
+  color: #6b7280; border-bottom: 1px solid #d0dce8;
+}
+.factor-table thead th:first-child { text-align: left; }
+.factor-table tbody td {
+  padding: 4px 6px; text-align: right; border-bottom: 1px solid #f0f4f8;
+}
+.factor-table tbody td:first-child { text-align: left; font-family: 'Inter', sans-serif; font-weight: 500; }
+.factor-table tr.muted td  { color: #a8b2bd; }
+.factor-table .na-tag      { font-size: 7.5px; color: #d97706; background: #fef3c7;
+                              padding: 1px 4px; border-radius: 3px; margin-left: 4px; font-weight: 600; }
+.factor-table .delta-pos   { color: #16a34a; font-weight: 600; }
+.factor-table .delta-neg   { color: #dc2626; font-weight: 600; }
+.factor-table .delta-flat  { color: #6b7280; }
+
+/* ── CoVe data-lineage grid (Step 6.2a — data-driven from data.cove_lineage) */
+.cove-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 0;
+  background: #fff; border: 1px solid #d0dce8; border-radius: 6px;
+  padding: 4px 0;
+}
+.cove-item {
+  display: flex; gap: 8px; padding: 8px 12px;
+  border-bottom: 1px solid #f0f4f8;
+}
+.cove-item:last-child, .cove-item:nth-last-child(2) { border-bottom: none; }
+.cove-check {
+  flex: 0 0 14px; font-weight: 700; font-size: 12px;
+  color: #16a34a; line-height: 1.2;
+}
+.cove-item.warn .cove-check { color: #d97706; }
+.cove-item.fail .cove-check { color: #dc2626; }
+.cove-body {
+  font-size: 9.5px; line-height: 1.45; color: #2a2e33;
+}
+.cove-body b { font-weight: 600; }
+.cove-meta {
+  font-family: 'JetBrains Mono', monospace; font-size: 8.5px;
+  color: #6b7280; line-height: 1.5;
+}
+.cove-legend {
+  margin-top: 8px; font-size: 9px; color: #6b7280; line-height: 1.5;
+}
+.cove-legend .cove-ok   { color: #16a34a; }
+.cove-legend .cove-warn { color: #d97706; }
+.cove-legend .cove-fail { color: #dc2626; }
+
+/* ── Mobile (Step 6.2a — narrow-screen layout for factor + CoVe blocks) ─── */
+@media (max-width: 768px) {
+  .factor-wrap {
+    grid-template-columns: 1fr;
+    grid-template-areas: "radar" "table" "notes";
+  }
+  .cove-grid { grid-template-columns: 1fr; }
+  .cove-item:nth-last-child(2) { border-bottom: 1px solid #f0f4f8; }
+  .factor-table { font-size: 11px; }
+  .factor-table tbody td { padding: 6px 8px; }     /* larger tap targets */
+}
 </style>
 </head>
 <body>
@@ -569,7 +639,7 @@
     <div class="header-meta">
       <div class="report-badge">Базовый отчёт</div>
       <div>Клиент #sample</div>
-      <div>17.05.2026 18:45 UTC+5</div>
+      <div>17.05.2026 19:15 UTC+5</div>
       <div style="color: var(--text-3);">Конфиденциально</div>
     </div>
   </div>
@@ -599,7 +669,7 @@
     <div class="snap-item">
       <div class="snap-label">Bank RAG</div>
       <div class="snap-value white" style="font-size:12px;">—</div>
-      <div class="snap-sub">17.05.2026 18:45 UTC+5</div>
+      <div class="snap-sub">17.05.2026 19:15 UTC+5</div>
     </div>
   </div>
 
@@ -867,6 +937,109 @@
 <div class="page">
 
   
+  <div class="section-title">Факторное разложение (β) — скрытые концентрации</div>
+  <div class="factor-wrap">
+    <div class="factor-radar-col">
+      <svg width="240" height="240" viewBox="0 0 240 240" xmlns="http://www.w3.org/2000/svg"><polygon points="120.0,120.0 120.0,120.0 120.0,120.0 120.0,120.0 120.0,120.0 120.0,120.0 120.0,120.0 120.0,120.0" fill="none" stroke="#E2E8F0" stroke-width="0.5" /><polygon points="120.0,97.0 136.3,103.7 143.0,120.0 136.3,136.3 120.0,143.0 103.7,136.3 97.0,120.0 103.7,103.7" fill="none" stroke="#E2E8F0" stroke-width="0.5" /><polygon points="120.0,74.0 152.5,87.5 166.0,120.0 152.5,152.5 120.0,166.0 87.5,152.5 74.0,120.0 87.5,87.5" fill="none" stroke="#E2E8F0" stroke-width="0.5" /><polygon points="120.0,51.0 168.8,71.2 189.0,120.0 168.8,168.8 120.0,189.0 71.2,168.8 51.0,120.0 71.2,71.2" fill="none" stroke="#E2E8F0" stroke-width="0.5" /><polygon points="120.0,28.0 185.1,54.9 212.0,120.0 185.1,185.1 120.0,212.0 54.9,185.1 28.0,120.0 54.9,54.9" fill="none" stroke="#E2E8F0" stroke-width="0.5" /><line x1="120.0" y1="120.0" x2="120.0" y2="28.0" stroke="#E2E8F0" stroke-width="0.6" /><text x="120.0" y="17.0" text-anchor="middle" font-family="Inter,Arial" font-size="9" fill="#475569">Market</text><line x1="120.0" y1="120.0" x2="185.1" y2="54.9" stroke="#E2E8F0" stroke-width="0.6" /><text x="195.0" y="48.0" text-anchor="middle" font-family="Inter,Arial" font-size="9" fill="#475569">Momentum</text><line x1="120.0" y1="120.0" x2="212.0" y2="120.0" stroke="#E2E8F0" stroke-width="0.6" /><text x="226.0" y="123.0" text-anchor="middle" font-family="Inter,Arial" font-size="9" fill="#475569">Value</text><line x1="120.0" y1="120.0" x2="185.1" y2="185.1" stroke="#E2E8F0" stroke-width="0.6" /><text x="195.0" y="198.0" text-anchor="middle" font-family="Inter,Arial" font-size="9" fill="#475569">Quality</text><line x1="120.0" y1="120.0" x2="120.0" y2="212.0" stroke="#E2E8F0" stroke-width="0.6" /><text x="120.0" y="229.0" text-anchor="middle" font-family="Inter,Arial" font-size="9" fill="#475569">Size</text><line x1="120.0" y1="120.0" x2="54.9" y2="185.1" stroke="#E2E8F0" stroke-width="0.6" /><text x="45.0" y="198.0" text-anchor="middle" font-family="Inter,Arial" font-size="9" fill="#475569">Volatility</text><line x1="120.0" y1="120.0" x2="28.0" y2="120.0" stroke="#E2E8F0" stroke-width="0.6" /><text x="14.0" y="123.0" text-anchor="middle" font-family="Inter,Arial" font-size="9" fill="#475569">Commodities</text><line x1="120.0" y1="120.0" x2="54.9" y2="54.9" stroke="#E2E8F0" stroke-width="0.6" /><text x="45.0" y="48.0" text-anchor="middle" font-family="Inter,Arial" font-size="9" fill="#475569">Rates</text><polygon points="120.0,37.8 175.3,64.7 173.7,120.0 166.0,166.0 120.0,178.9 68.4,171.6 69.4,120.0 94.0,94.0" fill="#1E6BB8" fill-opacity="0.20" stroke="#0F4C81" stroke-width="1.5" /></svg>
+    </div>
+
+    
+    <div class="factor-table-col">
+      <table class="factor-table">
+        <thead>
+          <tr><th>Фактор</th><th>β портф.</th><th>Бенч.</th><th>Δ</th></tr>
+        </thead>
+        <tbody>
+          
+          <tr>
+            <td>Market</td>
+            <td>1.18</td>
+            <td>1.00</td>
+            <td class="delta-pos">
+              +0.18
+            </td>
+          </tr>
+          
+          <tr>
+            <td>Momentum</td>
+            <td>1.05</td>
+            <td>0.00</td>
+            <td class="delta-pos">
+              +1.05
+            </td>
+          </tr>
+          
+          <tr>
+            <td>Value</td>
+            <td>0.25</td>
+            <td>0.00</td>
+            <td class="delta-pos">
+              +0.25
+            </td>
+          </tr>
+          
+          <tr>
+            <td>Quality</td>
+            <td>0.62</td>
+            <td>0.00</td>
+            <td class="delta-pos">
+              +0.62
+            </td>
+          </tr>
+          
+          <tr>
+            <td>Size</td>
+            <td>0.42</td>
+            <td>0.00</td>
+            <td class="delta-pos">
+              +0.42
+            </td>
+          </tr>
+          
+          <tr>
+            <td>Volatility</td>
+            <td>0.88</td>
+            <td>0.00</td>
+            <td class="delta-pos">
+              +0.88
+            </td>
+          </tr>
+          
+          <tr>
+            <td>Commodities</td>
+            <td>0.15</td>
+            <td>0.00</td>
+            <td class="delta-pos">
+              +0.15
+            </td>
+          </tr>
+          
+          <tr>
+            <td>Rates</td>
+            <td>-0.30</td>
+            <td>0.00</td>
+            <td class="delta-neg">
+              -0.30
+            </td>
+          </tr>
+          
+        </tbody>
+      </table>
+    </div>
+    
+
+    <div class="factor-notes">
+      <div><strong>Что показывает радар:</strong> насколько портфель зависит от
+        глобальных рыночных факторов. Большая площадь — больше зависимость от
+        рынка.  Совпадение направлений по нескольким факторам — скрытая общая
+        ставка (диверсификация ниже, чем кажется).</div>
+      <div style="margin-top:6px; color:#8a9db0; font-size:8.5px;">
+        Метод: Ridge β-регрессия (α=1.0) · EWMA λ≈0.94 ⊕ Ledoit-Wolf 70/30 ·
+        Δ vs S&amp;P 500 baseline (Market β=1.0, остальные ≈0). [Quant Engine]
+      </div>
+    </div>
+  </div>
+  
 
   
 
@@ -901,28 +1074,188 @@
 
   
 
-  <!-- CoVe: Chain-of-Verification sources -->
+  
   <div class="section-title">CoVe — верификация источников данных</div>
-  <div class="ai-block" style="font-size:9px;">
-    <strong>Риск-метрики</strong> (Vol, CVaR, TE, IR, Max DD):
-    <strong>[Quant Engine · 730d daily · Wilder RMA · EWMA λ≈0.94 ⊕ Ledoit-Wolf]</strong><br>
-    <strong>Tracking Error</strong>: σ(port_daily − bm_daily, ddof=1) × √252 —
-    <em>отличается от Volatility портфеля</em>: √(w'Σw) × √252<br>
-    <strong>Information Ratio</strong>: Excess_Return_Ann ÷ Tracking_Error — обе в годовой шкале.<br>
-    <strong>Fundamental Z-scores</strong>:
-    <strong>[SEC EDGAR · 10-K FY · sector-normalised MAD]</strong><br>
-    <strong>Altman-Z, Piotroski-F, Interest Coverage</strong>:
-    <strong>[SEC EDGAR · CompanyFacts JSON]</strong><br>
-    <strong>CDS spreads</strong>:
-    <strong>[FRED HY proxy · WGB sovereign · QualityGate: sanity 1–3000 bps, ≤3 trading days]</strong><br>
-    <strong>Режим рынка</strong>:
-    <strong>[Quant Engine: Growth/Cycle factor returns · 60d window]</strong><br>
-    <strong>Action levels</strong> (Buy zone / Sell target / Stop loss):
-    <strong>[ATR Wilder RMA + SMA50/200 + RSI(14) + MACD(12,26,9)]</strong><br>
+  
+  <div class="cove-grid">
     
-    <strong>Идеи ИИ-агента</strong>: Advisory only. Не является ИИИ или рекомендацией к покупке.<br>
+    
+    
+    
+    <div class="cove-item ok">
+      <span class="cove-check">✓</span>
+      <span class="cove-body">
+        <b>Vol · CVaR · TE · IR · Max DD</b><br>
+        <span class="cove-meta">
+          Quant Engine MAC3 · Wilder RMA · EWMA λ≈0.94 ⊕ Ledoit-Wolf 70/30 · Politis-Romano bootstrap CI
+        </span>
+      </span>
+    </div>
+    
+    
+    
+    
+    <div class="cove-item ok">
+      <span class="cove-check">✓</span>
+      <span class="cove-body">
+        <b>TRC (Euler decomposition) · MCTR · CVaR</b><br>
+        <span class="cove-meta">
+          Quant Engine MAC3 · MCTR = Σw/σ_p · ERC%_i = w_i·MCTR_i/σ_p
+        </span>
+      </span>
+    </div>
+    
+    
+    
+    
+    <div class="cove-item fail">
+      <span class="cove-check">✗</span>
+      <span class="cove-body">
+        <b>Цены и история активов</b><br>
+        <span class="cove-meta">
+          Tradernet (Freedom Broker) · Daily CLOSE · 730d window · no price data loaded
+        </span>
+      </span>
+    </div>
+    
+    
+    
+    
+    <div class="cove-item ok">
+      <span class="cove-check">✓</span>
+      <span class="cove-body">
+        <b>Fundamental Z-scores</b><br>
+        <span class="cove-meta">
+          SEC EDGAR CompanyFacts · 10-K FY · sector-normalised MAD · Group B factors
+        </span>
+      </span>
+    </div>
+    
+    
+    
+    
+    <div class="cove-item ok">
+      <span class="cove-check">✓</span>
+      <span class="cove-body">
+        <b>Altman-Z · Piotroski-F · Interest Coverage</b><br>
+        <span class="cove-meta">
+          SEC EDGAR CompanyFacts · разностный расчёт по балансу и P&amp;L (annual filings)
+        </span>
+      </span>
+    </div>
+    
+    
+    
+    
+    <div class="cove-item fail">
+      <span class="cove-check">✗</span>
+      <span class="cove-body">
+        <b>CDS spreads (credit signal)</b><br>
+        <span class="cove-meta">
+          FRED HY proxy + WGB sovereign · QualityGate: sanity 1–3000 bps · ≤ 3 trading days · no CDS summary attached
+        </span>
+      </span>
+    </div>
+    
+    
+    
+    
+    <div class="cove-item fail">
+      <span class="cove-check">✗</span>
+      <span class="cove-body">
+        <b>Action levels (Buy / Sell / Stop)</b><br>
+        <span class="cove-meta">
+          Quant Engine · ATR Wilder RMA + SMA50/200 + RSI(14) + MACD(12,26,9) · action plan not computed for this run
+        </span>
+      </span>
+    </div>
+    
+    
+    
+    
+    <div class="cove-item fail">
+      <span class="cove-check">✗</span>
+      <span class="cove-body">
+        <b>Black-Litterman target weights</b><br>
+        <span class="cove-meta">
+          Quant Engine · Reverse-optimisation prior + score-derived views · BL skipped (no scores / empty cov)
+        </span>
+      </span>
+    </div>
+    
+    
+    
+    
+    <div class="cove-item fail">
+      <span class="cove-check">✗</span>
+      <span class="cove-body">
+        <b>Регим-классификатор</b><br>
+        <span class="cove-meta">
+          Quant Engine · Growth × Cycle factor returns · 60-day window
+        </span>
+      </span>
+    </div>
+    
+    
+    
+    
+    <div class="cove-item fail">
+      <span class="cove-check">✗</span>
+      <span class="cove-body">
+        <b>Стресс-сценарии</b><br>
+        <span class="cove-meta">
+          Quant Engine · parametric factor shocks · per-asset β · linear PnL
+        </span>
+      </span>
+    </div>
+    
+    
+    
+    
+    <div class="cove-item fail">
+      <span class="cove-check">✗</span>
+      <span class="cove-body">
+        <b>Макро-драйверы (FRED)</b><br>
+        <span class="cove-meta">
+          FRED St. Louis Fed · yield curve · HY spread · PMI · VIX · breakeven · FRED_API_KEY not set (see .env.template)
+        </span>
+      </span>
+    </div>
+    
+    
+    
+    
+    <div class="cove-item fail">
+      <span class="cove-check">✗</span>
+      <span class="cove-body">
+        <b>Bank RAG (выдержки)</b><br>
+        <span class="cove-meta">
+          ChromaDB · GS / MS / JPM PDF reports · cosine similarity retrieval · RAG not requested / not available
+        </span>
+      </span>
+    </div>
+    
+    
+    
+    
+    <div class="cove-item ok">
+      <span class="cove-check">✓</span>
+      <span class="cove-body">
+        <b>AI verdict · bullets</b><br>
+        <span class="cove-meta">
+          Anthropic Claude  · advisory only; verdict + plain summary + bullets · не является ИИИ
+        </span>
+      </span>
+    </div>
     
   </div>
+  <div class="cove-legend">
+    <b class="cove-ok">✓</b> — данные прошли QualityGate ·
+    <b class="cove-warn">!</b> — частичное покрытие или fallback на устаревший кэш ·
+    <b class="cove-fail">✗</b> — источник недоступен.
+    Документ не является ИИИ — только аналитическая рекомендация.
+  </div>
+  
 
   <div class="footer">
     <span>4 / 4 · Portfolio Intelligence © 2026 — Не является ИИИ.</span>
