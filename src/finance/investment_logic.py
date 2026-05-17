@@ -17,6 +17,8 @@ logger = logging.getLogger("Antigravity_RiskEngine")
 from finance.period_returns import compute_period_returns_table as _compute_period_returns_table
 # Stress engine (parametric factor shocks) — also sklearn-free.
 from finance.stress import run_stress_scenarios as _run_stress_scenarios
+# Simulator (Black-Litterman "after-plan" portfolio metrics) — sklearn-free.
+from finance.simulate import simulate_after_plan as _simulate_after_plan
 
 class MAC3RiskEngine:
     """
@@ -1121,6 +1123,55 @@ class UniversalPortfolioManager:
             logger.warning("Black-Litterman skipped: %s", exc)
             bl_records = None
 
+        # ═══════════════ EXPECTED EFFECT (after-plan simulation) ═══════════
+        # Re-evaluates cover-page metrics under BL target weights.  Falls
+        # back to current weights when BL is unavailable — the "after" then
+        # equals "before" and every delta is 0, which the report can detect.
+        expected_effect: dict | None = None
+        try:
+            # Build target_weights from BL where present; otherwise keep
+            # current weights (no-op simulation).
+            target_weights = dict(weights_dict)
+            if bl_records:
+                for r in bl_records:
+                    t = r.get("ticker")
+                    if t:
+                        target_weights[t] = float(r.get("target_w", weights_dict.get(t, 0)))
+
+            # Build daily log-returns matrix for assets the cov matrix knows
+            # about.  Reuses all_data (already loaded) so no extra fetch.
+            sim_daily_log: pd.DataFrame | None = None
+            if not cov_matrix.empty:
+                cov_tickers = list(cov_matrix.index)
+                resolved    = self.engine.resolve_tickers(cov_tickers)
+                avail_cols  = [r for r in resolved if r in all_data.columns]
+                if avail_cols:
+                    sub = all_data[avail_cols].dropna()
+                    if len(sub) >= 2:
+                        log_df = np.log(sub / sub.shift(1)).dropna()
+                        # Map columns back to ORIGINAL (display) tickers.
+                        col_map = {res: orig for orig, res in zip(cov_tickers, resolved)
+                                   if res in avail_cols}
+                        log_df = log_df.rename(columns=col_map)
+                        sim_daily_log = log_df
+
+            sector_map_for_sim = {t: self.engine.get_ticker_sector(t)
+                                   for t in df.index}
+
+            expected_effect = _simulate_after_plan(
+                perf_df           = df.reset_index(),
+                risk_matrix       = cov_matrix,
+                daily_log_returns = sim_daily_log,
+                bl_records        = bl_records,
+                current_metrics   = port_metrics,
+                risk_free_rate    = self.engine.current_rfr_annual,
+                target_weights    = target_weights,
+                sector_by_ticker  = sector_map_for_sim,
+            )
+        except Exception as exc:
+            logger.warning("Expected-effect simulator skipped: %s", exc)
+            expected_effect = None
+
         # ═══════════════ ACTION PLAN ═══════════════
         # Buy zone / Sell target / Stop loss anchored to ATR + SMA + RSI.
         action_plan_rows: list[dict] = []
@@ -1154,6 +1205,7 @@ class UniversalPortfolioManager:
             "benchmark_comparison": benchmark_results,
             "period_returns_table": period_returns_table,
             "stress_scenarios": stress_scenarios,
+            "expected_effect": expected_effect,
             "history_result": history_result,
             "sector_exposure": sector_exposure,
             "factor_scores": factor_scores,

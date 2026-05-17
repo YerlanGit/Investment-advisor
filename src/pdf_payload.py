@@ -302,6 +302,9 @@ def build_payload(results: dict, tier: str,
     # ── Stress scenarios (parametric factor shocks, 7-row default catalog) ─
     stress_scenarios = results.get("stress_scenarios") or []
 
+    # ── Expected effect — before/after simulation under BL target weights ──
+    expected_effect = results.get("expected_effect")
+
     # ── Macro regime (Cover) ───────────────────────────────────────────────
     regime_block = None
     regime = results.get("regime")
@@ -429,6 +432,8 @@ def build_payload(results: dict, tier: str,
         "period_returns_table": period_returns_table,
         # Stress scenarios (parametric factor shocks — list of dicts)
         "stress_scenarios":     stress_scenarios,
+        # Expected effect — DEEP P4 8-card before/after panel
+        "expected_effect":      expected_effect,
         # Regime
         "regime":            regime_block,
         "regime_rag_confirm": regime_rag_confirm or [],
