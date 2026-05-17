@@ -2682,8 +2682,10 @@
   <div class="d3-block">
     <div class="d3-block-head">
       <div class="panel-title">Стресс-сценарии — реакция портфеля на гипотетические шоки</div>
-      <div class="d3-block-sub">Параметрические шоки факторов + историческое перепроживание ·
-        горизонт 1 квартал
+      <div class="d3-block-sub">Параметрические шоки факторов (ΔPnL = w′·B·shock) ·
+        горизонт 1 квартал · runtime из <code style="font-family:var(--font-mono);
+        font-size:9px; background:var(--tech-blue-08); color:var(--tech-blue);
+        padding:1px 4px; border-radius:2px;">data.stress_scenarios</code> [Step 2]
         <span class="src">[Quant Engine]</span></div>
     </div>
 
@@ -2914,8 +2916,11 @@
   <div class="d3-block">
     <div class="d3-block-head">
       <div class="panel-title">Ожидаемый эффект на риск-показатели портфеля</div>
-      <div class="d3-block-sub">оценка «до / после» при исполнении полного Action Plan ·
-        горизонт 1 квартал
+      <div class="d3-block-sub">оценка «до / после» при исполнении Action Plan ·
+        BL target weights · runtime из <code style="font-family:var(--font-mono);
+        font-size:9px; background:var(--tech-blue-08); color:var(--tech-blue);
+        padding:1px 4px; border-radius:2px;">data.expected_effect</code> [Step 3]
+        ·  горизонт 1 квартал
         <span class="src">[Quant Engine]</span></div>
     </div>
 
@@ -3012,8 +3017,11 @@
   <div class="d3-block">
     <div class="d3-block-head">
       <div class="panel-title">CoVe — Chain-of-Verification источников данных</div>
-      <div class="d3-block-sub">каждый показатель отчёта прослеживается до первичного источника
-        с указанием метода расчёта и QualityGate-статуса</div>
+      <div class="d3-block-sub">каждый показатель прослеживается до первичного источника
+        с указанием метода расчёта и QualityGate-статуса · список собирается
+        runtime из <code style="font-family:var(--font-mono); font-size:9px;
+        background:var(--tech-blue-08); color:var(--tech-blue);
+        padding:1px 4px; border-radius:2px;">data.cove_lineage</code> [Step 5]</div>
     </div>
 
     <div class="cove-grid">
@@ -3099,7 +3107,10 @@
   <div class="d3-block">
     <div class="d3-block-head">
       <div class="panel-title">Текущий режим и его координаты</div>
-      <div class="d3-block-sub">определение по факторам Growth × Cycle · окно 60 дней
+      <div class="d3-block-sub">Growth × Cycle факторные returns · окно 60 дней ·
+        квадранты Expansion / Recovery / Slowdown / Recession (см. <code style="font-family:var(--font-mono);
+        font-size:9px; background:var(--tech-blue-08); color:var(--tech-blue);
+        padding:1px 4px; border-radius:2px;">finance/regime.py</code>)
         <span class="src">[Quant Engine]</span></div>
     </div>
 
@@ -3109,21 +3120,26 @@
         <svg class="reg-quadrant-svg" viewBox="0 0 320 280" xmlns="http://www.w3.org/2000/svg"
              role="img" aria-label="Квадрант рыночного режима: Growth × Cycle">
           <defs>
-            <linearGradient id="qReflate" x1="0" y1="1" x2="1" y2="0">
-              <stop offset="0%"   stop-color="#4FAA72" stop-opacity="0.18"/>
-              <stop offset="100%" stop-color="#4FAA72" stop-opacity="0.04"/>
+            <!-- Цветовая семантика:                                       -->
+            <!--   Expansion = синий  (здоровый рост — наша целевая фаза)  -->
+            <!--   Recovery  = зелёный (выход из дна, growth↑ cycle↓)      -->
+            <!--   Slowdown  = амбер  (охлаждение, growth↓ cycle↑)         -->
+            <!--   Recession = красный (двойное падение growth↓ cycle↓)    -->
+            <linearGradient id="qSlowdown" x1="0" y1="1" x2="1" y2="0">
+              <stop offset="0%"   stop-color="#D9A03B" stop-opacity="0.18"/>
+              <stop offset="100%" stop-color="#D9A03B" stop-opacity="0.04"/>
             </linearGradient>
-            <linearGradient id="qGoldilocks" x1="0" y1="1" x2="1" y2="0">
+            <linearGradient id="qExpansion" x1="0" y1="1" x2="1" y2="0">
               <stop offset="0%"   stop-color="#3E83C9" stop-opacity="0.20"/>
               <stop offset="100%" stop-color="#3E83C9" stop-opacity="0.04"/>
             </linearGradient>
-            <linearGradient id="qSlow" x1="0" y1="0" x2="1" y2="1">
+            <linearGradient id="qRecession" x1="0" y1="0" x2="1" y2="1">
               <stop offset="0%"   stop-color="#D85C42" stop-opacity="0.16"/>
               <stop offset="100%" stop-color="#D85C42" stop-opacity="0.03"/>
             </linearGradient>
-            <linearGradient id="qStag" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0%"   stop-color="#D9A03B" stop-opacity="0.18"/>
-              <stop offset="100%" stop-color="#D9A03B" stop-opacity="0.04"/>
+            <linearGradient id="qRecovery" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%"   stop-color="#4FAA72" stop-opacity="0.18"/>
+              <stop offset="100%" stop-color="#4FAA72" stop-opacity="0.04"/>
             </linearGradient>
             <radialGradient id="regDot" cx="35%" cy="30%" r="80%">
               <stop offset="0%"   stop-color="#FFFFFF"/>
@@ -3136,16 +3152,20 @@
           </defs>
 
           <!-- 4 квадранта -->
-          <rect x="30"  y="30"  width="125" height="125" fill="url(#qStag)"/>
-          <rect x="155" y="30"  width="125" height="125" fill="url(#qGoldilocks)"/>
-          <rect x="30"  y="155" width="125" height="125" fill="url(#qSlow)"/>
-          <rect x="155" y="155" width="125" height="125" fill="url(#qReflate)"/>
-          <!-- внутренние подписи квадрантов -->
+          <rect x="30"  y="30"  width="125" height="125" fill="url(#qRecovery)"/>
+          <rect x="155" y="30"  width="125" height="125" fill="url(#qExpansion)"/>
+          <rect x="30"  y="155" width="125" height="125" fill="url(#qRecession)"/>
+          <rect x="155" y="155" width="125" height="125" fill="url(#qSlowdown)"/>
+          <!-- внутренние подписи квадрантов (синхронизировано с finance/regime.py) -->
+          <!--   top-left  (Growth↑, Cycle↓): RECOVERY                              -->
+          <!--   top-right (Growth↑, Cycle↑): EXPANSION                             -->
+          <!--   bot-left  (Growth↓, Cycle↓): RECESSION                             -->
+          <!--   bot-right (Growth↓, Cycle↑): SLOWDOWN                              -->
           <g font-family="IBM Plex Mono" font-size="9" fill="rgba(42,46,51,0.55)" font-weight="600" letter-spacing="0.05em">
-            <text x="92.5"  y="50">STAGFLATION</text>
-            <text x="217.5" y="50">GOLDILOCKS</text>
-            <text x="92.5"  y="275">SLOWDOWN</text>
-            <text x="217.5" y="275">REFLATION</text>
+            <text x="92.5"  y="50">RECOVERY</text>
+            <text x="217.5" y="50">EXPANSION</text>
+            <text x="92.5"  y="275">RECESSION</text>
+            <text x="217.5" y="275">SLOWDOWN</text>
           </g>
 
           <!-- оси (центральный крест) -->
@@ -3173,23 +3193,26 @@
             <text x="158" y="165" text-anchor="start">0</text>
           </g>
 
-          <!-- траектория последних 6 точек (90 дней) — тонкая линия -->
-          <polyline points="120,210 145,200 165,185 180,175 195,165 200,155"
+          <!-- траектория последних 6 точек (90 дней) — путь через Recession → -->
+          <!-- Recovery → Expansion.  Координаты согласованы с шкалой:         -->
+          <!--   100 px ≈ 0.2 (см. метки +0.2 / −0.2 выше)                     -->
+          <polyline points="118,210 138,192 152,170 162,148 170,128 177,110"
                     fill="none" stroke="rgba(42,46,51,0.30)" stroke-width="1"
                     stroke-dasharray="3 2" stroke-linecap="round"/>
           <g fill="rgba(42,46,51,0.45)">
-            <circle cx="120" cy="210" r="1.6"/>
-            <circle cx="145" cy="200" r="1.6"/>
-            <circle cx="165" cy="185" r="1.6"/>
-            <circle cx="180" cy="175" r="1.6"/>
-            <circle cx="195" cy="165" r="1.6"/>
+            <circle cx="118" cy="210" r="1.6"/>
+            <circle cx="138" cy="192" r="1.6"/>
+            <circle cx="152" cy="170" r="1.6"/>
+            <circle cx="162" cy="148" r="1.6"/>
+            <circle cx="170" cy="128" r="1.6"/>
           </g>
-          <!-- актуальная точка: большая капля -->
-          <circle cx="200" cy="155" r="14" fill="#3E83C9" fill-opacity="0.18"/>
-          <circle cx="200" cy="155" r="8"  fill="url(#regDot)" filter="url(#regDotShadow)"/>
-          <text x="216" y="151" font-family="IBM Plex Mono" font-size="9.5"
+          <!-- актуальная точка: большая капля.  Координаты (177, 110) =        -->
+          <!-- Growth +0.08 (40 px выше центра), Cycle +0.04 (22 px правее).    -->
+          <circle cx="177" cy="110" r="14" fill="#3E83C9" fill-opacity="0.18"/>
+          <circle cx="177" cy="110" r="8"  fill="url(#regDot)" filter="url(#regDotShadow)"/>
+          <text x="193" y="106" font-family="IBM Plex Mono" font-size="9.5"
                 font-weight="600" fill="#23588F">сейчас</text>
-          <text x="216" y="163" font-family="IBM Plex Mono" font-size="8.5"
+          <text x="193" y="118" font-family="IBM Plex Mono" font-size="8.5"
                 fill="rgba(42,46,51,0.6)">Growth +0.08 · Cycle +0.04</text>
         </svg>
       </div>
@@ -3197,7 +3220,7 @@
       <!-- Сводная по режиму -->
       <div class="regime-summary">
         <div class="block-label" style="font-size:9px; margin-bottom:6px;">Текущий режим</div>
-        <div class="reg-name">Late-cycle · Goldilocks</div>
+        <div class="reg-name">Expansion · поздняя фаза</div>
         <div class="reg-conf">Уверенность модели <b>72%</b> · стабильно последние 4 недели</div>
 
         <div class="reg-factors">
@@ -3224,7 +3247,8 @@
         </div>
 
         <div class="reg-signals">
-          <div class="reg-signals-label">Сигналы-драйверы (топ-5)</div>
+          <div class="reg-signals-label">Сигналы-драйверы (топ-5) ·
+            <span style="text-transform:none; font-weight:500; color:var(--tech-blue);">data.macro_drivers</span> [Step 4]</div>
           <div class="reg-signal-row">
             <span class="reg-signal-name">Yield curve 10Y−2Y</span>
             <span class="reg-signal-val pos">+18 bps</span>
@@ -3257,11 +3281,12 @@
     <div class="conc-ai" style="margin-top:14px;">
       <div class="ai-head">[ 🤖 AI_ANALYSIS // HAIKU ]</div>
       <div class="ai-body">
-        «Точка портфеля на квадранте — <span class="flag">правый верхний (Goldilocks),
-        но близко к границе со Slowdown</span>: Growth ещё положительный, но
-        замедляется, а earnings revisions уже остывают (0.92). Типичная
-        late-cycle конфигурация: рост ещё есть, но защитные сектора стоит наращивать
-        заранее. Это объясняет TRIM PLTR и BUY JNJ/MSFT в Action Plan.
+        «Точка портфеля на квадранте — <span class="flag">правый верхний (Expansion),
+        но близко к границе со Slowdown</span>: Growth ещё положительный (+0.08),
+        Cycle слабый (+0.04), и earnings revisions уже остывают (0.92).
+        Типичная late-Expansion конфигурация: рост ещё есть, но защитные сектора
+        стоит наращивать заранее. Это объясняет TRIM PLTR и BUY JNJ/MSFT
+        в Action Plan на стр. 4.
         <span class="src">[Quant Engine]</span>»
       </div>
     </div>
@@ -3298,14 +3323,14 @@
         <div class="rag-doc">«Q2 2026 Strategy &amp; Allocation» · стр. 4</div>
         <div class="rag-text">«Healthcare and consumer staples remain «islands of
           stability» as growth decelerates. Adding 5–10 pp to defensives is
-          consistent with a Goldilocks-to-Slowdown transition.»</div>
+          consistent with an Expansion-to-Slowdown transition.»</div>
         <span class="rag-tag">defensive-tilt · staples · healthcare</span>
       </div>
     </div>
 
     <div style="margin-top:10px; font-size:9.5px; color:var(--ink-60); line-height:1.55;">
       <b style="color:var(--ink);">Совпадение с моделью режима:</b> все три источника
-      называют late-cycle / Goldilocks-to-Slowdown переход и рекомендуют trim в техах
+      описывают late-Expansion → Slowdown переход и рекомендуют trim в техах
       и наращивание защитных секторов. Это <b style="color:var(--tech-blue);">точно
       воспроизводит</b> рекомендации Action Plan на стр. 4.
     </div>
