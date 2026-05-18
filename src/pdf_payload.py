@@ -10,6 +10,7 @@ from __future__ import annotations
 import math
 from typing import Optional
 
+import numpy as np
 import pandas as pd
 
 
@@ -125,9 +126,10 @@ TIER_BASE = "base"
 TIER_DEEP = "deep"
 
 # Factor ETFs the engine attempts to load (keep in sync with MAC3RiskEngine).
+# SPLV adds the Volatility (low-vol) factor — Step 5 expansion.
 _FACTOR_ETFS = [
     "SPY.US", "MTUM.US", "VLUE.US", "QUAL.US", "IWM.US",
-    "DBC.US", "IEF.US", "EEM.US", "EMB.US",
+    "SPLV.US", "DBC.US", "IEF.US", "EEM.US", "EMB.US",
 ]
 
 # Benchmark display-name → Tradernet ticker (reverse used to filter scenarios).
@@ -237,6 +239,7 @@ def build_payload(results: dict, tier: str,
             assets.append({
                 "ticker":        ticker,
                 "weight":        f"{weight_pct:.1f}%",
+                "weight_pct_num": float(weight_pct),  # raw % for concentration math
                 "weight_extreme":_flag(weight_pct, kind="weight"),
                 "asset_class":   _classify_asset(ticker),
                 "euler_risk":    f"{euler:.1f}%",
@@ -276,6 +279,44 @@ def build_payload(results: dict, tier: str,
         {"name": s, "weight_pct": float(w) * 100, "weight_str": f"{float(w)*100:.0f}%"}
         for s, w in sector_exposure.items()
     ]
+
+    # ── Concentration metrics (sectors and individual assets) ──────────────
+    sector_pairs = [(s, float(w)) for s, w in sector_exposure.items()]
+    sector_concentration = _build_concentration(sector_pairs)
+    sector_warnings      = _build_sector_warnings(sector_pairs, cap_pct=SECTOR_CAP_PCT)
+
+    asset_pairs = [(a["ticker"], a["weight_pct_num"] / 100.0) for a in assets
+                   if a.get("weight_pct_num") is not None]
+    asset_concentration = _build_concentration(asset_pairs)
+
+    # ── Risk waterfall: standalone vol per asset vs diversified portfolio ──
+    risk_waterfall = _build_risk_waterfall(
+        risk_matrix    = results.get("risk_matrix"),
+        perf_df        = perf_df,
+        total_val      = total_val,
+        total_vol_ann  = vol_raw,
+    )
+
+    # ── Multi-period performance (1м / 3м / 6м / 12м / YTD) ────────────────
+    period_returns_table = results.get("period_returns_table") or {}
+
+    # ── Stress scenarios (parametric factor shocks, 7-row default catalog) ─
+    stress_scenarios = results.get("stress_scenarios") or []
+
+    # ── Expected effect — before/after simulation under BL target weights ──
+    expected_effect = results.get("expected_effect")
+
+    # ── Macro drivers from FRED (5-series pack for DEEP P5) ────────────────
+    macro_drivers = results.get("macro_drivers") or {}
+
+    # ── CoVe data-lineage (runtime status per source) ──────────────────────
+    # Build a uniform list[dict] over all data sources consumed by this
+    # run — used by the DEEP P4 "CoVe" panel.  Pure-function, never throws.
+    try:
+        from finance.data_lineage import build_lineage as _build_lineage
+        cove_lineage = _build_lineage(results, ai_summary)
+    except Exception:
+        cove_lineage = []
 
     # ── Macro regime (Cover) ───────────────────────────────────────────────
     regime_block = None
@@ -395,6 +436,21 @@ def build_payload(results: dict, tier: str,
         "assets":            assets,
         "hotspots":          hotspots,
         "sectors":           sectors,
+        # Concentration & waterfall (new — data ready for next-gen template)
+        "sector_concentration": sector_concentration,
+        "sector_warnings":      sector_warnings,
+        "asset_concentration":  asset_concentration,
+        "risk_waterfall":       risk_waterfall,
+        # Multi-period performance table {bm_name: {periods: [...], window_*}}
+        "period_returns_table": period_returns_table,
+        # Stress scenarios (parametric factor shocks — list of dicts)
+        "stress_scenarios":     stress_scenarios,
+        # Expected effect — DEEP P4 8-card before/after panel
+        "expected_effect":      expected_effect,
+        # Macro drivers — FRED 5-series pack for DEEP P5 regime page
+        "macro_drivers":        macro_drivers,
+        # CoVe data-lineage (runtime status per source — DEEP P4 panel)
+        "cove_lineage":         cove_lineage,
         # Regime
         "regime":            regime_block,
         "regime_rag_confirm": regime_rag_confirm or [],
@@ -560,6 +616,161 @@ def _fmt_int(v) -> str:
         return str(x)
     except (TypeError, ValueError):
         return "—"
+
+
+# ── Concentration metrics ─────────────────────────────────────────────────────
+# Standard US DOJ Herfindahl thresholds (originally for market structure, but
+# the bands have become the de-facto reference for portfolio concentration as
+# well — see e.g. Markowitz / Sharpe textbooks).
+HHI_BAND_THRESHOLDS = (1500, 2500)   # < 1500: diversified; 1500–2500: moderate; ≥ 2500: concentrated
+SECTOR_CAP_PCT      = 40.0           # warn when single sector > this share of portfolio
+
+
+def _hhi_band(points: float) -> str:
+    """Map a 0..10000 HHI to a human label (DOJ-style bands)."""
+    lo, hi = HHI_BAND_THRESHOLDS
+    if points < lo: return "diversified"
+    if points < hi: return "moderate"
+    return "concentrated"
+
+
+def _build_concentration(weight_pairs: list[tuple[str, float]]) -> Optional[dict]:
+    """
+    Build a concentration dict from a list of (label, weight_decimal) pairs.
+
+    weight_decimal must be in [0, 1] (i.e. 0.42 == 42%).  The function does NOT
+    normalise: when weights sum to less than 1 (e.g. portfolio has cash that's
+    not represented in the sector breakdown) the HHI is computed on the dict
+    as-is — that's the correct Herfindahl interpretation of "concentration of
+    represented exposure" and matches how prime brokers report it.
+
+    Returns None when the input is empty.
+    """
+    if not weight_pairs:
+        return None
+    items = sorted(weight_pairs, key=lambda kv: kv[1], reverse=True)
+    hhi_decimal = float(sum(w * w for _, w in items))
+    hhi_points  = hhi_decimal * 10000.0
+    top1 = items[0]
+    top3_sum = float(sum(w for _, w in items[:3]))
+    top5_sum = float(sum(w for _, w in items[:5]))
+    return {
+        "hhi_decimal":   round(hhi_decimal, 4),
+        "hhi_points":    int(round(hhi_points)),
+        "hhi_band":      _hhi_band(hhi_points),
+        "top1_label":    top1[0],
+        "top1_pct":      round(top1[1] * 100, 1),
+        "top3_pct":      round(top3_sum * 100, 1),
+        "top5_pct":      round(top5_sum * 100, 1),
+        "top3_labels":   [lbl for lbl, _ in items[:3]],
+        "items_count":   len(items),
+        "total_weight_pct": round(sum(w for _, w in items) * 100, 1),
+    }
+
+
+def _build_sector_warnings(weight_pairs: list[tuple[str, float]],
+                            cap_pct: float = SECTOR_CAP_PCT) -> list[dict]:
+    """
+    List of {sector, weight_pct, cap_pct, overage_pp} for sectors exceeding the
+    soft cap.  Empty list when nothing trips the threshold.
+    """
+    warnings: list[dict] = []
+    for sector, w in weight_pairs:
+        w_pct = float(w) * 100.0
+        if w_pct > cap_pct:
+            warnings.append({
+                "sector":     sector,
+                "weight_pct": round(w_pct, 1),
+                "cap_pct":    cap_pct,
+                "overage_pp": round(w_pct - cap_pct, 1),
+            })
+    # Sort by overage descending so the worst is first.
+    warnings.sort(key=lambda d: d["overage_pp"], reverse=True)
+    return warnings
+
+
+# ── Risk waterfall (standalone vs diversified) ───────────────────────────────
+
+def _build_risk_waterfall(risk_matrix: Optional[pd.DataFrame],
+                           perf_df: Optional[pd.DataFrame],
+                           total_val: float,
+                           total_vol_ann: float) -> Optional[dict]:
+    """
+    Decompose annualised portfolio volatility into per-asset *standalone*
+    contributions and the *diversification benefit*.
+
+    Math (all in annualised decimal units, e.g. 0.142 == 14.2%):
+        σ_i              = sqrt(Σ_ii)              # per-asset annual vol (diagonal)
+        standalone_i     = w_i * σ_i               # asset's "as if alone" contribution
+        Σ standalone     = Σ_i (w_i * σ_i)         # undiversified portfolio vol
+        diversified vol  = sqrt(w' Σ w)            # actual portfolio vol (= total_vol_ann)
+        diversification_benefit = Σ standalone − diversified vol  ≥ 0
+
+    Sanity guaranteed by Minkowski:
+        sqrt(w' Σ w)  ≤  Σ |w_i| * sqrt(Σ_ii)
+    so the benefit is non-negative provided weights are non-negative
+    (which they are — long-only portfolio).
+
+    Returns None when inputs are missing or the cov matrix is empty.
+    """
+    if (risk_matrix is None or perf_df is None or
+        getattr(risk_matrix, "empty", True) or getattr(perf_df, "empty", True) or
+        total_val <= 0):
+        return None
+
+    # Build {ticker: weight_decimal} from perf_df.
+    weights: dict[str, float] = {}
+    for _, row in perf_df.iterrows():
+        t = str(row.get("Ticker", "")).strip()
+        cv = _safe_float(row.get("Current_Value"), 0.0)
+        if t:
+            weights[t] = cv / total_val if total_val > 0 else 0.0
+
+    contributions: list[dict] = []
+    sum_standalone = 0.0
+    for ticker in risk_matrix.index:
+        diag = _safe_float(risk_matrix.loc[ticker, ticker], 0.0)
+        if diag <= 0 or math.isnan(diag):
+            continue
+        sigma_i = math.sqrt(diag)              # annualised vol, decimal
+        w_i     = weights.get(str(ticker), 0.0)
+        contrib = w_i * sigma_i                # decimal pp of total
+        sum_standalone += contrib
+        contributions.append({
+            "ticker":         str(ticker),
+            "weight_pct":     round(w_i * 100, 2),
+            "standalone_vol_pct": round(sigma_i * 100, 2),     # asset's own annual vol
+            "standalone_pp":  round(contrib * 100, 2),         # contribution as if uncorrelated
+        })
+
+    if not contributions:
+        return None
+
+    # Sort contributions descending for waterfall rendering.
+    contributions.sort(key=lambda d: d["standalone_pp"], reverse=True)
+
+    sum_standalone_pp = round(sum_standalone * 100, 2)
+    total_vol_pp      = round(total_vol_ann * 100, 2)
+    diversification_pp = round(sum_standalone_pp - total_vol_pp, 2)
+
+    # Per-asset share of standalone total (sums to 100%).
+    if sum_standalone > 0:
+        for c in contributions:
+            c["standalone_share_pct"] = round(c["standalone_pp"] / sum_standalone_pp * 100, 1)
+    else:
+        for c in contributions:
+            c["standalone_share_pct"] = 0.0
+
+    return {
+        "contributions":     contributions,
+        "sum_standalone_pp": sum_standalone_pp,
+        "total_vol_pp":      total_vol_pp,
+        "diversification_pp": max(0.0, diversification_pp),   # clip tiny negative noise to 0
+        "diversification_ratio": round(diversification_pp / sum_standalone_pp, 3)
+                                  if sum_standalone_pp > 0 else 0.0,
+        "method": ("σᵢ = √Σᵢᵢ (annualised) · standalone = wᵢ·σᵢ · "
+                   "diversified = √(w'Σw) · benefit = Σstandalone − diversified"),
+    }
 
 
 __all__ = ["build_payload", "TIER_BASE", "TIER_DEEP"]

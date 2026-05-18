@@ -20,6 +20,7 @@ import math
 import os
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -35,7 +36,6 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import (
-    BufferedInputFile,
     CallbackQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
@@ -67,7 +67,8 @@ from finance.broker_api import (
 from finance.investment_logic import UniversalPortfolioManager
 from finance.security import SecureVault
 from agent.gatekeeper import run_gatekeeper
-from pdf_generator import MOCK_DATA, generate_portfolio_pdf
+from html_renderer import MOCK_DATA, render_report_html, write_report_html
+from services.report_storage import upload_report
 from pdf_payload import build_payload as _build_v2_payload, TIER_BASE, TIER_DEEP
 from pdf_charts import equity_curve_svg, factor_radar_svg
 from ai_narrative import generate_narrative
@@ -395,45 +396,238 @@ def _build_equity_curve_svg(results: dict) -> str:
         return equity_curve_svg([])
 
 
+# ── KPI sparklines (DEEP/BASE templates · cover KPI strip) ──────────────────
+
+def _sparkline_svg(values: list[float], color: str = "#2F6FB3",
+                    invert: bool = False) -> str:
+    """
+    Inline 240×36 SVG sparkline for one KPI's 12-month trend.
+
+    Args:
+        values : List of 12 floats (one per monthly snapshot).
+        color  : Line + area color (e.g. green for CVaR, blue for Sharpe,
+                  red for MaxDD).
+        invert : When True, the "best" point is the MIN (CVaR/MaxDD — less
+                  negative = better).  When False, MAX is best (Sharpe).
+                  Drives which extremum gets the highlight marker.
+
+    Returns "" for empty / single-point series.
+    """
+    if not values or len(values) < 3:
+        return ""
+    pad_x, pad_y    = 4, 4
+    plot_w, plot_h  = 232, 28
+    n               = len(values)
+    vmin, vmax      = min(values), max(values)
+
+    if vmax == vmin:
+        ys = [pad_y + plot_h / 2] * n
+    else:
+        # Plot so HIGH values appear at the TOP of the plot area
+        # (standard chart convention).  For CVaR/MaxDD (negative), this
+        # naturally puts the least-bad month on top — visually intuitive.
+        ys = [pad_y + plot_h - (v - vmin) / (vmax - vmin) * plot_h for v in values]
+    xs = [pad_x + i * plot_w / (n - 1) for i in range(n)]
+
+    points_str = " ".join(f"{x:.1f},{y:.1f}" for x, y in zip(xs, ys))
+    area_str   = (f"M{xs[0]:.1f},{pad_y + plot_h:.1f} L"
+                   + " L".join(f"{x:.1f},{y:.1f}" for x, y in zip(xs, ys))
+                   + f" L{xs[-1]:.1f},{pad_y + plot_h:.1f} Z")
+
+    # Highlight extremum (min for invert=True, max otherwise)
+    extr_i = values.index(min(values)) if invert else values.index(max(values))
+    extr_x, extr_y = xs[extr_i], ys[extr_i]
+    last_x,  last_y  = xs[-1], ys[-1]
+    grad_id          = f"spk_{abs(hash(tuple(values))) % 1000000}"
+
+    return (
+        f'<svg viewBox="0 0 240 36" preserveAspectRatio="none" '
+        f'xmlns="http://www.w3.org/2000/svg">'
+        f'<defs>'
+        f'<linearGradient id="{grad_id}" x1="0" y1="0" x2="0" y2="1">'
+        f'<stop offset="0%" stop-color="{color}" stop-opacity="0.28"/>'
+        f'<stop offset="100%" stop-color="{color}" stop-opacity="0"/>'
+        f'</linearGradient>'
+        f'</defs>'
+        f'<path d="{area_str}" fill="url(#{grad_id})"/>'
+        f'<polyline points="{points_str}" fill="none" stroke="{color}" '
+        f'stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>'
+        f'<circle cx="{extr_x:.1f}" cy="{extr_y:.1f}" r="3.4" fill="{color}" fill-opacity="0.18"/>'
+        f'<circle cx="{extr_x:.1f}" cy="{extr_y:.1f}" r="1.7" fill="{color}"/>'
+        f'<circle cx="{last_x:.1f}" cy="{last_y:.1f}" r="3.0" fill="#FBFAF7" '
+        f'stroke="{color}" stroke-width="1.1"/>'
+        f'</svg>'
+    )
+
+
+def _build_kpi_sparklines(results: dict) -> Optional[dict]:
+    """
+    Compute 3 monthly trend series (CVaR / Sharpe / MaxDD) and render them as
+    inline SVG sparklines for the KPI cards.
+
+    Window: last 252 trading days, sampled at ~12 evenly-spaced snapshots.
+    For each snapshot, compute the metric over a trailing 60-day window of
+    cap-weighted portfolio daily log returns.
+
+    Returns dict {cvar_svg, sharpe_svg, mdd_svg} when there is enough history
+    (≥ 90 daily obs), else None — template's `{% if data.kpi_sparklines %}`
+    guard then hides the chart cells cleanly.
+    """
+    try:
+        history = results.get("history_result")
+        perf    = results.get("performance_table")
+        if perf is None or perf.empty or history is None:
+            return None
+        prices = getattr(history, "data", None)
+        if prices is None or prices.empty or len(prices) < 90:
+            return None
+
+        import numpy as _np
+        total_val = float(results.get("total_value") or 1.0)
+        cols:    list[str]   = []
+        weights: list[float] = []
+        for _, row in perf.iterrows():
+            t  = str(row.get("Ticker", "")).strip()
+            cv = float(row.get("Current_Value", 0) or 0)
+            if t and t in prices.columns and cv > 0:
+                cols.append(t)
+                weights.append(cv / total_val)
+        if not cols:
+            return None
+
+        w        = _np.array(weights)
+        daily_lr = _np.log(prices[cols] / prices[cols].shift(1)).dropna()
+        if len(daily_lr) < 60:
+            return None
+        port_lr  = (daily_lr * w).sum(axis=1)
+
+        if len(port_lr) > 252:
+            port_lr = port_lr.iloc[-252:]
+
+        n      = len(port_lr)
+        step   = max(1, n // 12)
+        if step < 5:
+            return None
+        snap_indices = [step * (i + 1) - 1 for i in range(12) if step * (i + 1) - 1 < n]
+
+        cvar_pts, sharpe_pts, mdd_pts = [], [], []
+        for end in snap_indices:
+            win = port_lr.iloc[max(0, end - 60):end + 1]
+            if len(win) < 30:
+                continue
+            # CVaR 95% — mean of bottom 5% returns
+            cutoff = max(1, int(len(win) * 0.05))
+            cvar_pts.append(float(win.sort_values().iloc[:cutoff].mean()))
+            # Sharpe annualised (sparkline uses RFR=0 — it's a trend visual,
+            # not the headline number, which is wired separately to data.sharpe)
+            std = float(win.std())
+            sharpe_pts.append(float(win.mean()) / std * (252 ** 0.5) if std > 0 else 0.0)
+            # Max drawdown over the trailing window
+            eq   = (1 + win).cumprod()
+            dd   = (eq / eq.cummax() - 1).min()
+            mdd_pts.append(float(dd))
+
+        if len(cvar_pts) < 3:
+            return None
+
+        return {
+            "cvar_svg":   _sparkline_svg(cvar_pts,   color="#3F8F5F", invert=True),
+            "sharpe_svg": _sparkline_svg(sharpe_pts, color="#2F6FB3", invert=False),
+            "mdd_svg":    _sparkline_svg(mdd_pts,    color="#C0492F", invert=True),
+        }
+    except Exception as exc:
+        logger.warning("kpi_sparklines build failed: %s", exc)
+        return None
+
+
 # All 9 axes the engine claims to model.  When a factor ETF didn't load,
 # the perf table has no Beta_<factor> column — we still want the radar to
 # show the missing axis (drawn as a gray dashed slice with value 0) so the
 # user sees that 7/9 factors are loaded, not that we have only 7 factors.
 _RADAR_FACTOR_AXES = [
     "Market", "Momentum", "Value", "Quality", "Size",
+    "Volatility",   # SPLV.US — low-vol factor (Step 5)
     "Commodities", "Rates", "EM_Equity", "EM_Bond",
 ]
 
 
 def _build_factor_radar_svg(results: dict) -> str:
     """Inline factor-radar SVG with all 9 axes (missing factors flagged)."""
+    betas, missing = _compute_factor_betas(results)
     try:
-        perf = results.get("performance_table")
-        if perf is None or perf.empty:
-            return factor_radar_svg({})
-        total_val = float(results.get("total_value") or 1.0)
-        weights = (perf["Current_Value"].fillna(0).astype(float) / total_val).values
-
-        betas: dict[str, float] = {}
-        missing: list[str] = []
-        for axis in _RADAR_FACTOR_AXES:
-            col = f"Beta_{axis}"
-            if col in perf.columns:
-                vals = perf[col].fillna(0).astype(float).values
-                betas[axis] = float((vals * weights).sum())
-            else:
-                # Keep the axis but with value 0 — caller marks it as missing.
-                betas[axis] = 0.0
-                missing.append(axis)
-
-        if missing:
-            logger.info("Factor radar: %d/%d axes loaded; missing: %s",
-                        len(_RADAR_FACTOR_AXES) - len(missing),
-                        len(_RADAR_FACTOR_AXES), ", ".join(missing))
         return factor_radar_svg(betas, missing_axes=missing)
     except Exception as exc:
         logger.warning("factor_radar_svg build failed: %s", exc)
         return factor_radar_svg({})
+
+
+# Benchmark β profile for "Δ vs benchmark" column in the factor table.
+# S&P 500 has Market β ≈ 1.0 and ~0.0 on all other style/macro factors.
+_BENCH_FACTOR_BETAS = {axis: (1.0 if axis == "Market" else 0.0)
+                        for axis in _RADAR_FACTOR_AXES}
+
+
+def _compute_factor_betas(results: dict) -> tuple[dict[str, float], list[str]]:
+    """
+    Extract weighted-average factor β for each axis from the perf table.
+
+    Returns (betas_dict, missing_axes_list).  When an axis has no
+    Beta_<axis> column in the perf frame the engine never loaded that
+    factor ETF — keep the axis in betas at 0.0 and report it as missing
+    so downstream visualisations can render a dashed/grey spoke.
+    """
+    try:
+        perf = results.get("performance_table")
+        if perf is None or perf.empty:
+            return {}, list(_RADAR_FACTOR_AXES)
+        total_val = float(results.get("total_value") or 1.0)
+        weights   = (perf["Current_Value"].fillna(0).astype(float) / total_val).values
+
+        betas:   dict[str, float] = {}
+        missing: list[str]        = []
+        for axis in _RADAR_FACTOR_AXES:
+            col = f"Beta_{axis}"
+            if col in perf.columns:
+                vals       = perf[col].fillna(0).astype(float).values
+                betas[axis] = float((vals * weights).sum())
+            else:
+                betas[axis]  = 0.0
+                missing.append(axis)
+        if missing:
+            logger.info("Factor radar: %d/%d axes loaded; missing: %s",
+                         len(_RADAR_FACTOR_AXES) - len(missing),
+                         len(_RADAR_FACTOR_AXES), ", ".join(missing))
+        return betas, missing
+    except Exception as exc:
+        logger.warning("factor beta extraction failed: %s", exc)
+        return {}, list(_RADAR_FACTOR_AXES)
+
+
+def _build_factor_betas_table(results: dict) -> list[dict]:
+    """
+    Template-friendly factor-β table for the DEEP factor-radar section.
+
+    Each row: {axis, beta, bench, delta, missing}.  Bench is the SPX-like
+    baseline (Market = 1.0, rest = 0.0); delta = β_port − β_bench rounded
+    to 2 dp.  Missing axes get beta=0.0 + missing=True so the template
+    can render them as muted "n/a" rows instead of dropping them silently.
+    """
+    betas, missing = _compute_factor_betas(results)
+    if not betas:
+        return []
+    missing_set = set(missing)
+    rows: list[dict] = []
+    for axis in _RADAR_FACTOR_AXES:
+        b     = float(betas.get(axis, 0.0))
+        bench = float(_BENCH_FACTOR_BETAS.get(axis, 0.0))
+        rows.append({
+            "axis":    axis,
+            "beta":    round(b, 2),
+            "bench":   round(bench, 2),
+            "delta":   round(b - bench, 2),
+            "missing": axis in missing_set,
+        })
+    return rows
 
 
 def _safe_float(val, default: float = 0.0) -> float:
@@ -540,7 +734,12 @@ def _build_pdf_payload(results: dict, tier: str,
         if tier == TIER_DEEP:
             payload["equity_curve_svg"] = _build_equity_curve_svg(results)
             payload["factor_radar_svg"] = _build_factor_radar_svg(results)
+            payload["factor_betas"]     = _build_factor_betas_table(results)
             payload["used_rag"]         = bool(market_context)
+        # KPI sparklines — wired for BOTH tiers (both templates surface them
+        # in the cover KPI strip).  None when history < 90 daily obs;
+        # template gating then hides the chart cells.
+        payload["kpi_sparklines"] = _build_kpi_sparklines(results)
         return payload
 
     # ── v1 legacy fallback ──────────────────────────────────────────────────
@@ -1209,28 +1408,37 @@ async def _send_pdf(
     tier: str,
     payload: dict | None = None,
 ) -> None:
+    """
+    Render the HTML report, push to GCS, send the user a signed URL.
+
+    Function name kept as `_send_pdf` for now to minimise call-site churn;
+    will be renamed once all references are updated.  The underlying
+    delivery is HTML + signed URL — no PDF, no Chromium.
+    """
     report_type = TIER_LABEL[tier]
-    pdf_path    = await generate_portfolio_pdf(
-        payload, user_id=user_id, report_type=report_type, tier=tier,
-    )
 
-    today_str = datetime.now().strftime("%Y-%m-%d")
-    with open(pdf_path, "rb") as fh:
-        doc = BufferedInputFile(
-            fh.read(),
-            filename=f"Portfolio_Report_{user_id}_{today_str}.pdf",
-        )
+    # Render Jinja → HTML string and write to /tmp.  Both ops are sync
+    # and fast (<50 ms total); no need for executor offload.
+    html       = render_report_html(payload, user_id=user_id,
+                                     report_type=report_type, tier=tier)
+    local_path = write_report_html(html, user_id=user_id, tier=tier)
 
-    await bot.send_document(
+    # Push to GCS (or fall back to file:// in local-dev mode).
+    url = upload_report(local_path, user_id=user_id, tier=tier)
+
+    # Tell the user.  The link is a plain markdown URL — Telegram renders
+    # it as a preview card on most clients.
+    await bot.send_message(
         chat_id,
-        document=doc,
-        caption=(
-            f"📄 *{report_type}* готов.\n\n"
-            "Отчёт сформирован институциональным риск-движком "
-            "(Euler Decomposition · Bootstrap CVaR · 4-pillar Scoring · "
-            "Black-Litterman). Штурвал всегда у вас."
+        text=(
+            f"📊 *{report_type}* готов.\n\n"
+            f"[Открыть отчёт]({url})\n\n"
+            "Ссылка действительна 7 дней.  Отчёт сформирован институциональным "
+            "риск-движком (Euler Decomposition · Bootstrap CVaR · 4-pillar "
+            "Scoring · Black-Litterman).  Штурвал всегда у вас."
         ),
-        parse_mode=ParseMode.MARKDOWN,
+        parse_mode               = ParseMode.MARKDOWN,
+        disable_web_page_preview = False,
     )
 
 

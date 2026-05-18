@@ -1,0 +1,2431 @@
+<!DOCTYPE html>
+<!--
+  ─────────────────────────────────────────────────────────────────────────
+  ПРОТОТИП (design-only, НЕ подключён к боту)
+  ОБЪЕДИНЁННЫЙ BASE-ОТЧЁТ — все 4 страницы в одном файле:
+    1. Обложка · KPI · концентрация риска
+    2. Что вы держите (holdings)
+    3. Рост против рынка
+    4. Идеи ИИ
+  Собран из 4 отдельных прототипов; конфликты классов/функций разведены.
+  Открыть просто в браузере.
+  ─────────────────────────────────────────────────────────────────────────
+-->
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>BASE Report — полный отчёт (4 страницы) — Прототип</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+/* ════════ СТРАНИЦА 1 — обложка · KPI · концентрация риска ════════ */
+  :root {
+    --bg:          #F4F2EC;   /* тёплый кремовый фон */
+    --panel:       #FBFAF7;   /* карточки чуть светлее */
+    --ink:         #2A2E33;
+    --ink-60:      rgba(42,46,51,0.60);
+    --ink-40:      rgba(42,46,51,0.40);
+    --hairline:    rgba(42,46,51,0.18);
+    --hairline-2:  rgba(42,46,51,0.10);
+    --tech-blue:   #2F6FB3;   /* основной акцент */
+    --tech-blue-08:rgba(47,111,179,0.08);
+    --tech-blue-14:rgba(47,111,179,0.14);
+    --ai-bg:       #F0F6FF;   /* фон AI-блока */
+    --amber:       #C77B2C;
+    --green:       #3F8F5F;
+    --neg:         #C0492F;
+
+    --font-ui:   'IBM Plex Sans', -apple-system, sans-serif;
+    --font-mono: 'IBM Plex Mono', monospace;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-ui);
+    font-size: 13px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .sheet { max-width: 1100px; margin: 0 auto; padding: 20px 30px 28px; }
+
+  /* ═══ ТЕХ-ХЕДЕР ═══ */
+  .tech-header {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--ink-60);
+    letter-spacing: 0.03em;
+    padding-bottom: 12px;
+    border-bottom: 0.5pt solid var(--hairline);
+    display: flex; justify-content: space-between; flex-wrap: wrap; gap: 6px;
+  }
+  .tech-header b { color: var(--ink); font-weight: 600; }
+  .tech-header .ts { color: var(--ink-40); }
+
+  /* ═══ COVER ═══ */
+  .cover {
+    display: grid;
+    grid-template-columns: 1.55fr 1fr;
+    gap: 26px;
+    padding: 24px 0 22px;
+    border-bottom: 0.5pt solid var(--hairline);
+  }
+  .block-label {
+    font-size: 10px; font-weight: 600; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--ink-60); margin-bottom: 8px;
+  }
+  h1.verdict {
+    font-size: 26px; font-weight: 700; line-height: 1.3;
+    letter-spacing: -0.01em; color: var(--ink);
+  }
+  h1.verdict .hl { color: var(--tech-blue); }
+
+  /* AI INSIGHT BOX — терминал-лог */
+  .ai-box {
+    margin-top: 16px;
+    background: var(--ai-bg);
+    border: 0.5pt solid var(--hairline-2);
+    border-left: 2px solid var(--tech-blue);
+    border-radius: 2px;
+    padding: 12px 15px 13px;
+  }
+  .ai-box .ai-head {
+    font-family: var(--font-mono); font-size: 10.5px; font-weight: 600;
+    letter-spacing: 0.04em; color: var(--tech-blue); margin-bottom: 6px;
+  }
+  .ai-box .ai-body { font-style: italic; font-size: 12.5px; line-height: 1.62; }
+  .ai-box .ai-body .ai-lead { font-style: normal; font-weight: 600; color: var(--ink); }
+  .src {
+    font-style: normal; font-family: var(--font-mono); font-size: 10px;
+    color: var(--tech-blue); background: var(--tech-blue-08);
+    padding: 0 4px; border-radius: 2px; white-space: nowrap;
+  }
+  .flag { font-style: normal; font-weight: 600; color: var(--amber); }
+
+  /* RISK GAUGE — полукруглая шкала */
+  .risk-panel {
+    border: 0.5pt solid var(--hairline); border-radius: 2px;
+    padding: 14px 18px 16px; background: var(--panel);
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; text-align: center;
+  }
+  .risk-panel .block-label { align-self: flex-start; margin-bottom: 4px; }
+  .risk-gauge-svg { width: 100%; max-width: 300px; height: auto; display: block; margin-top: 4px; }
+  .risk-readout-big {
+    margin-top: 8px;
+    font-family: var(--font-mono); font-size: 16px; font-weight: 500;
+    color: var(--ink); letter-spacing: 0.01em;
+  }
+  .risk-readout-big .tier-text { color: var(--amber); font-weight: 600; }
+
+  /* ═══ KPI STRIP ═══ */
+  .kpi-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 16px; margin-top: 22px; }
+  .kpi {
+    background: var(--panel);
+    border: 0.5pt solid var(--hairline);
+    border-radius: 2px;
+    padding: 13px 16px 14px;
+    display: flex; flex-direction: column;
+  }
+  /* AI-блок прижат к нижней кромке — карточки выравниваются по grid-stretch */
+  .kpi .kpi-ai { margin-top: auto; }
+  /* статус-кромка сверху — без теней */
+  .kpi.st-normal { border-top: 2px solid var(--green); }
+  .kpi.st-good   { border-top: 2px solid var(--tech-blue); }
+  .kpi.st-watch  { border-top: 2px solid var(--amber); }
+
+  .kpi-name {
+    font-size: 10px; font-weight: 600; letter-spacing: 0.09em;
+    text-transform: uppercase; color: var(--ink-60);
+    margin-bottom: 8px;
+  }
+  .kpi-value-row {
+    display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  }
+  .kpi-value {
+    font-family: var(--font-mono); font-size: 30px; font-weight: 600;
+    line-height: 1.05; color: var(--ink); letter-spacing: -0.01em;
+  }
+  .kpi-value .unit { font-size: 17px; color: var(--ink-40); }
+  .kpi-sub {
+    font-family: var(--font-mono); font-size: 10px; color: var(--ink-40);
+    white-space: nowrap;
+  }
+
+  .kpi-spark {
+    margin-top: 10px;
+    background: rgba(42,46,51,0.03);
+    border-radius: 2px; padding: 6px 8px;
+  }
+  .kpi-spark svg { display: block; width: 100%; height: 32px; }
+
+  .kpi-ai {
+    display: flex; gap: 7px;
+    margin-top: 10px; padding: 8px 10px;
+    background: var(--ai-bg); border-left: 2px solid var(--tech-blue);
+    border-radius: 0 2px 2px 0;
+  }
+  .kpi-ai .tag { font-size: 10px; flex-shrink: 0; }
+  .kpi-ai .txt { font-style: italic; font-size: 10.5px; line-height: 1.5; }
+  .kpi-ai .txt b { font-style: normal; font-weight: 600; }
+  .kpi-ai .txt .src { font-size: 9px; }
+
+  /* ═══ RISK CONCENTRATION ═══ */
+  .risk-conc { display: grid; grid-template-columns: 1.25fr 1fr; gap: 18px; margin-top: 24px; }
+  .panel {
+    background: var(--panel); border: 0.5pt solid var(--hairline);
+    border-radius: 2px; padding: 15px 17px;
+  }
+  .panel-title { font-size: 14px; font-weight: 600; margin-bottom: 12px; letter-spacing: -0.005em; }
+
+  table { width: 100%; border-collapse: collapse; }
+  thead th {
+    font-family: var(--font-mono); font-size: 9px; font-weight: 600;
+    letter-spacing: 0.03em; color: var(--ink-60); text-align: right;
+    padding: 5px 7px; border-bottom: 0.5pt solid var(--hairline);
+  }
+  thead th:first-child { text-align: left; }
+  thead th.hl-col { background: var(--tech-blue-14); color: var(--tech-blue); }
+  tbody td {
+    font-family: var(--font-mono); font-size: 11px; text-align: right;
+    padding: 6px 7px; border-bottom: 0.5pt solid var(--hairline-2);
+  }
+  tbody td:first-child { text-align: left; font-weight: 500; }
+  tbody td.hl-col { background: var(--tech-blue-08); font-weight: 500; }
+  tbody tr:last-child td { border-bottom: none; }
+  .pill {
+    font-size: 9px; font-family: var(--font-mono);
+    padding: 1px 6px; border-radius: 2px; border: 0.5pt solid currentColor;
+  }
+  .pill.normal { color: var(--green); }
+  .pill.watch  { color: var(--amber); }
+
+  /* waterfall легенда */
+  .wf-legend {
+    display: flex; gap: 16px; font-size: 9.5px; color: var(--ink-60);
+    margin-bottom: 8px; font-family: var(--font-mono);
+  }
+  .wf-legend .sw { display: inline-block; width: 9px; height: 9px; margin-right: 4px; vertical-align: -1px; }
+  .wf-legend .sw.amber { background: var(--amber); }
+  .wf-legend .sw.green { background: var(--green); }
+  .wf-legend .sw.blue  { background: var(--tech-blue); }
+
+  /* связующий AI-комментарий под рядом */
+  .conc-ai {
+    grid-column: 1 / -1;
+    background: var(--ai-bg); border: 0.5pt solid var(--hairline-2);
+    border-left: 2px solid var(--tech-blue); border-radius: 2px;
+    padding: 11px 15px;
+  }
+  .conc-ai .ai-head {
+    font-family: var(--font-mono); font-size: 10px; font-weight: 600;
+    color: var(--tech-blue); margin-bottom: 5px;
+  }
+  .conc-ai .ai-body { font-style: italic; font-size: 12px; line-height: 1.6; }
+
+  /* ═══ ФУТЕР ═══ */
+  .foot {
+    font-family: var(--font-mono); font-size: 10px; color: var(--ink-40);
+    text-align: center; padding-top: 14px; margin-top: 22px;
+    border-top: 0.5pt solid var(--hairline); letter-spacing: 0.05em;
+  }
+
+  /* ═══ АДАПТИВ ═══ */
+  @media (max-width: 880px) {
+    .cover { grid-template-columns: 1fr; gap: 20px; }
+    .kpi-grid { grid-template-columns: 1fr; }
+    .kpi { min-height: auto; }
+    .risk-conc { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 480px) {
+    body { font-size: 15px; }
+    .sheet { padding: 14px 16px 22px; }
+    .tech-header { font-size: 9.5px; }
+    h1.verdict { font-size: 21px; }
+    .risk-readout-big { font-size: 14px; }
+    .kpi-value { font-size: 26px; }
+    .ai-box .ai-body { font-size: 14px; }
+    .kpi-ai .txt { font-size: 12px; }
+    table { font-size: 13px; }
+    thead th, tbody td { padding: 6px 4px; }
+  }
+
+/* ════════ СТРАНИЦА 2 — что вы держите ════════ */
+  :root {
+    --bg:          #F4F2EC;
+    --panel:       #FBFAF7;
+    --ink:         #2A2E33;
+    --ink-60:      rgba(42,46,51,0.60);
+    --ink-40:      rgba(42,46,51,0.40);
+    --hairline:    rgba(42,46,51,0.18);
+    --hairline-2:  rgba(42,46,51,0.10);
+    --tech-blue:   #2F6FB3;
+    --tech-blue-08:rgba(47,111,179,0.08);
+    --ai-bg:       #F0F6FF;
+    --amber:       #C77B2C;
+    --amber-08:    rgba(199,123,44,0.10);
+    --green:       #3F8F5F;
+    --neg:         #C0492F;
+
+    --font-ui:   'IBM Plex Sans', -apple-system, sans-serif;
+    --font-mono: 'IBM Plex Mono', monospace;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    background: var(--bg); color: var(--ink);
+    font-family: var(--font-ui); font-size: 13px; line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  .sheet { max-width: 1100px; margin: 0 auto; padding: 20px 30px 28px; }
+
+  /* ТЕХ-ХЕДЕР */
+  .tech-header {
+    font-family: var(--font-mono); font-size: 11px; color: var(--ink-60);
+    letter-spacing: 0.03em; padding-bottom: 12px;
+    border-bottom: 0.5pt solid var(--hairline);
+    display: flex; justify-content: space-between; flex-wrap: wrap; gap: 6px;
+  }
+  .tech-header b { color: var(--ink); font-weight: 600; }
+  .tech-header .ts { color: var(--ink-40); }
+
+  /* ЗАГОЛОВОК СЕКЦИИ */
+  .sec-head { padding: 22px 0 4px; }
+  .sec-title { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
+  .sec-sub { font-size: 11.5px; color: var(--ink-60); margin-top: 3px; }
+
+  /* ── РАСКЛАДКА: ТАБЛИЦА + ПАНЕЛЬ СЕКТОРОВ ── */
+  .holdings-layout {
+    margin-top: 14px;
+    display: flex; gap: 14px; align-items: stretch;
+  }
+
+  /* ── ТАБЛИЦА HOLDINGS ── */
+  .holdings {
+    flex: 1 1 auto; min-width: 0;
+    border: 0.5pt solid var(--hairline); border-radius: 2px;
+    background: var(--panel); overflow: hidden;
+  }
+  .h-head, .h-row {
+    display: grid;
+    grid-template-columns: 1.35fr 1.1fr 0.7fr 0.85fr 0.8fr 0.95fr 1.05fr 0.95fr;
+    align-items: center; gap: 10px;
+  }
+  .h-head {
+    padding: 8px 14px;
+    border-bottom: 0.5pt solid var(--hairline);
+    font-family: var(--font-mono); font-size: 9px; font-weight: 600;
+    letter-spacing: 0.04em; color: var(--ink-60); text-transform: uppercase;
+  }
+  .h-head .num, .h-row .num { text-align: right; }
+
+  /* разделитель перед колонкой «Действие» */
+  .h-head .sep, .h-cell.action {
+    border-left: 0.5pt solid var(--hairline); padding-left: 11px;
+  }
+
+  .h-row {
+    padding: 10px 14px;
+    border-bottom: 0.5pt solid var(--hairline-2);
+    cursor: pointer; transition: background 0.1s, box-shadow 0.1s;
+  }
+  .h-row:hover {
+    background: var(--tech-blue-08);
+    box-shadow: inset 3px 0 0 var(--tech-blue);
+  }
+  .h-row.open {
+    background: var(--tech-blue-08);
+    box-shadow: inset 3px 0 0 var(--tech-blue);
+  }
+  .h-group:last-child .h-row { border-bottom: none; }
+
+  .h-cell { font-size: 12px; }
+  .h-cell.num { font-family: var(--font-mono); text-align: right; }
+  .h-cell-label { display: none; }   /* виден только на мобильном */
+
+  .h-ticker { display: flex; align-items: center; gap: 7px; }
+  .h-ticker .tk { font-family: var(--font-mono); font-weight: 600; font-size: 12.5px; }
+  .h-flag {
+    font-family: var(--font-mono); font-size: 8px; font-weight: 600;
+    color: var(--amber); border: 0.5pt solid var(--amber);
+    border-radius: 2px; padding: 0.5px 4px; letter-spacing: 0.02em;
+  }
+  .pnl.pos { color: var(--green); }
+  .pnl.neg { color: var(--neg); }
+
+  .badge {
+    font-family: var(--font-mono); font-size: 9.5px; font-weight: 500;
+    padding: 2px 7px; border-radius: 2px; border: 0.5pt solid currentColor;
+    white-space: nowrap;
+  }
+  .badge.buy    { color: var(--green); }
+  .badge.hold   { color: var(--ink-60); }
+  .badge.trim   { color: var(--amber); }
+  .badge.sell   { color: var(--neg); }
+
+  .caret-cell { display: flex; justify-content: flex-end; }
+  /* заметная кнопка разворота строки */
+  .h-toggle {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3.5px 9px; border-radius: 3px;
+    background: var(--tech-blue);
+    font-family: var(--font-mono); font-size: 9px; font-weight: 600;
+    color: #fff; letter-spacing: 0.02em; white-space: nowrap;
+    transition: background 0.12s;
+  }
+  .h-row:hover .h-toggle { background: #25557F; }
+  .h-caret { font-size: 9px; transition: transform 0.15s; }
+  .h-row.open .h-caret { transform: rotate(90deg); }
+  .h-toggle .t-less { display: none; }
+  .h-row.open .h-toggle .t-more { display: none; }
+  .h-row.open .h-toggle .t-less { display: inline; }
+
+  /* ── РАЗВОРОТ: SEC-ФУНДАМЕНТАЛ ── */
+  .h-detail { display: none; padding: 0 14px 14px; }
+  .h-detail.open { display: block; }
+  .h-detail-inner {
+    border-left: 2px solid var(--tech-blue);
+    background: rgba(42,46,51,0.02);
+    border-radius: 0 2px 2px 0;
+    padding: 12px 14px;
+  }
+  .h-detail-name {
+    font-size: 11px; color: var(--ink-60); margin-bottom: 9px;
+  }
+  .stat-grid {
+    display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px;
+  }
+  .stat { }
+  .stat-label {
+    font-size: 8.5px; color: var(--ink-60); letter-spacing: 0.02em;
+    text-transform: uppercase; line-height: 1.3; margin-bottom: 3px;
+  }
+  .stat-value {
+    font-family: var(--font-mono); font-size: 13px; font-weight: 500; color: var(--ink);
+  }
+  .stat-value.pos { color: var(--green); }
+  .stat-value.neg { color: var(--neg); }
+  .h-detail-ai {
+    margin-top: 10px; padding-top: 9px;
+    border-top: 0.5pt solid var(--hairline-2);
+    display: flex; gap: 7px;
+  }
+  .h-detail-ai .tag { font-size: 10px; flex-shrink: 0; }
+  .h-detail-ai .txt { font-style: italic; font-size: 11px; line-height: 1.5; }
+  .h-detail-ai .txt .h-cite {
+    font-style: normal; font-family: var(--font-mono); font-size: 9px;
+    color: var(--tech-blue);
+  }
+
+  /* ── ПАНЕЛЬ СЕКТОРОВ + PIE ── */
+  .sector-panel {
+    flex: 0 0 234px;
+    border: 0.5pt solid var(--hairline); border-radius: 2px;
+    background: var(--panel); overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+  /* заголовок-бар — зеркалит шапку таблицы */
+  .sp-head {
+    padding: 8px 14px;
+    border-bottom: 0.5pt solid var(--hairline);
+  }
+  .sp-title {
+    font-family: var(--font-mono); font-size: 9px; font-weight: 600;
+    letter-spacing: 0.04em; color: var(--ink-60); text-transform: uppercase;
+  }
+  .sp-sub { font-size: 10px; color: var(--ink-40); margin-top: 2px; }
+
+  /* тело панели растягивается и центрирует pie+легенду */
+  .sp-body {
+    flex: 1 1 auto;
+    display: flex; flex-direction: column; justify-content: center;
+    padding: 16px 14px;
+  }
+  .pie-wrap { display: flex; justify-content: center; margin-bottom: 14px; position: relative; }
+  /* deep-shadow «подложка» под пирогом — мягкая глубина */
+  .pie-wrap::before {
+    content: ''; position: absolute; top: 50%; left: 50%;
+    width: 156px; height: 156px; border-radius: 50%;
+    transform: translate(-50%, -47%);
+    background: radial-gradient(closest-side, rgba(42,46,51,0.18), rgba(42,46,51,0) 72%);
+    filter: blur(2px);
+    z-index: 0; pointer-events: none;
+  }
+  .pie {
+    position: relative; width: 152px; height: 152px; border-radius: 50%;
+    z-index: 1;
+    background:
+      /* верхний rim-highlight на 12 часов */
+      radial-gradient(circle at 50% 8%, rgba(255,255,255,0.55), rgba(255,255,255,0) 28%),
+      /* нижний rim-shadow */
+      radial-gradient(circle at 50% 96%, rgba(42,46,51,0.16), rgba(42,46,51,0) 32%),
+      /* основной сектор: с тонкими белыми разделителями */
+      conic-gradient(
+        var(--amber)              0       61.5%,
+        rgba(255,255,255,0.85)    61.5%   62.5%,
+        var(--tech-blue)          62.5%   75.5%,
+        rgba(255,255,255,0.85)    75.5%   76.5%,
+        var(--green)              76.5%   91.5%,
+        rgba(255,255,255,0.85)    91.5%   92.5%,
+        var(--ink-60)             92.5%   97.5%,
+        rgba(255,255,255,0.85)    97.5%   98.5%,
+        var(--ink-40)             98.5%   100%
+      );
+    box-shadow:
+      0 1px 1px rgba(255,255,255,0.6) inset,
+      0 -1px 2px rgba(42,46,51,0.08) inset,
+      0 2px 6px rgba(42,46,51,0.12);
+  }
+  /* внешний hairline-обод */
+  .pie::before {
+    content: ''; position: absolute; inset: -1px;
+    border-radius: 50%;
+    border: 0.5pt solid rgba(42,46,51,0.20);
+    pointer-events: none;
+  }
+  /* центральная «втулка» — с лёгкой объёмной обводкой */
+  .pie::after {
+    content: ''; position: absolute; inset: 28%;
+    background:
+      radial-gradient(circle at 35% 30%, #FFFFFF, var(--panel) 70%);
+    border-radius: 50%;
+    border: 0.5pt solid rgba(42,46,51,0.18);
+    box-shadow: 0 1px 2px rgba(42,46,51,0.10) inset;
+  }
+  .pie-center {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; text-align: center;
+    z-index: 2;
+  }
+  .pie-center .pc-pct {
+    font-family: var(--font-mono); font-size: 17px; font-weight: 600;
+    color: var(--amber); line-height: 1; letter-spacing: -0.01em;
+  }
+  .pie-center .pc-lbl {
+    font-family: var(--font-mono); font-size: 7.5px; color: var(--ink-60);
+    letter-spacing: 0.06em; margin-top: 3px;
+  }
+
+  .pie-legend { display: flex; flex-direction: column; gap: 5px; }
+  .lg-item { display: flex; align-items: center; gap: 7px; font-size: 11px; }
+  .lg-sw { width: 9px; height: 9px; border-radius: 2px; flex-shrink: 0; }
+  .lg-name { flex: 1; color: var(--ink); }
+  .lg-pct { font-family: var(--font-mono); font-size: 11px; color: var(--ink-60); }
+  .lg-item.over .lg-name,
+  .lg-item.over .lg-pct { color: var(--amber); font-weight: 600; }
+
+  /* предупреждение прижато к нижней кромке — вровень с таблицей */
+  .sp-warn {
+    margin: 0 14px 14px; padding: 8px 9px;
+    background: var(--amber-08); border: 0.5pt solid var(--amber);
+    border-radius: 2px; display: flex; gap: 6px;
+    font-size: 10.5px; line-height: 1.42; color: var(--amber);
+  }
+  .sp-warn b { font-weight: 600; }
+
+  /* ── СВОДНЫЙ AI-БЛОК ── */
+  .sec-ai {
+    margin-top: 16px;
+    background: var(--ai-bg); border: 0.5pt solid var(--hairline-2);
+    border-left: 2px solid var(--tech-blue); border-radius: 2px;
+    padding: 12px 15px;
+  }
+  .sec-ai .ai-head {
+    font-family: var(--font-mono); font-size: 10.5px; font-weight: 600;
+    color: var(--tech-blue); margin-bottom: 6px;
+  }
+  .sec-ai .ai-body { font-style: italic; font-size: 12.5px; line-height: 1.62; }
+  .sec-ai .ai-body p { margin: 0; }
+  .sec-ai .ai-body p + p { margin-top: 8px; }
+  .ai-sources {
+    margin-top: 10px; padding-top: 8px;
+    border-top: 0.5pt solid var(--hairline-2);
+    font-family: var(--font-mono); font-size: 9px; color: var(--ink-60);
+    letter-spacing: 0.02em; line-height: 1.7;
+  }
+  .ai-sources b { color: var(--tech-blue); font-weight: 600; }
+  .src-inline {
+    font-style: normal; font-family: var(--font-mono); font-size: 10px;
+    color: var(--tech-blue); background: var(--tech-blue-08);
+    padding: 0 4px; border-radius: 2px;
+  }
+  .flag-inline { font-style: normal; font-weight: 600; color: var(--amber); }
+
+  /* ФУТЕР */
+  .foot {
+    font-family: var(--font-mono); font-size: 10px; color: var(--ink-40);
+    text-align: center; padding-top: 14px; margin-top: 22px;
+    border-top: 0.5pt solid var(--hairline); letter-spacing: 0.05em;
+  }
+
+  /* ─────────── АДАПТИВ ─────────── */
+  /* панель секторов уходит под таблицу */
+  @media (max-width: 900px) {
+    .holdings-layout { flex-direction: column; }
+    .sector-panel { flex: 1 1 auto; width: 100%; }
+    .pie-wrap { margin: 12px 0; }
+  }
+
+  /* таблица → карточки */
+  @media (max-width: 720px) {
+    .h-head { display: none; }
+    .h-row {
+      grid-template-columns: 1fr 1fr;
+      gap: 7px 14px;
+      padding: 12px 14px;
+    }
+    .h-cell { display: flex; justify-content: space-between; align-items: baseline; font-size: 13px; }
+    .h-cell.num { text-align: left; }
+    .h-cell-label {
+      display: inline; font-size: 9px; color: var(--ink-60);
+      text-transform: uppercase; letter-spacing: 0.03em;
+    }
+    .h-cell.ticker  { grid-column: 1 / -1; }
+    .h-cell.action  {
+      grid-column: 1 / -1; justify-content: flex-start;
+      border-left: none; padding-left: 0;
+    }
+    .h-cell.caret-cell {
+      grid-column: 1 / -1; justify-content: flex-end;
+      border-top: 0.5pt solid var(--hairline-2); padding-top: 6px;
+    }
+    .h-cell.ticker .h-cell-label { display: none; }
+    .stat-grid { grid-template-columns: repeat(2, 1fr); gap: 9px 14px; }
+  }
+  @media (max-width: 480px) {
+    body { font-size: 15px; }
+    .sheet { padding: 14px 16px 22px; }
+    .tech-header { font-size: 9.5px; }
+    .sec-title { font-size: 15px; }
+    .sec-ai .ai-body { font-size: 14px; }
+  }
+
+/* ════════ СТРАНИЦА 3 — рост против рынка ════════ */
+  :root {
+    --bg:          #F4F2EC;
+    --panel:       #FBFAF7;
+    --ink:         #2A2E33;
+    --ink-60:      rgba(42,46,51,0.60);
+    --ink-40:      rgba(42,46,51,0.40);
+    --hairline:    rgba(42,46,51,0.18);
+    --hairline-2:  rgba(42,46,51,0.10);
+    --tech-blue:   #2F6FB3;
+    --tech-blue-08:rgba(47,111,179,0.08);
+    --ai-bg:       #F0F6FF;
+    --amber:       #C77B2C;
+    --amber-08:    rgba(199,123,44,0.10);
+    --green:       #3F8F5F;
+    --neg:         #C0492F;
+
+    --font-ui:   'IBM Plex Sans', -apple-system, sans-serif;
+    --font-mono: 'IBM Plex Mono', monospace;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    background: var(--bg); color: var(--ink);
+    font-family: var(--font-ui); font-size: 13px; line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  .sheet { max-width: 1100px; margin: 0 auto; padding: 20px 30px 28px; }
+
+  /* ТЕХ-ХЕДЕР */
+  .tech-header {
+    font-family: var(--font-mono); font-size: 11px; color: var(--ink-60);
+    letter-spacing: 0.03em; padding-bottom: 12px;
+    border-bottom: 0.5pt solid var(--hairline);
+    display: flex; justify-content: space-between; flex-wrap: wrap; gap: 6px;
+  }
+  .tech-header b { color: var(--ink); font-weight: 600; }
+  .tech-header .ts { color: var(--ink-40); }
+
+  /* ЗАГОЛОВОК СЕКЦИИ */
+  .sec-head { padding: 18px 0 4px; }
+  .sec-title { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
+  .sec-sub { font-size: 11.5px; color: var(--ink-60); margin-top: 3px; }
+
+  /* ── СТАТ-КАРТОЧКИ ── */
+  .gv-stats {
+    margin-top: 12px;
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;
+  }
+  .gv-stat {
+    border: 0.5pt solid var(--hairline); border-radius: 2px;
+    background: var(--panel); padding: 10px 12px;
+  }
+  .gv-stat.accent { border-left: 2px solid var(--tech-blue); }
+  .gv-label {
+    font-family: var(--font-mono); font-size: 8.5px; font-weight: 600;
+    letter-spacing: 0.04em; color: var(--ink-60); text-transform: uppercase;
+  }
+  .gv-value {
+    font-family: var(--font-mono); font-size: 18px; font-weight: 600;
+    margin-top: 4px; line-height: 1;
+  }
+  .gv-value.pos { color: var(--green); }
+  .gv-value.neu { color: var(--ink); }
+  .gv-value.blue { color: var(--tech-blue); }
+  .gv-note { font-size: 10px; color: var(--ink-40); margin-top: 4px; }
+
+  /* ── ГРАФИК + ТАБЛИЦА РЯДОМ ── */
+  .gv-main {
+    margin-top: 10px;
+    display: flex; gap: 10px; align-items: stretch;
+  }
+
+  /* ── КАРТОЧКА ГРАФИКА ── */
+  .chart-card {
+    flex: 1.6 1 0; min-width: 0;
+    border: 0.5pt solid var(--hairline); border-radius: 2px;
+    background: var(--panel); overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+  .chart-head {
+    padding: 8px 14px; border-bottom: 0.5pt solid var(--hairline);
+    display: flex; justify-content: space-between; align-items: center;
+    flex-wrap: wrap; gap: 6px;
+  }
+  .chart-title {
+    font-family: var(--font-mono); font-size: 9px; font-weight: 600;
+    letter-spacing: 0.04em; color: var(--ink-60); text-transform: uppercase;
+  }
+  .chart-legend { display: flex; gap: 14px; }
+  .cl-item {
+    display: flex; align-items: center; gap: 6px;
+    font-family: var(--font-mono); font-size: 9.5px; color: var(--ink-60);
+  }
+  .cl-line { width: 16px; height: 0; border-top: 2px solid; }
+  .cl-line.port { border-color: var(--tech-blue); }
+  .cl-line.mkt  { border-color: var(--ink-40); border-top-style: dashed; }
+  .chart-body {
+    flex: 1 1 auto; padding: 12px 14px;
+    display: flex; align-items: center;
+  }
+  .chart-body svg { display: block; width: 100%; height: auto; }
+
+  /* ── ТАБЛИЦА ПЕРИОДОВ ── */
+  .pr-card {
+    flex: 1 1 0; min-width: 240px;
+    border: 0.5pt solid var(--hairline); border-radius: 2px;
+    background: var(--panel); overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+  .pr-row {
+    display: grid; grid-template-columns: 1.2fr 1fr 1fr 1fr;
+    align-items: center; gap: 6px; padding: 9px 13px;
+    flex: 1 1 auto;
+  }
+  .pr-row + .pr-row { border-top: 0.5pt solid var(--hairline-2); }
+  .pr-head {
+    flex: 0 0 auto;
+    border-bottom: 0.5pt solid var(--hairline);
+    font-family: var(--font-mono); font-size: 9px; font-weight: 600;
+    letter-spacing: 0.04em; color: var(--ink-60); text-transform: uppercase;
+  }
+  .pr-row .num { text-align: right; font-family: var(--font-mono); font-size: 12px; }
+  .pr-period { font-size: 12px; }
+  .pr-cell-label { display: none; }
+  .pos { color: var(--green); }
+  .neg { color: var(--neg); }
+  .blue { color: var(--tech-blue); }
+
+  /* ── СВОДНЫЙ AI-БЛОК ── */
+  .sec-ai {
+    margin-top: 12px;
+    background: var(--ai-bg); border: 0.5pt solid var(--hairline-2);
+    border-left: 2px solid var(--tech-blue); border-radius: 2px;
+    padding: 12px 15px;
+  }
+  .sec-ai .ai-head {
+    font-family: var(--font-mono); font-size: 10.5px; font-weight: 600;
+    color: var(--tech-blue); margin-bottom: 6px;
+  }
+  .sec-ai .ai-body { font-style: italic; font-size: 12.5px; line-height: 1.62; }
+  .sec-ai .ai-body p { margin: 0; }
+  .sec-ai .ai-body p + p { margin-top: 8px; }
+  .src-inline {
+    font-style: normal; font-family: var(--font-mono); font-size: 10px;
+    color: var(--tech-blue); background: var(--tech-blue-08);
+    padding: 0 4px; border-radius: 2px;
+  }
+  .flag-inline { font-style: normal; font-weight: 600; color: var(--amber); }
+  .ai-sources {
+    margin-top: 10px; padding-top: 8px;
+    border-top: 0.5pt solid var(--hairline-2);
+    font-family: var(--font-mono); font-size: 9px; color: var(--ink-60);
+    letter-spacing: 0.02em; line-height: 1.7;
+  }
+  .ai-sources b { color: var(--tech-blue); font-weight: 600; }
+
+  /* ФУТЕР */
+  .foot {
+    font-family: var(--font-mono); font-size: 10px; color: var(--ink-40);
+    text-align: center; padding-top: 14px; margin-top: 22px;
+    border-top: 0.5pt solid var(--hairline); letter-spacing: 0.05em;
+  }
+
+  /* ─────────── АДАПТИВ ─────────── */
+  @media (max-width: 720px) {
+    .gv-stats { grid-template-columns: repeat(2, 1fr); }
+    .gv-main { flex-direction: column; }
+    .pr-head { display: none; }
+    .pr-row {
+      grid-template-columns: 1fr 1fr; gap: 7px 14px; padding: 12px 14px;
+    }
+    .pr-row + .pr-row { border-top: 0.5pt solid var(--hairline-2); }
+    .pr-period { grid-column: 1 / -1; font-weight: 600; font-family: var(--font-mono); }
+    .pr-row .num { text-align: left; display: flex; justify-content: space-between; }
+    .pr-cell-label {
+      display: inline; font-size: 9px; color: var(--ink-60);
+      text-transform: uppercase; letter-spacing: 0.03em;
+    }
+  }
+  @media (max-width: 480px) {
+    body { font-size: 15px; }
+    .sheet { padding: 14px 16px 22px; }
+    .tech-header { font-size: 9.5px; }
+    .sec-title { font-size: 15px; }
+    .gv-stats { grid-template-columns: 1fr 1fr; }
+    .sec-ai .ai-body { font-size: 14px; }
+  }
+
+/* ════════ СТРАНИЦА 4 — идеи ИИ ════════ */
+  :root {
+    --bg:          #F4F2EC;
+    --panel:       #FBFAF7;
+    --ink:         #2A2E33;
+    --ink-60:      rgba(42,46,51,0.60);
+    --ink-40:      rgba(42,46,51,0.40);
+    --hairline:    rgba(42,46,51,0.18);
+    --hairline-2:  rgba(42,46,51,0.10);
+    --tech-blue:   #2F6FB3;
+    --tech-blue-08:rgba(47,111,179,0.08);
+    --ai-bg:       #F0F6FF;
+    --amber:       #C77B2C;
+    --amber-08:    rgba(199,123,44,0.10);
+    --green:       #3F8F5F;
+    --green-08:    rgba(63,143,95,0.10);
+    --neg:         #C0492F;
+
+    --font-ui:   'IBM Plex Sans', -apple-system, sans-serif;
+    --font-mono: 'IBM Plex Mono', monospace;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    background: var(--bg); color: var(--ink);
+    font-family: var(--font-ui); font-size: 13px; line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  .sheet { max-width: 1100px; margin: 0 auto; padding: 20px 30px 28px; }
+
+  /* ТЕХ-ХЕДЕР */
+  .tech-header {
+    font-family: var(--font-mono); font-size: 11px; color: var(--ink-60);
+    letter-spacing: 0.03em; padding-bottom: 12px;
+    border-bottom: 0.5pt solid var(--hairline);
+    display: flex; justify-content: space-between; flex-wrap: wrap; gap: 6px;
+  }
+  .tech-header b { color: var(--ink); font-weight: 600; }
+  .tech-header .ts { color: var(--ink-40); }
+
+  /* ЗАГОЛОВОК СЕКЦИИ */
+  .sec-head { padding: 18px 0 4px; }
+  .sec-title { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
+  .sec-sub { font-size: 11.5px; color: var(--ink-60); margin-top: 3px; }
+
+  /* ── ВВОДНЫЙ AI-БЛОК ── */
+  .sec-ai {
+    margin-top: 12px;
+    background: var(--ai-bg); border: 0.5pt solid var(--hairline-2);
+    border-left: 2px solid var(--tech-blue); border-radius: 2px;
+    padding: 12px 15px;
+  }
+  .sec-ai .ai-head {
+    font-family: var(--font-mono); font-size: 10.5px; font-weight: 600;
+    color: var(--tech-blue); margin-bottom: 6px;
+  }
+  .sec-ai .ai-body { font-style: italic; font-size: 12.5px; line-height: 1.62; }
+  .src-inline {
+    font-style: normal; font-family: var(--font-mono); font-size: 10px;
+    color: var(--tech-blue); background: var(--tech-blue-08);
+    padding: 0 4px; border-radius: 2px;
+  }
+  .flag-inline { font-style: normal; font-weight: 600; color: var(--amber); }
+
+  /* ── СЕТКА ИДЕЙ ── */
+  .ideas-grid {
+    margin-top: 10px;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+    align-items: start;          /* раскрывается только нужная карточка */
+  }
+  .idea-card {
+    border: 0.5pt solid var(--hairline); border-radius: 2px;
+    background: var(--panel);
+    border-left: 2px solid var(--ink-40);
+    padding: 11px 13px 12px;
+  }
+  .idea-card.risk      { border-left-color: var(--amber); }
+  .idea-card.diversify { border-left-color: var(--tech-blue); }
+  .idea-card.rebalance { border-left-color: var(--ink-60); }
+  .idea-card.grow      { border-left-color: var(--green); }
+
+  /* ── КЛИКАБЕЛЬНАЯ ШАПКА КАРТОЧКИ ── */
+  .idea-head { cursor: pointer; }
+
+  .idea-top {
+    display: flex; justify-content: space-between; align-items: center;
+    gap: 8px; margin-bottom: 8px;
+  }
+  .idea-cat {
+    font-family: var(--font-mono); font-size: 9px; font-weight: 600;
+    letter-spacing: 0.03em; text-transform: uppercase;
+    padding: 2px 7px; border-radius: 2px; border: 0.5pt solid currentColor;
+  }
+  .idea-card.risk      .idea-cat { color: var(--amber); }
+  .idea-card.diversify .idea-cat { color: var(--tech-blue); }
+  .idea-card.rebalance .idea-cat { color: var(--ink-60); }
+  .idea-card.grow      .idea-cat { color: var(--green); }
+
+  .idea-prio {
+    font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.02em;
+    display: flex; align-items: center; gap: 5px;
+  }
+  .idea-prio::before {
+    content: ''; width: 6px; height: 6px; border-radius: 50%;
+    background: currentColor; display: inline-block;
+  }
+  .idea-prio.high { color: var(--amber); }
+  .idea-prio.mid  { color: var(--ink-40); }
+
+  .idea-num {
+    font-family: var(--font-mono); font-size: 9px; color: var(--ink-40);
+    margin-bottom: 3px;
+  }
+  .idea-title {
+    font-size: 13px; font-weight: 600; line-height: 1.35;
+    letter-spacing: -0.01em;
+  }
+  .idea-why {
+    font-size: 11px; color: var(--ink); line-height: 1.54;
+    margin-top: 6px;
+  }
+  .idea-why b { font-weight: 600; }
+
+  /* ── ИДЕИ ПО ЗАМЕНЕ — ТИКЕРЫ ВНЕ ПОРТФЕЛЯ (видны свёрнуто) ── */
+  .idea-swap { margin-top: 9px; }
+  .swap-label {
+    font-family: var(--font-mono); font-size: 8px; font-weight: 600;
+    letter-spacing: 0.04em; color: var(--ink-60); text-transform: uppercase;
+    margin-bottom: 5px;
+  }
+  .swap-tickers { display: flex; flex-wrap: wrap; gap: 5px; }
+  .tk-chip {
+    font-family: var(--font-mono); font-size: 9.5px; font-weight: 600;
+    color: var(--tech-blue); background: var(--tech-blue-08);
+    border: 0.5pt solid rgba(47,111,179,0.22);
+    padding: 1.5px 6px; border-radius: 2px;
+  }
+  .swap-note {
+    margin-top: 7px;
+    font-size: 10px; line-height: 1.5; color: var(--ink-60);
+    font-style: italic;
+  }
+  .swap-note .expand-hint { color: var(--tech-blue); font-style: normal; }
+
+  /* ── ПЕРЕКЛЮЧАТЕЛЬ РАЗВОРОТА ── */
+  .idea-toggle {
+    margin-top: 11px;
+    display: flex; align-items: center; justify-content: center; gap: 7px;
+    padding: 8px 10px; border-radius: 3px;
+    background: var(--tech-blue);
+    font-family: var(--font-mono); font-size: 9.5px; font-weight: 600;
+    color: #fff; letter-spacing: 0.03em;
+    transition: background 0.12s;
+  }
+  .idea-head:hover .idea-toggle { background: #25557F; }
+  .idea-caret {
+    display: inline-flex; color: #fff; font-size: 10px;
+    transition: transform 0.15s;
+  }
+  .idea-card.open .idea-caret { transform: rotate(90deg); }
+  .idea-toggle .t-less { display: none; }
+  .idea-card.open .idea-toggle .t-more { display: none; }
+  .idea-card.open .idea-toggle .t-less { display: inline; }
+
+  /* ── РАЗВОРАЧИВАЕМЫЕ ДЕТАЛИ ── */
+  .idea-detail { display: none; }
+  .idea-card.open .idea-detail { display: block; }
+
+  /* ── КОНВЕЙЕР ОТБОРА: FACTOR → REGIME → RAG ── */
+  .idea-pipeline {
+    margin-top: 10px; padding: 8px 10px;
+    background: var(--tech-blue-08); border-radius: 2px;
+  }
+  .pl-label {
+    font-family: var(--font-mono); font-size: 8px; font-weight: 600;
+    letter-spacing: 0.04em; color: var(--tech-blue); text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .pl-flow { display: flex; align-items: stretch; }
+  .pl-stage { flex: 1; min-width: 0; }
+  .pl-stage-name {
+    font-family: var(--font-mono); font-size: 8px; font-weight: 600;
+    letter-spacing: 0.03em; color: var(--tech-blue); margin-bottom: 3px;
+  }
+  .pl-stage-text { font-size: 9px; line-height: 1.36; color: var(--ink); }
+  .pl-sep {
+    flex: 0 0 auto; display: flex; align-items: center;
+    padding: 0 7px; color: var(--tech-blue); font-size: 11px;
+  }
+
+  /* ── ПОЧЕМУ ИМЕННО ЭТИ БУМАГИ (разбор кандидатов вне портфеля) ── */
+  .cand-list { margin-top: 10px; }
+  .cand-label {
+    font-family: var(--font-mono); font-size: 8px; font-weight: 600;
+    letter-spacing: 0.05em; color: var(--ink-60); text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+  .cand { display: flex; gap: 8px; padding: 6px 0; align-items: baseline; }
+  .cand + .cand { border-top: 0.5pt solid var(--hairline-2); }
+  .cand-tk {
+    font-family: var(--font-mono); font-size: 11px; font-weight: 600;
+    color: var(--ink); width: 48px; flex-shrink: 0;
+  }
+  .cand-body { font-size: 10px; line-height: 1.45; color: var(--ink); }
+  .cand-name { font-weight: 600; }
+  .cand-scn {
+    display: inline-block; font-family: var(--font-mono); font-size: 8.5px;
+    color: var(--tech-blue); background: var(--tech-blue-08);
+    padding: 0 4px; border-radius: 2px; margin-top: 2px;
+  }
+
+  /* ── ОЖИДАЕМЫЙ ЭФФЕКТ ── */
+  .idea-effect {
+    margin-top: 10px; padding: 7px 9px;
+    background: rgba(42,46,51,0.035); border-radius: 2px;
+    border: 0.5pt solid var(--hairline-2);
+  }
+  .idea-effect-label {
+    font-family: var(--font-mono); font-size: 8px; font-weight: 600;
+    letter-spacing: 0.05em; color: var(--ink-60); text-transform: uppercase;
+    margin-bottom: 3px;
+  }
+  .idea-effect-val {
+    font-family: var(--font-mono); font-size: 11px; color: var(--ink);
+    line-height: 1.5;
+  }
+  .idea-effect-val .arrow { color: var(--tech-blue); }
+
+  /* ── ИСТОЧНИКИ ── */
+  .idea-src {
+    margin-top: 10px; padding-top: 10px;
+    border-top: 0.5pt solid var(--hairline-2);
+    display: flex; flex-wrap: wrap; gap: 5px;
+  }
+  .src-chip {
+    font-family: var(--font-mono); font-size: 8.5px;
+    color: var(--tech-blue); background: var(--tech-blue-08);
+    padding: 1.5px 5px; border-radius: 2px;
+  }
+  .src-chip.data { color: var(--ink-60); background: rgba(42,46,51,0.05); }
+
+  /* ── ДИСКЛЕЙМЕР ── */
+  .disclaimer {
+    margin-top: 12px; padding: 10px 13px;
+    background: var(--amber-08); border: 0.5pt solid var(--amber);
+    border-radius: 2px; display: flex; gap: 9px;
+    font-size: 11px; line-height: 1.5; color: var(--ink);
+  }
+  .disclaimer .dc-icon { color: var(--amber); flex-shrink: 0; }
+  .disclaimer b { font-weight: 600; color: var(--amber); }
+
+  /* ── ПОЛОСА ИСТОЧНИКОВ ── */
+  .section-sources {
+    margin-top: 10px; padding: 9px 14px;
+    border: 0.5pt solid var(--hairline-2); border-radius: 2px;
+    background: var(--panel);
+    font-family: var(--font-mono); font-size: 9px; color: var(--ink-60);
+    letter-spacing: 0.02em; line-height: 1.7;
+  }
+  .section-sources b { color: var(--tech-blue); font-weight: 600; }
+
+  /* ФУТЕР */
+  .foot {
+    font-family: var(--font-mono); font-size: 10px; color: var(--ink-40);
+    text-align: center; padding-top: 14px; margin-top: 22px;
+    border-top: 0.5pt solid var(--hairline); letter-spacing: 0.05em;
+  }
+
+  /* ─────────── АДАПТИВ ─────────── */
+  @media (max-width: 720px) {
+    .ideas-grid { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 480px) {
+    body { font-size: 15px; }
+    .sheet { padding: 14px 16px 22px; }
+    .tech-header { font-size: 9.5px; }
+    .sec-title { font-size: 15px; }
+    .sec-ai .ai-body { font-size: 14px; }
+    .idea-title { font-size: 15px; }
+    .idea-why { font-size: 13px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="sheet">
+
+  <!-- ═══ ТЕХ-ХЕДЕР ═══ -->
+  <div class="tech-header">
+    <span><b>PORTFOLIO RISK REPORT</b> // TIER: BASE // ID: Usample // RISK_ENGINE: MAC3</span>
+    <span class="ts">GENERATED 18.05.2026 09:48 UTC+5</span>
+  </div>
+
+  <!-- ═══ COVER ═══ -->
+  <section class="cover">
+    <div class="cover-main">
+      <div class="block-label">Вердикт по портфелю</div>
+      <h1 class="verdict">
+        Портфель в зоне <span class="hl">умеренного риска</span> —
+        держать можно, но почти весь риск собран в двух позициях.
+      </h1>
+
+      <div class="ai-box">
+        <div class="ai-head">[ 🤖 AI_ANALYSIS // CLAUDE HAIKU 4.5 ]</div>
+        <div class="ai-body">
+          
+            За месяц портфель прибавил +5.8%.  Главные риски — перевес в технологиях и KSPI hotspot (TRC 22%).
+          
+        </div>
+      </div>
+    </div>
+
+    <!-- RISK GAUGE 0–100 -->
+    <div class="risk-panel">
+      <div class="block-label">Индекс риска портфеля (0–100)</div>
+      <svg class="risk-gauge-svg" viewBox="0 0 280 178"
+           xmlns="http://www.w3.org/2000/svg"
+           role="img" aria-label="Индекс риска портфеля: 62 из 100, умеренный">
+        <defs>
+          <!-- 5-стоп градиент шкалы — банковая палитра отчёта -->
+          <linearGradient id="riskGrad" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%"   stop-color="#3F8F5F"/>
+            <stop offset="24%"  stop-color="#8FB44C"/>
+            <stop offset="50%"  stop-color="#D9A03B"/>
+            <stop offset="76%"  stop-color="#C77B2C"/>
+            <stop offset="100%" stop-color="#C0492F"/>
+          </linearGradient>
+          <!-- объёмная заклёпка-пивот: тёмная сталь со светлым бликом -->
+          <radialGradient id="pivotGrad" cx="35%" cy="30%" r="80%">
+            <stop offset="0%"   stop-color="#6A7079"/>
+            <stop offset="55%"  stop-color="#2A2E33"/>
+            <stop offset="100%" stop-color="#0E1013"/>
+          </radialGradient>
+          <!-- конусная стрелка: лёгкий вертикальный градиент -->
+          <linearGradient id="needleGrad" x1="0.5" y1="0" x2="0.5" y2="1">
+            <stop offset="0%"   stop-color="#15171A"/>
+            <stop offset="100%" stop-color="#3A3F47"/>
+          </linearGradient>
+          <!-- мягкая тень стрелки -->
+          <filter id="ndlShadow" x="-30%" y="-30%" width="160%" height="160%">
+            <feDropShadow dx="0.6" dy="1.4" stdDeviation="1.2" flood-opacity="0.32"/>
+          </filter>
+        </defs>
+
+        <!-- внешний и внутренний hairline-обод (бель «прибора») -->
+        <path d="M 28 138 A 112 112 0 0 1 252 138"
+              fill="none" stroke="rgba(42,46,51,0.22)" stroke-width="0.6"/>
+        <path d="M 52 138 A 88 88 0 0 1 228 138"
+              fill="none" stroke="rgba(42,46,51,0.16)" stroke-width="0.6"/>
+
+        <!-- основная цветная дуга шкалы -->
+        <path d="M 40 138 A 100 100 0 0 1 240 138"
+              fill="none" stroke="url(#riskGrad)" stroke-width="22" stroke-linecap="butt"/>
+        <!-- внутренний светлый ободок шкалы (rim-light, эффект объёма) -->
+        <path d="M 50.4 138 A 89.6 89.6 0 0 1 229.6 138"
+              fill="none" stroke="rgba(255,255,255,0.40)" stroke-width="1.2"/>
+        <!-- внешний тёмный ободок шкалы (тень, эффект глубины) -->
+        <path d="M 29.6 138 A 110.4 110.4 0 0 1 250.4 138"
+              fill="none" stroke="rgba(42,46,51,0.18)" stroke-width="1.2"/>
+
+        <!-- мажорные тики и подписи: 0 / 25 / 50 / 75 / 100 -->
+        <g stroke="#2A2E33" stroke-opacity="0.55" stroke-width="0.8">
+          <line x1="22"    y1="138"  x2="29"    y2="138"/>
+          <line x1="52.0"  y1="50.0" x2="56.9"  y2="54.9"/>
+          <line x1="140"   y1="20"   x2="140"   y2="27"/>
+          <line x1="223.1" y1="54.9" x2="228.0" y2="50.0"/>
+          <line x1="251"   y1="138"  x2="258"   y2="138"/>
+        </g>
+        <g font-family="IBM Plex Mono" font-size="9.5" fill="rgba(42,46,51,0.62)">
+          <text x="14"  y="155" text-anchor="middle">0</text>
+          <text x="45"  y="42"  text-anchor="middle">25</text>
+          <text x="140" y="13"  text-anchor="middle">50</text>
+          <text x="235" y="42"  text-anchor="middle">75</text>
+          <text x="266" y="155" text-anchor="middle">100</text>
+        </g>
+
+        <!-- зональные подписи внутри полукруга -->
+        <g font-family="IBM Plex Mono" font-size="7.5" fill="rgba(42,46,51,0.42)" letter-spacing="0.04em">
+          <text x="80"  y="120" text-anchor="middle">НИЗКИЙ</text>
+          <text x="140" y="86"  text-anchor="middle">УМЕРЕННЫЙ</text>
+          <text x="200" y="120" text-anchor="middle">ВЫСОКИЙ</text>
+        </g>
+
+        
+        <polygon points="140,38 147.01,138 132.99,138"
+                 transform="rotate(21.6 140 138)"
+                 fill="url(#needleGrad)" filter="url(#ndlShadow)"/>
+
+        <!-- Пивот-хаб: объёмная заклёпка с обводкой и бликом -->
+        <circle cx="140" cy="138" r="10.5" fill="url(#pivotGrad)"
+                stroke="rgba(42,46,51,0.45)" stroke-width="0.6"/>
+        <ellipse cx="136.5" cy="134.5" rx="3.2" ry="2.2"
+                 fill="rgba(255,255,255,0.32)"/>
+      </svg>
+      <div class="risk-readout-big">62 / 100 — <span class="tier-text">Умеренный</span></div>
+    </div>
+  </section>
+
+  <!-- ═══ KPI STRIP ═══ -->
+  <div class="block-label" style="margin-top:24px;">Ключевые показатели риска</div>
+  <div class="kpi-grid">
+
+    <!-- KPI 1 — CVaR 95% -->
+    <div class="kpi st-normal">
+      <div class="kpi-name">CVaR&nbsp;95%</div>
+      <div class="kpi-value-row">
+        <span class="kpi-value">-5.2%</span>
+        <span class="kpi-sub">(95% CL · 1 день · ≈ $2,600 · CI CI: -7.0% … -4.5%)</span>
+      </div>
+
+      
+      <div class="kpi-spark">
+        <svg viewBox="0 0 240 36" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg"><polyline points="4.0,4.0 25.1,8.7 46.2,14.3 67.3,20.8 88.4,27.3 109.5,32.0 130.5,30.1 151.6,24.5 172.7,19.9 193.8,18.0 214.9,22.7 236.0,24.5" fill="none" stroke="#3F8F5F" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/><circle cx="236.0" cy="24.5" r="3" fill="#FBFAF7" stroke="#3F8F5F" stroke-width="1.1"/></svg>
+      </div>
+      
+      <div class="kpi-ai">
+        <span class="tag">🤖</span>
+        <span class="txt">«Средний убыток портфеля за один худший день при самом
+          плохом сценарии в будущем. У вас ≈&nbsp;<b>-5.2%</b> ($2,600 от $50,000).
+          Доверительный интервал (95%): CI: -7.0% … -4.5%.»
+          <span class="src">[Quant Engine · Politis-Romano bootstrap]</span></span>
+      </div>
+    </div>
+
+    <!-- KPI 2 — Sharpe Ratio -->
+    <div class="kpi st-good">
+      <div class="kpi-name">Sharpe Ratio</div>
+      <div class="kpi-value-row">
+        <span class="kpi-value">1.34</span>
+        <span class="kpi-sub">(Sortino 1.62)</span>
+      </div>
+
+      
+      <div class="kpi-spark">
+        <svg viewBox="0 0 240 36" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg"><polyline points="4.0,28.3 25.1,23.5 46.2,18.6 67.3,21.7 88.4,29.6 109.5,32.0 130.5,25.3 151.6,17.4 172.7,12.5 193.8,7.7 214.9,6.4 236.0,4.0" fill="none" stroke="#2F6FB3" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/><circle cx="236.0" cy="4.0" r="3" fill="#FBFAF7" stroke="#2F6FB3" stroke-width="1.1"/></svg>
+      </div>
+      
+      <div class="kpi-ai">
+        <span class="tag">🤖</span>
+        <span class="txt">«Сколько прибыли приносит каждая единица риска. У вас
+          <b>1.34</b> (Sortino 1.62 — учитывает только просадки).
+          Норма ≥&nbsp;1.0, ≥&nbsp;1.5 — отлично; &lt; 0 — портфель проигрывает безриск. ставке.»
+          <span class="src">[Quant Engine · RFR 14%]</span></span>
+      </div>
+    </div>
+
+    <!-- KPI 3 — Max Drawdown -->
+    <div class="kpi st-watch">
+      <div class="kpi-name">Max Drawdown</div>
+      <div class="kpi-value-row">
+        <span class="kpi-value">-12.8%</span>
+        <span class="kpi-sub">(пик→дно · ≈ $6,400)</span>
+      </div>
+
+      
+      <div class="kpi-spark">
+        <svg viewBox="0 0 240 36" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg"><polyline points="4.0,4.0 25.1,8.8 46.2,14.2 67.3,21.5 88.4,26.3 109.5,32.0 130.5,27.9 151.6,25.6 172.7,24.7 193.8,23.1 214.9,26.3 236.0,32.0" fill="none" stroke="#C0492F" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/><circle cx="236.0" cy="32.0" r="3" fill="#FBFAF7" stroke="#C0492F" stroke-width="1.1"/></svg>
+      </div>
+      
+      <div class="kpi-ai">
+        <span class="tag">🤖</span>
+        <span class="txt">«Максимальное падение портфеля от его пика за всю историю.
+          У вас <b>-12.8%</b> (≈ $6,400).
+          
+            Снижение веса крупнейших позиций сглаживает будущие просадки.
+          »
+          <span class="src">[Quant Engine · peak-to-trough на equity curve]</span></span>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ═══ RISK CONCENTRATION: таблица + waterfall ═══ -->
+  <div class="risk-conc">
+
+    <!-- Таблица -->
+    <div class="panel">
+      <div class="panel-title">Где сосредоточен ваш риск</div>
+      <table>
+        <thead>
+          <tr>
+            <th>ТИКЕР</th>
+            <th>ВЕС&nbsp;%</th>
+            <th>BETA</th>
+            <th class="hl-col">ВКЛАД В РИСК&nbsp;%</th>
+            <th>СТАТУС</th>
+          </tr>
+        </thead>
+        <tbody>
+          
+          
+          
+            
+            
+          <tr>
+            <td>BND</td>
+            <td>20.0</td>
+            <td>—</td>
+            <td class="hl-col">3.2</td>
+            <td><span class="pill normal">NORMAL</span></td>
+          </tr>
+          
+            
+            
+          <tr>
+            <td>KSPI</td>
+            <td>30.0</td>
+            <td>—</td>
+            <td class="hl-col">22.1</td>
+            <td><span class="pill watch">HOTSPOT</span></td>
+          </tr>
+          
+            
+            
+          <tr>
+            <td>AAPL</td>
+            <td>50.0</td>
+            <td>—</td>
+            <td class="hl-col">18.4</td>
+            <td><span class="pill normal">NORMAL</span></td>
+          </tr>
+          
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Waterfall: разложение риска (стиль референса) -->
+    <div class="panel">
+      <div class="panel-title">Разложение риска портфеля</div>
+      <div class="wf-legend">
+        <span><span class="sw amber"></span>риск позиции отдельно</span>
+        <span><span class="sw green"></span>эффект диверсификации</span>
+        <span><span class="sw blue"></span>итоговый риск</span>
+      </div>
+      <!--
+        Классический waterfall разложения риска (как на референс-изображении):
+        индивидуальные риски позиций набираются стопкой вверх → зелёный шаг
+        "эффект диверсификации" вычитает → синий "итоговый риск" — полный бар.
+        Шкала Y: 0..20% годовой волатильности.
+        plot: x 38..350, y 165(0%)..18(20%); 7.35 px на 1%.  y(p)=165-7.35p
+        7 слотов, шаг 44.57, бар 30.
+        Значения (вклад в годовую волатильность, %):
+          PLTR 6.2  CRWD 5.0  AAPL 3.4  JNJ 2.0  KO 1.8  → сумма 18.4
+          Диверсификация −4.2  →  Итоговый риск 14.2
+      -->
+      <svg width="100%" height="218" viewBox="0 0 360 218" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <!-- амбер: вертикальный градиент для индивидуальных рисков -->
+          <linearGradient id="barAmber" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%"   stop-color="#D9913D"/>
+            <stop offset="100%" stop-color="#A85F1C"/>
+          </linearGradient>
+          <!-- зелёный: «эффект диверсификации» -->
+          <linearGradient id="barGreen" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%"   stop-color="#52A476"/>
+            <stop offset="100%" stop-color="#2F7048"/>
+          </linearGradient>
+          <!-- синий: итоговый риск -->
+          <linearGradient id="barBlue" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%"   stop-color="#3E83C9"/>
+            <stop offset="100%" stop-color="#23588F"/>
+          </linearGradient>
+          <!-- мягкая тень под барами -->
+          <filter id="barShadow" x="-20%" y="-20%" width="140%" height="140%">
+            <feDropShadow dx="0" dy="1.2" stdDeviation="1.0" flood-opacity="0.16"/>
+          </filter>
+        </defs>
+
+        
+        
+        
+        
+          
+        
+        
+        
+        
+        
+
+        
+        <g font-family="IBM Plex Mono" font-size="8" fill="rgba(42,46,51,0.45)">
+          <line x1="34" y1="165"    x2="352" y2="165"    stroke="#2A2E33" stroke-opacity="0.22" stroke-width="0.5"/>
+          <text x="30" y="168" text-anchor="end">0%</text>
+          <line x1="34" y1="128.25" x2="352" y2="128.25" stroke="#2A2E33" stroke-opacity="0.10" stroke-width="0.5" stroke-dasharray="2 3"/>
+          <text x="30" y="131" text-anchor="end">5%</text>
+          <line x1="34" y1="91.5"   x2="352" y2="91.5"   stroke="#2A2E33" stroke-opacity="0.10" stroke-width="0.5" stroke-dasharray="2 3"/>
+          <text x="30" y="94" text-anchor="end">10%</text>
+          <line x1="34" y1="54.75"  x2="352" y2="54.75"  stroke="#2A2E33" stroke-opacity="0.10" stroke-width="0.5" stroke-dasharray="2 3"/>
+          <text x="30" y="57" text-anchor="end">15%</text>
+          <line x1="34" y1="18"     x2="352" y2="18"     stroke="#2A2E33" stroke-opacity="0.10" stroke-width="0.5" stroke-dasharray="2 3"/>
+          <text x="30" y="21" text-anchor="end">20%</text>
+        </g>
+
+        
+          
+          
+          
+          
+
+          
+          
+          
+          <rect x="46.6" y="26" width="171.3" height="139"
+                fill="#C77B2C" fill-opacity="0.05"/>
+
+          
+          
+          <g filter="url(#barShadow)">
+          
+            
+            
+            
+            
+            <rect x="46.6" y="75.0"
+                  width="40.0" height="90.0"
+                  fill="url(#barAmber)" rx="1"/>
+          
+            
+            
+            
+            
+            <rect x="103.7" y="35.3"
+                  width="40.0" height="39.7"
+                  fill="url(#barAmber)" rx="1"/>
+          
+            
+            
+            
+            
+            <rect x="160.7" y="31.3"
+                  width="40.0" height="4.0"
+                  fill="url(#barAmber)" rx="1"/>
+          
+
+            
+            
+            
+            
+            <rect x="217.8" y="31.3"
+                  width="40.0" height="29.3"
+                  fill="url(#barGreen)" rx="1"/>
+
+            
+            
+            
+            
+            <rect x="274.9" y="60.6"
+                  width="40.0" height="104.4"
+                  fill="url(#barBlue)" rx="1"/>
+          </g>
+
+          
+          
+          <g stroke="#2A2E33" stroke-opacity="0.42" stroke-width="0.5" stroke-dasharray="2.5 2">
+          
+            
+            
+            
+            
+            <line x1="86.5" y1="75.0"
+                  x2="103.7"  y2="75.0"/>
+          
+            
+            
+            
+            
+            <line x1="143.6" y1="35.3"
+                  x2="160.7"  y2="35.3"/>
+          
+            
+            
+            
+            
+            <line x1="200.7" y1="31.3"
+                  x2="217.8"  y2="31.3"/>
+          
+          </g>
+
+          
+          
+          <g font-family="IBM Plex Mono" font-size="8.5" fill="#2A2E33">
+          
+            
+            
+            
+            <text x="66.5" y="71.0" text-anchor="middle">12.2%</text>
+          
+            
+            
+            
+            <text x="123.6" y="31.3" text-anchor="middle">5.4%</text>
+          
+            
+            
+            
+            <text x="180.7" y="27.3" text-anchor="middle">0.5%</text>
+          
+            
+            
+            
+            <text x="237.8" y="27.3"
+                  text-anchor="middle" fill="#2F7048" font-weight="600">−4.0%</text>
+            
+            
+            
+            <text x="294.9" y="56.6"
+                  text-anchor="middle" fill="#23588F" font-weight="600">14.2%</text>
+          </g>
+
+          
+          <g font-family="IBM Plex Mono" font-size="8.5" fill="#2A2E33">
+          
+            
+            <text x="66.5" y="178" text-anchor="middle">AAPL</text>
+          
+            
+            <text x="123.6" y="178" text-anchor="middle">KSPI</text>
+          
+            
+            <text x="180.7" y="178" text-anchor="middle">BND</text>
+          
+          </g>
+
+          
+          <g font-family="IBM Plex Sans" font-size="7.5" fill="rgba(42,46,51,0.7)">
+            <text x="237.8" y="176" text-anchor="middle">Диверси-</text>
+            <text x="237.8" y="184" text-anchor="middle">фикация</text>
+            <text x="294.9"  y="176" text-anchor="middle">Итоговый</text>
+            <text x="294.9"  y="184" text-anchor="middle">риск</text>
+          </g>
+
+          
+          
+          
+          
+          <path d="M46.6,192 L46.6,197 L123.6,200 L123.6,203 L123.6,200 L200.7,197 L200.7,192"
+                fill="none" stroke="#2A2E33" stroke-opacity="0.50" stroke-width="0.5"/>
+          <text x="123.6" y="214" text-anchor="middle"
+                font-family="IBM Plex Sans" font-size="8.5" fill="rgba(42,46,51,0.65)">Риск каждой позиции по отдельности</text>
+
+        
+            </svg>
+    </div>
+
+    <!-- связующий AI-комментарий -->
+    <div class="conc-ai">
+      <div class="ai-head">[ 🤖 AI_ANALYSIS // CLAUDE HAIKU 4.5 ]</div>
+      <div class="ai-body">
+        «Простыми словами: если бы вы держали каждую бумагу <span class="flag">по
+        отдельности, их риски сложились бы в 18.4%</span> годовых колебаний. Но
+        бумаги не падают одновременно — этот «эффект диверсификации» снижает риск
+        на 4.2 пункта, и реальный риск портфеля — 14.2%. В таблице слева видно,
+        кто вносит больше всего: те же PLTR и CRWD. Диверсификация уже работает
+        на вас, но усилить её можно, добавив активы из других секторов.
+        <span class="src">[Quant Engine]</span>»
+      </div>
+    </div>
+
+  </div>
+
+
+</div>
+
+<div class="sheet">
+
+  <!-- ТЕХ-ХЕДЕР -->
+  <div class="tech-header">
+    <span><b>PORTFOLIO RISK REPORT</b> // TIER: BASE // ID: Usample // RISK_ENGINE: MAC3</span>
+    <span class="ts">PAGE 2 OF 4</span>
+  </div>
+
+  <!-- ЗАГОЛОВОК СЕКЦИИ -->
+  <div class="sec-head">
+    <div class="sec-title">Что вы держите</div>
+    <div class="sec-sub">9 позиций · нажмите на строку, чтобы увидеть фундаментал бумаги</div>
+  </div>
+
+  <!-- ТАБЛИЦА + ПАНЕЛЬ СЕКТОРОВ -->
+  <div class="holdings-layout">
+
+  <div class="holdings">
+    <!-- шапка -->
+    <div class="h-head">
+      <span>Тикер</span>
+      <span>Класс активов</span>
+      <span class="num">Вес</span>
+      <span class="num">Риск</span>
+      <span class="num">P/L %</span>
+      <span class="num">P/L $</span>
+      <span class="sep">Действие</span>
+      <span></span>
+    </div>
+
+    
+    
+    
+
+    
+      
+      
+      
+    <div class="h-group">
+      <div class="h-row" onclick="tgRow(this)">
+        <div class="h-cell ticker">
+          <div class="h-ticker">
+            <span class="tk">AAPL</span>
+            
+          </div>
+        </div>
+        <div class="h-cell"><span class="h-cell-label">Класс</span>Акции США</div>
+        <div class="h-cell num"><span class="h-cell-label">Вес</span>50.0%</div>
+        <div class="h-cell num"><span class="h-cell-label">Риск</span>18.4%</div>
+        <div class="h-cell num"><span class="h-cell-label">P/L %</span>
+          <span class="pnl pos">+25.0%</span>
+        </div>
+        <div class="h-cell num"><span class="h-cell-label">P/L $</span>
+          <span class="pnl pos">+$5,000</span>
+        </div>
+        <div class="h-cell action"><span class="badge hold">HOLD</span></div>
+        <div class="h-cell caret-cell">
+          <span class="h-toggle">
+            <span class="t-more">Детали</span>
+            <span class="t-less">Свернуть</span>
+            <span class="h-caret">▸</span>
+          </span>
+        </div>
+      </div>
+      <div class="h-detail">
+        <div class="h-detail-inner">
+          <div class="h-detail-name">AAPL · фундаментал по данным SEC EDGAR</div>
+          <div class="stat-grid">
+            <div class="stat"><div class="stat-label">Доходность капитала (ROE)</div>
+              <div class="stat-value">н/д</div></div>
+            <div class="stat"><div class="stat-label">Операц. маржа</div>
+              <div class="stat-value">н/д</div></div>
+            <div class="stat"><div class="stat-label">Долг / активы</div>
+              <div class="stat-value">н/д</div></div>
+            <div class="stat"><div class="stat-label">Рост выручки г/г</div>
+              <div class="stat-value">н/д</div></div>
+            <div class="stat"><div class="stat-label">ATR — дневная волатильность</div>
+              <div class="stat-value ">1.40%</div></div>
+            <div class="stat"><div class="stat-label">Altman-Z</div>
+              <div class="stat-value">н/д</div></div>
+          </div>
+          <div class="h-detail-ai">
+            <span class="tag">🤖</span>
+            <span class="txt">Особенности позиции: вес &gt; 15%.
+              <span class="h-cite">[SEC EDGAR] [Quant Engine]</span>
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+      
+      
+      
+    <div class="h-group">
+      <div class="h-row" onclick="tgRow(this)">
+        <div class="h-cell ticker">
+          <div class="h-ticker">
+            <span class="tk">KSPI</span>
+            
+          </div>
+        </div>
+        <div class="h-cell"><span class="h-cell-label">Класс</span>Акции США</div>
+        <div class="h-cell num"><span class="h-cell-label">Вес</span>30.0%</div>
+        <div class="h-cell num"><span class="h-cell-label">Риск</span>22.1%</div>
+        <div class="h-cell num"><span class="h-cell-label">P/L %</span>
+          <span class="pnl neg">-16.7%</span>
+        </div>
+        <div class="h-cell num"><span class="h-cell-label">P/L $</span>
+          <span class="pnl neg">−$3,000</span>
+        </div>
+        <div class="h-cell action"><span class="badge hold">HOLD</span></div>
+        <div class="h-cell caret-cell">
+          <span class="h-toggle">
+            <span class="t-more">Детали</span>
+            <span class="t-less">Свернуть</span>
+            <span class="h-caret">▸</span>
+          </span>
+        </div>
+      </div>
+      <div class="h-detail">
+        <div class="h-detail-inner">
+          <div class="h-detail-name">KSPI · фундаментал по данным SEC EDGAR</div>
+          <div class="stat-grid">
+            <div class="stat"><div class="stat-label">Доходность капитала (ROE)</div>
+              <div class="stat-value">н/д</div></div>
+            <div class="stat"><div class="stat-label">Операц. маржа</div>
+              <div class="stat-value">н/д</div></div>
+            <div class="stat"><div class="stat-label">Долг / активы</div>
+              <div class="stat-value">н/д</div></div>
+            <div class="stat"><div class="stat-label">Рост выручки г/г</div>
+              <div class="stat-value">н/д</div></div>
+            <div class="stat"><div class="stat-label">ATR — дневная волатильность</div>
+              <div class="stat-value ">2.10%</div></div>
+            <div class="stat"><div class="stat-label">Altman-Z</div>
+              <div class="stat-value">н/д</div></div>
+          </div>
+          <div class="h-detail-ai">
+            <span class="tag">🤖</span>
+            <span class="txt">В минусе (-16.7%); вклад в риск 22.1%.Дополнительные триггеры: вес &gt; 15% · TRC &gt; 20%.
+              <span class="h-cite">[SEC EDGAR] [Quant Engine]</span>
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+      
+      
+      
+    <div class="h-group">
+      <div class="h-row" onclick="tgRow(this)">
+        <div class="h-cell ticker">
+          <div class="h-ticker">
+            <span class="tk">BND</span>
+            
+          </div>
+        </div>
+        <div class="h-cell"><span class="h-cell-label">Класс</span>Облигации</div>
+        <div class="h-cell num"><span class="h-cell-label">Вес</span>20.0%</div>
+        <div class="h-cell num"><span class="h-cell-label">Риск</span>3.2%</div>
+        <div class="h-cell num"><span class="h-cell-label">P/L %</span>
+          <span class="pnl pos">+0.0%</span>
+        </div>
+        <div class="h-cell num"><span class="h-cell-label">P/L $</span>
+          <span class="pnl pos">+$0</span>
+        </div>
+        <div class="h-cell action"><span class="badge hold">HOLD</span></div>
+        <div class="h-cell caret-cell">
+          <span class="h-toggle">
+            <span class="t-more">Детали</span>
+            <span class="t-less">Свернуть</span>
+            <span class="h-caret">▸</span>
+          </span>
+        </div>
+      </div>
+      <div class="h-detail">
+        <div class="h-detail-inner">
+          <div class="h-detail-name">BND · фундаментал по данным SEC EDGAR</div>
+          <div class="stat-grid">
+            <div class="stat"><div class="stat-label">Доходность капитала (ROE)</div>
+              <div class="stat-value">н/д</div></div>
+            <div class="stat"><div class="stat-label">Операц. маржа</div>
+              <div class="stat-value">н/д</div></div>
+            <div class="stat"><div class="stat-label">Долг / активы</div>
+              <div class="stat-value">н/д</div></div>
+            <div class="stat"><div class="stat-label">Рост выручки г/г</div>
+              <div class="stat-value">н/д</div></div>
+            <div class="stat"><div class="stat-label">ATR — дневная волатильность</div>
+              <div class="stat-value ">0.40%</div></div>
+            <div class="stat"><div class="stat-label">Altman-Z</div>
+              <div class="stat-value">н/д</div></div>
+          </div>
+          <div class="h-detail-ai">
+            <span class="tag">🤖</span>
+            <span class="txt">Особенности позиции: вес &gt; 15%.
+              <span class="h-cite">[SEC EDGAR] [Quant Engine]</span>
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+
+  </div><!-- /.holdings -->
+
+  <!-- ПАНЕЛЬ СЕКТОРОВ -->
+  
+  
+  
+  
+  
+
+  <div class="sector-panel">
+    <div class="sp-head">
+      <div class="sp-title">Структура по секторам</div>
+      <div class="sp-sub">доля капитала · 3 позиций</div>
+    </div>
+
+    <div class="sp-body">
+    <div class="pie-wrap">
+      
+      
+        
+        
+        
+        
+        
+          
+        
+        
+      
+        
+        
+        
+        
+        
+          
+        
+        
+      
+        
+        
+        
+        
+        
+        
+      
+      <div class="pie" style="background:
+            radial-gradient(circle at 50% 8%,  rgba(255,255,255,0.55), rgba(255,255,255,0) 28%),
+            radial-gradient(circle at 50% 96%, rgba(42,46,51,0.16),  rgba(42,46,51,0) 32%),
+            conic-gradient(var(--amber) 0.00% 49.00%, rgba(255,255,255,0.85) 49.00% 50.00%, var(--tech-blue) 50.00% 79.00%, rgba(255,255,255,0.85) 79.00% 80.00%, var(--green) 80.00% 100.00%);">
+        <div class="pie-center">
+          <span class="pc-pct">50%</span>
+          <span class="pc-lbl">TECHNOLOGY</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="pie-legend">
+      
+        
+        <div class="lg-item over">
+          <span class="lg-sw" style="background:var(--amber)"></span>
+          <span class="lg-name">Technology</span>
+          <span class="lg-pct">50%</span>
+        </div>
+      
+        
+        <div class="lg-item">
+          <span class="lg-sw" style="background:var(--tech-blue)"></span>
+          <span class="lg-name">EM_Kazakhstan</span>
+          <span class="lg-pct">30%</span>
+        </div>
+      
+        
+        <div class="lg-item">
+          <span class="lg-sw" style="background:var(--green)"></span>
+          <span class="lg-name">Fixed_Income</span>
+          <span class="lg-pct">20%</span>
+        </div>
+      
+    </div>
+    </div><!-- /.sp-body -->
+
+    
+      
+      <div class="sp-warn">
+        <span>⚠</span>
+        <span>{&#39;sector&#39;: &#39;Technology&#39;, &#39;weight_pct&#39;: 50.0, &#39;cap_pct&#39;: 40.0, &#39;overage_pp&#39;: 10.0}</span>
+      </div>
+      
+    
+  </div><!-- /.sector-panel -->
+
+  </div><!-- /.holdings-layout -->
+
+  <!-- СВОДНЫЙ AI-БЛОК -->
+  <div class="sec-ai">
+    <div class="ai-head">[ 🤖 AI_ANALYSIS // CLAUDE HAIKU 4.5 ]</div>
+    <div class="ai-body">
+      <p>«Простыми словами: портфель двигают две бумаги — <span class="flag-inline">PLTR
+      и CRWD</span>. Они приносят лучшую доходность, но именно они помечены
+      HOTSPOT — на них вместе приходится почти половина риска. С другого края —
+      JNJ, KO и BND: спокойные позиции с низкой бетой, которые этот риск гасят.</p>
+
+      <p>По секторам портфель сильно перевешен в технологиях —
+      <span class="flag-inline">62% против ~30% у рынка</span>. Goldman Sachs
+      ждёт повышенной волатильности в IT в этом квартале
+      <span class="src-inline">[RAG: GS_Q2_2026]</span>, а Morgan Stanley в обзоре
+      сектора понижает прогноз роста на 2026 и советует фиксировать часть прибыли
+      в перегретых именах <span class="src-inline">[RAG: MS_TechOutlook_2026]</span> —
+      это прямо про ваши PLTR, CRWD и NVDA. Зато ваши защитные сектора —
+      здравоохранение (14%) и потребительские товары (16%) — JPMorgan называет
+      «островками стабильности» на случай коррекции
+      <span class="src-inline">[RAG: JPM_Strategy_Q2_2026]</span>. По энергетике
+      (6%) банки осторожны при текущих ценах на нефть — и XOM у вас уже помечен на
+      сокращение. Подробности концентрации — на странице «Где сосредоточен риск».»</p>
+    </div>
+    <div class="ai-sources">
+      ИСТОЧНИКИ — ОТЧЁТЫ ИНВЕСТБАНКОВ:
+      <b>Goldman Sachs</b> «Q2 2026 Market Outlook» ·
+      <b>Morgan Stanley</b> «Technology Sector Outlook 2026» ·
+      <b>JPMorgan</b> «Q2 2026 Strategy &amp; Allocation»
+    </div>
+  </div>
+
+
+</div>
+
+<div class="sheet">
+
+  <!-- ТЕХ-ХЕДЕР -->
+  <div class="tech-header">
+    <span><b>PORTFOLIO RISK REPORT</b> // TIER: BASE // ID: Usample // RISK_ENGINE: MAC3</span>
+    <span class="ts">PAGE 3 OF 4</span>
+  </div>
+
+  <!-- ЗАГОЛОВОК СЕКЦИИ -->
+  <div class="sec-head">
+    <div class="sec-title">Рост против рынка</div>
+    <div class="sec-sub">накопленная доходность портфеля в сравнении с S&amp;P 500 · 12 месяцев</div>
+  </div>
+
+  
+  
+  <div class="gv-stats">
+    <div class="gv-stat">
+      <div class="gv-label">Доходность портфеля</div>
+      <div class="gv-value pos">+4.2%</div>
+      <div class="gv-note">за период</div>
+    </div>
+    <div class="gv-stat">
+      <div class="gv-label">Рынок · S&amp;P 500</div>
+      <div class="gv-value neu">+9.1%</div>
+      <div class="gv-note">за тот же период</div>
+    </div>
+    <div class="gv-stat accent">
+      <div class="gv-label">Опережение рынка</div>
+      <div class="gv-value blue">0.61</div>
+      <div class="gv-note">Information Ratio</div>
+    </div>
+    <div class="gv-stat">
+      <div class="gv-label">Волатильность портф. (год.)</div>
+      <div class="gv-value neu">14.2%</div>
+      <div class="gv-note">TE vs бенч: 8.4%</div>
+    </div>
+  </div>
+
+  <!-- ГРАФИК + ТАБЛИЦА ПЕРИОДОВ -->
+  <div class="gv-main">
+
+  <div class="chart-card">
+    <div class="chart-head">
+      <span class="chart-title">Накопленная доходность · 12 месяцев</span>
+      <div class="chart-legend">
+        <span class="cl-item"><span class="cl-line port"></span>Ваш портфель</span>
+        <span class="cl-item"><span class="cl-line mkt"></span>S&amp;P 500</span>
+      </div>
+    </div>
+    <div class="chart-body">
+      <svg viewBox="0 0 820 180" role="img" aria-label="График накопленной доходности портфеля против S&amp;P 500">
+        <defs>
+          <!-- area: вертикальный градиент под линией портфеля -->
+          <linearGradient id="portArea" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%"   stop-color="#2F6FB3" stop-opacity="0.26"/>
+            <stop offset="100%" stop-color="#2F6FB3" stop-opacity="0"/>
+          </linearGradient>
+          <!-- линия: горизонтальный градиент тёмный→светлый -->
+          <linearGradient id="portLine" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%"   stop-color="#23588F"/>
+            <stop offset="100%" stop-color="#3E83C9"/>
+          </linearGradient>
+          <filter id="lineShadow" x="-2%" y="-15%" width="104%" height="130%">
+            <feDropShadow dx="0" dy="1.2" stdDeviation="1.0" flood-opacity="0.22"/>
+          </filter>
+        </defs>
+
+        <!-- горизонтальная сетка -->
+        <g stroke="rgba(42,46,51,0.10)" stroke-width="0.5">
+          <line x1="50" y1="14"  x2="720" y2="14" stroke-dasharray="2.5 3"/>
+          <line x1="50" y1="48"  x2="720" y2="48" stroke-dasharray="2.5 3"/>
+          <line x1="50" y1="82"  x2="720" y2="82" stroke-dasharray="2.5 3"/>
+          <line x1="50" y1="116" x2="720" y2="116" stroke-dasharray="2.5 3"/>
+          <line x1="50" y1="150" x2="720" y2="150" stroke="rgba(42,46,51,0.28)" stroke-width="0.6"/>
+        </g>
+        <!-- подписи оси Y -->
+        <g font-family="'IBM Plex Mono', monospace" font-size="9" fill="rgba(42,46,51,0.6)" text-anchor="end">
+          <text x="42" y="17">+16%</text>
+          <text x="42" y="51">+12%</text>
+          <text x="42" y="85">+8%</text>
+          <text x="42" y="119">+4%</text>
+          <text x="42" y="153">0%</text>
+        </g>
+
+        <!-- область под линией портфеля -->
+        <path d="M50,150 L111,132.2 L172,138.1 L233,109.2 L294,97.3 L355,107.5 L415,79.5 L476,64.2 L537,71.8 L598,43.8 L659,49.7 L720,29.3 L720,150 L50,150 Z"
+              fill="url(#portArea)"/>
+
+        <!-- линия S&P 500 (пунктир) -->
+        <path d="M50,150 L111,137.3 L172,143.2 L233,125.4 L294,119.4 L355,123.7 L415,109.2 L476,99 L537,103.3 L598,88.8 L659,82 L720,72.7"
+              fill="none" stroke="rgba(42,46,51,0.50)" stroke-width="1.6"
+              stroke-dasharray="5 3" stroke-linejoin="round" stroke-linecap="round"/>
+
+        <!-- линия портфеля: градиент + лёгкая тень -->
+        <path d="M50,150 L111,132.2 L172,138.1 L233,109.2 L294,97.3 L355,107.5 L415,79.5 L476,64.2 L537,71.8 L598,43.8 L659,49.7 L720,29.3"
+              fill="none" stroke="url(#portLine)" stroke-width="2.2"
+              stroke-linejoin="round" stroke-linecap="round" filter="url(#lineShadow)"/>
+
+        <!-- маркер пика портфеля (декабрь): гало + точка -->
+        <circle cx="598" cy="43.8" r="5.6" fill="#2F6FB3" fill-opacity="0.16"/>
+        <circle cx="598" cy="43.8" r="2.6" fill="#2F6FB3"/>
+
+        <!-- конечные точки: с гало -->
+        <circle cx="720" cy="72.7" r="4.4" fill="rgba(42,46,51,0.10)"/>
+        <circle cx="720" cy="72.7" r="2.8" fill="#FBFAF7" stroke="rgba(42,46,51,0.55)" stroke-width="1.2"/>
+        <circle cx="720" cy="29.3" r="5.2" fill="#2F6FB3" fill-opacity="0.18"/>
+        <circle cx="720" cy="29.3" r="3.2" fill="#FBFAF7" stroke="#2F6FB3" stroke-width="1.4"/>
+
+        <!-- конечные подписи -->
+        <text x="729" y="32.3" font-family="'IBM Plex Mono', monospace" font-size="11"
+              font-weight="600" fill="#23588F">+14.2%</text>
+        <text x="729" y="76" font-family="'IBM Plex Mono', monospace" font-size="11"
+              fill="rgba(42,46,51,0.6)">+9.1%</text>
+        <!-- подписи оси X -->
+        <g font-family="'IBM Plex Mono', monospace" font-size="8" fill="rgba(42,46,51,0.5)" text-anchor="middle">
+          <text x="50"  y="167">Июн</text>
+          <text x="111" y="167">Июл</text>
+          <text x="172" y="167">Авг</text>
+          <text x="233" y="167">Сен</text>
+          <text x="294" y="167">Окт</text>
+          <text x="355" y="167">Ноя</text>
+          <text x="415" y="167">Дек</text>
+          <text x="476" y="167">Янв</text>
+          <text x="537" y="167">Фев</text>
+          <text x="598" y="167">Мар</text>
+          <text x="659" y="167">Апр</text>
+          <text x="720" y="167">Май</text>
+        </g>
+      </svg>
+    </div>
+  </div>
+
+  
+  
+  
+  
+  
+  <div class="pr-card">
+    <div class="pr-row pr-head">
+      <span>Период</span>
+      <span class="num">Портфель</span>
+      <span class="num">S&amp;P 500</span>
+      <span class="num">Опережение</span>
+    </div>
+    
+      
+      
+      
+      
+    <div class="pr-row">
+      <span class="pr-period">1М</span>
+      <span class="num"><span class="pr-cell-label">Портфель</span><span class="pos">+2.0%</span></span>
+      <span class="num"><span class="pr-cell-label">S&amp;P 500</span>+1.4%</span>
+      <span class="num"><span class="pr-cell-label">Опереж.</span><span class="blue">+0.6 пп</span></span>
+    </div>
+    
+      
+      
+      
+      
+    <div class="pr-row">
+      <span class="pr-period">3М</span>
+      <span class="num"><span class="pr-cell-label">Портфель</span><span class="pos">+5.5%</span></span>
+      <span class="num"><span class="pr-cell-label">S&amp;P 500</span>+3.6%</span>
+      <span class="num"><span class="pr-cell-label">Опереж.</span><span class="blue">+1.9 пп</span></span>
+    </div>
+    
+      
+      
+      
+      
+    <div class="pr-row">
+      <span class="pr-period">6М</span>
+      <span class="num"><span class="pr-cell-label">Портфель</span><span class="pos">+9.4%</span></span>
+      <span class="num"><span class="pr-cell-label">S&amp;P 500</span>+6.0%</span>
+      <span class="num"><span class="pr-cell-label">Опереж.</span><span class="blue">+3.4 пп</span></span>
+    </div>
+    
+      
+      
+      
+      
+    <div class="pr-row">
+      <span class="pr-period">YTD</span>
+      <span class="num"><span class="pr-cell-label">Портфель</span><span class="pos">+7.1%</span></span>
+      <span class="num"><span class="pr-cell-label">S&amp;P 500</span>+4.4%</span>
+      <span class="num"><span class="pr-cell-label">Опереж.</span><span class="blue">+2.7 пп</span></span>
+    </div>
+    
+      
+      
+      
+      
+    <div class="pr-row">
+      <span class="pr-period">12М</span>
+      <span class="num"><span class="pr-cell-label">Портфель</span><span class="pos">+14.2%</span></span>
+      <span class="num"><span class="pr-cell-label">S&amp;P 500</span>+9.1%</span>
+      <span class="num"><span class="pr-cell-label">Опереж.</span><span class="blue">+5.1 пп</span></span>
+    </div>
+    
+  </div><!-- /.pr-card -->
+
+  </div><!-- /.gv-main -->
+
+  <!-- СВОДНЫЙ AI-БЛОК -->
+  <div class="sec-ai">
+    <div class="ai-head">[ 🤖 AI_ANALYSIS // CLAUDE HAIKU 4.5 ]</div>
+    <div class="ai-body">
+      <p>«Простыми словами: за год портфель обошёл рынок на
+      <span class="flag-inline">+5.1 пункта</span> — и опережение есть на всех
+      отрезках, от месяца до года. Это хороший результат.</p>
+
+      <p>Но важно понимать, чем он куплен: рост дали в основном технологии —
+      PLTR, NVDA, MSFT. Те же бумаги делают портфель более «качающимся», чем
+      рынок (волатильность 14.8% против 11.2%). Goldman Sachs предупреждает: в
+      коррекцию перевес в IT так же быстро превращает опережение в отставание
+      <span class="src-inline">[RAG: GS_Q2_2026]</span>, а Morgan Stanley прямо
+      советует фиксировать часть прибыли в перегретых техах
+      <span class="src-inline">[RAG: MS_TechOutlook_2026]</span>. Идеи, что с
+      этим делать — на странице «Идеи ИИ».»</p>
+    </div>
+    <div class="ai-sources">
+      ИСТОЧНИКИ — ОТЧЁТЫ ИНВЕСТБАНКОВ:
+      <b>Goldman Sachs</b> «Q2 2026 Market Outlook» ·
+      <b>Morgan Stanley</b> «Technology Sector Outlook 2026»
+    </div>
+  </div>
+
+
+</div>
+
+<div class="sheet">
+
+  <!-- ТЕХ-ХЕДЕР -->
+  <div class="tech-header">
+    <span><b>PORTFOLIO RISK REPORT</b> // TIER: BASE // ID: Usample // RISK_ENGINE: MAC3</span>
+    <span class="ts">PAGE 4 OF 4</span>
+  </div>
+
+  <!-- ЗАГОЛОВОК СЕКЦИИ -->
+  <div class="sec-head">
+    <div class="sec-title">Идеи ИИ</div>
+    <div class="sec-sub">4 идеи на основе данных портфеля, отчётности SEC и обзоров инвестбанков · нажмите на карточку, чтобы раскрыть детали</div>
+  </div>
+
+  <!-- ВВОДНЫЙ AI-БЛОК -->
+  <div class="sec-ai">
+    <div class="ai-head">[ 🤖 AI_ANALYSIS // CLAUDE HAIKU 4.5 ]</div>
+    <div class="ai-body">
+      «Главная мысль одной строкой: портфель зарабатывает, но риск собран в
+      одном углу — <span class="flag-inline">62% в технологиях</span>. Идеи ниже
+      — про то, как сохранить рост и при этом сделать портфель устойчивее к
+      просадке. Каждая идея отсортирована по приоритету и снабжена источником.»
+    </div>
+  </div>
+
+  
+  <!-- СЕТКА ИДЕЙ -->
+  
+  
+  
+  
+    
+      
+    
+  
+    
+      
+    
+  
+    
+  
+    
+  
+    
+  
+    
+  
+  
+  
+    
+  
+    
+  
+
+  
+  <div class="ideas-grid">
+    
+      
+      
+    <div class="idea-card risk">
+      <div class="idea-head" onclick="tgIdea(this)">
+        <div class="idea-top">
+          <span class="idea-cat">Снижение риска</span>
+          <span class="idea-prio high">Высокий приоритет</span>
+        </div>
+        <div class="idea-num">ИДЕЯ 01</div>
+        <div class="idea-title">Сократить долю AAPL с 50% до ~30%</div>
+        <div class="idea-why">Позиция помечена HOTSPOT — даёт 18% всего риска портфеля.  Положение в плюсе +25% — есть что зафиксировать без убытка.</div>
+        
+        <div class="idea-swap">
+          <div class="swap-label">Идеи по замене — нет в портфеле</div>
+          <div class="swap-tickers">
+            <span class="tk-chip">TXN</span><span class="tk-chip">CSCO</span><span class="tk-chip">ACN</span>
+          </div>
+          <div class="swap-note">
+            Бумаги выше — не из вашего портфеля: ИИ подбирает их под смысл идеи.
+            <span class="expand-hint">Разверните карточку — внутри разбор, почему выбран именно этот список.</span>
+          </div>
+        </div>
+        
+        <div class="idea-toggle">
+          <span class="idea-caret">▸</span>
+          <span class="t-more">Развернуть детали идеи</span>
+          <span class="t-less">Свернуть детали</span>
+        </div>
+      </div>
+      <div class="idea-detail">
+        
+        <div class="idea-pipeline">
+          <div class="pl-label">Конвейер отбора · Factor → Regime → RAG</div>
+          <div class="pl-flow">
+            
+              <div class="pl-stage">
+                <div class="pl-stage-name">FACTOR</div>
+                <div class="pl-stage-text">AAPL даёт 18% риска, HOTSPOT</div>
+              </div>
+              <div class="pl-sep">→</div>
+            
+              <div class="pl-stage">
+                <div class="pl-stage-name">REGIME</div>
+                <div class="pl-stage-text">ждём роста волатильности в IT</div>
+              </div>
+              <div class="pl-sep">→</div>
+            
+              <div class="pl-stage">
+                <div class="pl-stage-name">RAG</div>
+                <div class="pl-stage-text">Morgan Stanley: фиксировать прибыль</div>
+              </div>
+              
+            
+          </div>
+        </div>
+        
+        
+        <div class="cand-list">
+          <div class="cand-label">Почему именно эти бумаги</div>
+          
+          <div class="cand">
+            <span class="cand-tk">TXN</span>
+            <span class="cand-body"><span class="cand-name">Texas Instruments</span> — спрос на качество в IT.</span>
+          </div>
+          
+          <div class="cand">
+            <span class="cand-tk">CSCO</span>
+            <span class="cand-body"><span class="cand-name">Cisco</span> — ротация в защитный тех.</span>
+          </div>
+          
+          <div class="cand">
+            <span class="cand-tk">ACN</span>
+            <span class="cand-body"><span class="cand-name">Accenture</span> — замедление без рецессии.</span>
+          </div>
+          
+        </div>
+        
+        
+        <div class="idea-effect">
+          <div class="idea-effect-label">Ожидаемый эффект</div>
+          <div class="idea-effect-val">
+            
+              Вклад AAPL в риск: 18.4% <span class="arrow">→</span> ~12%<br />
+            
+              Доля IT-сектора: 50% <span class="arrow">→</span> ~38%
+            
+          </div>
+        </div>
+        
+        
+        <div class="idea-src">
+          
+            <span class="src-chip data">[Quant Engine]</span>
+          
+            <span class="src-chip data">[SEC EDGAR]</span>
+          
+            <span class="src-chip">[RAG: MS_TechOutlook_2026]</span>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+      
+      
+    <div class="idea-card div">
+      <div class="idea-head" onclick="tgIdea(this)">
+        <div class="idea-top">
+          <span class="idea-cat">Диверсификация</span>
+          <span class="idea-prio medium">Средний приоритет</span>
+        </div>
+        <div class="idea-num">ИДЕЯ 02</div>
+        <div class="idea-title">Добавить защитные сектора 10–15%</div>
+        <div class="idea-why">Текущая структура перевешена в IT (50%) + KSPI (30% EM).  Healthcare / Consumer Staples сглаживают просадки в late-cycle.</div>
+        
+        <div class="idea-swap">
+          <div class="swap-label">Идеи по замене — нет в портфеле</div>
+          <div class="swap-tickers">
+            <span class="tk-chip">JNJ</span><span class="tk-chip">KO</span><span class="tk-chip">PG</span>
+          </div>
+          <div class="swap-note">
+            Бумаги выше — не из вашего портфеля: ИИ подбирает их под смысл идеи.
+            <span class="expand-hint">Разверните карточку — внутри разбор, почему выбран именно этот список.</span>
+          </div>
+        </div>
+        
+        <div class="idea-toggle">
+          <span class="idea-caret">▸</span>
+          <span class="t-more">Развернуть детали идеи</span>
+          <span class="t-less">Свернуть детали</span>
+        </div>
+      </div>
+      <div class="idea-detail">
+        
+        <div class="idea-pipeline">
+          <div class="pl-label">Конвейер отбора · Factor → Regime → RAG</div>
+          <div class="pl-flow">
+            
+              <div class="pl-stage">
+                <div class="pl-stage-name">FACTOR</div>
+                <div class="pl-stage-text">TRC concentration HHI &gt; 3500</div>
+              </div>
+              <div class="pl-sep">→</div>
+            
+              <div class="pl-stage">
+                <div class="pl-stage-name">REGIME</div>
+                <div class="pl-stage-text">late-cycle transition: защитные растут</div>
+              </div>
+              <div class="pl-sep">→</div>
+            
+              <div class="pl-stage">
+                <div class="pl-stage-name">RAG</div>
+                <div class="pl-stage-text">JPMorgan: &#39;islands of stability&#39;</div>
+              </div>
+              
+            
+          </div>
+        </div>
+        
+        
+        <div class="cand-list">
+          <div class="cand-label">Почему именно эти бумаги</div>
+          
+          <div class="cand">
+            <span class="cand-tk">JNJ</span>
+            <span class="cand-body"><span class="cand-name">Johnson &amp; Johnson</span> — healthcare hedge.</span>
+          </div>
+          
+          <div class="cand">
+            <span class="cand-tk">KO</span>
+            <span class="cand-body"><span class="cand-name">Coca-Cola</span> — defensive staples.</span>
+          </div>
+          
+          <div class="cand">
+            <span class="cand-tk">PG</span>
+            <span class="cand-body"><span class="cand-name">Procter &amp; Gamble</span> — low-beta yielder.</span>
+          </div>
+          
+        </div>
+        
+        
+        <div class="idea-effect">
+          <div class="idea-effect-label">Ожидаемый эффект</div>
+          <div class="idea-effect-val">
+            
+              Concentration HHI: 3520 <span class="arrow">→</span> ~2200<br />
+            
+              Beta к рынку: 1.18 <span class="arrow">→</span> ~0.95
+            
+          </div>
+        </div>
+        
+        
+        <div class="idea-src">
+          
+            <span class="src-chip data">[Quant Engine]</span>
+          
+            <span class="src-chip">[RAG: JPM_Strategy_Q2_2026]</span>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+  </div>
+  
+
+  <!-- ДИСКЛЕЙМЕР -->
+  <div class="disclaimer">
+    <span class="dc-icon">⚠</span>
+    <span><b>Это аналитические идеи, а не инвестиционная рекомендация.</b>
+      Расчёты основаны на исторических данных и публичной отчётности; они не
+      учитывают вашу налоговую ситуацию, горизонт и цели. Окончательное решение —
+      за вами или вашим финансовым консультантом.</span>
+  </div>
+
+  <!-- ПОЛОСА ИСТОЧНИКОВ -->
+  <div class="section-sources">
+    ИСТОЧНИКИ:
+    <b>SEC EDGAR</b> — публичная отчётность эмитентов ·
+    <b>Quant Engine MAC3</b> — расчёт риска и сигналов ·
+    <b>Factor Engine</b> — фактор-скрининг качества ·
+    <b>Regime Model</b> — определение режима рынка ·
+    <b>Goldman Sachs</b> «Q2 2026 Market Outlook» ·
+    <b>Morgan Stanley</b> «Technology Sector Outlook 2026» ·
+    <b>JPMorgan</b> «Q2 2026 Strategy &amp; Allocation»
+  </div>
+
+
+</div>
+
+<script>
+  /* — разворот строки holdings — */
+  // Разворот/сворачивание строки holdings
+  function tgRow(rowEl) {
+    rowEl.classList.toggle('open');
+    var detail = rowEl.nextElementSibling;
+    if (detail && detail.classList.contains('h-detail')) {
+      detail.classList.toggle('open');
+    }
+  }
+
+  /* — разворот карточки идеи — */
+  // Разворот/сворачивание карточки идеи
+  function tgIdea(headEl) {
+    headEl.parentElement.classList.toggle('open');
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,3479 @@
+<!DOCTYPE html>
+<!--
+  ─────────────────────────────────────────────────────────────────────────
+  ПРОТОТИП (design-only, НЕ подключён к боту)
+  ОБЪЕДИНЁННЫЙ DEEP-ОТЧЁТ — все 5 страниц в одном файле:
+    1. Обложка · KPI · концентрация риска  (наследует BASE)
+    2. Что вы держите (holdings)            (наследует BASE)
+    3. Факторное разложение · 4-Pillar Scoring · стресс-сценарии  [DEEP]
+    4. Action Plan · Ожидаемый эффект · CoVe                       [DEEP]
+    5. Рыночный режим                                              [DEEP]
+  Дизайн-язык совпадает с BASE: gauge-level графики, hairline-detail,
+  IBM Plex, кремовый фон. Открыть просто в браузере.
+  ─────────────────────────────────────────────────────────────────────────
+-->
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>DEEP Report — полный отчёт (5 страниц) — Прототип</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+/* ════════ СТРАНИЦА 1 — обложка · KPI · концентрация риска ════════ */
+  :root {
+    --bg:          #F4F2EC;   /* тёплый кремовый фон */
+    --panel:       #FBFAF7;   /* карточки чуть светлее */
+    --ink:         #2A2E33;
+    --ink-60:      rgba(42,46,51,0.60);
+    --ink-40:      rgba(42,46,51,0.40);
+    --hairline:    rgba(42,46,51,0.18);
+    --hairline-2:  rgba(42,46,51,0.10);
+    --tech-blue:   #2F6FB3;   /* основной акцент */
+    --tech-blue-08:rgba(47,111,179,0.08);
+    --tech-blue-14:rgba(47,111,179,0.14);
+    --ai-bg:       #F0F6FF;   /* фон AI-блока */
+    --amber:       #C77B2C;
+    --green:       #3F8F5F;
+    --neg:         #C0492F;
+
+    --font-ui:   'IBM Plex Sans', -apple-system, sans-serif;
+    --font-mono: 'IBM Plex Mono', monospace;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-ui);
+    font-size: 13px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .sheet { max-width: 1100px; margin: 0 auto; padding: 20px 30px 28px; }
+
+  /* ═══ ТЕХ-ХЕДЕР ═══ */
+  .tech-header {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--ink-60);
+    letter-spacing: 0.03em;
+    padding-bottom: 12px;
+    border-bottom: 0.5pt solid var(--hairline);
+    display: flex; justify-content: space-between; flex-wrap: wrap; gap: 6px;
+  }
+  .tech-header b { color: var(--ink); font-weight: 600; }
+  .tech-header .ts { color: var(--ink-40); }
+
+  /* ═══ COVER ═══ */
+  .cover {
+    display: grid;
+    grid-template-columns: 1.55fr 1fr;
+    gap: 26px;
+    padding: 24px 0 22px;
+    border-bottom: 0.5pt solid var(--hairline);
+  }
+  .block-label {
+    font-size: 10px; font-weight: 600; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--ink-60); margin-bottom: 8px;
+  }
+  h1.verdict {
+    font-size: 26px; font-weight: 700; line-height: 1.3;
+    letter-spacing: -0.01em; color: var(--ink);
+  }
+  h1.verdict .hl { color: var(--tech-blue); }
+
+  /* AI INSIGHT BOX — терминал-лог */
+  .ai-box {
+    margin-top: 16px;
+    background: var(--ai-bg);
+    border: 0.5pt solid var(--hairline-2);
+    border-left: 2px solid var(--tech-blue);
+    border-radius: 2px;
+    padding: 12px 15px 13px;
+  }
+  .ai-box .ai-head {
+    font-family: var(--font-mono); font-size: 10.5px; font-weight: 600;
+    letter-spacing: 0.04em; color: var(--tech-blue); margin-bottom: 6px;
+  }
+  .ai-box .ai-body { font-style: italic; font-size: 12.5px; line-height: 1.62; }
+  .ai-box .ai-body .ai-lead { font-style: normal; font-weight: 600; color: var(--ink); }
+  .src {
+    font-style: normal; font-family: var(--font-mono); font-size: 10px;
+    color: var(--tech-blue); background: var(--tech-blue-08);
+    padding: 0 4px; border-radius: 2px; white-space: nowrap;
+  }
+  .flag { font-style: normal; font-weight: 600; color: var(--amber); }
+
+  /* RISK GAUGE — полукруглая шкала */
+  .risk-panel {
+    border: 0.5pt solid var(--hairline); border-radius: 2px;
+    padding: 14px 18px 16px; background: var(--panel);
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; text-align: center;
+  }
+  .risk-panel .block-label { align-self: flex-start; margin-bottom: 4px; }
+  .risk-gauge-svg { width: 100%; max-width: 300px; height: auto; display: block; margin-top: 4px; }
+  .risk-readout-big {
+    margin-top: 8px;
+    font-family: var(--font-mono); font-size: 16px; font-weight: 500;
+    color: var(--ink); letter-spacing: 0.01em;
+  }
+  .risk-readout-big .tier-text { color: var(--amber); font-weight: 600; }
+
+  /* ═══ KPI STRIP ═══ */
+  .kpi-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 16px; margin-top: 22px; }
+  .kpi {
+    background: var(--panel);
+    border: 0.5pt solid var(--hairline);
+    border-radius: 2px;
+    padding: 13px 16px 14px;
+    display: flex; flex-direction: column;
+  }
+  /* AI-блок прижат к нижней кромке — карточки выравниваются по grid-stretch */
+  .kpi .kpi-ai { margin-top: auto; }
+  /* статус-кромка сверху — без теней */
+  .kpi.st-normal { border-top: 2px solid var(--green); }
+  .kpi.st-good   { border-top: 2px solid var(--tech-blue); }
+  .kpi.st-watch  { border-top: 2px solid var(--amber); }
+
+  .kpi-name {
+    font-size: 10px; font-weight: 600; letter-spacing: 0.09em;
+    text-transform: uppercase; color: var(--ink-60);
+    margin-bottom: 8px;
+  }
+  .kpi-value-row {
+    display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  }
+  .kpi-value {
+    font-family: var(--font-mono); font-size: 30px; font-weight: 600;
+    line-height: 1.05; color: var(--ink); letter-spacing: -0.01em;
+  }
+  .kpi-value .unit { font-size: 17px; color: var(--ink-40); }
+  .kpi-sub {
+    font-family: var(--font-mono); font-size: 10px; color: var(--ink-40);
+    white-space: nowrap;
+  }
+
+  .kpi-spark {
+    margin-top: 10px;
+    background: rgba(42,46,51,0.03);
+    border-radius: 2px; padding: 6px 8px;
+  }
+  .kpi-spark svg { display: block; width: 100%; height: 32px; }
+
+  .kpi-ai {
+    display: flex; gap: 7px;
+    margin-top: 10px; padding: 8px 10px;
+    background: var(--ai-bg); border-left: 2px solid var(--tech-blue);
+    border-radius: 0 2px 2px 0;
+  }
+  .kpi-ai .tag { font-size: 10px; flex-shrink: 0; }
+  .kpi-ai .txt { font-style: italic; font-size: 10.5px; line-height: 1.5; }
+  .kpi-ai .txt b { font-style: normal; font-weight: 600; }
+  .kpi-ai .txt .src { font-size: 9px; }
+
+  /* ═══ RISK CONCENTRATION ═══ */
+  .risk-conc { display: grid; grid-template-columns: 1.25fr 1fr; gap: 18px; margin-top: 24px; }
+  .panel {
+    background: var(--panel); border: 0.5pt solid var(--hairline);
+    border-radius: 2px; padding: 15px 17px;
+  }
+  .panel-title { font-size: 14px; font-weight: 600; margin-bottom: 12px; letter-spacing: -0.005em; }
+
+  table { width: 100%; border-collapse: collapse; }
+  thead th {
+    font-family: var(--font-mono); font-size: 9px; font-weight: 600;
+    letter-spacing: 0.03em; color: var(--ink-60); text-align: right;
+    padding: 5px 7px; border-bottom: 0.5pt solid var(--hairline);
+  }
+  thead th:first-child { text-align: left; }
+  thead th.hl-col { background: var(--tech-blue-14); color: var(--tech-blue); }
+  tbody td {
+    font-family: var(--font-mono); font-size: 11px; text-align: right;
+    padding: 6px 7px; border-bottom: 0.5pt solid var(--hairline-2);
+  }
+  tbody td:first-child { text-align: left; font-weight: 500; }
+  tbody td.hl-col { background: var(--tech-blue-08); font-weight: 500; }
+  tbody tr:last-child td { border-bottom: none; }
+  .pill {
+    font-size: 9px; font-family: var(--font-mono);
+    padding: 1px 6px; border-radius: 2px; border: 0.5pt solid currentColor;
+  }
+  .pill.normal { color: var(--green); }
+  .pill.watch  { color: var(--amber); }
+
+  /* waterfall легенда */
+  .wf-legend {
+    display: flex; gap: 16px; font-size: 9.5px; color: var(--ink-60);
+    margin-bottom: 8px; font-family: var(--font-mono);
+  }
+  .wf-legend .sw { display: inline-block; width: 9px; height: 9px; margin-right: 4px; vertical-align: -1px; }
+  .wf-legend .sw.amber { background: var(--amber); }
+  .wf-legend .sw.green { background: var(--green); }
+  .wf-legend .sw.blue  { background: var(--tech-blue); }
+
+  /* связующий AI-комментарий под рядом */
+  .conc-ai {
+    grid-column: 1 / -1;
+    background: var(--ai-bg); border: 0.5pt solid var(--hairline-2);
+    border-left: 2px solid var(--tech-blue); border-radius: 2px;
+    padding: 11px 15px;
+  }
+  .conc-ai .ai-head {
+    font-family: var(--font-mono); font-size: 10px; font-weight: 600;
+    color: var(--tech-blue); margin-bottom: 5px;
+  }
+  .conc-ai .ai-body { font-style: italic; font-size: 12px; line-height: 1.6; }
+
+  /* ═══ ФУТЕР ═══ */
+  .foot {
+    font-family: var(--font-mono); font-size: 10px; color: var(--ink-40);
+    text-align: center; padding-top: 14px; margin-top: 22px;
+    border-top: 0.5pt solid var(--hairline); letter-spacing: 0.05em;
+  }
+
+  /* ═══ АДАПТИВ ═══ */
+  @media (max-width: 880px) {
+    .cover { grid-template-columns: 1fr; gap: 20px; }
+    .kpi-grid { grid-template-columns: 1fr; }
+    .kpi { min-height: auto; }
+    .risk-conc { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 480px) {
+    body { font-size: 15px; }
+    .sheet { padding: 14px 16px 22px; }
+    .tech-header { font-size: 9.5px; }
+    h1.verdict { font-size: 21px; }
+    .risk-readout-big { font-size: 14px; }
+    .kpi-value { font-size: 26px; }
+    .ai-box .ai-body { font-size: 14px; }
+    .kpi-ai .txt { font-size: 12px; }
+    table { font-size: 13px; }
+    thead th, tbody td { padding: 6px 4px; }
+  }
+
+/* ════════ СТРАНИЦА 2 — что вы держите ════════ */
+  :root {
+    --bg:          #F4F2EC;
+    --panel:       #FBFAF7;
+    --ink:         #2A2E33;
+    --ink-60:      rgba(42,46,51,0.60);
+    --ink-40:      rgba(42,46,51,0.40);
+    --hairline:    rgba(42,46,51,0.18);
+    --hairline-2:  rgba(42,46,51,0.10);
+    --tech-blue:   #2F6FB3;
+    --tech-blue-08:rgba(47,111,179,0.08);
+    --ai-bg:       #F0F6FF;
+    --amber:       #C77B2C;
+    --amber-08:    rgba(199,123,44,0.10);
+    --green:       #3F8F5F;
+    --neg:         #C0492F;
+
+    --font-ui:   'IBM Plex Sans', -apple-system, sans-serif;
+    --font-mono: 'IBM Plex Mono', monospace;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    background: var(--bg); color: var(--ink);
+    font-family: var(--font-ui); font-size: 13px; line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  .sheet { max-width: 1100px; margin: 0 auto; padding: 20px 30px 28px; }
+
+  /* ТЕХ-ХЕДЕР */
+  .tech-header {
+    font-family: var(--font-mono); font-size: 11px; color: var(--ink-60);
+    letter-spacing: 0.03em; padding-bottom: 12px;
+    border-bottom: 0.5pt solid var(--hairline);
+    display: flex; justify-content: space-between; flex-wrap: wrap; gap: 6px;
+  }
+  .tech-header b { color: var(--ink); font-weight: 600; }
+  .tech-header .ts { color: var(--ink-40); }
+
+  /* ЗАГОЛОВОК СЕКЦИИ */
+  .sec-head { padding: 22px 0 4px; }
+  .sec-title { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
+  .sec-sub { font-size: 11.5px; color: var(--ink-60); margin-top: 3px; }
+
+  /* ── РАСКЛАДКА: ТАБЛИЦА + ПАНЕЛЬ СЕКТОРОВ ── */
+  .holdings-layout {
+    margin-top: 14px;
+    display: flex; gap: 14px; align-items: stretch;
+  }
+
+  /* ── ТАБЛИЦА HOLDINGS ── */
+  .holdings {
+    flex: 1 1 auto; min-width: 0;
+    border: 0.5pt solid var(--hairline); border-radius: 2px;
+    background: var(--panel); overflow: hidden;
+  }
+  .h-head, .h-row {
+    display: grid;
+    grid-template-columns: 1.35fr 1.1fr 0.7fr 0.85fr 0.8fr 0.95fr 1.05fr 0.95fr;
+    align-items: center; gap: 10px;
+  }
+  .h-head {
+    padding: 8px 14px;
+    border-bottom: 0.5pt solid var(--hairline);
+    font-family: var(--font-mono); font-size: 9px; font-weight: 600;
+    letter-spacing: 0.04em; color: var(--ink-60); text-transform: uppercase;
+  }
+  .h-head .num, .h-row .num { text-align: right; }
+
+  /* разделитель перед колонкой «Действие» */
+  .h-head .sep, .h-cell.action {
+    border-left: 0.5pt solid var(--hairline); padding-left: 11px;
+  }
+
+  .h-row {
+    padding: 10px 14px;
+    border-bottom: 0.5pt solid var(--hairline-2);
+    cursor: pointer; transition: background 0.1s, box-shadow 0.1s;
+  }
+  .h-row:hover {
+    background: var(--tech-blue-08);
+    box-shadow: inset 3px 0 0 var(--tech-blue);
+  }
+  .h-row.open {
+    background: var(--tech-blue-08);
+    box-shadow: inset 3px 0 0 var(--tech-blue);
+  }
+  .h-group:last-child .h-row { border-bottom: none; }
+
+  .h-cell { font-size: 12px; }
+  .h-cell.num { font-family: var(--font-mono); text-align: right; }
+  .h-cell-label { display: none; }   /* виден только на мобильном */
+
+  .h-ticker { display: flex; align-items: center; gap: 7px; }
+  .h-ticker .tk { font-family: var(--font-mono); font-weight: 600; font-size: 12.5px; }
+  .h-flag {
+    font-family: var(--font-mono); font-size: 8px; font-weight: 600;
+    color: var(--amber); border: 0.5pt solid var(--amber);
+    border-radius: 2px; padding: 0.5px 4px; letter-spacing: 0.02em;
+  }
+  .pnl.pos { color: var(--green); }
+  .pnl.neg { color: var(--neg); }
+
+  .badge {
+    font-family: var(--font-mono); font-size: 9.5px; font-weight: 500;
+    padding: 2px 7px; border-radius: 2px; border: 0.5pt solid currentColor;
+    white-space: nowrap;
+  }
+  .badge.buy    { color: var(--green); }
+  .badge.hold   { color: var(--ink-60); }
+  .badge.trim   { color: var(--amber); }
+  .badge.sell   { color: var(--neg); }
+
+  .caret-cell { display: flex; justify-content: flex-end; }
+  /* заметная кнопка разворота строки */
+  .h-toggle {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3.5px 9px; border-radius: 3px;
+    background: var(--tech-blue);
+    font-family: var(--font-mono); font-size: 9px; font-weight: 600;
+    color: #fff; letter-spacing: 0.02em; white-space: nowrap;
+    transition: background 0.12s;
+  }
+  .h-row:hover .h-toggle { background: #25557F; }
+  .h-caret { font-size: 9px; transition: transform 0.15s; }
+  .h-row.open .h-caret { transform: rotate(90deg); }
+  .h-toggle .t-less { display: none; }
+  .h-row.open .h-toggle .t-more { display: none; }
+  .h-row.open .h-toggle .t-less { display: inline; }
+
+  /* ── РАЗВОРОТ: SEC-ФУНДАМЕНТАЛ ── */
+  .h-detail { display: none; padding: 0 14px 14px; }
+  .h-detail.open { display: block; }
+  .h-detail-inner {
+    border-left: 2px solid var(--tech-blue);
+    background: rgba(42,46,51,0.02);
+    border-radius: 0 2px 2px 0;
+    padding: 12px 14px;
+  }
+  .h-detail-name {
+    font-size: 11px; color: var(--ink-60); margin-bottom: 9px;
+  }
+  .stat-grid {
+    display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px;
+  }
+  .stat { }
+  .stat-label {
+    font-size: 8.5px; color: var(--ink-60); letter-spacing: 0.02em;
+    text-transform: uppercase; line-height: 1.3; margin-bottom: 3px;
+  }
+  .stat-value {
+    font-family: var(--font-mono); font-size: 13px; font-weight: 500; color: var(--ink);
+  }
+  .stat-value.pos { color: var(--green); }
+  .stat-value.neg { color: var(--neg); }
+  .h-detail-ai {
+    margin-top: 10px; padding-top: 9px;
+    border-top: 0.5pt solid var(--hairline-2);
+    display: flex; gap: 7px;
+  }
+  .h-detail-ai .tag { font-size: 10px; flex-shrink: 0; }
+  .h-detail-ai .txt { font-style: italic; font-size: 11px; line-height: 1.5; }
+  .h-detail-ai .txt .h-cite {
+    font-style: normal; font-family: var(--font-mono); font-size: 9px;
+    color: var(--tech-blue);
+  }
+
+  /* ── ПАНЕЛЬ СЕКТОРОВ + PIE ── */
+  .sector-panel {
+    flex: 0 0 234px;
+    border: 0.5pt solid var(--hairline); border-radius: 2px;
+    background: var(--panel); overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+  /* заголовок-бар — зеркалит шапку таблицы */
+  .sp-head {
+    padding: 8px 14px;
+    border-bottom: 0.5pt solid var(--hairline);
+  }
+  .sp-title {
+    font-family: var(--font-mono); font-size: 9px; font-weight: 600;
+    letter-spacing: 0.04em; color: var(--ink-60); text-transform: uppercase;
+  }
+  .sp-sub { font-size: 10px; color: var(--ink-40); margin-top: 2px; }
+
+  /* тело панели растягивается и центрирует pie+легенду */
+  .sp-body {
+    flex: 1 1 auto;
+    display: flex; flex-direction: column; justify-content: center;
+    padding: 16px 14px;
+  }
+  .pie-wrap { display: flex; justify-content: center; margin-bottom: 14px; position: relative; }
+  /* deep-shadow «подложка» под пирогом — мягкая глубина */
+  .pie-wrap::before {
+    content: ''; position: absolute; top: 50%; left: 50%;
+    width: 156px; height: 156px; border-radius: 50%;
+    transform: translate(-50%, -47%);
+    background: radial-gradient(closest-side, rgba(42,46,51,0.18), rgba(42,46,51,0) 72%);
+    filter: blur(2px);
+    z-index: 0; pointer-events: none;
+  }
+  .pie {
+    position: relative; width: 152px; height: 152px; border-radius: 50%;
+    z-index: 1;
+    background:
+      /* верхний rim-highlight на 12 часов */
+      radial-gradient(circle at 50% 8%, rgba(255,255,255,0.55), rgba(255,255,255,0) 28%),
+      /* нижний rim-shadow */
+      radial-gradient(circle at 50% 96%, rgba(42,46,51,0.16), rgba(42,46,51,0) 32%),
+      /* основной сектор: с тонкими белыми разделителями */
+      conic-gradient(
+        var(--amber)              0       61.5%,
+        rgba(255,255,255,0.85)    61.5%   62.5%,
+        var(--tech-blue)          62.5%   75.5%,
+        rgba(255,255,255,0.85)    75.5%   76.5%,
+        var(--green)              76.5%   91.5%,
+        rgba(255,255,255,0.85)    91.5%   92.5%,
+        var(--ink-60)             92.5%   97.5%,
+        rgba(255,255,255,0.85)    97.5%   98.5%,
+        var(--ink-40)             98.5%   100%
+      );
+    box-shadow:
+      0 1px 1px rgba(255,255,255,0.6) inset,
+      0 -1px 2px rgba(42,46,51,0.08) inset,
+      0 2px 6px rgba(42,46,51,0.12);
+  }
+  /* внешний hairline-обод */
+  .pie::before {
+    content: ''; position: absolute; inset: -1px;
+    border-radius: 50%;
+    border: 0.5pt solid rgba(42,46,51,0.20);
+    pointer-events: none;
+  }
+  /* центральная «втулка» — с лёгкой объёмной обводкой */
+  .pie::after {
+    content: ''; position: absolute; inset: 28%;
+    background:
+      radial-gradient(circle at 35% 30%, #FFFFFF, var(--panel) 70%);
+    border-radius: 50%;
+    border: 0.5pt solid rgba(42,46,51,0.18);
+    box-shadow: 0 1px 2px rgba(42,46,51,0.10) inset;
+  }
+  .pie-center {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; text-align: center;
+    z-index: 2;
+  }
+  .pie-center .pc-pct {
+    font-family: var(--font-mono); font-size: 17px; font-weight: 600;
+    color: var(--amber); line-height: 1; letter-spacing: -0.01em;
+  }
+  .pie-center .pc-lbl {
+    font-family: var(--font-mono); font-size: 7.5px; color: var(--ink-60);
+    letter-spacing: 0.06em; margin-top: 3px;
+  }
+
+  .pie-legend { display: flex; flex-direction: column; gap: 5px; }
+  .lg-item { display: flex; align-items: center; gap: 7px; font-size: 11px; }
+  .lg-sw { width: 9px; height: 9px; border-radius: 2px; flex-shrink: 0; }
+  .lg-name { flex: 1; color: var(--ink); }
+  .lg-pct { font-family: var(--font-mono); font-size: 11px; color: var(--ink-60); }
+  .lg-item.over .lg-name,
+  .lg-item.over .lg-pct { color: var(--amber); font-weight: 600; }
+
+  /* предупреждение прижато к нижней кромке — вровень с таблицей */
+  .sp-warn {
+    margin: 0 14px 14px; padding: 8px 9px;
+    background: var(--amber-08); border: 0.5pt solid var(--amber);
+    border-radius: 2px; display: flex; gap: 6px;
+    font-size: 10.5px; line-height: 1.42; color: var(--amber);
+  }
+  .sp-warn b { font-weight: 600; }
+
+  /* ── СВОДНЫЙ AI-БЛОК ── */
+  .sec-ai {
+    margin-top: 16px;
+    background: var(--ai-bg); border: 0.5pt solid var(--hairline-2);
+    border-left: 2px solid var(--tech-blue); border-radius: 2px;
+    padding: 12px 15px;
+  }
+  .sec-ai .ai-head {
+    font-family: var(--font-mono); font-size: 10.5px; font-weight: 600;
+    color: var(--tech-blue); margin-bottom: 6px;
+  }
+  .sec-ai .ai-body { font-style: italic; font-size: 12.5px; line-height: 1.62; }
+  .sec-ai .ai-body p { margin: 0; }
+  .sec-ai .ai-body p + p { margin-top: 8px; }
+  .ai-sources {
+    margin-top: 10px; padding-top: 8px;
+    border-top: 0.5pt solid var(--hairline-2);
+    font-family: var(--font-mono); font-size: 9px; color: var(--ink-60);
+    letter-spacing: 0.02em; line-height: 1.7;
+  }
+  .ai-sources b { color: var(--tech-blue); font-weight: 600; }
+  .src-inline {
+    font-style: normal; font-family: var(--font-mono); font-size: 10px;
+    color: var(--tech-blue); background: var(--tech-blue-08);
+    padding: 0 4px; border-radius: 2px;
+  }
+  .flag-inline { font-style: normal; font-weight: 600; color: var(--amber); }
+
+  /* ФУТЕР */
+  .foot {
+    font-family: var(--font-mono); font-size: 10px; color: var(--ink-40);
+    text-align: center; padding-top: 14px; margin-top: 22px;
+    border-top: 0.5pt solid var(--hairline); letter-spacing: 0.05em;
+  }
+
+  /* ─────────── АДАПТИВ ─────────── */
+  /* панель секторов уходит под таблицу */
+  @media (max-width: 900px) {
+    .holdings-layout { flex-direction: column; }
+    .sector-panel { flex: 1 1 auto; width: 100%; }
+    .pie-wrap { margin: 12px 0; }
+  }
+
+  /* таблица → карточки */
+  @media (max-width: 720px) {
+    .h-head { display: none; }
+    .h-row {
+      grid-template-columns: 1fr 1fr;
+      gap: 7px 14px;
+      padding: 12px 14px;
+    }
+    .h-cell { display: flex; justify-content: space-between; align-items: baseline; font-size: 13px; }
+    .h-cell.num { text-align: left; }
+    .h-cell-label {
+      display: inline; font-size: 9px; color: var(--ink-60);
+      text-transform: uppercase; letter-spacing: 0.03em;
+    }
+    .h-cell.ticker  { grid-column: 1 / -1; }
+    .h-cell.action  {
+      grid-column: 1 / -1; justify-content: flex-start;
+      border-left: none; padding-left: 0;
+    }
+    .h-cell.caret-cell {
+      grid-column: 1 / -1; justify-content: flex-end;
+      border-top: 0.5pt solid var(--hairline-2); padding-top: 6px;
+    }
+    .h-cell.ticker .h-cell-label { display: none; }
+    .stat-grid { grid-template-columns: repeat(2, 1fr); gap: 9px 14px; }
+  }
+  @media (max-width: 480px) {
+    body { font-size: 15px; }
+    .sheet { padding: 14px 16px 22px; }
+    .tech-header { font-size: 9.5px; }
+    .sec-title { font-size: 15px; }
+    .sec-ai .ai-body { font-size: 14px; }
+  }
+
+/* ════════ СТРАНИЦА 3 — рост против рынка ════════ */
+  :root {
+    --bg:          #F4F2EC;
+    --panel:       #FBFAF7;
+    --ink:         #2A2E33;
+    --ink-60:      rgba(42,46,51,0.60);
+    --ink-40:      rgba(42,46,51,0.40);
+    --hairline:    rgba(42,46,51,0.18);
+    --hairline-2:  rgba(42,46,51,0.10);
+    --tech-blue:   #2F6FB3;
+    --tech-blue-08:rgba(47,111,179,0.08);
+    --ai-bg:       #F0F6FF;
+    --amber:       #C77B2C;
+    --amber-08:    rgba(199,123,44,0.10);
+    --green:       #3F8F5F;
+    --neg:         #C0492F;
+
+    --font-ui:   'IBM Plex Sans', -apple-system, sans-serif;
+    --font-mono: 'IBM Plex Mono', monospace;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    background: var(--bg); color: var(--ink);
+    font-family: var(--font-ui); font-size: 13px; line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  .sheet { max-width: 1100px; margin: 0 auto; padding: 20px 30px 28px; }
+
+  /* ТЕХ-ХЕДЕР */
+  .tech-header {
+    font-family: var(--font-mono); font-size: 11px; color: var(--ink-60);
+    letter-spacing: 0.03em; padding-bottom: 12px;
+    border-bottom: 0.5pt solid var(--hairline);
+    display: flex; justify-content: space-between; flex-wrap: wrap; gap: 6px;
+  }
+  .tech-header b { color: var(--ink); font-weight: 600; }
+  .tech-header .ts { color: var(--ink-40); }
+
+  /* ЗАГОЛОВОК СЕКЦИИ */
+  .sec-head { padding: 18px 0 4px; }
+  .sec-title { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
+  .sec-sub { font-size: 11.5px; color: var(--ink-60); margin-top: 3px; }
+
+  /* ── СТАТ-КАРТОЧКИ ── */
+  .gv-stats {
+    margin-top: 12px;
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;
+  }
+  .gv-stat {
+    border: 0.5pt solid var(--hairline); border-radius: 2px;
+    background: var(--panel); padding: 10px 12px;
+  }
+  .gv-stat.accent { border-left: 2px solid var(--tech-blue); }
+  .gv-label {
+    font-family: var(--font-mono); font-size: 8.5px; font-weight: 600;
+    letter-spacing: 0.04em; color: var(--ink-60); text-transform: uppercase;
+  }
+  .gv-value {
+    font-family: var(--font-mono); font-size: 18px; font-weight: 600;
+    margin-top: 4px; line-height: 1;
+  }
+  .gv-value.pos { color: var(--green); }
+  .gv-value.neu { color: var(--ink); }
+  .gv-value.blue { color: var(--tech-blue); }
+  .gv-note { font-size: 10px; color: var(--ink-40); margin-top: 4px; }
+
+  /* ── ГРАФИК + ТАБЛИЦА РЯДОМ ── */
+  .gv-main {
+    margin-top: 10px;
+    display: flex; gap: 10px; align-items: stretch;
+  }
+
+  /* ── КАРТОЧКА ГРАФИКА ── */
+  .chart-card {
+    flex: 1.6 1 0; min-width: 0;
+    border: 0.5pt solid var(--hairline); border-radius: 2px;
+    background: var(--panel); overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+  .chart-head {
+    padding: 8px 14px; border-bottom: 0.5pt solid var(--hairline);
+    display: flex; justify-content: space-between; align-items: center;
+    flex-wrap: wrap; gap: 6px;
+  }
+  .chart-title {
+    font-family: var(--font-mono); font-size: 9px; font-weight: 600;
+    letter-spacing: 0.04em; color: var(--ink-60); text-transform: uppercase;
+  }
+  .chart-legend { display: flex; gap: 14px; }
+  .cl-item {
+    display: flex; align-items: center; gap: 6px;
+    font-family: var(--font-mono); font-size: 9.5px; color: var(--ink-60);
+  }
+  .cl-line { width: 16px; height: 0; border-top: 2px solid; }
+  .cl-line.port { border-color: var(--tech-blue); }
+  .cl-line.mkt  { border-color: var(--ink-40); border-top-style: dashed; }
+  .chart-body {
+    flex: 1 1 auto; padding: 12px 14px;
+    display: flex; align-items: center;
+  }
+  .chart-body svg { display: block; width: 100%; height: auto; }
+
+  /* ── ТАБЛИЦА ПЕРИОДОВ ── */
+  .pr-card {
+    flex: 1 1 0; min-width: 240px;
+    border: 0.5pt solid var(--hairline); border-radius: 2px;
+    background: var(--panel); overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+  .pr-row {
+    display: grid; grid-template-columns: 1.2fr 1fr 1fr 1fr;
+    align-items: center; gap: 6px; padding: 9px 13px;
+    flex: 1 1 auto;
+  }
+  .pr-row + .pr-row { border-top: 0.5pt solid var(--hairline-2); }
+  .pr-head {
+    flex: 0 0 auto;
+    border-bottom: 0.5pt solid var(--hairline);
+    font-family: var(--font-mono); font-size: 9px; font-weight: 600;
+    letter-spacing: 0.04em; color: var(--ink-60); text-transform: uppercase;
+  }
+  .pr-row .num { text-align: right; font-family: var(--font-mono); font-size: 12px; }
+  .pr-period { font-size: 12px; }
+  .pr-cell-label { display: none; }
+  .pos { color: var(--green); }
+  .neg { color: var(--neg); }
+  .blue { color: var(--tech-blue); }
+
+  /* ── СВОДНЫЙ AI-БЛОК ── */
+  .sec-ai {
+    margin-top: 12px;
+    background: var(--ai-bg); border: 0.5pt solid var(--hairline-2);
+    border-left: 2px solid var(--tech-blue); border-radius: 2px;
+    padding: 12px 15px;
+  }
+  .sec-ai .ai-head {
+    font-family: var(--font-mono); font-size: 10.5px; font-weight: 600;
+    color: var(--tech-blue); margin-bottom: 6px;
+  }
+  .sec-ai .ai-body { font-style: italic; font-size: 12.5px; line-height: 1.62; }
+  .sec-ai .ai-body p { margin: 0; }
+  .sec-ai .ai-body p + p { margin-top: 8px; }
+  .src-inline {
+    font-style: normal; font-family: var(--font-mono); font-size: 10px;
+    color: var(--tech-blue); background: var(--tech-blue-08);
+    padding: 0 4px; border-radius: 2px;
+  }
+  .flag-inline { font-style: normal; font-weight: 600; color: var(--amber); }
+  .ai-sources {
+    margin-top: 10px; padding-top: 8px;
+    border-top: 0.5pt solid var(--hairline-2);
+    font-family: var(--font-mono); font-size: 9px; color: var(--ink-60);
+    letter-spacing: 0.02em; line-height: 1.7;
+  }
+  .ai-sources b { color: var(--tech-blue); font-weight: 600; }
+
+  /* ФУТЕР */
+  .foot {
+    font-family: var(--font-mono); font-size: 10px; color: var(--ink-40);
+    text-align: center; padding-top: 14px; margin-top: 22px;
+    border-top: 0.5pt solid var(--hairline); letter-spacing: 0.05em;
+  }
+
+  /* ─────────── АДАПТИВ ─────────── */
+  @media (max-width: 720px) {
+    .gv-stats { grid-template-columns: repeat(2, 1fr); }
+    .gv-main { flex-direction: column; }
+    .pr-head { display: none; }
+    .pr-row {
+      grid-template-columns: 1fr 1fr; gap: 7px 14px; padding: 12px 14px;
+    }
+    .pr-row + .pr-row { border-top: 0.5pt solid var(--hairline-2); }
+    .pr-period { grid-column: 1 / -1; font-weight: 600; font-family: var(--font-mono); }
+    .pr-row .num { text-align: left; display: flex; justify-content: space-between; }
+    .pr-cell-label {
+      display: inline; font-size: 9px; color: var(--ink-60);
+      text-transform: uppercase; letter-spacing: 0.03em;
+    }
+  }
+  @media (max-width: 480px) {
+    body { font-size: 15px; }
+    .sheet { padding: 14px 16px 22px; }
+    .tech-header { font-size: 9.5px; }
+    .sec-title { font-size: 15px; }
+    .gv-stats { grid-template-columns: 1fr 1fr; }
+    .sec-ai .ai-body { font-size: 14px; }
+  }
+
+/* ════════ СТРАНИЦА 4 — идеи ИИ ════════ */
+  :root {
+    --bg:          #F4F2EC;
+    --panel:       #FBFAF7;
+    --ink:         #2A2E33;
+    --ink-60:      rgba(42,46,51,0.60);
+    --ink-40:      rgba(42,46,51,0.40);
+    --hairline:    rgba(42,46,51,0.18);
+    --hairline-2:  rgba(42,46,51,0.10);
+    --tech-blue:   #2F6FB3;
+    --tech-blue-08:rgba(47,111,179,0.08);
+    --ai-bg:       #F0F6FF;
+    --amber:       #C77B2C;
+    --amber-08:    rgba(199,123,44,0.10);
+    --green:       #3F8F5F;
+    --green-08:    rgba(63,143,95,0.10);
+    --neg:         #C0492F;
+
+    --font-ui:   'IBM Plex Sans', -apple-system, sans-serif;
+    --font-mono: 'IBM Plex Mono', monospace;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    background: var(--bg); color: var(--ink);
+    font-family: var(--font-ui); font-size: 13px; line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  .sheet { max-width: 1100px; margin: 0 auto; padding: 20px 30px 28px; }
+
+  /* ТЕХ-ХЕДЕР */
+  .tech-header {
+    font-family: var(--font-mono); font-size: 11px; color: var(--ink-60);
+    letter-spacing: 0.03em; padding-bottom: 12px;
+    border-bottom: 0.5pt solid var(--hairline);
+    display: flex; justify-content: space-between; flex-wrap: wrap; gap: 6px;
+  }
+  .tech-header b { color: var(--ink); font-weight: 600; }
+  .tech-header .ts { color: var(--ink-40); }
+
+  /* ЗАГОЛОВОК СЕКЦИИ */
+  .sec-head { padding: 18px 0 4px; }
+  .sec-title { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
+  .sec-sub { font-size: 11.5px; color: var(--ink-60); margin-top: 3px; }
+
+  /* ── ВВОДНЫЙ AI-БЛОК ── */
+  .sec-ai {
+    margin-top: 12px;
+    background: var(--ai-bg); border: 0.5pt solid var(--hairline-2);
+    border-left: 2px solid var(--tech-blue); border-radius: 2px;
+    padding: 12px 15px;
+  }
+  .sec-ai .ai-head {
+    font-family: var(--font-mono); font-size: 10.5px; font-weight: 600;
+    color: var(--tech-blue); margin-bottom: 6px;
+  }
+  .sec-ai .ai-body { font-style: italic; font-size: 12.5px; line-height: 1.62; }
+  .src-inline {
+    font-style: normal; font-family: var(--font-mono); font-size: 10px;
+    color: var(--tech-blue); background: var(--tech-blue-08);
+    padding: 0 4px; border-radius: 2px;
+  }
+  .flag-inline { font-style: normal; font-weight: 600; color: var(--amber); }
+
+  /* ── СЕТКА ИДЕЙ ── */
+  .ideas-grid {
+    margin-top: 10px;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+    align-items: start;          /* раскрывается только нужная карточка */
+  }
+  .idea-card {
+    border: 0.5pt solid var(--hairline); border-radius: 2px;
+    background: var(--panel);
+    border-left: 2px solid var(--ink-40);
+    padding: 11px 13px 12px;
+  }
+  .idea-card.risk      { border-left-color: var(--amber); }
+  .idea-card.diversify { border-left-color: var(--tech-blue); }
+  .idea-card.rebalance { border-left-color: var(--ink-60); }
+  .idea-card.grow      { border-left-color: var(--green); }
+
+  /* ── КЛИКАБЕЛЬНАЯ ШАПКА КАРТОЧКИ ── */
+  .idea-head { cursor: pointer; }
+
+  .idea-top {
+    display: flex; justify-content: space-between; align-items: center;
+    gap: 8px; margin-bottom: 8px;
+  }
+  .idea-cat {
+    font-family: var(--font-mono); font-size: 9px; font-weight: 600;
+    letter-spacing: 0.03em; text-transform: uppercase;
+    padding: 2px 7px; border-radius: 2px; border: 0.5pt solid currentColor;
+  }
+  .idea-card.risk      .idea-cat { color: var(--amber); }
+  .idea-card.diversify .idea-cat { color: var(--tech-blue); }
+  .idea-card.rebalance .idea-cat { color: var(--ink-60); }
+  .idea-card.grow      .idea-cat { color: var(--green); }
+
+  .idea-prio {
+    font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.02em;
+    display: flex; align-items: center; gap: 5px;
+  }
+  .idea-prio::before {
+    content: ''; width: 6px; height: 6px; border-radius: 50%;
+    background: currentColor; display: inline-block;
+  }
+  .idea-prio.high { color: var(--amber); }
+  .idea-prio.mid  { color: var(--ink-40); }
+
+  .idea-num {
+    font-family: var(--font-mono); font-size: 9px; color: var(--ink-40);
+    margin-bottom: 3px;
+  }
+  .idea-title {
+    font-size: 13px; font-weight: 600; line-height: 1.35;
+    letter-spacing: -0.01em;
+  }
+  .idea-why {
+    font-size: 11px; color: var(--ink); line-height: 1.54;
+    margin-top: 6px;
+  }
+  .idea-why b { font-weight: 600; }
+
+  /* ── ИДЕИ ПО ЗАМЕНЕ — ТИКЕРЫ ВНЕ ПОРТФЕЛЯ (видны свёрнуто) ── */
+  .idea-swap { margin-top: 9px; }
+  .swap-label {
+    font-family: var(--font-mono); font-size: 8px; font-weight: 600;
+    letter-spacing: 0.04em; color: var(--ink-60); text-transform: uppercase;
+    margin-bottom: 5px;
+  }
+  .swap-tickers { display: flex; flex-wrap: wrap; gap: 5px; }
+  .tk-chip {
+    font-family: var(--font-mono); font-size: 9.5px; font-weight: 600;
+    color: var(--tech-blue); background: var(--tech-blue-08);
+    border: 0.5pt solid rgba(47,111,179,0.22);
+    padding: 1.5px 6px; border-radius: 2px;
+  }
+  .swap-note {
+    margin-top: 7px;
+    font-size: 10px; line-height: 1.5; color: var(--ink-60);
+    font-style: italic;
+  }
+  .swap-note .expand-hint { color: var(--tech-blue); font-style: normal; }
+
+  /* ── ПЕРЕКЛЮЧАТЕЛЬ РАЗВОРОТА ── */
+  .idea-toggle {
+    margin-top: 11px;
+    display: flex; align-items: center; justify-content: center; gap: 7px;
+    padding: 8px 10px; border-radius: 3px;
+    background: var(--tech-blue);
+    font-family: var(--font-mono); font-size: 9.5px; font-weight: 600;
+    color: #fff; letter-spacing: 0.03em;
+    transition: background 0.12s;
+  }
+  .idea-head:hover .idea-toggle { background: #25557F; }
+  .idea-caret {
+    display: inline-flex; color: #fff; font-size: 10px;
+    transition: transform 0.15s;
+  }
+  .idea-card.open .idea-caret { transform: rotate(90deg); }
+  .idea-toggle .t-less { display: none; }
+  .idea-card.open .idea-toggle .t-more { display: none; }
+  .idea-card.open .idea-toggle .t-less { display: inline; }
+
+  /* ── РАЗВОРАЧИВАЕМЫЕ ДЕТАЛИ ── */
+  .idea-detail { display: none; }
+  .idea-card.open .idea-detail { display: block; }
+
+  /* ── КОНВЕЙЕР ОТБОРА: FACTOR → REGIME → RAG ── */
+  .idea-pipeline {
+    margin-top: 10px; padding: 8px 10px;
+    background: var(--tech-blue-08); border-radius: 2px;
+  }
+  .pl-label {
+    font-family: var(--font-mono); font-size: 8px; font-weight: 600;
+    letter-spacing: 0.04em; color: var(--tech-blue); text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .pl-flow { display: flex; align-items: stretch; }
+  .pl-stage { flex: 1; min-width: 0; }
+  .pl-stage-name {
+    font-family: var(--font-mono); font-size: 8px; font-weight: 600;
+    letter-spacing: 0.03em; color: var(--tech-blue); margin-bottom: 3px;
+  }
+  .pl-stage-text { font-size: 9px; line-height: 1.36; color: var(--ink); }
+  .pl-sep {
+    flex: 0 0 auto; display: flex; align-items: center;
+    padding: 0 7px; color: var(--tech-blue); font-size: 11px;
+  }
+
+  /* ── ПОЧЕМУ ИМЕННО ЭТИ БУМАГИ (разбор кандидатов вне портфеля) ── */
+  .cand-list { margin-top: 10px; }
+  .cand-label {
+    font-family: var(--font-mono); font-size: 8px; font-weight: 600;
+    letter-spacing: 0.05em; color: var(--ink-60); text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+  .cand { display: flex; gap: 8px; padding: 6px 0; align-items: baseline; }
+  .cand + .cand { border-top: 0.5pt solid var(--hairline-2); }
+  .cand-tk {
+    font-family: var(--font-mono); font-size: 11px; font-weight: 600;
+    color: var(--ink); width: 48px; flex-shrink: 0;
+  }
+  .cand-body { font-size: 10px; line-height: 1.45; color: var(--ink); }
+  .cand-name { font-weight: 600; }
+  .cand-scn {
+    display: inline-block; font-family: var(--font-mono); font-size: 8.5px;
+    color: var(--tech-blue); background: var(--tech-blue-08);
+    padding: 0 4px; border-radius: 2px; margin-top: 2px;
+  }
+
+  /* ── ОЖИДАЕМЫЙ ЭФФЕКТ ── */
+  .idea-effect {
+    margin-top: 10px; padding: 7px 9px;
+    background: rgba(42,46,51,0.035); border-radius: 2px;
+    border: 0.5pt solid var(--hairline-2);
+  }
+  .idea-effect-label {
+    font-family: var(--font-mono); font-size: 8px; font-weight: 600;
+    letter-spacing: 0.05em; color: var(--ink-60); text-transform: uppercase;
+    margin-bottom: 3px;
+  }
+  .idea-effect-val {
+    font-family: var(--font-mono); font-size: 11px; color: var(--ink);
+    line-height: 1.5;
+  }
+  .idea-effect-val .arrow { color: var(--tech-blue); }
+
+  /* ── ИСТОЧНИКИ ── */
+  .idea-src {
+    margin-top: 10px; padding-top: 10px;
+    border-top: 0.5pt solid var(--hairline-2);
+    display: flex; flex-wrap: wrap; gap: 5px;
+  }
+  .src-chip {
+    font-family: var(--font-mono); font-size: 8.5px;
+    color: var(--tech-blue); background: var(--tech-blue-08);
+    padding: 1.5px 5px; border-radius: 2px;
+  }
+  .src-chip.data { color: var(--ink-60); background: rgba(42,46,51,0.05); }
+
+  /* ── ДИСКЛЕЙМЕР ── */
+  .disclaimer {
+    margin-top: 12px; padding: 10px 13px;
+    background: var(--amber-08); border: 0.5pt solid var(--amber);
+    border-radius: 2px; display: flex; gap: 9px;
+    font-size: 11px; line-height: 1.5; color: var(--ink);
+  }
+  .disclaimer .dc-icon { color: var(--amber); flex-shrink: 0; }
+  .disclaimer b { font-weight: 600; color: var(--amber); }
+
+  /* ── ПОЛОСА ИСТОЧНИКОВ ── */
+  .section-sources {
+    margin-top: 10px; padding: 9px 14px;
+    border: 0.5pt solid var(--hairline-2); border-radius: 2px;
+    background: var(--panel);
+    font-family: var(--font-mono); font-size: 9px; color: var(--ink-60);
+    letter-spacing: 0.02em; line-height: 1.7;
+  }
+  .section-sources b { color: var(--tech-blue); font-weight: 600; }
+
+  /* ФУТЕР */
+  .foot {
+    font-family: var(--font-mono); font-size: 10px; color: var(--ink-40);
+    text-align: center; padding-top: 14px; margin-top: 22px;
+    border-top: 0.5pt solid var(--hairline); letter-spacing: 0.05em;
+  }
+
+  /* ─────────── АДАПТИВ ─────────── */
+  @media (max-width: 720px) {
+    .ideas-grid { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 480px) {
+    body { font-size: 15px; }
+    .sheet { padding: 14px 16px 22px; }
+    .tech-header { font-size: 9.5px; }
+    .sec-title { font-size: 15px; }
+    .sec-ai .ai-body { font-size: 14px; }
+    .idea-title { font-size: 15px; }
+    .idea-why { font-size: 13px; }
+  }
+
+/* ════════════════════════════════════════════════════════════════════════
+   DEEP-only components: factor radar · 4-pillar scoring · stress scenarios
+   action plan · expected effect · CoVe · regime quadrant
+   ════════════════════════════════════════════════════════════════════════ */
+
+  /* ── общий контейнер блока (используется на P3/P4/P5) ── */
+  .d3-block {
+    margin-top: 22px;
+    background: var(--panel); border: 0.5pt solid var(--hairline);
+    border-radius: 2px; padding: 14px 17px 15px;
+  }
+  .d3-block + .d3-block { margin-top: 14px; }
+  .d3-block-head { margin-bottom: 10px; }
+  .d3-block-head .panel-title { margin-bottom: 3px; }
+  .d3-block-sub { font-size: 10.5px; color: var(--ink-60); }
+  .d3-block-sub .src {
+    font-family: var(--font-mono); font-size: 9px;
+    color: var(--tech-blue); background: var(--tech-blue-08);
+    padding: 0 4px; border-radius: 2px; margin-left: 4px;
+  }
+
+  /* ── A. FACTOR β-RADAR ── */
+  .factor-layout {
+    display: grid; grid-template-columns: 1.05fr 1fr; gap: 14px;
+    align-items: center;
+  }
+  .factor-radar-svg { width: 100%; height: auto; max-width: 360px; display: block; margin: 0 auto; }
+
+  table.factor-table { width: 100%; border-collapse: collapse; }
+  table.factor-table thead th {
+    font-family: var(--font-mono); font-size: 9px; font-weight: 600;
+    letter-spacing: 0.03em; color: var(--ink-60); text-align: right;
+    padding: 5px 7px; border-bottom: 0.5pt solid var(--hairline);
+    text-transform: uppercase;
+  }
+  table.factor-table thead th:first-child { text-align: left; }
+  table.factor-table tbody td {
+    font-family: var(--font-mono); font-size: 11px; text-align: right;
+    padding: 6px 7px; border-bottom: 0.5pt solid var(--hairline-2);
+  }
+  table.factor-table tbody td:first-child { text-align: left; font-weight: 500; }
+  table.factor-table tbody tr:last-child td { border-bottom: none; }
+  table.factor-table td.delta-pos { color: var(--amber); font-weight: 600; }
+  table.factor-table td.delta-neg { color: var(--green); font-weight: 600; }
+
+  /* ── B. 4-PILLAR SCORING ── */
+  .score-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
+    margin-top: 4px;
+  }
+  .score-card {
+    background: #FFFFFF; border: 0.5pt solid var(--hairline);
+    border-left: 2px solid var(--ink-40);
+    border-radius: 2px; padding: 10px 12px;
+    display: flex; flex-direction: column;
+  }
+  .score-card.act-buy   { border-left-color: var(--green); }
+  .score-card.act-hold  { border-left-color: var(--ink-60); }
+  .score-card.act-trim  { border-left-color: var(--amber); }
+  .score-card.act-sell  { border-left-color: var(--neg); }
+  .sc-head {
+    display: flex; justify-content: space-between; align-items: baseline;
+    margin-bottom: 7px;
+  }
+  .sc-ticker {
+    font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--ink);
+  }
+  .sc-total {
+    font-family: var(--font-mono); font-size: 12px; font-weight: 600;
+  }
+  .sc-total.pos { color: var(--green); }
+  .sc-total.neg { color: var(--neg); }
+  .sc-total.neut { color: var(--ink-60); }
+  .sc-pillars { display: flex; flex-direction: column; gap: 5px; }
+  .sc-pillar {
+    display: grid; grid-template-columns: 14px 1fr 22px;
+    align-items: center; gap: 7px;
+    font-family: var(--font-mono); font-size: 9px;
+  }
+  .sc-pillar-name { color: var(--ink-60); font-weight: 600; }
+  .sc-pillar-bar {
+    position: relative; height: 6px;
+    background: rgba(42,46,51,0.06); border-radius: 1px;
+  }
+  /* центральная ось 0 */
+  .sc-pillar-bar::before {
+    content: ''; position: absolute; left: 50%; top: -1px; bottom: -1px;
+    width: 0.5pt; background: rgba(42,46,51,0.30);
+  }
+  /* заполнение от 0: позиция и ширина зависят от значения через CSS-vars */
+  .sc-pillar-fill {
+    position: absolute; top: 0.5px; bottom: 0.5px;
+    border-radius: 1px;
+  }
+  .sc-pillar-fill.pos { background: linear-gradient(90deg, #4FAA72, #2F7048); }
+  .sc-pillar-fill.neg { background: linear-gradient(90deg, #A85F1C, #D85C42); }
+  .sc-pillar-val {
+    text-align: right; color: var(--ink); font-weight: 600;
+  }
+  .sc-pillar-val.pos { color: var(--green); }
+  .sc-pillar-val.neg { color: var(--neg); }
+  .sc-foot {
+    margin-top: 9px; padding-top: 7px;
+    border-top: 0.5pt solid var(--hairline-2);
+    display: flex; align-items: baseline; gap: 8px;
+  }
+  .sc-action {
+    font-family: var(--font-mono); font-size: 8.5px; font-weight: 600;
+    padding: 1.5px 6px; border-radius: 2px;
+    border: 0.5pt solid currentColor; white-space: nowrap;
+  }
+  .sc-action.act-buy  { color: var(--green); }
+  .sc-action.act-hold { color: var(--ink-60); }
+  .sc-action.act-trim { color: var(--amber); }
+  .sc-action.act-sell { color: var(--neg); }
+  .sc-reason { font-size: 9.5px; color: var(--ink-60); line-height: 1.4; }
+
+  /* ── C. STRESS SCENARIOS ── */
+  table.stress-table { width: 100%; border-collapse: collapse; }
+  table.stress-table thead th {
+    font-family: var(--font-mono); font-size: 9px; font-weight: 600;
+    letter-spacing: 0.03em; color: var(--ink-60); text-align: right;
+    padding: 6px 7px; border-bottom: 0.5pt solid var(--hairline);
+    text-transform: uppercase;
+  }
+  table.stress-table thead th:first-child,
+  table.stress-table thead th.scenario-col { text-align: left; }
+  table.stress-table tbody td {
+    font-family: var(--font-mono); font-size: 11px; text-align: right;
+    padding: 8px 7px; border-bottom: 0.5pt solid var(--hairline-2);
+  }
+  table.stress-table tbody td:first-child,
+  table.stress-table tbody td.scenario-col {
+    text-align: left; font-family: var(--font-ui); font-size: 11px;
+  }
+  table.stress-table tbody tr:last-child td { border-bottom: none; }
+  table.stress-table td.impact-cell {
+    position: relative; min-width: 140px; padding-right: 12px;
+  }
+  .impact-bar {
+    height: 6px; background: rgba(42,46,51,0.06); border-radius: 1px;
+    position: relative; overflow: hidden;
+  }
+  .impact-bar::before {
+    content: ''; position: absolute; left: 50%; top: 0; bottom: 0;
+    width: 0.5pt; background: rgba(42,46,51,0.30);
+  }
+  .impact-fill {
+    position: absolute; top: 0.5px; bottom: 0.5px; border-radius: 1px;
+  }
+  .impact-fill.neg { background: linear-gradient(90deg, #A85F1C, #C0492F); }
+  .impact-fill.pos { background: linear-gradient(90deg, #4FAA72, #2F7048); }
+  .impact-val { font-family: var(--font-mono); font-weight: 600; }
+  .impact-val.neg { color: var(--neg); }
+  .impact-val.pos { color: var(--green); }
+
+  /* ── D. ACTION PLAN (P4) ── */
+  table.action-table { width: 100%; border-collapse: collapse; }
+  table.action-table thead th {
+    font-family: var(--font-mono); font-size: 9px; font-weight: 600;
+    letter-spacing: 0.03em; color: var(--ink-60); text-align: right;
+    padding: 6px 7px; border-bottom: 0.5pt solid var(--hairline);
+    text-transform: uppercase;
+  }
+  table.action-table thead th:first-child,
+  table.action-table thead th.l { text-align: left; }
+  table.action-table tbody td {
+    font-family: var(--font-mono); font-size: 10.5px; text-align: right;
+    padding: 7px 7px; border-bottom: 0.5pt solid var(--hairline-2);
+    vertical-align: middle;
+  }
+  table.action-table tbody td:first-child,
+  table.action-table tbody td.l { text-align: left; }
+  table.action-table tbody td.l.reason { font-family: var(--font-ui); font-size: 10px; color: var(--ink-60); line-height: 1.4; }
+  table.action-table tbody tr:last-child td { border-bottom: none; }
+  table.action-table .ticker { font-weight: 600; color: var(--ink); }
+  table.action-table .badge {
+    font-family: var(--font-mono); font-size: 8.5px; font-weight: 600;
+    padding: 1.5px 6px; border-radius: 2px; border: 0.5pt solid currentColor;
+    white-space: nowrap;
+  }
+  table.action-table .badge.act-buy  { color: var(--green); }
+  table.action-table .badge.act-hold { color: var(--ink-60); }
+  table.action-table .badge.act-trim { color: var(--amber); }
+  table.action-table .badge.act-sell { color: var(--neg); }
+  table.action-table .pos { color: var(--green); font-weight: 600; }
+  table.action-table .neg { color: var(--neg); font-weight: 600; }
+  table.action-table .level-pos { color: var(--green); }
+  table.action-table .level-neg { color: var(--neg); }
+
+  /* ── E. ОЖИДАЕМЫЙ ЭФФЕКТ — before/after ── */
+  .effect-grid {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;
+    margin-top: 4px;
+  }
+  .effect-card {
+    background: #FFFFFF; border: 0.5pt solid var(--hairline);
+    border-radius: 2px; padding: 10px 12px;
+  }
+  .ef-name {
+    font-family: var(--font-mono); font-size: 9px; font-weight: 600;
+    letter-spacing: 0.04em; color: var(--ink-60); text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .ef-row {
+    display: flex; align-items: baseline; gap: 6px;
+    font-family: var(--font-mono); font-size: 13px;
+  }
+  .ef-before { color: var(--ink-40); }
+  .ef-arrow { color: var(--tech-blue); font-size: 12px; }
+  .ef-after  { color: var(--ink); font-weight: 600; }
+  .ef-delta {
+    margin-top: 5px;
+    font-family: var(--font-mono); font-size: 10px; font-weight: 600;
+  }
+  .ef-delta.pos { color: var(--green); }
+  .ef-delta.neg { color: var(--neg); }
+  .ef-delta.neut { color: var(--ink-60); }
+
+  /* ── F. CoVe — верификация источников ── */
+  .cove-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px;
+    margin-top: 4px;
+  }
+  .cove-item {
+    display: grid; grid-template-columns: 18px 1fr; gap: 7px;
+    padding: 6px 0;
+    border-bottom: 0.5pt solid var(--hairline-2);
+    align-items: baseline;
+  }
+  .cove-item:last-child,
+  .cove-item:nth-last-child(2) { border-bottom: none; }
+  .cove-check {
+    color: var(--green); font-family: var(--font-mono); font-weight: 700;
+    text-align: center;
+  }
+  .cove-item.warn .cove-check { color: var(--amber); }
+  .cove-item.fail .cove-check { color: var(--neg); }
+  .cove-body {
+    font-size: 10.5px; line-height: 1.5; color: var(--ink);
+  }
+  .cove-body b { font-weight: 600; }
+  .cove-meta {
+    font-family: var(--font-mono); font-size: 9px; color: var(--ink-60);
+  }
+
+  /* ── G. РЕЖИМ — P5 ── */
+  .regime-layout {
+    display: grid; grid-template-columns: 1.05fr 1fr; gap: 14px;
+    align-items: stretch;
+  }
+  .regime-quadrant {
+    background: var(--panel); border: 0.5pt solid var(--hairline);
+    border-radius: 2px; padding: 12px 14px;
+  }
+  .regime-summary {
+    background: var(--panel); border: 0.5pt solid var(--hairline);
+    border-radius: 2px; padding: 12px 14px;
+    display: flex; flex-direction: column;
+  }
+  .reg-name {
+    font-size: 18px; font-weight: 700; color: var(--ink);
+    letter-spacing: -0.01em; margin-bottom: 4px;
+  }
+  .reg-conf {
+    font-family: var(--font-mono); font-size: 10px; color: var(--ink-60);
+    letter-spacing: 0.02em;
+  }
+  .reg-conf b { color: var(--tech-blue); font-weight: 600; }
+  .reg-factors {
+    margin-top: 10px; padding-top: 9px;
+    border-top: 0.5pt solid var(--hairline-2);
+    display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px;
+  }
+  .reg-f {
+    display: flex; flex-direction: column;
+  }
+  .reg-f-name {
+    font-family: var(--font-mono); font-size: 8.5px; font-weight: 600;
+    letter-spacing: 0.04em; color: var(--ink-60); text-transform: uppercase;
+  }
+  .reg-f-val {
+    font-family: var(--font-mono); font-size: 14px; font-weight: 600;
+    margin-top: 2px;
+  }
+  .reg-f-val.pos { color: var(--green); }
+  .reg-f-val.neg { color: var(--neg); }
+  .reg-f-val.neut { color: var(--ink); }
+  .reg-f-note { font-size: 9.5px; color: var(--ink-60); margin-top: 2px; }
+
+  .reg-quadrant-svg { width: 100%; height: auto; max-width: 360px; display: block; margin: 0 auto; }
+
+  /* список сигналов режима */
+  .reg-signals {
+    margin-top: 14px;
+  }
+  .reg-signals-label {
+    font-family: var(--font-mono); font-size: 8.5px; font-weight: 600;
+    letter-spacing: 0.04em; color: var(--ink-60); text-transform: uppercase;
+    margin-bottom: 7px;
+  }
+  .reg-signal-row {
+    display: grid; grid-template-columns: 1fr auto auto; gap: 10px;
+    padding: 6px 0; border-bottom: 0.5pt solid var(--hairline-2);
+    align-items: baseline;
+  }
+  .reg-signal-row:last-child { border-bottom: none; }
+  .reg-signal-name { font-size: 10.5px; }
+  .reg-signal-val { font-family: var(--font-mono); font-size: 10.5px; font-weight: 600; }
+  .reg-signal-val.pos { color: var(--green); }
+  .reg-signal-val.neg { color: var(--neg); }
+  .reg-signal-val.neut { color: var(--ink-60); }
+  .reg-signal-state {
+    font-family: var(--font-mono); font-size: 8.5px; font-weight: 600;
+    padding: 1.5px 6px; border-radius: 2px; border: 0.5pt solid currentColor;
+  }
+  .reg-signal-state.bull { color: var(--green); }
+  .reg-signal-state.bear { color: var(--neg); }
+  .reg-signal-state.flat { color: var(--ink-60); }
+  .reg-signal-state.warn { color: var(--amber); }
+
+  /* Bank RAG quote cards */
+  .rag-quotes {
+    margin-top: 22px;
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
+  }
+  .rag-quote {
+    background: var(--panel); border: 0.5pt solid var(--hairline);
+    border-left: 2px solid var(--tech-blue);
+    border-radius: 2px; padding: 11px 13px;
+  }
+  .rag-bank {
+    font-family: var(--font-mono); font-size: 9.5px; font-weight: 600;
+    color: var(--tech-blue); letter-spacing: 0.03em;
+  }
+  .rag-doc {
+    font-family: var(--font-mono); font-size: 8.5px; color: var(--ink-60);
+    margin-top: 1px;
+  }
+  .rag-text {
+    margin-top: 7px;
+    font-size: 11px; font-style: italic; line-height: 1.55; color: var(--ink);
+  }
+  .rag-tag {
+    margin-top: 6px;
+    font-family: var(--font-mono); font-size: 8.5px;
+    color: var(--tech-blue); background: var(--tech-blue-08);
+    padding: 1.5px 5px; border-radius: 2px;
+    display: inline-block;
+  }
+</style>
+</head>
+<body>
+
+<div class="sheet">
+
+  
+  <div class="tech-header">
+    <span><b>PORTFOLIO RISK REPORT</b> // TIER: DEEP // ID: Usample // RISK_ENGINE: MAC3</span>
+    <span class="ts">GENERATED 18.05.2026 09:48 UTC+5</span>
+  </div>
+
+  <!-- ═══ COVER ═══ -->
+  <section class="cover">
+    <div class="cover-main">
+      <div class="block-label">Вердикт по портфелю</div>
+      <h1 class="verdict">
+        Портфель в зоне <span class="hl">умеренного риска</span> —
+        держать можно, но почти весь риск собран в двух позициях.
+      </h1>
+
+      <div class="ai-box">
+        <div class="ai-head">[ 🤖 AI_ANALYSIS // CLAUDE SONNET 4.6 ]</div>
+        <div class="ai-body">
+          
+            За месяц портфель прибавил +5.8%.  Главные риски — перевес в технологиях и KSPI hotspot (TRC 22%).
+          
+        </div>
+      </div>
+    </div>
+
+    <!-- RISK GAUGE 0–100 -->
+    <div class="risk-panel">
+      <div class="block-label">Индекс риска портфеля (0–100)</div>
+      <svg class="risk-gauge-svg" viewBox="0 0 280 178"
+           xmlns="http://www.w3.org/2000/svg"
+           role="img" aria-label="Индекс риска портфеля: 62 из 100, умеренный">
+        <defs>
+          <!-- 5-стоп градиент шкалы — банковая палитра отчёта -->
+          <linearGradient id="riskGrad" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%"   stop-color="#3F8F5F"/>
+            <stop offset="24%"  stop-color="#8FB44C"/>
+            <stop offset="50%"  stop-color="#D9A03B"/>
+            <stop offset="76%"  stop-color="#C77B2C"/>
+            <stop offset="100%" stop-color="#C0492F"/>
+          </linearGradient>
+          <!-- объёмная заклёпка-пивот: тёмная сталь со светлым бликом -->
+          <radialGradient id="pivotGrad" cx="35%" cy="30%" r="80%">
+            <stop offset="0%"   stop-color="#6A7079"/>
+            <stop offset="55%"  stop-color="#2A2E33"/>
+            <stop offset="100%" stop-color="#0E1013"/>
+          </radialGradient>
+          <!-- конусная стрелка: лёгкий вертикальный градиент -->
+          <linearGradient id="needleGrad" x1="0.5" y1="0" x2="0.5" y2="1">
+            <stop offset="0%"   stop-color="#15171A"/>
+            <stop offset="100%" stop-color="#3A3F47"/>
+          </linearGradient>
+          <!-- мягкая тень стрелки -->
+          <filter id="ndlShadow" x="-30%" y="-30%" width="160%" height="160%">
+            <feDropShadow dx="0.6" dy="1.4" stdDeviation="1.2" flood-opacity="0.32"/>
+          </filter>
+        </defs>
+
+        <!-- внешний и внутренний hairline-обод (бель «прибора») -->
+        <path d="M 28 138 A 112 112 0 0 1 252 138"
+              fill="none" stroke="rgba(42,46,51,0.22)" stroke-width="0.6"/>
+        <path d="M 52 138 A 88 88 0 0 1 228 138"
+              fill="none" stroke="rgba(42,46,51,0.16)" stroke-width="0.6"/>
+
+        <!-- основная цветная дуга шкалы -->
+        <path d="M 40 138 A 100 100 0 0 1 240 138"
+              fill="none" stroke="url(#riskGrad)" stroke-width="22" stroke-linecap="butt"/>
+        <!-- внутренний светлый ободок шкалы (rim-light, эффект объёма) -->
+        <path d="M 50.4 138 A 89.6 89.6 0 0 1 229.6 138"
+              fill="none" stroke="rgba(255,255,255,0.40)" stroke-width="1.2"/>
+        <!-- внешний тёмный ободок шкалы (тень, эффект глубины) -->
+        <path d="M 29.6 138 A 110.4 110.4 0 0 1 250.4 138"
+              fill="none" stroke="rgba(42,46,51,0.18)" stroke-width="1.2"/>
+
+        <!-- мажорные тики и подписи: 0 / 25 / 50 / 75 / 100 -->
+        <g stroke="#2A2E33" stroke-opacity="0.55" stroke-width="0.8">
+          <line x1="22"    y1="138"  x2="29"    y2="138"/>
+          <line x1="52.0"  y1="50.0" x2="56.9"  y2="54.9"/>
+          <line x1="140"   y1="20"   x2="140"   y2="27"/>
+          <line x1="223.1" y1="54.9" x2="228.0" y2="50.0"/>
+          <line x1="251"   y1="138"  x2="258"   y2="138"/>
+        </g>
+        <g font-family="IBM Plex Mono" font-size="9.5" fill="rgba(42,46,51,0.62)">
+          <text x="14"  y="155" text-anchor="middle">0</text>
+          <text x="45"  y="42"  text-anchor="middle">25</text>
+          <text x="140" y="13"  text-anchor="middle">50</text>
+          <text x="235" y="42"  text-anchor="middle">75</text>
+          <text x="266" y="155" text-anchor="middle">100</text>
+        </g>
+
+        <!-- зональные подписи внутри полукруга -->
+        <g font-family="IBM Plex Mono" font-size="7.5" fill="rgba(42,46,51,0.42)" letter-spacing="0.04em">
+          <text x="80"  y="120" text-anchor="middle">НИЗКИЙ</text>
+          <text x="140" y="86"  text-anchor="middle">УМЕРЕННЫЙ</text>
+          <text x="200" y="120" text-anchor="middle">ВЫСОКИЙ</text>
+        </g>
+
+        
+        
+        
+        <polygon points="140,38 147.01,138 132.99,138"
+                 transform="rotate(21.6 140 138)"
+                 fill="url(#needleGrad)" filter="url(#ndlShadow)"/>
+
+        <!-- Пивот-хаб: объёмная заклёпка с обводкой и бликом -->
+        <circle cx="140" cy="138" r="10.5" fill="url(#pivotGrad)"
+                stroke="rgba(42,46,51,0.45)" stroke-width="0.6"/>
+        <ellipse cx="136.5" cy="134.5" rx="3.2" ry="2.2"
+                 fill="rgba(255,255,255,0.32)"/>
+      </svg>
+      <div class="risk-readout-big">62 / 100 — <span class="tier-text">Умеренный</span></div>
+    </div>
+  </section>
+
+  <!-- ═══ KPI STRIP ═══ -->
+  <div class="block-label" style="margin-top:24px;">Ключевые показатели риска</div>
+  <div class="kpi-grid">
+
+    
+    
+    <div class="kpi st-normal">
+      <div class="kpi-name">CVaR&nbsp;95%</div>
+      <div class="kpi-value-row">
+        <span class="kpi-value">-5.2%</span>
+        <span class="kpi-sub">
+          (95% CL · 1 день · ≈ $2,600 · CI CI: -7.0% … -4.5%)
+        </span>
+      </div>
+
+      
+      <div class="kpi-spark">
+        <svg viewBox="0 0 240 36" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg"><polyline points="4.0,4.0 25.1,8.7 46.2,14.3 67.3,20.8 88.4,27.3 109.5,32.0 130.5,30.1 151.6,24.5 172.7,19.9 193.8,18.0 214.9,22.7 236.0,24.5" fill="none" stroke="#3F8F5F" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/><circle cx="236.0" cy="24.5" r="3" fill="#FBFAF7" stroke="#3F8F5F" stroke-width="1.1"/></svg>
+      </div>
+      
+      <div class="kpi-ai">
+        <span class="tag">🤖</span>
+        <span class="txt">«Средний убыток портфеля за один худший день при самом
+          плохом сценарии в будущем. У вас ≈&nbsp;<b>-5.2%</b> ($2,600 от $50,000).
+          Доверительный интервал (95%): CI: -7.0% … -4.5%.»
+          <span class="src">[Quant Engine · Politis-Romano bootstrap]</span></span>
+      </div>
+    </div>
+
+    <!-- KPI 2 — Sharpe Ratio -->
+    <div class="kpi st-good">
+      <div class="kpi-name">Sharpe Ratio</div>
+      <div class="kpi-value-row">
+        <span class="kpi-value">1.34</span>
+        <span class="kpi-sub">(Sortino 1.62)</span>
+      </div>
+
+      
+      <div class="kpi-spark">
+        <svg viewBox="0 0 240 36" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg"><polyline points="4.0,28.3 25.1,23.5 46.2,18.6 67.3,21.7 88.4,29.6 109.5,32.0 130.5,25.3 151.6,17.4 172.7,12.5 193.8,7.7 214.9,6.4 236.0,4.0" fill="none" stroke="#2F6FB3" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/><circle cx="236.0" cy="4.0" r="3" fill="#FBFAF7" stroke="#2F6FB3" stroke-width="1.1"/></svg>
+      </div>
+      
+      <div class="kpi-ai">
+        <span class="tag">🤖</span>
+        <span class="txt">«Сколько прибыли приносит каждая единица риска. У вас
+          <b>1.34</b> (Sortino 1.62 — учитывает только просадки).
+          Норма ≥&nbsp;1.0, ≥&nbsp;1.5 — отлично; &lt; 0 — портфель проигрывает безриск. ставке.»
+          <span class="src">[Quant Engine · RFR 14%]</span></span>
+      </div>
+    </div>
+
+    <!-- KPI 3 — Max Drawdown -->
+    <div class="kpi st-watch">
+      <div class="kpi-name">Max Drawdown</div>
+      <div class="kpi-value-row">
+        <span class="kpi-value">-12.8%</span>
+        <span class="kpi-sub">(пик→дно · ≈ $6,400)</span>
+      </div>
+
+      
+      <div class="kpi-spark">
+        <svg viewBox="0 0 240 36" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg"><polyline points="4.0,4.0 25.1,8.8 46.2,14.2 67.3,21.5 88.4,26.3 109.5,32.0 130.5,27.9 151.6,25.6 172.7,24.7 193.8,23.1 214.9,26.3 236.0,32.0" fill="none" stroke="#C0492F" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/><circle cx="236.0" cy="32.0" r="3" fill="#FBFAF7" stroke="#C0492F" stroke-width="1.1"/></svg>
+      </div>
+      
+      <div class="kpi-ai">
+        <span class="tag">🤖</span>
+        <span class="txt">«Максимальное падение портфеля от его пика за всю историю.
+          У вас <b>-12.8%</b> (≈ $6,400).
+          
+            Основной вклад — <b>AAPL</b> и <b>KSPI</b>: снижение их веса сгладит будущие просадки.
+          »
+          <span class="src">[Quant Engine · peak-to-trough на equity curve]</span></span>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ═══ RISK CONCENTRATION: таблица + waterfall ═══ -->
+  <div class="risk-conc">
+
+    <!-- Таблица -->
+    <div class="panel">
+      <div class="panel-title">Где сосредоточен ваш риск</div>
+      <table>
+        <thead>
+          <tr>
+            <th>ТИКЕР</th>
+            <th>ВЕС&nbsp;%</th>
+            <th>BETA</th>
+            <th class="hl-col">ВКЛАД В РИСК&nbsp;%</th>
+            <th>СТАТУС</th>
+          </tr>
+        </thead>
+        <tbody>
+          
+          
+          
+            
+            
+          <tr>
+            <td>BND</td>
+            <td>20.0</td>
+            <td>—</td>
+            <td class="hl-col">3.2</td>
+            <td><span class="pill normal">NORMAL</span></td>
+          </tr>
+          
+            
+            
+          <tr>
+            <td>KSPI</td>
+            <td>30.0</td>
+            <td>—</td>
+            <td class="hl-col">22.1</td>
+            <td><span class="pill watch">HOTSPOT</span></td>
+          </tr>
+          
+            
+            
+          <tr>
+            <td>AAPL</td>
+            <td>50.0</td>
+            <td>—</td>
+            <td class="hl-col">18.4</td>
+            <td><span class="pill normal">NORMAL</span></td>
+          </tr>
+          
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Waterfall: разложение риска (стиль референса) -->
+    <div class="panel">
+      <div class="panel-title">Разложение риска портфеля</div>
+      <div class="wf-legend">
+        <span><span class="sw amber"></span>риск позиции отдельно</span>
+        <span><span class="sw green"></span>эффект диверсификации</span>
+        <span><span class="sw blue"></span>итоговый риск</span>
+      </div>
+      <!--
+        Классический waterfall разложения риска (как на референс-изображении):
+        индивидуальные риски позиций набираются стопкой вверх → зелёный шаг
+        "эффект диверсификации" вычитает → синий "итоговый риск" — полный бар.
+        Шкала Y: 0..20% годовой волатильности.
+        plot: x 38..350, y 165(0%)..18(20%); 7.35 px на 1%.  y(p)=165-7.35p
+        7 слотов, шаг 44.57, бар 30.
+        Значения (вклад в годовую волатильность, %):
+          PLTR 6.2  CRWD 5.0  AAPL 3.4  JNJ 2.0  KO 1.8  → сумма 18.4
+          Диверсификация −4.2  →  Итоговый риск 14.2
+      -->
+      <svg width="100%" height="218" viewBox="0 0 360 218" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <!-- амбер: вертикальный градиент для индивидуальных рисков -->
+          <linearGradient id="barAmber" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%"   stop-color="#D9913D"/>
+            <stop offset="100%" stop-color="#A85F1C"/>
+          </linearGradient>
+          <!-- зелёный: «эффект диверсификации» -->
+          <linearGradient id="barGreen" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%"   stop-color="#52A476"/>
+            <stop offset="100%" stop-color="#2F7048"/>
+          </linearGradient>
+          <!-- синий: итоговый риск -->
+          <linearGradient id="barBlue" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%"   stop-color="#3E83C9"/>
+            <stop offset="100%" stop-color="#23588F"/>
+          </linearGradient>
+          <!-- мягкая тень под барами -->
+          <filter id="barShadow" x="-20%" y="-20%" width="140%" height="140%">
+            <feDropShadow dx="0" dy="1.2" stdDeviation="1.0" flood-opacity="0.16"/>
+          </filter>
+        </defs>
+
+        
+        
+        
+        
+          
+        
+        
+        
+        
+        
+
+        
+        <g font-family="IBM Plex Mono" font-size="8" fill="rgba(42,46,51,0.45)">
+          <line x1="34" y1="165"    x2="352" y2="165"    stroke="#2A2E33" stroke-opacity="0.22" stroke-width="0.5"/>
+          <text x="30" y="168" text-anchor="end">0%</text>
+          <line x1="34" y1="128.25" x2="352" y2="128.25" stroke="#2A2E33" stroke-opacity="0.10" stroke-width="0.5" stroke-dasharray="2 3"/>
+          <text x="30" y="131" text-anchor="end">5%</text>
+          <line x1="34" y1="91.5"   x2="352" y2="91.5"   stroke="#2A2E33" stroke-opacity="0.10" stroke-width="0.5" stroke-dasharray="2 3"/>
+          <text x="30" y="94" text-anchor="end">10%</text>
+          <line x1="34" y1="54.75"  x2="352" y2="54.75"  stroke="#2A2E33" stroke-opacity="0.10" stroke-width="0.5" stroke-dasharray="2 3"/>
+          <text x="30" y="57" text-anchor="end">15%</text>
+          <line x1="34" y1="18"     x2="352" y2="18"     stroke="#2A2E33" stroke-opacity="0.10" stroke-width="0.5" stroke-dasharray="2 3"/>
+          <text x="30" y="21" text-anchor="end">20%</text>
+        </g>
+
+        
+          
+          
+          
+          
+
+          
+          
+          
+          <rect x="46.6" y="26" width="171.3" height="139"
+                fill="#C77B2C" fill-opacity="0.05"/>
+
+          
+          
+          <g filter="url(#barShadow)">
+          
+            
+            
+            
+            
+            <rect x="46.6" y="75.0"
+                  width="40.0" height="90.0"
+                  fill="url(#barAmber)" rx="1"/>
+          
+            
+            
+            
+            
+            <rect x="103.7" y="35.3"
+                  width="40.0" height="39.7"
+                  fill="url(#barAmber)" rx="1"/>
+          
+            
+            
+            
+            
+            <rect x="160.7" y="31.3"
+                  width="40.0" height="4.0"
+                  fill="url(#barAmber)" rx="1"/>
+          
+
+            
+            
+            
+            
+            <rect x="217.8" y="31.3"
+                  width="40.0" height="29.3"
+                  fill="url(#barGreen)" rx="1"/>
+
+            
+            
+            
+            
+            <rect x="274.9" y="60.6"
+                  width="40.0" height="104.4"
+                  fill="url(#barBlue)" rx="1"/>
+          </g>
+
+          
+          
+          <g stroke="#2A2E33" stroke-opacity="0.42" stroke-width="0.5" stroke-dasharray="2.5 2">
+          
+            
+            
+            
+            
+            <line x1="86.5" y1="75.0"
+                  x2="103.7"  y2="75.0"/>
+          
+            
+            
+            
+            
+            <line x1="143.6" y1="35.3"
+                  x2="160.7"  y2="35.3"/>
+          
+            
+            
+            
+            
+            <line x1="200.7" y1="31.3"
+                  x2="217.8"  y2="31.3"/>
+          
+          </g>
+
+          
+          
+          <g font-family="IBM Plex Mono" font-size="8.5" fill="#2A2E33">
+          
+            
+            
+            
+            <text x="66.5" y="71.0" text-anchor="middle">12.2%</text>
+          
+            
+            
+            
+            <text x="123.6" y="31.3" text-anchor="middle">5.4%</text>
+          
+            
+            
+            
+            <text x="180.7" y="27.3" text-anchor="middle">0.5%</text>
+          
+            
+            
+            
+            <text x="237.8" y="27.3"
+                  text-anchor="middle" fill="#2F7048" font-weight="600">−4.0%</text>
+            
+            
+            
+            <text x="294.9" y="56.6"
+                  text-anchor="middle" fill="#23588F" font-weight="600">14.2%</text>
+          </g>
+
+          
+          <g font-family="IBM Plex Mono" font-size="8.5" fill="#2A2E33">
+          
+            
+            <text x="66.5" y="178" text-anchor="middle">AAPL</text>
+          
+            
+            <text x="123.6" y="178" text-anchor="middle">KSPI</text>
+          
+            
+            <text x="180.7" y="178" text-anchor="middle">BND</text>
+          
+          </g>
+
+          
+          <g font-family="IBM Plex Sans" font-size="7.5" fill="rgba(42,46,51,0.7)">
+            <text x="237.8" y="176" text-anchor="middle">Диверси-</text>
+            <text x="237.8" y="184" text-anchor="middle">фикация</text>
+            <text x="294.9"  y="176" text-anchor="middle">Итоговый</text>
+            <text x="294.9"  y="184" text-anchor="middle">риск</text>
+          </g>
+
+          
+          
+          
+          
+          <path d="M46.6,192 L46.6,197 L123.6,200 L123.6,203 L123.6,200 L200.7,197 L200.7,192"
+                fill="none" stroke="#2A2E33" stroke-opacity="0.50" stroke-width="0.5"/>
+          <text x="123.6" y="214" text-anchor="middle"
+                font-family="IBM Plex Sans" font-size="8.5" fill="rgba(42,46,51,0.65)">Риск каждой позиции по отдельности</text>
+
+        
+            </svg>
+    </div>
+
+    <!-- связующий AI-комментарий -->
+    <div class="conc-ai">
+      <div class="ai-head">[ 🤖 AI_ANALYSIS // CLAUDE SONNET 4.6 ]</div>
+      <div class="ai-body">
+        «Простыми словами: если бы вы держали каждую бумагу <span class="flag">по
+        отдельности, их риски сложились бы в 18.4%</span> годовых колебаний. Но
+        бумаги не падают одновременно — этот «эффект диверсификации» снижает риск
+        на 4.2 пункта, и реальный риск портфеля — 14.2%. В таблице слева видно,
+        кто вносит больше всего: те же PLTR и CRWD. Диверсификация уже работает
+        на вас, но усилить её можно, добавив активы из других секторов.
+        <span class="src">[Quant Engine]</span>»
+      </div>
+    </div>
+
+  </div>
+
+
+</div>
+
+<div class="sheet">
+
+  <!-- ТЕХ-ХЕДЕР -->
+  <div class="tech-header">
+    <span><b>PORTFOLIO RISK REPORT</b> // TIER: DEEP // ID: Usample // RISK_ENGINE: MAC3</span>
+    <span class="ts">PAGE 2 OF 5</span>
+  </div>
+
+  <!-- ЗАГОЛОВОК СЕКЦИИ -->
+  <div class="sec-head">
+    <div class="sec-title">Что вы держите</div>
+    <div class="sec-sub">9 позиций · нажмите на строку, чтобы увидеть фундаментал бумаги</div>
+  </div>
+
+  <!-- ТАБЛИЦА + ПАНЕЛЬ СЕКТОРОВ -->
+  <div class="holdings-layout">
+
+  <div class="holdings">
+    <!-- шапка -->
+    <div class="h-head">
+      <span>Тикер</span>
+      <span>Класс активов</span>
+      <span class="num">Вес</span>
+      <span class="num">Риск</span>
+      <span class="num">P/L %</span>
+      <span class="num">P/L $</span>
+      <span class="sep">Действие</span>
+      <span></span>
+    </div>
+
+    
+    
+    
+      
+    
+      
+    
+      
+    
+
+    
+      
+      
+      
+    <div class="h-group">
+      <div class="h-row" onclick="tgRow(this)">
+        <div class="h-cell ticker">
+          <div class="h-ticker">
+            <span class="tk">AAPL</span>
+            
+          </div>
+        </div>
+        <div class="h-cell"><span class="h-cell-label">Класс</span>Акции США</div>
+        <div class="h-cell num"><span class="h-cell-label">Вес</span>50.0%</div>
+        <div class="h-cell num"><span class="h-cell-label">Риск</span>18.4%</div>
+        <div class="h-cell num"><span class="h-cell-label">P/L %</span>
+          <span class="pnl pos">+25.0%</span>
+        </div>
+        <div class="h-cell num"><span class="h-cell-label">P/L $</span>
+          <span class="pnl pos">+$5,000</span>
+        </div>
+        <div class="h-cell action"><span class="badge hold">HOLD</span></div>
+        <div class="h-cell caret-cell">
+          <span class="h-toggle">
+            <span class="t-more">Детали</span>
+            <span class="t-less">Свернуть</span>
+            <span class="h-caret">▸</span>
+          </span>
+        </div>
+      </div>
+      <div class="h-detail">
+        <div class="h-detail-inner">
+          <div class="h-detail-name">AAPL · фундаментал по данным SEC EDGAR</div>
+          <div class="stat-grid">
+            <div class="stat"><div class="stat-label">Доходность капитала (ROE)</div>
+              <div class="stat-value">н/д</div></div>
+            <div class="stat"><div class="stat-label">Операц. маржа</div>
+              <div class="stat-value">н/д</div></div>
+            <div class="stat"><div class="stat-label">Долг / активы</div>
+              <div class="stat-value">н/д</div></div>
+            <div class="stat"><div class="stat-label">Рост выручки г/г</div>
+              <div class="stat-value">н/д</div></div>
+            <div class="stat"><div class="stat-label">ATR — дневная волатильность</div>
+              <div class="stat-value ">1.40%</div></div>
+            <div class="stat"><div class="stat-label">Altman-Z (банкротство)</div>
+              <div class="stat-value">н/д</div></div>
+          </div>
+          <div class="h-detail-ai">
+            <span class="tag">🤖</span>
+            <span class="txt">Особенности позиции: вес &gt; 15% — следите за
+                  динамикой через панель Action Plan.
+              <span class="h-cite">[SEC EDGAR] [Quant Engine]</span>
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+      
+      
+      
+    <div class="h-group">
+      <div class="h-row" onclick="tgRow(this)">
+        <div class="h-cell ticker">
+          <div class="h-ticker">
+            <span class="tk">KSPI</span>
+            
+          </div>
+        </div>
+        <div class="h-cell"><span class="h-cell-label">Класс</span>Акции США</div>
+        <div class="h-cell num"><span class="h-cell-label">Вес</span>30.0%</div>
+        <div class="h-cell num"><span class="h-cell-label">Риск</span>22.1%</div>
+        <div class="h-cell num"><span class="h-cell-label">P/L %</span>
+          <span class="pnl neg">-16.7%</span>
+        </div>
+        <div class="h-cell num"><span class="h-cell-label">P/L $</span>
+          <span class="pnl neg">−$3,000</span>
+        </div>
+        <div class="h-cell action"><span class="badge hold">HOLD</span></div>
+        <div class="h-cell caret-cell">
+          <span class="h-toggle">
+            <span class="t-more">Детали</span>
+            <span class="t-less">Свернуть</span>
+            <span class="h-caret">▸</span>
+          </span>
+        </div>
+      </div>
+      <div class="h-detail">
+        <div class="h-detail-inner">
+          <div class="h-detail-name">KSPI · фундаментал по данным SEC EDGAR</div>
+          <div class="stat-grid">
+            <div class="stat"><div class="stat-label">Доходность капитала (ROE)</div>
+              <div class="stat-value">н/д</div></div>
+            <div class="stat"><div class="stat-label">Операц. маржа</div>
+              <div class="stat-value">н/д</div></div>
+            <div class="stat"><div class="stat-label">Долг / активы</div>
+              <div class="stat-value">н/д</div></div>
+            <div class="stat"><div class="stat-label">Рост выручки г/г</div>
+              <div class="stat-value">н/д</div></div>
+            <div class="stat"><div class="stat-label">ATR — дневная волатильность</div>
+              <div class="stat-value ">2.10%</div></div>
+            <div class="stat"><div class="stat-label">Altman-Z (банкротство)</div>
+              <div class="stat-value">н/д</div></div>
+          </div>
+          <div class="h-detail-ai">
+            <span class="tag">🤖</span>
+            <span class="txt">В минусе (-16.7%); вклад в риск 22.1%.Дополнительные триггеры: вес &gt; 15% · TRC &gt; 20%.
+              <span class="h-cite">[SEC EDGAR] [Quant Engine]</span>
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+      
+      
+      
+    <div class="h-group">
+      <div class="h-row" onclick="tgRow(this)">
+        <div class="h-cell ticker">
+          <div class="h-ticker">
+            <span class="tk">BND</span>
+            
+          </div>
+        </div>
+        <div class="h-cell"><span class="h-cell-label">Класс</span>Облигации</div>
+        <div class="h-cell num"><span class="h-cell-label">Вес</span>20.0%</div>
+        <div class="h-cell num"><span class="h-cell-label">Риск</span>3.2%</div>
+        <div class="h-cell num"><span class="h-cell-label">P/L %</span>
+          <span class="pnl pos">+0.0%</span>
+        </div>
+        <div class="h-cell num"><span class="h-cell-label">P/L $</span>
+          <span class="pnl pos">+$0</span>
+        </div>
+        <div class="h-cell action"><span class="badge hold">HOLD</span></div>
+        <div class="h-cell caret-cell">
+          <span class="h-toggle">
+            <span class="t-more">Детали</span>
+            <span class="t-less">Свернуть</span>
+            <span class="h-caret">▸</span>
+          </span>
+        </div>
+      </div>
+      <div class="h-detail">
+        <div class="h-detail-inner">
+          <div class="h-detail-name">BND · фундаментал по данным SEC EDGAR</div>
+          <div class="stat-grid">
+            <div class="stat"><div class="stat-label">Доходность капитала (ROE)</div>
+              <div class="stat-value">н/д</div></div>
+            <div class="stat"><div class="stat-label">Операц. маржа</div>
+              <div class="stat-value">н/д</div></div>
+            <div class="stat"><div class="stat-label">Долг / активы</div>
+              <div class="stat-value">н/д</div></div>
+            <div class="stat"><div class="stat-label">Рост выручки г/г</div>
+              <div class="stat-value">н/д</div></div>
+            <div class="stat"><div class="stat-label">ATR — дневная волатильность</div>
+              <div class="stat-value ">0.40%</div></div>
+            <div class="stat"><div class="stat-label">Altman-Z (банкротство)</div>
+              <div class="stat-value">н/д</div></div>
+          </div>
+          <div class="h-detail-ai">
+            <span class="tag">🤖</span>
+            <span class="txt">Особенности позиции: вес &gt; 15% — следите за
+                  динамикой через панель Action Plan.
+              <span class="h-cite">[SEC EDGAR] [Quant Engine]</span>
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+
+  </div><!-- /.holdings -->
+
+  <!-- ПАНЕЛЬ СЕКТОРОВ -->
+  
+  
+  
+  
+  
+
+  <div class="sector-panel">
+    <div class="sp-head">
+      <div class="sp-title">Структура по секторам</div>
+      <div class="sp-sub">доля капитала · 3 позиций</div>
+    </div>
+
+    <div class="sp-body">
+    <div class="pie-wrap">
+      
+      
+      
+        
+        
+        
+        
+        
+          
+        
+        
+      
+        
+        
+        
+        
+        
+          
+        
+        
+      
+        
+        
+        
+        
+        
+        
+      
+      <div class="pie" style="background:
+            radial-gradient(circle at 50% 8%,  rgba(255,255,255,0.55), rgba(255,255,255,0) 28%),
+            radial-gradient(circle at 50% 96%, rgba(42,46,51,0.16),  rgba(42,46,51,0) 32%),
+            conic-gradient(var(--amber) 0.00% 49.00%, rgba(255,255,255,0.85) 49.00% 50.00%, var(--tech-blue) 50.00% 79.00%, rgba(255,255,255,0.85) 79.00% 80.00%, var(--green) 80.00% 100.00%);">
+        <div class="pie-center">
+          <span class="pc-pct">50%</span>
+          <span class="pc-lbl">TECHNOLOGY</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="pie-legend">
+      
+        
+        <div class="lg-item over">
+          <span class="lg-sw" style="background:var(--amber)"></span>
+          <span class="lg-name">Technology</span>
+          <span class="lg-pct">50%</span>
+        </div>
+      
+        
+        <div class="lg-item">
+          <span class="lg-sw" style="background:var(--tech-blue)"></span>
+          <span class="lg-name">EM_Kazakhstan</span>
+          <span class="lg-pct">30%</span>
+        </div>
+      
+        
+        <div class="lg-item">
+          <span class="lg-sw" style="background:var(--green)"></span>
+          <span class="lg-name">Fixed_Income</span>
+          <span class="lg-pct">20%</span>
+        </div>
+      
+    </div>
+    </div><!-- /.sp-body -->
+
+    
+      
+      <div class="sp-warn">
+        <span>⚠</span>
+        <span>{&#39;sector&#39;: &#39;Technology&#39;, &#39;weight_pct&#39;: 50.0, &#39;cap_pct&#39;: 40.0, &#39;overage_pp&#39;: 10.0}</span>
+      </div>
+      
+    
+  </div><!-- /.sector-panel -->
+
+  </div><!-- /.holdings-layout -->
+
+  <!-- СВОДНЫЙ AI-БЛОК -->
+  <div class="sec-ai">
+    <div class="ai-head">[ 🤖 AI_ANALYSIS // CLAUDE SONNET 4.6 ]</div>
+    <div class="ai-body">
+      <p>«Простыми словами: портфель двигают две бумаги — <span class="flag-inline">PLTR
+      и CRWD</span>. Они приносят лучшую доходность, но именно они помечены
+      HOTSPOT — на них вместе приходится почти половина риска. С другого края —
+      JNJ, KO и BND: спокойные позиции с низкой бетой, которые этот риск гасят.</p>
+
+      <p>По секторам портфель сильно перевешен в технологиях —
+      <span class="flag-inline">62% против ~30% у рынка</span>. Goldman Sachs
+      ждёт повышенной волатильности в IT в этом квартале
+      <span class="src-inline">[RAG: GS_Q2_2026]</span>, а Morgan Stanley в обзоре
+      сектора понижает прогноз роста на 2026 и советует фиксировать часть прибыли
+      в перегретых именах <span class="src-inline">[RAG: MS_TechOutlook_2026]</span> —
+      это прямо про ваши PLTR, CRWD и NVDA. Зато ваши защитные сектора —
+      здравоохранение (14%) и потребительские товары (16%) — JPMorgan называет
+      «островками стабильности» на случай коррекции
+      <span class="src-inline">[RAG: JPM_Strategy_Q2_2026]</span>. По энергетике
+      (6%) банки осторожны при текущих ценах на нефть — и XOM у вас уже помечен на
+      сокращение. Подробности концентрации — на странице «Где сосредоточен риск».»</p>
+    </div>
+    <div class="ai-sources">
+      ИСТОЧНИКИ — ОТЧЁТЫ ИНВЕСТБАНКОВ:
+      <b>Goldman Sachs</b> «Q2 2026 Market Outlook» ·
+      <b>Morgan Stanley</b> «Technology Sector Outlook 2026» ·
+      <b>JPMorgan</b> «Q2 2026 Strategy &amp; Allocation»
+    </div>
+  </div>
+
+
+</div>
+
+<div class="sheet">
+
+  <!-- ТЕХ-ХЕДЕР -->
+  <div class="tech-header">
+    <span><b>PORTFOLIO RISK REPORT</b> // TIER: DEEP // ID: Usample // RISK_ENGINE: MAC3</span>
+    <span class="ts">PAGE 3 OF 5</span>
+  </div>
+
+  <!-- ЗАГОЛОВОК СЕКЦИИ -->
+  <div class="sec-head">
+    <div class="sec-title">Факторное разложение · 4-Pillar Scoring · стресс-сценарии</div>
+    <div class="sec-sub">детальный взгляд на источники риска и качество позиций · <b style="color:var(--tech-blue);">[DEEP]</b></div>
+  </div>
+
+  <!-- ════ A. FACTOR β-RADAR ════ -->
+  <div class="d3-block">
+    <div class="d3-block-head">
+      <div class="panel-title">Факторное разложение (β) — скрытые концентрации</div>
+      <div class="d3-block-sub">Ridge β-регрессия (α=1.0) · EWMA-ковариация λ≈0.94 · окно 60 дней
+        <span class="src">[Quant Engine MAC3]</span></div>
+    </div>
+
+    <div class="factor-layout">
+      <!-- Radar SVG -->
+      <div class="factor-radar-wrap">
+        <svg class="factor-radar-svg" viewBox="0 0 320 280" xmlns="http://www.w3.org/2000/svg"
+             role="img" aria-label="Факторный радар портфеля: 8 факторов">
+          <defs>
+            <linearGradient id="radarFill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%"   stop-color="#2F6FB3" stop-opacity="0.32"/>
+              <stop offset="100%" stop-color="#2F6FB3" stop-opacity="0.10"/>
+            </linearGradient>
+            <linearGradient id="radarStroke" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%"   stop-color="#23588F"/>
+              <stop offset="100%" stop-color="#3E83C9"/>
+            </linearGradient>
+            <filter id="radarShadow" x="-20%" y="-20%" width="140%" height="140%">
+              <feDropShadow dx="0" dy="1.2" stdDeviation="1.1" flood-opacity="0.20"/>
+            </filter>
+          </defs>
+
+          <!-- концентрические сетки 0.25 / 0.5 / 0.75 / 1.0 (8-gon) -->
+          <g fill="none" stroke="rgba(42,46,51,0.18)" stroke-width="0.5">
+            <polygon points="160,115 177.68,122.32 185,140 177.68,157.68 160,165 142.32,157.68 135,140 142.32,122.32"/>
+            <polygon points="160,90  195.36,104.64 210,140 195.36,175.36 160,190 124.64,175.36 110,140 124.64,104.64"/>
+            <polygon points="160,65  213.03,86.97 235,140 213.03,193.03 160,215 106.97,193.03 85,140 106.97,86.97"/>
+            <polygon points="160,40  230.71,69.29 260,140 230.71,210.71 160,240 89.29,210.71 60,140 89.29,69.29" stroke-opacity="0.32"/>
+          </g>
+          <!-- 8 радиальных осей (каждые 45°) -->
+          <g stroke="rgba(42,46,51,0.20)" stroke-width="0.5">
+            <line x1="160" y1="140" x2="160"    y2="40"/>
+            <line x1="160" y1="140" x2="230.71" y2="69.29"/>
+            <line x1="160" y1="140" x2="260"    y2="140"/>
+            <line x1="160" y1="140" x2="230.71" y2="210.71"/>
+            <line x1="160" y1="140" x2="160"    y2="240"/>
+            <line x1="160" y1="140" x2="89.29"  y2="210.71"/>
+            <line x1="160" y1="140" x2="60"     y2="140"/>
+            <line x1="160" y1="140" x2="89.29"  y2="69.29"/>
+          </g>
+
+          <!-- метки шкалы (вдоль оси Market) -->
+          <g font-family="IBM Plex Mono" font-size="8" fill="rgba(42,46,51,0.45)">
+            <text x="164" y="118" text-anchor="start">0.5</text>
+            <text x="164" y="78"  text-anchor="start">1.0</text>
+            <text x="164" y="44"  text-anchor="start">1.5</text>
+          </g>
+
+          <!-- 8 меток факторов на тиках -->
+          <g font-family="IBM Plex Mono" font-size="9" fill="rgba(42,46,51,0.85)" font-weight="600">
+            <text x="160"    y="28"  text-anchor="middle">MARKET</text>
+            <text x="241.32" y="60"  text-anchor="middle">VALUE</text>
+            <text x="277"    y="143" text-anchor="middle">QUALITY</text>
+            <text x="241.32" y="223" text-anchor="middle">COMMOD</text>
+            <text x="160"    y="258" text-anchor="middle">MOMENTUM</text>
+            <text x="78.68"  y="223" text-anchor="middle">RATES</text>
+            <text x="42"     y="143" text-anchor="middle">SIZE</text>
+            <text x="78.68"  y="60"  text-anchor="middle">VOLATIL</text>
+          </g>
+
+          <!-- бенчмарк (SPX-like): октагон 0.5 baseline, dashed -->
+          <polygon points="160,90 195.36,104.64 210,140 195.36,175.36 160,190 124.64,175.36 110,140 124.64,104.64"
+                   fill="rgba(42,46,51,0.06)" stroke="rgba(42,46,51,0.35)" stroke-width="0.6"
+                   stroke-dasharray="3 2"/>
+
+          <!-- портфель: 8-вершинный полигон с градиентом + тенью.            -->
+          <!-- β: MARKET 1.18 · VALUE 0.25 · QUALITY 0.62 · COMMOD 0.15 ·     -->
+          <!--    MOMENTUM 1.05 · RATES |−0.30|=0.30 · SIZE 0.42 · VOL 0.88   -->
+          <polygon points="160,61.33 171.79,128.21 201.33,140 167.07,147.07 160,210 145.86,154.14 132,140 118.51,98.51"
+                   fill="url(#radarFill)" stroke="url(#radarStroke)" stroke-width="1.8"
+                   stroke-linejoin="round" filter="url(#radarShadow)"/>
+
+          <!-- вершины данных -->
+          <g fill="#2F6FB3">
+            <circle cx="160"    cy="61.33"  r="3.0"/>
+            <circle cx="171.79" cy="128.21" r="3.0"/>
+            <circle cx="201.33" cy="140"    r="3.0"/>
+            <circle cx="167.07" cy="147.07" r="3.0"/>
+            <circle cx="160"    cy="210"    r="3.0"/>
+            <circle cx="145.86" cy="154.14" r="3.0"/>
+            <circle cx="132"    cy="140"    r="3.0"/>
+            <circle cx="118.51" cy="98.51"  r="3.0"/>
+          </g>
+          <g fill="#FBFAF7">
+            <circle cx="160"    cy="61.33"  r="1.3"/>
+            <circle cx="171.79" cy="128.21" r="1.3"/>
+            <circle cx="201.33" cy="140"    r="1.3"/>
+            <circle cx="167.07" cy="147.07" r="1.3"/>
+            <circle cx="160"    cy="210"    r="1.3"/>
+            <circle cx="145.86" cy="154.14" r="1.3"/>
+            <circle cx="132"    cy="140"    r="1.3"/>
+            <circle cx="118.51" cy="98.51"  r="1.3"/>
+          </g>
+
+          <!-- легенда внизу -->
+          <g font-family="IBM Plex Mono" font-size="8.5" fill="rgba(42,46,51,0.7)">
+            <rect x="60"  y="270" width="9" height="3" fill="url(#radarFill)" stroke="#2F6FB3" stroke-width="0.6"/>
+            <text x="73"  y="274">портфель</text>
+            <line x1="148" y1="271.5" x2="157" y2="271.5" stroke="rgba(42,46,51,0.5)" stroke-width="1" stroke-dasharray="3 2"/>
+            <text x="161" y="274">S&amp;P 500 (бенч.)</text>
+          </g>
+        </svg>
+      </div>
+
+      <!-- Factor table — 8 rows (EM_Equity / EM_Bond опущены: корреляция     -->
+      <!-- EM_Equity↔MARKET ≈ 0.85, EM_Bond↔RATES ≈ 0.50 — дублируют сигнал)  -->
+      <div class="factor-table-wrap">
+        <table class="factor-table">
+          <thead>
+            <tr><th>Фактор</th><th>β портф.</th><th>Бенч.</th><th>Δ</th></tr>
+          </thead>
+          <tbody>
+            
+            <tr>
+              <td>Market</td>
+              <td>1.18</td>
+              <td>1.00</td>
+              <td class="delta-pos">
+                +0.18
+              </td>
+            </tr>
+            
+            <tr>
+              <td>Momentum</td>
+              <td>1.05</td>
+              <td>0.00</td>
+              <td class="delta-pos">
+                +1.05
+              </td>
+            </tr>
+            
+            <tr>
+              <td>Value</td>
+              <td>0.25</td>
+              <td>0.00</td>
+              <td class="delta-pos">
+                +0.25
+              </td>
+            </tr>
+            
+            <tr>
+              <td>Quality</td>
+              <td>0.62</td>
+              <td>0.00</td>
+              <td class="delta-pos">
+                +0.62
+              </td>
+            </tr>
+            
+            <tr>
+              <td>Size</td>
+              <td>0.42</td>
+              <td>0.00</td>
+              <td class="delta-pos">
+                +0.42
+              </td>
+            </tr>
+            
+            <tr>
+              <td>Volatility</td>
+              <td>0.88</td>
+              <td>0.00</td>
+              <td class="delta-pos">
+                +0.88
+              </td>
+            </tr>
+            
+            <tr>
+              <td>Commodities</td>
+              <td>0.15</td>
+              <td>0.00</td>
+              <td class="delta-pos">
+                +0.15
+              </td>
+            </tr>
+            
+            <tr>
+              <td>Rates</td>
+              <td>-0.30</td>
+              <td>0.00</td>
+              <td class="delta-neg">
+                -0.30
+              </td>
+            </tr>
+            
+          </tbody>
+        </table>
+        <div style="margin-top:8px; font-size:9.5px; color:var(--ink-60); line-height:1.5;">
+          <b style="color:var(--ink);">Что показывает радар:</b> насколько портфель завязан на
+          глобальные факторы. Большая площадь — больше зависимости от рынка.
+          Совпадение направлений по нескольким факторам — скрытая общая ставка
+          (диверсификация ниже, чем кажется).
+        </div>
+      </div>
+    </div>
+
+    <div class="conc-ai" style="margin-top:14px;">
+      <div class="ai-head">[ 🤖 AI_ANALYSIS // CLAUDE SONNET 4.6 ]</div>
+      <div class="ai-body">
+        «Портфель сильно тянет <span class="flag">Momentum (β=1.05)</span> и
+        <span class="flag">Market (β=1.18)</span> — знакомый перевес в IT.
+        Quality 0.62 и Volatility 0.88 говорят, что бумаги дорогие/«разогретые»:
+        в коррекцию корректируются глубже. Низкий Value (0.25) — портфель не
+        выглядит «дешёвым» по фундаменталу. Отрицательная Rates β (−0.30) —
+        чувствительность к росту ставок (growth stocks страдают на hawkish surprise);
+        Commodities 0.15 — нет hedge против инфляции. Эти 5 факторов — главная
+        скрытая ставка, движутся синхронно вместе с PLTR · CRWD · NVDA.
+        <span class="src">[Quant Engine]</span>»
+      </div>
+    </div>
+  </div>
+
+  <!-- ════ B. 4-PILLAR SCORING ════ -->
+  <div class="d3-block">
+    <div class="d3-block-head">
+      <div class="panel-title">4-Pillar Scoring — оценка позиций (F · V · T · C)</div>
+      <div class="d3-block-sub">Fundamental · Valuation · Technical · Credit ·
+        каждый −2…+2 · итог ∈ [−6, +6]
+        <span class="src">[Quant Engine + SEC EDGAR]</span></div>
+    </div>
+
+    
+    
+    <div class="score-grid">
+      
+        
+        
+        
+        
+        
+        
+        
+      <div class="score-card act-buy">
+        <div class="sc-head">
+          <span class="sc-ticker">AAPL</span>
+          <span class="sc-total pos">Итог: +4.0</span>
+        </div>
+        <div class="sc-pillars">
+          <div class="sc-pillar">
+            <span class="sc-pillar-name">F</span>
+            <span class="sc-pillar-bar"><span class="sc-pillar-fill pos" style="left:50.0%; width:50.0%;"></span></span>
+            <span class="sc-pillar-val pos">+2.0</span>
+          </div>
+          <div class="sc-pillar">
+            <span class="sc-pillar-name">V</span>
+            <span class="sc-pillar-bar"><span class="sc-pillar-fill " style="left:50.0%; width:0.0%;"></span></span>
+            <span class="sc-pillar-val ">0.0</span>
+          </div>
+          <div class="sc-pillar">
+            <span class="sc-pillar-name">T</span>
+            <span class="sc-pillar-bar"><span class="sc-pillar-fill pos" style="left:50.0%; width:25.0%;"></span></span>
+            <span class="sc-pillar-val pos">+1.0</span>
+          </div>
+          <div class="sc-pillar">
+            <span class="sc-pillar-name">C</span>
+            <span class="sc-pillar-bar"><span class="sc-pillar-fill pos" style="left:50.0%; width:25.0%;"></span></span>
+            <span class="sc-pillar-val pos">+1.0</span>
+          </div>
+        </div>
+        <div class="sc-foot">
+          <span class="sc-action act-buy">BUY</span>
+          <span class="sc-reason">сильный совокупный сигнал</span>
+        </div>
+      </div>
+      
+        
+        
+        
+        
+        
+        
+      <div class="score-card act-hold">
+        <div class="sc-head">
+          <span class="sc-ticker">KSPI</span>
+          <span class="sc-total pos">Итог: +0.5</span>
+        </div>
+        <div class="sc-pillars">
+          <div class="sc-pillar">
+            <span class="sc-pillar-name">F</span>
+            <span class="sc-pillar-bar"><span class="sc-pillar-fill pos" style="left:50.0%; width:25.0%;"></span></span>
+            <span class="sc-pillar-val pos">+1.0</span>
+          </div>
+          <div class="sc-pillar">
+            <span class="sc-pillar-name">V</span>
+            <span class="sc-pillar-bar"><span class="sc-pillar-fill pos" style="left:50.0%; width:12.5%;"></span></span>
+            <span class="sc-pillar-val pos">+0.5</span>
+          </div>
+          <div class="sc-pillar">
+            <span class="sc-pillar-name">T</span>
+            <span class="sc-pillar-bar"><span class="sc-pillar-fill neg" style="left:25.0%; width:25.0%;"></span></span>
+            <span class="sc-pillar-val neg">-1.0</span>
+          </div>
+          <div class="sc-pillar">
+            <span class="sc-pillar-name">C</span>
+            <span class="sc-pillar-bar"><span class="sc-pillar-fill " style="left:50.0%; width:0.0%;"></span></span>
+            <span class="sc-pillar-val ">0.0</span>
+          </div>
+        </div>
+        <div class="sc-foot">
+          <span class="sc-action act-hold">HOLD</span>
+          <span class="sc-reason">положительный профиль</span>
+        </div>
+      </div>
+      
+        
+        
+        
+        
+        
+        
+      <div class="score-card act-hold">
+        <div class="sc-head">
+          <span class="sc-ticker">BND</span>
+          <span class="sc-total pos">Итог: +1.0</span>
+        </div>
+        <div class="sc-pillars">
+          <div class="sc-pillar">
+            <span class="sc-pillar-name">F</span>
+            <span class="sc-pillar-bar"><span class="sc-pillar-fill " style="left:50.0%; width:0.0%;"></span></span>
+            <span class="sc-pillar-val ">0.0</span>
+          </div>
+          <div class="sc-pillar">
+            <span class="sc-pillar-name">V</span>
+            <span class="sc-pillar-bar"><span class="sc-pillar-fill " style="left:50.0%; width:0.0%;"></span></span>
+            <span class="sc-pillar-val ">0.0</span>
+          </div>
+          <div class="sc-pillar">
+            <span class="sc-pillar-name">T</span>
+            <span class="sc-pillar-bar"><span class="sc-pillar-fill " style="left:50.0%; width:0.0%;"></span></span>
+            <span class="sc-pillar-val ">0.0</span>
+          </div>
+          <div class="sc-pillar">
+            <span class="sc-pillar-name">C</span>
+            <span class="sc-pillar-bar"><span class="sc-pillar-fill pos" style="left:50.0%; width:25.0%;"></span></span>
+            <span class="sc-pillar-val pos">+1.0</span>
+          </div>
+        </div>
+        <div class="sc-foot">
+          <span class="sc-action act-hold">HOLD</span>
+          <span class="sc-reason">положительный профиль</span>
+        </div>
+      </div>
+      
+    </div>
+    <div style="margin-top:6px; font-size:9px; color:var(--ink-60);">
+      
+      
+      
+        Все 3 позиций со скорингом.
+      
+    </div>
+  </div>
+
+  <!-- ════ C. STRESS SCENARIOS ════ -->
+  <div class="d3-block">
+    <div class="d3-block-head">
+      <div class="panel-title">Стресс-сценарии — реакция портфеля на гипотетические шоки</div>
+      <div class="d3-block-sub">Параметрические шоки факторов (ΔPnL = w′·B·shock) ·
+        горизонт 1 квартал · runtime из <code style="font-family:var(--font-mono);
+        font-size:9px; background:var(--tech-blue-08); color:var(--tech-blue);
+        padding:1px 4px; border-radius:2px;">data.stress_scenarios</code> [Step 2]
+        <span class="src">[Quant Engine]</span></div>
+    </div>
+
+    <table class="stress-table">
+      <thead>
+        <tr>
+          <th class="scenario-col">Сценарий</th>
+          <th>Δ Портфель, %</th>
+          <th>Δ Стоимость, $</th>
+          <th class="impact-col">Магнитуда</th>
+          <th>Drawdown, %</th>
+          <th>Восстановление</th>
+        </tr>
+      </thead>
+      <tbody>
+        
+        
+          
+          
+          
+          
+          
+          
+          
+        <tr>
+          <td class="scenario-col">Equity DM −20% · <span style="color:var(--ink-60); font-size:9px;">Tech sell-off</span></td>
+          <td><span class="impact-val neg">−15.8%</span></td>
+          <td><span class="impact-val neg">−$7 900</span></td>
+          <td class="impact-cell"><div class="impact-bar"><span class="impact-fill neg" style="right:50%; width:39.5%;"></span></div></td>
+          <td><span class="impact-val neg">−22.0%</span></td>
+          <td>6 мес</td>
+        </tr>
+        
+          
+          
+          
+          
+          
+          
+          
+        <tr>
+          <td class="scenario-col">Equity EM −25% · <span style="color:var(--ink-60); font-size:9px;">EM rout</span></td>
+          <td><span class="impact-val neg">−7.5%</span></td>
+          <td><span class="impact-val neg">−$3 750</span></td>
+          <td class="impact-cell"><div class="impact-bar"><span class="impact-fill neg" style="right:50%; width:18.8%;"></span></div></td>
+          <td><span class="impact-val neg">−11.0%</span></td>
+          <td>4 мес</td>
+        </tr>
+        
+          
+          
+          
+          
+          
+          
+          
+        <tr>
+          <td class="scenario-col">Rates +100 bp · <span style="color:var(--ink-60); font-size:9px;">Duration shock</span></td>
+          <td><span class="impact-val neg">−3.8%</span></td>
+          <td><span class="impact-val neg">−$1 900</span></td>
+          <td class="impact-cell"><div class="impact-bar"><span class="impact-fill neg" style="right:50%; width:9.5%;"></span></div></td>
+          <td><span class="impact-val neg">−6.2%</span></td>
+          <td>3 мес</td>
+        </tr>
+        
+          
+          
+          
+          
+          
+          
+          
+        <tr>
+          <td class="scenario-col">HY Credit +200bp · <span style="color:var(--ink-60); font-size:9px;">Credit widening</span></td>
+          <td><span class="impact-val neg">−2.8%</span></td>
+          <td><span class="impact-val neg">−$1 400</span></td>
+          <td class="impact-cell"><div class="impact-bar"><span class="impact-fill neg" style="right:50%; width:7.0%;"></span></div></td>
+          <td><span class="impact-val neg">−4.4%</span></td>
+          <td>3 мес</td>
+        </tr>
+        
+          
+          
+          
+          
+          
+          
+          
+        <tr>
+          <td class="scenario-col">USD +10% (proxy) · <span style="color:var(--ink-60); font-size:9px;">DXY rally</span></td>
+          <td><span class="impact-val pos">+1.2%</span></td>
+          <td><span class="impact-val pos">+$600</span></td>
+          <td class="impact-cell"><div class="impact-bar"><span class="impact-fill pos" style="left:50%; width:3.0%;"></span></div></td>
+          <td><span class="impact-val neg">−1.8%</span></td>
+          <td>2 мес</td>
+        </tr>
+        
+          
+          
+          
+          
+          
+          
+          
+        <tr>
+          <td class="scenario-col">Oil −30% · <span style="color:var(--ink-60); font-size:9px;">Energy drawdown</span></td>
+          <td><span class="impact-val neg">−1.4%</span></td>
+          <td><span class="impact-val neg">−$700</span></td>
+          <td class="impact-cell"><div class="impact-bar"><span class="impact-fill neg" style="right:50%; width:3.5%;"></span></div></td>
+          <td><span class="impact-val neg">−2.5%</span></td>
+          <td>2 мес</td>
+        </tr>
+        
+          
+          
+          
+          
+          
+          
+          
+        <tr>
+          <td class="scenario-col">CPI +1pp (proxy) · <span style="color:var(--ink-60); font-size:9px;">Inflation surprise</span></td>
+          <td><span class="impact-val neg">−2.2%</span></td>
+          <td><span class="impact-val neg">−$1 100</span></td>
+          <td class="impact-cell"><div class="impact-bar"><span class="impact-fill neg" style="right:50%; width:5.5%;"></span></div></td>
+          <td><span class="impact-val neg">−3.8%</span></td>
+          <td>3 мес</td>
+        </tr>
+        
+      </tbody>
+    </table>
+    <div style="margin-top:6px; font-size:9px; color:var(--ink-60);">
+      Магнитуда нормирована к ±20%. Drawdown — пиковая просадка внутри квартала
+      при реализации сценария.
+    </div>
+
+    <div class="conc-ai" style="margin-top:12px;">
+      <div class="ai-head">[ 🤖 AI_ANALYSIS // CLAUDE SONNET 4.6 ]</div>
+      <div class="ai-body">
+        «Худшие сценарии для вас — <span class="flag">tech sell-off (−9.3%)</span> и
+        <span class="flag">геополитический риск-офф (−8.1%)</span>: оба бьют именно по
+        Momentum-перевесу. Хорошая новость — стресс не превышает реализованный
+        Max&nbsp;Drawdown (−12.8%): портфель остаётся в рамках вашего «болевого потолка».
+        Защита от Fed-сюрпризов слабая — стоит подумать о коротком DUR-хедже.
+        <span class="src">[Quant Engine]</span>»
+      </div>
+    </div>
+  </div>
+
+
+</div>
+
+<!-- ══════════════════════════ СТРАНИЦА 4 ══════════════════════════════ -->
+<div class="sheet">
+
+  <!-- ТЕХ-ХЕДЕР -->
+  <div class="tech-header">
+    <span><b>PORTFOLIO RISK REPORT</b> // TIER: DEEP // ID: Usample // RISK_ENGINE: MAC3</span>
+    <span class="ts">PAGE 4 OF 5</span>
+  </div>
+
+  <!-- ЗАГОЛОВОК СЕКЦИИ -->
+  <div class="sec-head">
+    <div class="sec-title">Action Plan · Ожидаемый эффект · CoVe</div>
+    <div class="sec-sub">конкретные шаги, изменения риск-показателей и проверка источников · <b style="color:var(--tech-blue);">[DEEP]</b></div>
+  </div>
+
+  <!-- ════ A. ACTION PLAN — уровни Buy / Sell / Stop ════ -->
+  <div class="d3-block">
+    <div class="d3-block-head">
+      <div class="panel-title">Action Plan — уровни Buy / Sell / Stop</div>
+      <div class="d3-block-sub">ATR (Wilder RMA) · SMA50/200 · RSI(14) · MACD(12,26,9) ·
+        без внешних таргет-прайсов
+        <span class="src">[Quant Engine]</span></div>
+    </div>
+
+    <table class="action-table">
+      <thead>
+        <tr>
+          <th class="l">Тикер</th>
+          <th class="l">Action</th>
+          <th>Цена</th>
+          <th>Buy zone</th>
+          <th>Sell target</th>
+          <th>Stop loss</th>
+          <th colspan="2" class="l">Причина</th>
+        </tr>
+      </thead>
+      <tbody>
+        
+        
+          
+          
+          
+          
+        <tr>
+          <td class="l"><span class="ticker">AAPL</span></td>
+          <td class="l"><span class="badge act-trim">SELL 25%</span></td>
+          <td>$197.40</td>
+          <td>$182–188</td>
+          <td class="level-pos">$215</td>
+          <td class="level-neg">$175</td>
+          <td colspan="2" class="l reason">HOTSPOT 24% риска; фиксируем часть прибыли (+25%)</td>
+        </tr>
+        
+          
+          
+          
+          
+        <tr>
+          <td class="l"><span class="ticker">KSPI</span></td>
+          <td class="l"><span class="badge act-trim">REDUCE 50%</span></td>
+          <td>₸123.50</td>
+          <td>₸115–119</td>
+          <td class="level-pos">₸140</td>
+          <td class="level-neg">₸108</td>
+          <td colspan="2" class="l reason">TRC 22% при просадке −16.7% — концентрация выше порога</td>
+        </tr>
+        
+          
+          
+          
+        <tr>
+          <td class="l"><span class="ticker">BND</span></td>
+          <td class="l"><span class="badge act-hold">HOLD</span></td>
+          <td>$72.18</td>
+          <td>$71–73</td>
+          <td class="level-pos">$76</td>
+          <td class="level-neg">$69</td>
+          <td colspan="2" class="l reason">Hedge против rate shock; держим вес 20%</td>
+        </tr>
+        
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ════ B. ОЖИДАЕМЫЙ ЭФФЕКТ НА РИСК-ПОКАЗАТЕЛИ ════ -->
+  <div class="d3-block">
+    <div class="d3-block-head">
+      <div class="panel-title">Ожидаемый эффект на риск-показатели портфеля</div>
+      <div class="d3-block-sub">оценка «до / после» при исполнении Action Plan ·
+        BL target weights · runtime из <code style="font-family:var(--font-mono);
+        font-size:9px; background:var(--tech-blue-08); color:var(--tech-blue);
+        padding:1px 4px; border-radius:2px;">data.expected_effect</code> [Step 3]
+        ·  горизонт 1 квартал
+        <span class="src">[Quant Engine]</span></div>
+    </div>
+
+    
+    
+    
+    <div class="effect-grid">
+      <div class="effect-card">
+          <div class="ef-name">Индекс риска</div>
+          <div class="ef-row">
+            <span class="ef-before">62</span>
+            <span class="ef-arrow">→</span>
+            <span class="ef-after">54</span>
+          </div>
+          <div class="ef-delta pos">-8.0 пунктов</div>
+        </div>
+      <div class="effect-card">
+          <div class="ef-name">CVaR 95%</div>
+          <div class="ef-row">
+            <span class="ef-before">-5.2%</span>
+            <span class="ef-arrow">→</span>
+            <span class="ef-after">-4.1%</span>
+          </div>
+          <div class="ef-delta pos">+1.1 пп</div>
+        </div>
+      <div class="effect-card">
+          <div class="ef-name">Sharpe Ratio</div>
+          <div class="ef-row">
+            <span class="ef-before">1.18</span>
+            <span class="ef-arrow">→</span>
+            <span class="ef-after">1.32</span>
+          </div>
+          <div class="ef-delta pos">+0.1 пп</div>
+        </div>
+      <div class="effect-card">
+          <div class="ef-name">Max Drawdown (модель)</div>
+          <div class="ef-row">
+            <span class="ef-before">-12.8%</span>
+            <span class="ef-arrow">→</span>
+            <span class="ef-after">-10.4%</span>
+          </div>
+          <div class="ef-delta pos">+2.4 пп</div>
+        </div>
+      <div class="effect-card">
+          <div class="ef-name">Волатильность (год.)</div>
+          <div class="ef-row">
+            <span class="ef-before">+14.8%</span>
+            <span class="ef-arrow">→</span>
+            <span class="ef-after">+12.6%</span>
+          </div>
+          <div class="ef-delta pos">-2.2 пп</div>
+        </div>
+      <div class="effect-card">
+          <div class="ef-name">Max TRC (одной позиции)</div>
+          <div class="ef-row">
+            <span class="ef-before">+24.4%</span>
+            <span class="ef-arrow">→</span>
+            <span class="ef-after">+16.8%</span>
+          </div>
+          <div class="ef-delta pos">-7.6 пп</div>
+        </div>
+      <div class="effect-card">
+          <div class="ef-name">Доля IT-сектора</div>
+          <div class="ef-row">
+            <span class="ef-before">+62.0%</span>
+            <span class="ef-arrow">→</span>
+            <span class="ef-after">+50.0%</span>
+          </div>
+          <div class="ef-delta pos">-12.0 пп</div>
+        </div>
+      <div class="effect-card">
+          <div class="ef-name">Ожид. доходность (год.)</div>
+          <div class="ef-row">
+            <span class="ef-before">+14.2%</span>
+            <span class="ef-arrow">→</span>
+            <span class="ef-after">+12.6%</span>
+          </div>
+          <div class="ef-delta neg">-1.6 пп</div>
+        </div>
+    </div>
+
+    <div class="conc-ai" style="margin-top:12px;">
+      <div class="ai-head">[ 🤖 AI_ANALYSIS // CLAUDE SONNET 4.6 ]</div>
+      <div class="ai-body">
+        «Чистый эффект — индекс риска уходит с 62 в середину «умеренной» зоны (54),
+        исчезает HOTSPOT-перегрев одной бумаги, Sharpe растёт до
+        <span class="flag">1.32</span> — портфель становится эффективнее. Плата за это —
+        ≈ 1.6 пп ожидаемой доходности, но это типичный «обмен» при ребалансировке
+        в late-cycle. Goldman&nbsp;Sachs и JPMorgan
+        <span class="src">[RAG: GS_Q2_2026 · JPM_Strategy_Q2_2026]</span> поддерживают
+        такую конфигурацию.»
+      </div>
+    </div>
+  </div>
+
+  <!-- ════ C. CoVe — ВЕРИФИКАЦИЯ ИСТОЧНИКОВ ════ -->
+  <div class="d3-block">
+    <div class="d3-block-head">
+      <div class="panel-title">CoVe — Chain-of-Verification источников данных</div>
+      <div class="d3-block-sub">каждый показатель прослеживается до первичного источника
+        с указанием метода расчёта и QualityGate-статуса · список собирается
+        runtime из <code style="font-family:var(--font-mono); font-size:9px;
+        background:var(--tech-blue-08); color:var(--tech-blue);
+        padding:1px 4px; border-radius:2px;">data.cove_lineage</code> [Step 5]</div>
+    </div>
+
+    
+    <div class="cove-grid">
+      
+        
+        
+        
+        <div class="cove-item ">
+          <span class="cove-check">✓</span>
+          <span class="cove-body"><b>Vol · CVaR · TE · IR · Max DD</b><br>
+            <span class="cove-meta">
+              Quant Engine MAC3 · Wilder RMA · EWMA λ≈0.94 ⊕ Ledoit-Wolf 70/30 · Politis-Romano bootstrap CI
+            </span>
+          </span>
+        </div>
+      
+        
+        
+        
+        <div class="cove-item ">
+          <span class="cove-check">✓</span>
+          <span class="cove-body"><b>TRC (Euler decomposition) · MCTR · CVaR</b><br>
+            <span class="cove-meta">
+              Quant Engine MAC3 · MCTR = Σw/σ_p · ERC%_i = w_i·MCTR_i/σ_p
+            </span>
+          </span>
+        </div>
+      
+        
+        
+        
+        <div class="cove-item fail">
+          <span class="cove-check">✗</span>
+          <span class="cove-body"><b>Цены и история активов</b><br>
+            <span class="cove-meta">
+              Tradernet (Freedom Broker) · Daily CLOSE · 730d window · no price data loaded
+            </span>
+          </span>
+        </div>
+      
+        
+        
+        
+        <div class="cove-item ">
+          <span class="cove-check">✓</span>
+          <span class="cove-body"><b>Fundamental Z-scores</b><br>
+            <span class="cove-meta">
+              SEC EDGAR CompanyFacts · 10-K FY · sector-normalised MAD · Group B factors
+            </span>
+          </span>
+        </div>
+      
+        
+        
+        
+        <div class="cove-item ">
+          <span class="cove-check">✓</span>
+          <span class="cove-body"><b>Altman-Z · Piotroski-F · Interest Coverage</b><br>
+            <span class="cove-meta">
+              SEC EDGAR CompanyFacts · разностный расчёт по балансу и P&amp;L (annual filings)
+            </span>
+          </span>
+        </div>
+      
+        
+        
+        
+        <div class="cove-item fail">
+          <span class="cove-check">✗</span>
+          <span class="cove-body"><b>CDS spreads (credit signal)</b><br>
+            <span class="cove-meta">
+              FRED HY proxy + WGB sovereign · QualityGate: sanity 1–3000 bps · ≤ 3 trading days · no CDS summary attached
+            </span>
+          </span>
+        </div>
+      
+        
+        
+        
+        <div class="cove-item fail">
+          <span class="cove-check">✗</span>
+          <span class="cove-body"><b>Action levels (Buy / Sell / Stop)</b><br>
+            <span class="cove-meta">
+              Quant Engine · ATR Wilder RMA + SMA50/200 + RSI(14) + MACD(12,26,9) · action plan not computed for this run
+            </span>
+          </span>
+        </div>
+      
+        
+        
+        
+        <div class="cove-item fail">
+          <span class="cove-check">✗</span>
+          <span class="cove-body"><b>Black-Litterman target weights</b><br>
+            <span class="cove-meta">
+              Quant Engine · Reverse-optimisation prior + score-derived views · BL skipped (no scores / empty cov)
+            </span>
+          </span>
+        </div>
+      
+        
+        
+        
+        <div class="cove-item fail">
+          <span class="cove-check">✗</span>
+          <span class="cove-body"><b>Регим-классификатор</b><br>
+            <span class="cove-meta">
+              Quant Engine · Growth × Cycle factor returns · 60-day window
+            </span>
+          </span>
+        </div>
+      
+        
+        
+        
+        <div class="cove-item fail">
+          <span class="cove-check">✗</span>
+          <span class="cove-body"><b>Стресс-сценарии</b><br>
+            <span class="cove-meta">
+              Quant Engine · parametric factor shocks · per-asset β · linear PnL
+            </span>
+          </span>
+        </div>
+      
+        
+        
+        
+        <div class="cove-item fail">
+          <span class="cove-check">✗</span>
+          <span class="cove-body"><b>Макро-драйверы (FRED)</b><br>
+            <span class="cove-meta">
+              FRED St. Louis Fed · yield curve · HY spread · PMI · VIX · breakeven · FRED_API_KEY not set (see .env.template)
+            </span>
+          </span>
+        </div>
+      
+        
+        
+        
+        <div class="cove-item fail">
+          <span class="cove-check">✗</span>
+          <span class="cove-body"><b>Bank RAG (выдержки)</b><br>
+            <span class="cove-meta">
+              ChromaDB · GS / MS / JPM PDF reports · cosine similarity retrieval · RAG not requested / not available
+            </span>
+          </span>
+        </div>
+      
+        
+        
+        
+        <div class="cove-item ">
+          <span class="cove-check">✓</span>
+          <span class="cove-body"><b>AI verdict · bullets</b><br>
+            <span class="cove-meta">
+              Anthropic Claude claude-sonnet-4-6 · advisory only; verdict + plain summary + bullets · не является ИИИ
+            </span>
+          </span>
+        </div>
+      
+    </div>
+    <div style="margin-top:10px; font-size:9px; color:var(--ink-60); line-height:1.5;">
+      <b style="color:var(--ink);">✓</b> — данные прошли QualityGate ·
+      <b style="color:var(--amber);">!</b> — частичное покрытие или fallback на устаревший кэш ·
+      <b style="color:var(--neg);">✗</b> — источник недоступен.
+      Документ не является ИИИ — только аналитическая рекомендация.
+    </div>
+  </div>
+
+
+</div>
+
+<!-- ══════════════════════════ СТРАНИЦА 5 ══════════════════════════════ -->
+<div class="sheet">
+
+  <!-- ТЕХ-ХЕДЕР -->
+  <div class="tech-header">
+    <span><b>PORTFOLIO RISK REPORT</b> // TIER: DEEP // ID: Usample // RISK_ENGINE: MAC3</span>
+    <span class="ts">PAGE 5 OF 5</span>
+  </div>
+
+  <!-- ЗАГОЛОВОК СЕКЦИИ -->
+  <div class="sec-head">
+    <div class="sec-title">Рыночный режим</div>
+    <div class="sec-sub">в какой фазе мы находимся, какие сигналы это подтверждают и что это значит для портфеля · <b style="color:var(--tech-blue);">[DEEP]</b></div>
+  </div>
+
+  <!-- ════ A. КВАДРАНТ РЕЖИМА + СВОДНАЯ ════ -->
+  <div class="d3-block">
+    <div class="d3-block-head">
+      <div class="panel-title">Текущий режим и его координаты</div>
+      <div class="d3-block-sub">Growth × Cycle факторные returns · окно 60 дней ·
+        квадранты Expansion / Recovery / Slowdown / Recession (см. <code style="font-family:var(--font-mono);
+        font-size:9px; background:var(--tech-blue-08); color:var(--tech-blue);
+        padding:1px 4px; border-radius:2px;">finance/regime.py</code>)
+        <span class="src">[Quant Engine]</span></div>
+    </div>
+
+    <div class="regime-layout">
+      <!-- Quadrant SVG -->
+      <div class="regime-quadrant">
+        <svg class="reg-quadrant-svg" viewBox="0 0 320 280" xmlns="http://www.w3.org/2000/svg"
+             role="img" aria-label="Квадрант рыночного режима: Growth × Cycle">
+          <defs>
+            <!-- Цветовая семантика:                                       -->
+            <!--   Expansion = синий  (здоровый рост — наша целевая фаза)  -->
+            <!--   Recovery  = зелёный (выход из дна, growth↑ cycle↓)      -->
+            <!--   Slowdown  = амбер  (охлаждение, growth↓ cycle↑)         -->
+            <!--   Recession = красный (двойное падение growth↓ cycle↓)    -->
+            <linearGradient id="qSlowdown" x1="0" y1="1" x2="1" y2="0">
+              <stop offset="0%"   stop-color="#D9A03B" stop-opacity="0.18"/>
+              <stop offset="100%" stop-color="#D9A03B" stop-opacity="0.04"/>
+            </linearGradient>
+            <linearGradient id="qExpansion" x1="0" y1="1" x2="1" y2="0">
+              <stop offset="0%"   stop-color="#3E83C9" stop-opacity="0.20"/>
+              <stop offset="100%" stop-color="#3E83C9" stop-opacity="0.04"/>
+            </linearGradient>
+            <linearGradient id="qRecession" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%"   stop-color="#D85C42" stop-opacity="0.16"/>
+              <stop offset="100%" stop-color="#D85C42" stop-opacity="0.03"/>
+            </linearGradient>
+            <linearGradient id="qRecovery" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%"   stop-color="#4FAA72" stop-opacity="0.18"/>
+              <stop offset="100%" stop-color="#4FAA72" stop-opacity="0.04"/>
+            </linearGradient>
+            <radialGradient id="regDot" cx="35%" cy="30%" r="80%">
+              <stop offset="0%"   stop-color="#FFFFFF"/>
+              <stop offset="55%"  stop-color="#3E83C9"/>
+              <stop offset="100%" stop-color="#23588F"/>
+            </radialGradient>
+            <filter id="regDotShadow" x="-50%" y="-50%" width="200%" height="200%">
+              <feDropShadow dx="0" dy="1.6" stdDeviation="1.4" flood-opacity="0.35"/>
+            </filter>
+          </defs>
+
+          <!-- 4 квадранта -->
+          <rect x="30"  y="30"  width="125" height="125" fill="url(#qRecovery)"/>
+          <rect x="155" y="30"  width="125" height="125" fill="url(#qExpansion)"/>
+          <rect x="30"  y="155" width="125" height="125" fill="url(#qRecession)"/>
+          <rect x="155" y="155" width="125" height="125" fill="url(#qSlowdown)"/>
+          <!-- внутренние подписи квадрантов (синхронизировано с finance/regime.py) -->
+          <!--   top-left  (Growth↑, Cycle↓): RECOVERY                              -->
+          <!--   top-right (Growth↑, Cycle↑): EXPANSION                             -->
+          <!--   bot-left  (Growth↓, Cycle↓): RECESSION                             -->
+          <!--   bot-right (Growth↓, Cycle↑): SLOWDOWN                              -->
+          <g font-family="IBM Plex Mono" font-size="9" fill="rgba(42,46,51,0.55)" font-weight="600" letter-spacing="0.05em">
+            <text x="92.5"  y="50">RECOVERY</text>
+            <text x="217.5" y="50">EXPANSION</text>
+            <text x="92.5"  y="275">RECESSION</text>
+            <text x="217.5" y="275">SLOWDOWN</text>
+          </g>
+
+          <!-- оси (центральный крест) -->
+          <line x1="155" y1="30"  x2="155" y2="280" stroke="rgba(42,46,51,0.35)" stroke-width="0.6"/>
+          <line x1="30"  y1="155" x2="280" y2="155" stroke="rgba(42,46,51,0.35)" stroke-width="0.6"/>
+
+          <!-- сетка -->
+          <g stroke="rgba(42,46,51,0.10)" stroke-width="0.5" stroke-dasharray="2 3">
+            <line x1="30"  y1="92.5"  x2="280" y2="92.5"/>
+            <line x1="30"  y1="217.5" x2="280" y2="217.5"/>
+            <line x1="92.5"  y1="30"  x2="92.5"  y2="280"/>
+            <line x1="217.5" y1="30"  x2="217.5" y2="280"/>
+          </g>
+
+          <!-- подписи осей -->
+          <g font-family="IBM Plex Mono" font-size="9.5" fill="rgba(42,46,51,0.70)" font-weight="600">
+            <text x="285" y="158">→ Cycle ↑</text>
+            <text x="155" y="22"  text-anchor="middle">↑ Growth</text>
+          </g>
+          <g font-family="IBM Plex Mono" font-size="8" fill="rgba(42,46,51,0.45)">
+            <text x="160" y="45">+0.2</text>
+            <text x="160" y="270">−0.2</text>
+            <text x="40"  y="158">−0.2</text>
+            <text x="255" y="158">+0.2</text>
+            <text x="158" y="165" text-anchor="start">0</text>
+          </g>
+
+          <!-- траектория последних 6 точек (90 дней) — путь через Recession → -->
+          <!-- Recovery → Expansion.  Координаты согласованы с шкалой:         -->
+          <!--   100 px ≈ 0.2 (см. метки +0.2 / −0.2 выше)                     -->
+          <polyline points="118,210 138,192 152,170 162,148 170,128 177,110"
+                    fill="none" stroke="rgba(42,46,51,0.30)" stroke-width="1"
+                    stroke-dasharray="3 2" stroke-linecap="round"/>
+          <g fill="rgba(42,46,51,0.45)">
+            <circle cx="118" cy="210" r="1.6"/>
+            <circle cx="138" cy="192" r="1.6"/>
+            <circle cx="152" cy="170" r="1.6"/>
+            <circle cx="162" cy="148" r="1.6"/>
+            <circle cx="170" cy="128" r="1.6"/>
+          </g>
+          <!-- актуальная точка: большая капля.  Координаты (177, 110) =        -->
+          <!-- Growth +0.08 (40 px выше центра), Cycle +0.04 (22 px правее).    -->
+          <circle cx="177" cy="110" r="14" fill="#3E83C9" fill-opacity="0.18"/>
+          <circle cx="177" cy="110" r="8"  fill="url(#regDot)" filter="url(#regDotShadow)"/>
+          <text x="193" y="106" font-family="IBM Plex Mono" font-size="9.5"
+                font-weight="600" fill="#23588F">сейчас</text>
+          <text x="193" y="118" font-family="IBM Plex Mono" font-size="8.5"
+                fill="rgba(42,46,51,0.6)">Growth +0.08 · Cycle +0.04</text>
+        </svg>
+      </div>
+
+      <!-- Сводная по режиму -->
+      
+      
+      <div class="regime-summary">
+        <div class="block-label" style="font-size:9px; margin-bottom:6px;">Текущий режим</div>
+        <div class="reg-name">Expansion (late)</div>
+        <div class="reg-conf">Уверенность модели <b>72%</b> · 3 подтверждающ. сигнал(ов)</div>
+
+        <div class="reg-factors">
+          
+          
+          <div class="reg-f">
+            <span class="reg-f-name">Growth-фактор</span>
+            <span class="reg-f-val pos">+0.08</span>
+            <span class="reg-f-note">здоровый рост</span>
+          </div>
+          <div class="reg-f">
+            <span class="reg-f-name">Cycle-фактор</span>
+            <span class="reg-f-val pos">+0.04</span>
+            <span class="reg-f-note">слабая экспансия</span>
+          </div>
+          
+            
+          <div class="reg-f">
+            <span class="reg-f-name">Сигнал</span>
+            <span class="reg-f-val neut" style="font-size:9px; font-weight:500;">RAG</span>
+            <span class="reg-f-note">SPY обгоняет IEF на +4.1% за 60 дней (рост vs облигации)</span>
+          </div>
+            
+          <div class="reg-f">
+            <span class="reg-f-name">Discretionary &gt; Staples</span>
+            <span class="reg-f-val neut" style="font-size:9px; font-weight:500;">RAG</span>
+            <span class="reg-f-note">+2.8% за 60д (цикличные on)</span>
+          </div>
+            
+          
+        </div>
+
+        
+        <div class="reg-signals">
+          <div class="reg-signals-label">Сигналы-драйверы ·
+            <span style="text-transform:none; font-weight:500; color:var(--tech-blue);">data.macro_drivers</span>
+             · as_of 2026-05-14</div>
+          
+          
+            
+            
+            
+            
+          <div class="reg-signal-row">
+            <span class="reg-signal-name">Yield curve 10Y−2Y · <span style="color:var(--ink-60); font-weight:400; font-size:8.5px;">положительный наклон — рецессия не сигналит</span></span>
+            <span class="reg-signal-val pos">+0.18 pp</span>
+            <span class="reg-signal-state bull">актуально</span>
+          </div>
+          
+            
+            
+            
+            
+          <div class="reg-signal-row">
+            <span class="reg-signal-name">HY OAS (ICE BofA) · <span style="color:var(--ink-60); font-weight:400; font-size:8.5px;">спреды узкие — рынок не закладывает кредитный риск</span></span>
+            <span class="reg-signal-val pos">312 bp</span>
+            <span class="reg-signal-state bull">актуально</span>
+          </div>
+          
+            
+            
+            
+            
+          <div class="reg-signal-row">
+            <span class="reg-signal-name">ISM Manufacturing PMI · <span style="color:var(--ink-60); font-weight:400; font-size:8.5px;">чуть выше 50 — производство расширяется</span></span>
+            <span class="reg-signal-val pos">51.4</span>
+            <span class="reg-signal-state bull">актуально</span>
+          </div>
+          
+            
+            
+            
+            
+          <div class="reg-signal-row">
+            <span class="reg-signal-name">CBOE VIX · <span style="color:var(--ink-60); font-weight:400; font-size:8.5px;">низкая ожидаемая волатильность — комфортная зона</span></span>
+            <span class="reg-signal-val pos">14.2</span>
+            <span class="reg-signal-state bull">актуально</span>
+          </div>
+          
+            
+            
+            
+            
+          <div class="reg-signal-row">
+            <span class="reg-signal-name">10Y Breakeven Inflation · <span style="color:var(--ink-60); font-weight:400; font-size:8.5px;">инфляционные ожидания у цели ФРС 2%</span></span>
+            <span class="reg-signal-val pos">2.34%</span>
+            <span class="reg-signal-state bull">актуально</span>
+          </div>
+          
+        </div>
+      </div>
+    </div>
+
+    <div class="conc-ai" style="margin-top:14px;">
+      <div class="ai-head">[ 🤖 AI_ANALYSIS // CLAUDE SONNET 4.6 ]</div>
+      <div class="ai-body">
+        «Точка портфеля на квадранте — <span class="flag">правый верхний (Expansion),
+        но близко к границе со Slowdown</span>: Growth ещё положительный (+0.08),
+        Cycle слабый (+0.04), и earnings revisions уже остывают (0.92).
+        Типичная late-Expansion конфигурация: рост ещё есть, но защитные сектора
+        стоит наращивать заранее. Это объясняет TRIM PLTR и BUY JNJ/MSFT
+        в Action Plan на стр. 4.
+        <span class="src">[Quant Engine]</span>»
+      </div>
+    </div>
+  </div>
+
+  <!-- ════ B. BANK RAG — ПОДТВЕРЖДЕНИЕ РЕЖИМА ════ -->
+  <div class="d3-block">
+    <div class="d3-block-head">
+      <div class="panel-title">Bank RAG — что говорят инвестбанки о текущем режиме</div>
+      <div class="d3-block-sub">выдержки из публичных стратегических обзоров ·
+        retrieval cosine similarity ≥ 0.72
+        <span class="src">[ChromaDB · Bank PDF reports]</span></div>
+    </div>
+
+    <div class="rag-quotes">
+      <div class="rag-quote">
+        <div class="rag-bank">Goldman Sachs</div>
+        <div class="rag-doc">«Q2 2026 Market Outlook» · стр. 7</div>
+        <div class="rag-text">«We expect a late-cycle plateau in the US through mid-2026,
+          with elevated dispersion across Tech. Maintain quality bias and trim crowded
+          momentum names.»</div>
+        <span class="rag-tag">late-cycle · momentum-risk</span>
+      </div>
+      <div class="rag-quote">
+        <div class="rag-bank">Morgan Stanley</div>
+        <div class="rag-doc">«Technology Sector Outlook 2026» · стр. 12</div>
+        <div class="rag-text">«Hyper-growth Tech valuations sit at 92nd percentile.
+          We recommend taking profits in select names and rotating into
+          defensive Tech (mature large-cap with cash flow).»</div>
+        <span class="rag-tag">tech-rotation · take-profit</span>
+      </div>
+      <div class="rag-quote">
+        <div class="rag-bank">JPMorgan</div>
+        <div class="rag-doc">«Q2 2026 Strategy &amp; Allocation» · стр. 4</div>
+        <div class="rag-text">«Healthcare and consumer staples remain «islands of
+          stability» as growth decelerates. Adding 5–10 pp to defensives is
+          consistent with an Expansion-to-Slowdown transition.»</div>
+        <span class="rag-tag">defensive-tilt · staples · healthcare</span>
+      </div>
+    </div>
+
+    <div style="margin-top:10px; font-size:9.5px; color:var(--ink-60); line-height:1.55;">
+      <b style="color:var(--ink);">Совпадение с моделью режима:</b> все три источника
+      описывают late-Expansion → Slowdown переход и рекомендуют trim в техах
+      и наращивание защитных секторов. Это <b style="color:var(--tech-blue);">точно
+      воспроизводит</b> рекомендации Action Plan на стр. 4.
+    </div>
+  </div>
+
+  <!-- ПОЛОСА ИСТОЧНИКОВ -->
+  <div class="section-sources" style="margin-top:14px;">
+    ИСТОЧНИКИ:
+    <b>Quant Engine MAC3</b> — расчёт режима по факторам Growth/Cycle ·
+    <b>FRED</b> — макро-индикаторы (yield curve, HY spread, PMI) ·
+    <b>SEC EDGAR</b> — earnings revisions ratio ·
+    <b>Tradernet</b> — рыночные цены/тех-индикаторы ·
+    <b>ChromaDB · Bank PDF reports</b> — публичные обзоры GS / MS / JPM
+  </div>
+
+
+</div>
+
+
+<script>
+  /* — разворот строки holdings — */
+  // Разворот/сворачивание строки holdings
+  function tgRow(rowEl) {
+    rowEl.classList.toggle('open');
+    var detail = rowEl.nextElementSibling;
+    if (detail && detail.classList.contains('h-detail')) {
+      detail.classList.toggle('open');
+    }
+  }
+
+  /* — разворот карточки идеи — */
+  // Разворот/сворачивание карточки идеи
+  function tgIdea(headEl) {
+    headEl.parentElement.classList.toggle('open');
+  }
+</script>
+</body>
+</html>

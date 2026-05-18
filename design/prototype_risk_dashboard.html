@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<!--
+  ─────────────────────────────────────────────────────────────────────────
+  ПРОТОТИП (design-only, НЕ подключён к боту)
+  Секция: RISK DASHBOARD (страница 1) — Cover KPI + Allocation + Correlation
+          + Agentic Status + Risk Attribution + Stress Tests
+  Стиль: по референс-изображению пользователя — тёплый кремовый фон,
+         моно тех-строки, пастельные чарты, node-link корреляции.
+  Данные: статичные заглушки. Открыть просто в браузере.
+  ─────────────────────────────────────────────────────────────────────────
+-->
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Risk Dashboard — Прототип</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg:          #F4F2EC;   /* тёплый кремовый фон (как на референсе) */
+    --panel:       #FBFAF7;   /* чуть светлее фона — карточки */
+    --ink:         #2A2E33;   /* основной тёмный текст */
+    --ink-60:      rgba(42,46,51,0.60);
+    --ink-40:      rgba(42,46,51,0.40);
+    --hairline:    rgba(42,46,51,0.18);
+    --hairline-2:  rgba(42,46,51,0.10);
+    --blue:        #5B8FC7;
+    --blue-soft:   #A9C6E3;
+    --teal:        #8FC4C0;
+    --amber:       #E0934B;
+    --red-deep:    #B33A1A;
+    --pos:         #3F8F5F;
+    --neg:         #C0492F;
+
+    --font-ui:   'IBM Plex Sans', -apple-system, sans-serif;
+    --font-mono: 'IBM Plex Mono', monospace;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-ui);
+    font-size: 13px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .sheet {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 20px 30px 30px;
+  }
+
+  /* ═══ ТЕХ-ХЕДЕР ═══ */
+  .tech-header {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--ink-60);
+    letter-spacing: 0.03em;
+    padding-bottom: 14px;
+  }
+  .tech-header b { color: var(--ink); font-weight: 600; }
+
+  /* ═══ СЕТКА ═══ */
+  .row {
+    display: grid;
+    gap: 16px;
+    margin-bottom: 18px;
+  }
+  .row.kpi    { grid-template-columns: 1.75fr 1fr; }
+  .row.mid    { grid-template-columns: 1fr 1fr; }
+  .row.bottom { grid-template-columns: 1.5fr 1fr; }
+
+  .panel {
+    background: var(--panel);
+    border: 0.5pt solid var(--hairline);
+    border-radius: 4px;
+    padding: 16px 18px;
+  }
+
+  .sec-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--ink);
+    margin-bottom: 12px;
+    letter-spacing: -0.005em;
+  }
+
+  /* ═══ KPI ═══ */
+  .kpi-label {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--ink-60);
+    margin-bottom: 6px;
+  }
+  .kpi-flex { display: flex; align-items: center; gap: 20px; }
+  .kpi-num {
+    font-family: var(--font-mono);
+    font-size: 34px;
+    font-weight: 500;
+    color: var(--ink);
+    line-height: 1.1;
+    white-space: nowrap;
+  }
+  .kpi-num .ctx {
+    font-size: 13px;
+    color: var(--ink-40);
+    font-weight: 400;
+  }
+  .kpi-spark { flex: 1; min-width: 80px; }
+  .kpi-sub {
+    font-size: 11px;
+    color: var(--ink-60);
+    margin-top: 6px;
+    font-family: var(--font-mono);
+  }
+  .kpi-narrow .kpi-num { font-size: 30px; }
+
+  /* ═══ AGENTIC STATUS (AI box) ═══ */
+  .agentic {
+    border-left: 2px solid var(--blue);
+  }
+  .agentic .sec-title { margin-bottom: 8px; }
+  .agentic .ai-head {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--blue);
+    letter-spacing: 0.04em;
+    margin-bottom: 6px;
+  }
+  .agentic .ai-text {
+    font-style: italic;
+    font-size: 12.5px;
+    line-height: 1.65;
+    color: var(--ink);
+  }
+  .agentic .ai-text .src {
+    font-style: normal;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--blue);
+    background: rgba(91,143,199,0.10);
+    padding: 0 4px;
+    border-radius: 2px;
+  }
+  .agentic .ai-text .flag {
+    font-style: normal;
+    font-weight: 600;
+    color: var(--amber);
+  }
+
+  /* ═══ ТАБЛИЦА ═══ */
+  table { width: 100%; border-collapse: collapse; }
+  thead th {
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    color: var(--ink-60);
+    text-align: right;
+    padding: 6px 8px;
+    border-bottom: 0.5pt solid var(--hairline);
+  }
+  thead th:first-child { text-align: left; }
+  thead th.hl-col {
+    background: rgba(91,143,199,0.14);
+    color: var(--blue);
+  }
+  tbody td {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    text-align: right;
+    padding: 6px 8px;
+    border-bottom: 0.5pt solid var(--hairline-2);
+  }
+  tbody td:first-child { text-align: left; font-weight: 500; }
+  tbody td.hl-col { background: rgba(91,143,199,0.08); color: var(--ink); font-weight: 500; }
+  tbody tr:last-child td { border-bottom: none; }
+  .status-pill {
+    font-size: 9px;
+    font-family: var(--font-mono);
+    padding: 1px 6px;
+    border-radius: 2px;
+    border: 0.5pt solid currentColor;
+  }
+  .status-pill.normal { color: var(--pos); }
+  .status-pill.watch  { color: var(--amber); }
+
+  /* ═══ STRESS BARS ═══ */
+  .stress-wrap { display: flex; align-items: flex-end; gap: 14px; height: 130px; padding-top: 6px; }
+  .stress-item { flex: 1; display: flex; flex-direction: column; align-items: center; height: 100%; justify-content: flex-end; }
+  .stress-bar { width: 100%; border-radius: 2px 2px 0 0; }
+  .stress-cap {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--ink);
+    margin-bottom: 4px;
+  }
+  .stress-name {
+    font-size: 9.5px;
+    color: var(--ink-60);
+    text-align: center;
+    margin-top: 6px;
+    line-height: 1.3;
+  }
+
+  /* ═══ CHART CENTERING ═══ */
+  .chart-center { display: flex; justify-content: center; align-items: center; }
+  svg { display: block; }
+
+  /* ═══ ФУТЕР ═══ */
+  .foot {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--ink-40);
+    text-align: center;
+    padding-top: 10px;
+    border-top: 0.5pt solid var(--hairline);
+    letter-spacing: 0.05em;
+  }
+
+  /* ═══ АДАПТИВ ═══ */
+  @media (max-width: 820px) {
+    .row.kpi, .row.mid, .row.bottom { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 480px) {
+    body { font-size: 15px; }
+    .sheet { padding: 14px 14px 22px; }
+    .tech-header { font-size: 9.5px; }
+    .kpi-flex { flex-direction: column; align-items: flex-start; gap: 10px; }
+    .kpi-spark { width: 100%; }
+    .kpi-num { font-size: 30px; }
+    .stress-wrap { height: 110px; gap: 8px; }
+    table { font-size: 13px; }
+    thead th, tbody td { padding: 6px 4px; }
+  }
+</style>
+</head>
+<body>
+<div class="sheet">
+
+  <!-- ═══ ТЕХ-ХЕДЕР ═══ -->
+  <div class="tech-header">
+    <b>PORTFOLIO RISK REPORT</b> // TIER: DEEP // ID: 2026-05-14-U1042 //
+    RISK_ENGINE: MAC3 // SESSION: [A6C7B1F3]
+  </div>
+
+  <!-- ═══ РЯД 1 — KPI ═══ -->
+  <div class="row kpi">
+    <!-- VaR / CVaR -->
+    <div class="panel">
+      <div class="kpi-label">Худший день — ожидаемая потеря (CVaR&nbsp;95%)</div>
+      <div class="kpi-flex">
+        <div>
+          <div class="kpi-num">−$1&nbsp;245 <span class="ctx">(95% CL, 1d)</span></div>
+          <div class="kpi-sub">CI бутстрап: −$1&nbsp;120 … −$1&nbsp;640</div>
+        </div>
+        <div class="kpi-spark">
+          <!-- area-sparkline с мягкой заливкой -->
+          <svg width="100%" height="58" viewBox="0 0 260 58" preserveAspectRatio="none"
+               xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <linearGradient id="sparkFill" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%"  stop-color="#5B8FC7" stop-opacity="0.28"/>
+                <stop offset="100%" stop-color="#5B8FC7" stop-opacity="0.02"/>
+              </linearGradient>
+            </defs>
+            <path d="M0,46 L20,42 L40,44 L60,36 L80,38 L100,30 L120,33 L140,24
+                     L160,27 L180,18 L200,22 L220,14 L240,17 L260,9
+                     L260,58 L0,58 Z" fill="url(#sparkFill)"/>
+            <path d="M0,46 L20,42 L40,44 L60,36 L80,38 L100,30 L120,33 L140,24
+                     L160,27 L180,18 L200,22 L220,14 L240,17 L260,9"
+                  fill="none" stroke="#5B8FC7" stroke-width="1.5"/>
+          </svg>
+        </div>
+      </div>
+    </div>
+
+    <!-- Sharpe -->
+    <div class="panel kpi-narrow">
+      <div class="kpi-label">Награда за риск (Sharpe Ratio)</div>
+      <div class="kpi-num">1.18 <span class="ctx">годовой</span></div>
+      <div class="kpi-sub">Sortino 1.60 · бенчмарк 0.74</div>
+      <!-- мини-индикатор шкалы -->
+      <svg width="100%" height="14" viewBox="0 0 240 14" preserveAspectRatio="none"
+           style="margin-top:10px" xmlns="http://www.w3.org/2000/svg">
+        <rect x="0.5" y="5" width="239" height="4" fill="none"
+              stroke="#2A2E33" stroke-opacity="0.25" stroke-width="0.5"/>
+        <rect x="0.5" y="5" width="142" height="4" fill="#5B8FC7" fill-opacity="0.30"/>
+        <line x1="142" y1="2" x2="142" y2="12" stroke="#2A2E33" stroke-width="1.5"/>
+      </svg>
+    </div>
+  </div>
+
+  <!-- ═══ РЯД 2 — ALLOCATION + CORRELATION ═══ -->
+  <div class="row mid">
+    <!-- Asset Allocation donut -->
+    <div class="panel">
+      <div class="sec-title">Распределение по секторам</div>
+      <div class="chart-center">
+        <svg width="320" height="200" viewBox="0 0 320 200" xmlns="http://www.w3.org/2000/svg">
+          <!-- donut: 5 сегментов, пастельные -->
+          <!-- Technology 31% -->
+          <path d="M160,100 L160,40 A60,60 0 0,1 217.1,118.5 Z" fill="#5B8FC7"/>
+          <!-- Financials 22% -->
+          <path d="M160,100 L217.1,118.5 A60,60 0 0,1 132.4,156.6 Z" fill="#7FB0D4"/>
+          <!-- Healthcare 19% -->
+          <path d="M160,100 L132.4,156.6 A60,60 0 0,1 100.6,134.9 Z" fill="#A9C6E3"/>
+          <!-- Energy 15% -->
+          <path d="M160,100 L100.6,134.9 A60,60 0 0,1 105.3,67.6 Z" fill="#8FC4C0"/>
+          <!-- Consumer 13% -->
+          <path d="M160,100 L105.3,67.6 A60,60 0 0,1 160,40 Z" fill="#B6D9D5"/>
+          <!-- вырез донута -->
+          <circle cx="160" cy="100" r="34" fill="#FBFAF7"/>
+          <text x="160" y="96" text-anchor="middle" font-family="IBM Plex Mono"
+                font-size="11" fill="#2A2E33" font-weight="600">9 бумаг</text>
+          <text x="160" y="110" text-anchor="middle" font-family="IBM Plex Sans"
+                font-size="9" fill="rgba(42,46,51,0.6)">$24 000</text>
+          <!-- легенда-выноски -->
+          <g font-family="IBM Plex Sans" font-size="10" fill="rgba(42,46,51,0.75)">
+            <text x="240" y="60">Technology · 31%</text>
+            <text x="240" y="150">Financials · 22%</text>
+            <text x="10"  y="172">Healthcare · 19%</text>
+            <text x="10"  y="60">Energy · 15%</text>
+            <text x="120" y="20">Consumer · 13%</text>
+          </g>
+        </svg>
+      </div>
+    </div>
+
+    <!-- Dynamic Correlation Matrix (node-link) -->
+    <div class="panel">
+      <div class="sec-title">Скрытые связи между позициями</div>
+      <div class="chart-center">
+        <svg width="340" height="200" viewBox="0 0 340 200" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <radialGradient id="nodeBlue" cx="35%" cy="30%">
+              <stop offset="0%" stop-color="#9FC3E4"/>
+              <stop offset="100%" stop-color="#4A7DB0"/>
+            </radialGradient>
+            <radialGradient id="nodeTeal" cx="35%" cy="30%">
+              <stop offset="0%" stop-color="#B6DAD6"/>
+              <stop offset="100%" stop-color="#6FA8A3"/>
+            </radialGradient>
+            <radialGradient id="nodeGray" cx="35%" cy="30%">
+              <stop offset="0%" stop-color="#D4D2CC"/>
+              <stop offset="100%" stop-color="#9A988F"/>
+            </radialGradient>
+          </defs>
+          <!-- рёбра: толщина = сила корреляции; синие = сильная, серые = слабая -->
+          <!-- PLTR–CRWD сильная (толстая синяя) -->
+          <line x1="80" y1="55" x2="255" y2="50" stroke="#5B8FC7" stroke-width="4" stroke-opacity="0.7"/>
+          <!-- PLTR–AAPL средняя -->
+          <line x1="80" y1="55" x2="90"  y2="150" stroke="#5B8FC7" stroke-width="2" stroke-opacity="0.45"/>
+          <!-- CRWD–AAPL средняя -->
+          <line x1="255" y1="50" x2="90" y2="150" stroke="#5B8FC7" stroke-width="2" stroke-opacity="0.4"/>
+          <!-- остальные слабые серые -->
+          <line x1="80" y1="55"  x2="265" y2="150" stroke="#9A988F" stroke-width="1" stroke-opacity="0.5"/>
+          <line x1="255" y1="50" x2="265" y2="150" stroke="#9A988F" stroke-width="1" stroke-opacity="0.5"/>
+          <line x1="90" y1="150" x2="265" y2="150" stroke="#9A988F" stroke-width="1" stroke-opacity="0.5"/>
+          <!-- узлы -->
+          <circle cx="80"  cy="55"  r="20" fill="url(#nodeBlue)"/>
+          <circle cx="255" cy="50"  r="20" fill="url(#nodeBlue)"/>
+          <circle cx="90"  cy="150" r="17" fill="url(#nodeTeal)"/>
+          <circle cx="265" cy="150" r="15" fill="url(#nodeGray)"/>
+          <!-- подписи -->
+          <g font-family="IBM Plex Mono" font-size="10" fill="#2A2E33" font-weight="500">
+            <text x="80"  y="22"  text-anchor="middle">PLTR</text>
+            <text x="255" y="18"  text-anchor="middle">CRWD</text>
+            <text x="90"  y="183" text-anchor="middle">AAPL</text>
+            <text x="265" y="180" text-anchor="middle">KO</text>
+          </g>
+        </svg>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ РЯД 3 — AGENTIC STATUS ═══ -->
+  <div class="row" style="grid-template-columns:1fr;">
+    <div class="panel agentic">
+      <div class="ai-head">[ 🤖 AI_ANALYSIS // SONNET ]</div>
+      <div class="ai-text">
+        «Риск портфеля сконцентрирован: <span class="flag">две позиции из девяти
+        дают 45% всего риска</span>, а PLTR и CRWD движутся почти синхронно —
+        формально это разные бумаги, по риску — почти одна ставка на технологии.
+        Это согласуется с аналитикой <span class="src">[RAG: GS_Q2_2026]</span>,
+        где Goldman Sachs прогнозирует рост волатильности техсектора во II квартале.
+        Рекомендация advisory-only: рассмотреть снижение концентрации в Technology
+        (сейчас 31% против лимита мандата 25%).»
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ РЯД 4 — RISK ATTRIBUTION + STRESS ═══ -->
+  <div class="row bottom">
+    <!-- Risk Attribution table -->
+    <div class="panel">
+      <div class="sec-title">Где сосредоточен ваш риск</div>
+      <table>
+        <thead>
+          <tr>
+            <th>ТИКЕР</th>
+            <th>СТОИМОСТЬ</th>
+            <th>BETA</th>
+            <th>SHARPE</th>
+            <th class="hl-col">ВКЛАД В РИСК&nbsp;%</th>
+            <th>СТАТУС</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>PLTR</td><td>$5&nbsp;380</td><td>1.81</td><td>1.42</td>
+            <td class="hl-col">24.4</td>
+            <td><span class="status-pill watch">HOTSPOT</span></td>
+          </tr>
+          <tr>
+            <td>CRWD</td><td>$4&nbsp;120</td><td>1.55</td><td>1.67</td>
+            <td class="hl-col">20.8</td>
+            <td><span class="status-pill watch">HOTSPOT</span></td>
+          </tr>
+          <tr>
+            <td>AAPL</td><td>$3&nbsp;900</td><td>1.21</td><td>1.58</td>
+            <td class="hl-col">17.5</td>
+            <td><span class="status-pill normal">NORMAL</span></td>
+          </tr>
+          <tr>
+            <td>JNJ</td><td>$3&nbsp;240</td><td>0.74</td><td>1.10</td>
+            <td class="hl-col">11.0</td>
+            <td><span class="status-pill normal">NORMAL</span></td>
+          </tr>
+          <tr>
+            <td>KO</td><td>$2&nbsp;860</td><td>0.61</td><td>0.95</td>
+            <td class="hl-col">9.8</td>
+            <td><span class="status-pill normal">NORMAL</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Stress Test Scenarios -->
+    <div class="panel">
+      <div class="sec-title">Стресс-сценарии</div>
+      <div class="stress-wrap">
+        <div class="stress-item">
+          <span class="stress-cap">−8%</span>
+          <div class="stress-bar" style="height:38%;background:#C9C6BE;"></div>
+          <span class="stress-name">Падение рынка</span>
+        </div>
+        <div class="stress-item">
+          <span class="stress-cap">−12%</span>
+          <div class="stress-bar" style="height:55%;background:#E6B98A;"></div>
+          <span class="stress-name">Скачок ставки</span>
+        </div>
+        <div class="stress-item">
+          <span class="stress-cap">−18%</span>
+          <div class="stress-bar" style="height:78%;background:#D8814E;"></div>
+          <span class="stress-name">Геополит. шок</span>
+        </div>
+        <div class="stress-item">
+          <span class="stress-cap">−24%</span>
+          <div class="stress-bar" style="height:100%;background:#B33A1A;"></div>
+          <span class="stress-name">Кризис цепочек</span>
+        </div>
+      </div>
+      <div class="kpi-sub" style="margin-top:12px;">
+        Оценка потерь портфеля при историческом повторении сценария.
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ ФУТЕР ═══ -->
+  <div class="foot">
+    CONFIDENTIAL // ADVISORY-ONLY — NOT A RECOMMENDATION // PAGE 1 OF 4 //
+    CoVe: 4 SOURCES VERIFIED
+  </div>
+
+</div>
+</body>
+</html>

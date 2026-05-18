@@ -12,6 +12,18 @@ from freedom_portfolio import TradernetClient, get_history_frame
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger("Antigravity_RiskEngine")
 
+# Multi-period (1м / 3м / 6м / 12м / YTD) returns live in a separate module
+# so they can be unit-tested without pulling in sklearn / engine dependencies.
+from finance.period_returns import compute_period_returns_table as _compute_period_returns_table
+# Stress engine (parametric factor shocks) — also sklearn-free.
+from finance.stress import run_stress_scenarios as _run_stress_scenarios
+# Simulator (Black-Litterman "after-plan" portfolio metrics) — sklearn-free.
+from finance.simulate import simulate_after_plan as _simulate_after_plan
+# FRED macro feed (yield curve / HY spread / PMI / VIX / breakeven) — also
+# sklearn-free; gracefully degrades when FRED_API_KEY is missing or network
+# is unreachable.
+from services.macro_data import MacroFeed as _MacroFeed
+
 class MAC3RiskEngine:
     """
     Институциональный движок рисков (RAMP Style).
@@ -152,6 +164,7 @@ class MAC3RiskEngine:
             'Value':       'VLUE.US',
             'Quality':     'QUAL.US',
             'Size':        'IWM.US',
+            'Volatility':  'SPLV.US',   # Invesco S&P 500 Low Volatility — low-vol factor
             'Commodities': 'DBC.US',
             'Rates':       'IEF.US',    # 7-10y Treasury — фактор процентных ставок
             'EM_Equity':   'EEM.US',    # MSCI Emerging Markets — EM equity premium
@@ -916,6 +929,59 @@ class UniversalPortfolioManager:
                         "Beating_Benchmark":    port_return > bm_return,
                     }
 
+        # ═══════════════ MULTI-PERIOD RETURNS TABLE ═══════════════
+        # Builds the 1м / 3м / 6м / 12м / YTD table for the v2 report's
+        # "Рост против рынка" section.  We rebuild port_daily once here from
+        # the same source frame the benchmark loop used, so the windows are
+        # always sliced against the SAME aligned series — no risk that the
+        # 12m row uses a different cleaning policy than Tracking-Error above.
+        period_returns_table: dict[str, dict] = {}
+        try:
+            port_resolved = self.engine.resolve_tickers(actual_risky)
+            port_cols_idx = [(orig, res) for orig, res in zip(actual_risky, port_resolved)
+                              if res in all_data.columns]
+            if port_cols_idx:
+                port_cols   = [res for _, res in port_cols_idx]
+                port_origs  = [orig for orig, _ in port_cols_idx]
+                w_for_cols  = np.array([weights_dict.get(t, 0.0) for t in port_origs], dtype=float)
+                port_prices = all_data[port_cols].dropna()
+                if len(port_prices) >= 2 and w_for_cols.size:
+                    port_log_df = np.log(port_prices / port_prices.shift(1)).dropna()
+                    port_log_series = pd.Series(
+                        port_log_df.values @ w_for_cols,
+                        index=port_log_df.index,
+                        name="port_log",
+                    )
+                    bm_logs: dict[str, pd.Series] = {}
+                    for bm_name, bm_ticker in benchmarks.items():
+                        if bm_ticker in all_data.columns:
+                            bm_prices = all_data[bm_ticker].dropna()
+                            if len(bm_prices) >= 2:
+                                bm_logs[bm_name] = (
+                                    np.log(bm_prices / bm_prices.shift(1)).dropna()
+                                )
+                    period_returns_table = _compute_period_returns_table(
+                        port_log_series, bm_logs
+                    )
+        except Exception as exc:  # never block the rest of the pipeline
+            logger.warning("period_returns_table build failed: %s", exc)
+            period_returns_table = {}
+
+        # ═══════════════ STRESS SCENARIOS ═══════════════
+        # Parametric factor-shock scenarios using the betas just fitted.  The
+        # default catalog ships 7 scenarios (5 direct, 2 proxy).  Result is a
+        # list[dict] — always present, possibly empty when perf_df is too
+        # thin to support any scenario.
+        try:
+            stress_scenarios = _run_stress_scenarios(
+                perf_df      = df.reset_index(),
+                total_value  = total_portfolio_value,
+                port_metrics = port_metrics,
+            )
+        except Exception as exc:
+            logger.warning("stress scenarios build failed: %s", exc)
+            stress_scenarios = []
+
         # Sector exposure analysis
         sector_exposure = self.engine.get_sector_exposure(list(df.index), weights_dict)
 
@@ -956,6 +1022,18 @@ class UniversalPortfolioManager:
             logger.warning("Regime classification skipped: %s", exc)
             regime_reading = None
 
+        # ═══════════════ MACRO DRIVERS (FRED) ═══════════════
+        # 5-series pack (yield curve / HY OAS / PMI / VIX / breakeven) used
+        # by the DEEP P5 regime page.  Disk-cached for 12h; gracefully
+        # degrades to status="missing" when FRED_API_KEY is unset and to
+        # status="stale" on transient network failures.
+        macro_drivers: dict = {}
+        try:
+            macro_drivers = _MacroFeed().get_regime_drivers()
+        except Exception as exc:
+            logger.warning("Macro drivers fetch skipped: %s", exc)
+            macro_drivers = {}
+
         # ═══════════════ TECHNICALS (pillar C) ═══════════════
         # Computes RSI/MACD/SMA/Bollinger/52w-Hi/Mom-12m1m per-asset.
         # Uses the same close-price frame already loaded; no new fetches.
@@ -987,6 +1065,23 @@ class UniversalPortfolioManager:
             except Exception as exc:
                 logger.info("CDS feed unavailable, continuing without it: %s", exc)
                 cds_lookup = None
+
+        # Tally CDS coverage so the CoVe lineage row reflects reality
+        # (instead of the silent "no per-ticker CDS attached" placeholder).
+        # Single extra pass over the cache — microseconds for ≤20 tickers.
+        cds_summary: dict = {"enabled": cds_lookup is not None,
+                              "checked": 0, "loaded": 0, "gated_out": 0}
+        if cds_lookup is not None:
+            try:
+                checked = list(actual_risky)
+                n_loaded = sum(1 for t in checked if cds_lookup(t))
+                cds_summary.update({
+                    "checked":   len(checked),
+                    "loaded":    n_loaded,
+                    "gated_out": len(checked) - n_loaded,
+                })
+            except Exception as exc:
+                logger.info("CDS coverage tally skipped: %s", exc)
 
         # ═══════════════ 4-PILLAR SCORING (F/V/T/C) ═══════════════
         # Produces AssetScore per ticker, including CDS signals when available.
@@ -1062,6 +1157,55 @@ class UniversalPortfolioManager:
             logger.warning("Black-Litterman skipped: %s", exc)
             bl_records = None
 
+        # ═══════════════ EXPECTED EFFECT (after-plan simulation) ═══════════
+        # Re-evaluates cover-page metrics under BL target weights.  Falls
+        # back to current weights when BL is unavailable — the "after" then
+        # equals "before" and every delta is 0, which the report can detect.
+        expected_effect: dict | None = None
+        try:
+            # Build target_weights from BL where present; otherwise keep
+            # current weights (no-op simulation).
+            target_weights = dict(weights_dict)
+            if bl_records:
+                for r in bl_records:
+                    t = r.get("ticker")
+                    if t:
+                        target_weights[t] = float(r.get("target_w", weights_dict.get(t, 0)))
+
+            # Build daily log-returns matrix for assets the cov matrix knows
+            # about.  Reuses all_data (already loaded) so no extra fetch.
+            sim_daily_log: pd.DataFrame | None = None
+            if not cov_matrix.empty:
+                cov_tickers = list(cov_matrix.index)
+                resolved    = self.engine.resolve_tickers(cov_tickers)
+                avail_cols  = [r for r in resolved if r in all_data.columns]
+                if avail_cols:
+                    sub = all_data[avail_cols].dropna()
+                    if len(sub) >= 2:
+                        log_df = np.log(sub / sub.shift(1)).dropna()
+                        # Map columns back to ORIGINAL (display) tickers.
+                        col_map = {res: orig for orig, res in zip(cov_tickers, resolved)
+                                   if res in avail_cols}
+                        log_df = log_df.rename(columns=col_map)
+                        sim_daily_log = log_df
+
+            sector_map_for_sim = {t: self.engine.get_ticker_sector(t)
+                                   for t in df.index}
+
+            expected_effect = _simulate_after_plan(
+                perf_df           = df.reset_index(),
+                risk_matrix       = cov_matrix,
+                daily_log_returns = sim_daily_log,
+                bl_records        = bl_records,
+                current_metrics   = port_metrics,
+                risk_free_rate    = self.engine.current_rfr_annual,
+                target_weights    = target_weights,
+                sector_by_ticker  = sector_map_for_sim,
+            )
+        except Exception as exc:
+            logger.warning("Expected-effect simulator skipped: %s", exc)
+            expected_effect = None
+
         # ═══════════════ ACTION PLAN ═══════════════
         # Buy zone / Sell target / Stop loss anchored to ATR + SMA + RSI.
         action_plan_rows: list[dict] = []
@@ -1093,11 +1237,16 @@ class UniversalPortfolioManager:
             "portfolio_metrics": port_metrics,
             "risk_free_rate": self.engine.current_rfr_annual,
             "benchmark_comparison": benchmark_results,
+            "period_returns_table": period_returns_table,
+            "stress_scenarios": stress_scenarios,
+            "expected_effect": expected_effect,
+            "cds_summary":     cds_summary,
             "history_result": history_result,
             "sector_exposure": sector_exposure,
             "factor_scores": factor_scores,
             # Phase 2 additions
             "regime":            regime_reading.as_dict() if regime_reading else None,
+            "macro_drivers":     macro_drivers,
             "technicals":        {t: {"score": r.score, "raw": r.raw,
                                        "components": r.components}
                                   for t, r in technicals_map.items()},

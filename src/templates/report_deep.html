@@ -202,12 +202,82 @@
   padding: 3px 0 3px 8px; border-left: 2px solid #fbbf24; margin-bottom: 4px;
 }
 
-/* ── Factor radar placeholder ── */
+/* ── Factor radar (Step 6.2a — banker-grade 3-col layout) ───────────────── */
 .factor-wrap {
-  display: flex; align-items: flex-start; gap: 14px;
-  background: #fff; border: 1px solid #d0dce8; border-radius: 6px; padding: 10px;
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(220px, 1fr);
+  grid-template-areas: "radar table"
+                       "notes notes";
+  gap: 14px;
+  background: #fff; border: 1px solid #d0dce8; border-radius: 6px; padding: 12px;
 }
-.factor-notes { font-size: 9.5px; max-width: 360px; line-height: 1.6; }
+.factor-radar-col { grid-area: radar; }
+.factor-table-col { grid-area: table; }
+.factor-notes     { grid-area: notes; font-size: 9.5px; line-height: 1.6; color: #2a2e33; }
+
+.factor-table {
+  width: 100%; border-collapse: collapse;
+  font-family: 'JetBrains Mono', monospace; font-size: 10px;
+}
+.factor-table thead th {
+  text-align: right; font-weight: 600; padding: 4px 6px;
+  color: #6b7280; border-bottom: 1px solid #d0dce8;
+}
+.factor-table thead th:first-child { text-align: left; }
+.factor-table tbody td {
+  padding: 4px 6px; text-align: right; border-bottom: 1px solid #f0f4f8;
+}
+.factor-table tbody td:first-child { text-align: left; font-family: 'Inter', sans-serif; font-weight: 500; }
+.factor-table tr.muted td  { color: #a8b2bd; }
+.factor-table .na-tag      { font-size: 7.5px; color: #d97706; background: #fef3c7;
+                              padding: 1px 4px; border-radius: 3px; margin-left: 4px; font-weight: 600; }
+.factor-table .delta-pos   { color: #16a34a; font-weight: 600; }
+.factor-table .delta-neg   { color: #dc2626; font-weight: 600; }
+.factor-table .delta-flat  { color: #6b7280; }
+
+/* ── CoVe data-lineage grid (Step 6.2a — data-driven from data.cove_lineage) */
+.cove-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 0;
+  background: #fff; border: 1px solid #d0dce8; border-radius: 6px;
+  padding: 4px 0;
+}
+.cove-item {
+  display: flex; gap: 8px; padding: 8px 12px;
+  border-bottom: 1px solid #f0f4f8;
+}
+.cove-item:last-child, .cove-item:nth-last-child(2) { border-bottom: none; }
+.cove-check {
+  flex: 0 0 14px; font-weight: 700; font-size: 12px;
+  color: #16a34a; line-height: 1.2;
+}
+.cove-item.warn .cove-check { color: #d97706; }
+.cove-item.fail .cove-check { color: #dc2626; }
+.cove-body {
+  font-size: 9.5px; line-height: 1.45; color: #2a2e33;
+}
+.cove-body b { font-weight: 600; }
+.cove-meta {
+  font-family: 'JetBrains Mono', monospace; font-size: 8.5px;
+  color: #6b7280; line-height: 1.5;
+}
+.cove-legend {
+  margin-top: 8px; font-size: 9px; color: #6b7280; line-height: 1.5;
+}
+.cove-legend .cove-ok   { color: #16a34a; }
+.cove-legend .cove-warn { color: #d97706; }
+.cove-legend .cove-fail { color: #dc2626; }
+
+/* ── Mobile (Step 6.2a — narrow-screen layout for factor + CoVe blocks) ─── */
+@media (max-width: 768px) {
+  .factor-wrap {
+    grid-template-columns: 1fr;
+    grid-template-areas: "radar" "table" "notes";
+  }
+  .cove-grid { grid-template-columns: 1fr; }
+  .cove-item:nth-last-child(2) { border-bottom: 1px solid #f0f4f8; }
+  .factor-table { font-size: 11px; }
+  .factor-table tbody td { padding: 6px 8px; }     /* larger tap targets */
+}
 </style>
 </head>
 <body>
@@ -649,11 +719,41 @@
   {% if data.factor_radar_svg %}
   <div class="section-title">Факторное разложение (β) — скрытые концентрации</div>
   <div class="factor-wrap">
-    {{ data.factor_radar_svg | safe }}
+    <div class="factor-radar-col">
+      {{ data.factor_radar_svg | safe }}
+    </div>
+
+    {% if data.factor_betas %}
+    <div class="factor-table-col">
+      <table class="factor-table">
+        <thead>
+          <tr><th>Фактор</th><th>β портф.</th><th>Бенч.</th><th>Δ</th></tr>
+        </thead>
+        <tbody>
+          {% for row in data.factor_betas %}
+          <tr{% if row.missing %} class="muted"{% endif %}>
+            <td>{{ row.axis }}{% if row.missing %} <span class="na-tag">n/a</span>{% endif %}</td>
+            <td>{{ "%.2f"|format(row.beta) }}</td>
+            <td>{{ "%.2f"|format(row.bench) }}</td>
+            <td class="{% if row.delta > 0.01 %}delta-pos{% elif row.delta < -0.01 %}delta-neg{% else %}delta-flat{% endif %}">
+              {% if row.delta > 0 %}+{% endif %}{{ "%.2f"|format(row.delta) }}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
     <div class="factor-notes">
-      <div style="margin-bottom:6px;"><strong>Что показывает радар:</strong> насколько портфель зависит от глобальных рыночных факторов. Большая «площадь» — больше зависимость от рынка.</div>
-      <div><strong>Как читать:</strong> если несколько позиций одновременно двигаются в одну сторону — это скрытая общая ставка. Диверсификация может быть ниже, чем кажется.</div>
-      <div style="margin-top:6px; color:#8a9db0; font-size:8.5px;">Метод: Ridge β-регрессия (α=1.0), EWMA-ковариация λ≈0.94, Ledoit-Wolf 70/30. [Quant Engine]</div>
+      <div><strong>Что показывает радар:</strong> насколько портфель зависит от
+        глобальных рыночных факторов. Большая площадь — больше зависимость от
+        рынка.  Совпадение направлений по нескольким факторам — скрытая общая
+        ставка (диверсификация ниже, чем кажется).</div>
+      <div style="margin-top:6px; color:#8a9db0; font-size:8.5px;">
+        Метод: Ridge β-регрессия (α=1.0) · EWMA λ≈0.94 ⊕ Ledoit-Wolf 70/30 ·
+        Δ vs S&amp;P 500 baseline (Market β=1.0, остальные ≈0). [Quant Engine]
+      </div>
     </div>
   </div>
   {% endif %}
@@ -767,33 +867,41 @@
   </div>
   {% endif %}
 
-  <!-- CoVe: Chain-of-Verification sources -->
+  {# CoVe: Chain-of-Verification — data lineage.
+     Replaced hard-coded source block with a Jinja for-loop over
+     data.cove_lineage (list[dict] from finance.data_lineage.build_lineage).
+     Status legend  v = ok  ·  ! = warn/stale  ·  x = error/missing. #}
   <div class="section-title">CoVe — верификация источников данных</div>
-  <div class="ai-block" style="font-size:9px;">
-    <strong>Риск-метрики</strong> (Vol, CVaR, TE, IR, Max DD):
-    <strong>[Quant Engine · 730d daily · Wilder RMA · EWMA λ≈0.94 ⊕ Ledoit-Wolf]</strong><br>
-    <strong>Tracking Error</strong>: σ(port_daily − bm_daily, ddof=1) × √252 —
-    <em>отличается от Volatility портфеля</em>: √(w'Σw) × √252<br>
-    <strong>Information Ratio</strong>: Excess_Return_Ann ÷ Tracking_Error — обе в годовой шкале.<br>
-    <strong>Fundamental Z-scores</strong>:
-    <strong>[SEC EDGAR · 10-K FY · sector-normalised MAD]</strong><br>
-    <strong>Altman-Z, Piotroski-F, Interest Coverage</strong>:
-    <strong>[SEC EDGAR · CompanyFacts JSON]</strong><br>
-    <strong>CDS spreads</strong>:
-    <strong>[FRED HY proxy · WGB sovereign · QualityGate: sanity 1–3000 bps, ≤3 trading days]</strong><br>
-    <strong>Режим рынка</strong>:
-    <strong>[Quant Engine: Growth/Cycle factor returns · 60d window]</strong><br>
-    <strong>Action levels</strong> (Buy zone / Sell target / Stop loss):
-    <strong>[ATR Wilder RMA + SMA50/200 + RSI(14) + MACD(12,26,9)]</strong><br>
-    {% if data.used_rag %}
-    <strong>Bank RAG</strong>:
-    <strong>[ChromaDB · Bank PDF reports · cosine similarity retrieval]</strong><br>
-    {% endif %}
-    <strong>Идеи ИИ-агента</strong>: Advisory only. Не является ИИИ или рекомендацией к покупке.<br>
-    {% if data.ai_stock_picks %}
-    Все тикеры проверены на наличие ценовой истории в Tradernet. Неподтверждённые данные помечены [⚠️ NOT VERIFIED].
-    {% endif %}
+  {% if data.cove_lineage %}
+  <div class="cove-grid">
+    {% for row in data.cove_lineage %}
+    {% set status = row.status or "ok" %}
+    {% set icon   = "✓" if status == "ok"
+                    else ("!" if status in ("warn", "stale") else "✗") %}
+    {% set klass  = "ok" if status == "ok"
+                    else ("warn" if status in ("warn", "stale") else "fail") %}
+    <div class="cove-item {{ klass }}">
+      <span class="cove-check">{{ icon }}</span>
+      <span class="cove-body">
+        <b>{{ row.name }}</b><br>
+        <span class="cove-meta">
+          {{ row.source }}{% if row.method %} · {{ row.method }}{% endif %}{% if row.as_of %} · as_of {{ row.as_of }}{% endif %}{% if row.note %} · {{ row.note }}{% endif %}
+        </span>
+      </span>
+    </div>
+    {% endfor %}
   </div>
+  <div class="cove-legend">
+    <b class="cove-ok">✓</b> — данные прошли QualityGate ·
+    <b class="cove-warn">!</b> — частичное покрытие или fallback на устаревший кэш ·
+    <b class="cove-fail">✗</b> — источник недоступен.
+    Документ не является ИИИ — только аналитическая рекомендация.
+  </div>
+  {% else %}
+  <div class="ai-block" style="font-size:9px; color:#6b7280;">
+    Lineage недоступен — engine не пробросил список источников.
+  </div>
+  {% endif %}
 
   <div class="footer">
     <span>4 / 4 · Portfolio Intelligence © 2026 — Не является ИИИ.</span>

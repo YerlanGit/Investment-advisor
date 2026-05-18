@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<!--
+  ─────────────────────────────────────────────────────────────────────────
+  ПРОТОТИП (design-only, НЕ подключён к боту)
+  Объединённый макет: страница 1 BASE-отчёта
+  = Cover (verdict + AI box + risk scale) + KPI strip ×3
+    + Risk concentration (таблица + waterfall «вес vs риск»)
+  Стиль: тёплый кремовый фон, моно тех-строки, СТРОГО БЕЗ ГРАДИЕНТОВ.
+  Тариф: BASE → комментирует Haiku везде.
+  Данные: статичные заглушки. Открыть просто в браузере.
+  ─────────────────────────────────────────────────────────────────────────
+-->
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>BASE Report — страница 1 — Прототип</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg:          #F4F2EC;   /* тёплый кремовый фон */
+    --panel:       #FBFAF7;   /* карточки чуть светлее */
+    --ink:         #2A2E33;
+    --ink-60:      rgba(42,46,51,0.60);
+    --ink-40:      rgba(42,46,51,0.40);
+    --hairline:    rgba(42,46,51,0.18);
+    --hairline-2:  rgba(42,46,51,0.10);
+    --tech-blue:   #2F6FB3;   /* основной акцент */
+    --tech-blue-08:rgba(47,111,179,0.08);
+    --tech-blue-14:rgba(47,111,179,0.14);
+    --ai-bg:       #F0F6FF;   /* фон AI-блока */
+    --amber:       #C77B2C;
+    --green:       #3F8F5F;
+    --neg:         #C0492F;
+
+    --font-ui:   'IBM Plex Sans', -apple-system, sans-serif;
+    --font-mono: 'IBM Plex Mono', monospace;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-ui);
+    font-size: 13px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .sheet { max-width: 1100px; margin: 0 auto; padding: 20px 30px 28px; }
+
+  /* ═══ ТЕХ-ХЕДЕР ═══ */
+  .tech-header {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--ink-60);
+    letter-spacing: 0.03em;
+    padding-bottom: 12px;
+    border-bottom: 0.5pt solid var(--hairline);
+    display: flex; justify-content: space-between; flex-wrap: wrap; gap: 6px;
+  }
+  .tech-header b { color: var(--ink); font-weight: 600; }
+  .tech-header .ts { color: var(--ink-40); }
+
+  /* ═══ COVER ═══ */
+  .cover {
+    display: grid;
+    grid-template-columns: 1.55fr 1fr;
+    gap: 26px;
+    padding: 24px 0 22px;
+    border-bottom: 0.5pt solid var(--hairline);
+  }
+  .block-label {
+    font-size: 10px; font-weight: 600; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--ink-60); margin-bottom: 8px;
+  }
+  h1.verdict {
+    font-size: 26px; font-weight: 700; line-height: 1.3;
+    letter-spacing: -0.01em; color: var(--ink);
+  }
+  h1.verdict .hl { color: var(--tech-blue); }
+
+  /* AI INSIGHT BOX — терминал-лог */
+  .ai-box {
+    margin-top: 16px;
+    background: var(--ai-bg);
+    border: 0.5pt solid var(--hairline-2);
+    border-left: 2px solid var(--tech-blue);
+    border-radius: 2px;
+    padding: 12px 15px 13px;
+  }
+  .ai-box .ai-head {
+    font-family: var(--font-mono); font-size: 10.5px; font-weight: 600;
+    letter-spacing: 0.04em; color: var(--tech-blue); margin-bottom: 6px;
+  }
+  .ai-box .ai-body { font-style: italic; font-size: 12.5px; line-height: 1.62; }
+  .src {
+    font-style: normal; font-family: var(--font-mono); font-size: 10px;
+    color: var(--tech-blue); background: var(--tech-blue-08);
+    padding: 0 4px; border-radius: 2px; white-space: nowrap;
+  }
+  .flag { font-style: normal; font-weight: 600; color: var(--amber); }
+
+  /* RISK SCALE 0–100 */
+  .risk-panel {
+    border: 0.5pt solid var(--hairline); border-radius: 2px;
+    padding: 16px 18px 14px; display: flex; flex-direction: column;
+    justify-content: center; background: var(--panel);
+  }
+  .risk-readout { display: flex; align-items: baseline; gap: 7px; margin-bottom: 12px; }
+  .risk-readout .val {
+    font-family: var(--font-mono); font-size: 38px; font-weight: 600;
+    line-height: 1; color: var(--ink);
+  }
+  .risk-readout .scale-max { font-family: var(--font-mono); font-size: 14px; color: var(--ink-40); }
+  .risk-readout .tier {
+    margin-left: auto; align-self: center;
+    font-family: var(--font-mono); font-size: 11px; font-weight: 500;
+    color: var(--amber); border: 0.5pt solid var(--amber);
+    border-radius: 2px; padding: 2px 7px;
+  }
+  .risk-ticks {
+    display: flex; justify-content: space-between;
+    font-family: var(--font-mono); font-size: 9px; color: var(--ink-40); margin-top: 5px;
+  }
+
+  /* ═══ KPI STRIP ═══ */
+  .kpi-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 16px; margin-top: 22px; }
+  .kpi {
+    background: var(--panel);
+    border: 0.5pt solid var(--hairline);
+    border-radius: 2px;
+    padding: 13px 16px 14px;
+    display: flex; flex-direction: column; min-height: 196px;
+  }
+  /* статус-кромка сверху — без теней */
+  .kpi.st-normal { border-top: 2px solid var(--green); }
+  .kpi.st-good   { border-top: 2px solid var(--tech-blue); }
+  .kpi.st-watch  { border-top: 2px solid var(--amber); }
+
+  .kpi-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 9px; }
+  .kpi-name {
+    font-size: 10px; font-weight: 600; letter-spacing: 0.09em;
+    text-transform: uppercase; color: var(--ink-60);
+  }
+  .kpi-tag {
+    font-family: var(--font-mono); font-size: 9.5px; font-weight: 500;
+    padding: 1.5px 6px; border-radius: 2px; border: 0.5pt solid currentColor; white-space: nowrap;
+  }
+  .kpi-tag.st-normal { color: var(--green); }
+  .kpi-tag.st-good   { color: var(--tech-blue); }
+  .kpi-tag.st-watch  { color: var(--amber); }
+
+  .kpi-value {
+    font-family: var(--font-mono); font-size: 32px; font-weight: 600;
+    line-height: 1.05; color: var(--ink); letter-spacing: -0.01em;
+  }
+  .kpi-value .unit { font-size: 18px; color: var(--ink-40); }
+  .kpi-money { font-size: 11px; color: var(--ink-60); margin-top: 3px; }
+  .kpi-money b { font-family: var(--font-mono); font-weight: 500; color: var(--ink); }
+
+  .kpi-spark-row {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; margin-top: 11px;
+  }
+  .kpi-mom { font-family: var(--font-mono); font-size: 10px; white-space: nowrap; }
+  .kpi-mom.up   { color: var(--neg); }
+  .kpi-mom.down { color: var(--green); }
+  .kpi-mom.flat { color: var(--ink-40); }
+
+  .kpi-explainer {
+    font-size: 10.5px; color: var(--ink-60); line-height: 1.45;
+    margin-top: 8px; padding-top: 8px; border-top: 0.5pt solid var(--hairline-2);
+  }
+  .kpi-ai {
+    display: flex; gap: 7px; margin-top: 9px;
+    padding-left: 8px; border-left: 2px solid var(--tech-blue);
+  }
+  .kpi-ai .tag { font-size: 10px; flex-shrink: 0; }
+  .kpi-ai .txt { font-style: italic; font-size: 10.5px; line-height: 1.5; }
+  .kpi-ai .txt .src { font-size: 9px; }
+
+  /* ═══ RISK CONCENTRATION ═══ */
+  .risk-conc { display: grid; grid-template-columns: 1.25fr 1fr; gap: 18px; margin-top: 24px; }
+  .panel {
+    background: var(--panel); border: 0.5pt solid var(--hairline);
+    border-radius: 2px; padding: 15px 17px;
+  }
+  .sec-title { font-size: 14px; font-weight: 600; margin-bottom: 12px; letter-spacing: -0.005em; }
+
+  table { width: 100%; border-collapse: collapse; }
+  thead th {
+    font-family: var(--font-mono); font-size: 9px; font-weight: 600;
+    letter-spacing: 0.03em; color: var(--ink-60); text-align: right;
+    padding: 5px 7px; border-bottom: 0.5pt solid var(--hairline);
+  }
+  thead th:first-child { text-align: left; }
+  thead th.hl-col { background: var(--tech-blue-14); color: var(--tech-blue); }
+  tbody td {
+    font-family: var(--font-mono); font-size: 11px; text-align: right;
+    padding: 6px 7px; border-bottom: 0.5pt solid var(--hairline-2);
+  }
+  tbody td:first-child { text-align: left; font-weight: 500; }
+  tbody td.hl-col { background: var(--tech-blue-08); font-weight: 500; }
+  tbody tr:last-child td { border-bottom: none; }
+  .pill {
+    font-size: 9px; font-family: var(--font-mono);
+    padding: 1px 6px; border-radius: 2px; border: 0.5pt solid currentColor;
+  }
+  .pill.normal { color: var(--green); }
+  .pill.watch  { color: var(--amber); }
+
+  /* waterfall легенда */
+  .wf-legend {
+    display: flex; gap: 16px; font-size: 9.5px; color: var(--ink-60);
+    margin-bottom: 8px; font-family: var(--font-mono);
+  }
+  .wf-legend .sw { display: inline-block; width: 9px; height: 9px; margin-right: 4px; vertical-align: -1px; }
+  .wf-legend .sw.amber { background: var(--amber); }
+  .wf-legend .sw.green { background: var(--green); }
+  .wf-legend .sw.blue  { background: var(--tech-blue); }
+
+  /* связующий AI-комментарий под рядом */
+  .conc-ai {
+    grid-column: 1 / -1;
+    background: var(--ai-bg); border: 0.5pt solid var(--hairline-2);
+    border-left: 2px solid var(--tech-blue); border-radius: 2px;
+    padding: 11px 15px;
+  }
+  .conc-ai .ai-head {
+    font-family: var(--font-mono); font-size: 10px; font-weight: 600;
+    color: var(--tech-blue); margin-bottom: 5px;
+  }
+  .conc-ai .ai-body { font-style: italic; font-size: 12px; line-height: 1.6; }
+
+  /* ═══ ФУТЕР ═══ */
+  .foot {
+    font-family: var(--font-mono); font-size: 10px; color: var(--ink-40);
+    text-align: center; padding-top: 14px; margin-top: 22px;
+    border-top: 0.5pt solid var(--hairline); letter-spacing: 0.05em;
+  }
+
+  /* ═══ АДАПТИВ ═══ */
+  @media (max-width: 880px) {
+    .cover { grid-template-columns: 1fr; gap: 20px; }
+    .kpi-grid { grid-template-columns: 1fr; }
+    .kpi { min-height: auto; }
+    .risk-conc { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 480px) {
+    body { font-size: 15px; }
+    .sheet { padding: 14px 16px 22px; }
+    .tech-header { font-size: 9.5px; }
+    h1.verdict { font-size: 21px; }
+    .risk-readout .val { font-size: 32px; }
+    .kpi-value { font-size: 30px; }
+    .ai-box .ai-body { font-size: 14px; }
+    .kpi-explainer, .kpi-ai .txt { font-size: 12px; }
+    table { font-size: 13px; }
+    thead th, tbody td { padding: 6px 4px; }
+  }
+</style>
+</head>
+<body>
+<div class="sheet">
+
+  <!-- ═══ ТЕХ-ХЕДЕР ═══ -->
+  <div class="tech-header">
+    <span><b>PORTFOLIO RISK REPORT</b> // TIER: BASE // ID: 2026-05-14-U1042 // RISK_ENGINE: MAC3 // SESSION: [A6C7B1F3]</span>
+    <span class="ts">GENERATED 2026-05-14 09:24 UTC+5</span>
+  </div>
+
+  <!-- ═══ COVER ═══ -->
+  <section class="cover">
+    <div class="cover-main">
+      <div class="block-label">Вердикт по портфелю</div>
+      <h1 class="verdict">
+        Портфель в зоне <span class="hl">умеренного риска</span> —
+        держать можно, но почти весь риск собран в двух позициях.
+      </h1>
+
+      <div class="ai-box">
+        <div class="ai-head">[ 🤖 AI_ANALYSIS // HAIKU ]</div>
+        <div class="ai-body">
+          Ваш профиль — «умеренный», и портфель ему соответствует: общий риск
+          62 из 100 — это середина шкалы. Дальше в отчёте главное наблюдение:
+          риск сидит в 2 бумагах из 9. Аналитика
+          <span class="src">[RAG: GS_Q2_2026]</span> отдельно отмечает рост
+          колебаний в технологическом секторе — а у вас там перевес, поэтому
+          концентрацию стоит держать под контролем.
+        </div>
+      </div>
+    </div>
+
+    <!-- RISK SCALE 0–100 -->
+    <div class="risk-panel">
+      <div class="block-label">Насколько рискованный ваш портфель</div>
+      <div class="risk-readout">
+        <span class="val">62</span>
+        <span class="scale-max">/ 100</span>
+        <span class="tier">УМЕРЕННЫЙ</span>
+      </div>
+      <svg width="100%" height="26" viewBox="0 0 320 26" preserveAspectRatio="none"
+           xmlns="http://www.w3.org/2000/svg">
+        <!-- hairline-рамка трека -->
+        <rect x="0.5" y="8" width="319" height="10" fill="none"
+              stroke="#2A2E33" stroke-opacity="0.35" stroke-width="0.5"/>
+        <!-- деления 33 / 66 -->
+        <line x1="105.6" y1="8" x2="105.6" y2="18" stroke="#2A2E33" stroke-opacity="0.20" stroke-width="0.5"/>
+        <line x1="211.2" y1="8" x2="211.2" y2="18" stroke="#2A2E33" stroke-opacity="0.20" stroke-width="0.5"/>
+        <!-- заливка 8% ДО значения 62 — плоский цвет, без градиента -->
+        <rect x="0.5" y="8" width="197.9" height="10" fill="#2F6FB3" fill-opacity="0.08"/>
+        <!-- маркер-needle на 62 -->
+        <line x1="198.4" y1="3" x2="198.4" y2="23" stroke="#2A2E33" stroke-width="1.5"/>
+      </svg>
+      <div class="risk-ticks">
+        <span>0 · низкий</span><span>33</span><span>66</span><span>высокий · 100</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ KPI STRIP ═══ -->
+  <div class="block-label" style="margin-top:24px;">Ключевые показатели риска</div>
+  <div class="kpi-grid">
+
+    <!-- KPI 1 — Худший день / CVaR -->
+    <div class="kpi st-normal">
+      <div class="kpi-top">
+        <span class="kpi-name">Худший день</span>
+        <span class="kpi-tag st-normal">◆ В НОРМЕ</span>
+      </div>
+      <div class="kpi-value">−5.2<span class="unit">%</span></div>
+      <div class="kpi-money">≈ <b>−$1 240</b> при портфеле <b>$24 000</b></div>
+      <div class="kpi-spark-row">
+        <!-- sparkline: только линия, БЕЗ заливки/градиента -->
+        <svg width="120" height="24" viewBox="0 0 120 24" xmlns="http://www.w3.org/2000/svg">
+          <polyline points="2,20 14,18 26,15 38,11 50,6 62,5 74,8 86,13 98,17 110,19 118,20"
+                    fill="none" stroke="#2A2E33" stroke-width="1"/>
+          <line x1="50" y1="2" x2="50" y2="22" stroke="#C77B2C" stroke-width="1" stroke-dasharray="2 2"/>
+        </svg>
+        <span class="kpi-mom down">↓ 0.3 пп за мес</span>
+      </div>
+      <div class="kpi-explainer">
+        Технически — CVaR&nbsp;95%. В 1 из 20 худших дней портфель теряет примерно столько.
+      </div>
+      <div class="kpi-ai">
+        <span class="tag">🤖</span>
+        <span class="txt">
+          Простыми словами: даже в плохой день потери терпимы для вашего профиля,
+          и за месяц этот риск стал чуть меньше. <span class="src">[Quant Engine]</span>
+        </span>
+      </div>
+    </div>
+
+    <!-- KPI 2 — Награда за риск / Sharpe -->
+    <div class="kpi st-good">
+      <div class="kpi-top">
+        <span class="kpi-name">Награда за риск</span>
+        <span class="kpi-tag st-good">◆ ХОРОШО</span>
+      </div>
+      <div class="kpi-value">1.18</div>
+      <div class="kpi-money">Sortino <b>1.60</b> · бенчмарк <b>0.74</b></div>
+      <div class="kpi-spark-row">
+        <svg width="120" height="24" viewBox="0 0 120 24" xmlns="http://www.w3.org/2000/svg">
+          <polyline points="2,19 14,20 26,17 38,15 50,16 62,12 74,10 86,11 98,7 110,6 118,5"
+                    fill="none" stroke="#2A2E33" stroke-width="1"/>
+        </svg>
+        <span class="kpi-mom down">↑ 0.06 за мес</span>
+      </div>
+      <div class="kpi-explainer">
+        Технически — Sharpe Ratio. Сколько доходности портфель даёт на единицу риска.
+      </div>
+      <div class="kpi-ai">
+        <span class="tag">🤖</span>
+        <span class="txt">
+          Простыми словами: вы получаете достойную отдачу за тот риск, что берёте —
+          и обгоняете рынок-ориентир. <span class="src">[Quant Engine]</span>
+        </span>
+      </div>
+    </div>
+
+    <!-- KPI 3 — Самое сильное падение / Max Drawdown -->
+    <div class="kpi st-watch">
+      <div class="kpi-top">
+        <span class="kpi-name">Самое сильное падение</span>
+        <span class="kpi-tag st-watch">◆ ВНИМАНИЕ</span>
+      </div>
+      <div class="kpi-value">−12.8<span class="unit">%</span></div>
+      <div class="kpi-money">≈ <b>−$3 070</b> от пика до дна</div>
+      <div class="kpi-spark-row">
+        <svg width="120" height="24" viewBox="0 0 120 24" xmlns="http://www.w3.org/2000/svg">
+          <polyline points="2,7 14,5 26,8 38,6 50,11 62,19 74,21 86,16 98,12 110,9 118,8"
+                    fill="none" stroke="#2A2E33" stroke-width="1"/>
+          <circle cx="74" cy="21" r="1.8" fill="#C77B2C"/>
+        </svg>
+        <span class="kpi-mom flat">= без изменений</span>
+      </div>
+      <div class="kpi-explainer">
+        Технически — Max Drawdown. Самая глубокая просадка за всю историю портфеля.
+      </div>
+      <div class="kpi-ai">
+        <span class="tag">🤖</span>
+        <span class="txt">
+          Простыми словами: в худший период портфель падал ощутимо — и причина та же,
+          две концентрированные позиции (см. ниже). <span class="src">[Quant Engine]</span>
+        </span>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ═══ RISK CONCENTRATION: таблица + waterfall ═══ -->
+  <div class="risk-conc">
+
+    <!-- Таблица -->
+    <div class="panel">
+      <div class="sec-title">Где сосредоточен ваш риск</div>
+      <table>
+        <thead>
+          <tr>
+            <th>ТИКЕР</th>
+            <th>ВЕС&nbsp;%</th>
+            <th>BETA</th>
+            <th class="hl-col">ВКЛАД В РИСК&nbsp;%</th>
+            <th>СТАТУС</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>PLTR</td><td>18.0</td><td>1.81</td>
+            <td class="hl-col">24.4</td>
+            <td><span class="pill watch">HOTSPOT</span></td>
+          </tr>
+          <tr>
+            <td>CRWD</td><td>14.0</td><td>1.55</td>
+            <td class="hl-col">20.8</td>
+            <td><span class="pill watch">HOTSPOT</span></td>
+          </tr>
+          <tr>
+            <td>AAPL</td><td>16.0</td><td>1.21</td>
+            <td class="hl-col">17.5</td>
+            <td><span class="pill normal">NORMAL</span></td>
+          </tr>
+          <tr>
+            <td>JNJ</td><td>22.0</td><td>0.74</td>
+            <td class="hl-col">11.0</td>
+            <td><span class="pill normal">NORMAL</span></td>
+          </tr>
+          <tr>
+            <td>KO</td><td>30.0</td><td>0.61</td>
+            <td class="hl-col">9.8</td>
+            <td><span class="pill normal">NORMAL</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Waterfall: разложение риска (стиль референса) -->
+    <div class="panel">
+      <div class="sec-title">Разложение риска портфеля</div>
+      <div class="wf-legend">
+        <span><span class="sw amber"></span>риск позиции отдельно</span>
+        <span><span class="sw green"></span>эффект диверсификации</span>
+        <span><span class="sw blue"></span>итоговый риск</span>
+      </div>
+      <!--
+        Классический waterfall разложения риска (как на референс-изображении):
+        индивидуальные риски позиций набираются стопкой вверх → зелёный шаг
+        "эффект диверсификации" вычитает → синий "итоговый риск" — полный бар.
+        Шкала Y: 0..20% годовой волатильности.
+        plot: x 38..350, y 165(0%)..18(20%); 7.35 px на 1%.  y(p)=165-7.35p
+        7 слотов, шаг 44.57, бар 30.
+        Значения (вклад в годовую волатильность, %):
+          PLTR 6.2  CRWD 5.0  AAPL 3.4  JNJ 2.0  KO 1.8  → сумма 18.4
+          Диверсификация −4.2  →  Итоговый риск 14.2
+      -->
+      <svg width="100%" height="218" viewBox="0 0 360 218" xmlns="http://www.w3.org/2000/svg">
+        <!-- сетка Y: 0/5/10/15/20 % -->
+        <g font-family="IBM Plex Mono" font-size="8" fill="rgba(42,46,51,0.45)">
+          <line x1="34" y1="165"   x2="352" y2="165"   stroke="#2A2E33" stroke-opacity="0.20" stroke-width="0.5"/>
+          <text x="30" y="168" text-anchor="end">0%</text>
+          <line x1="34" y1="128.25" x2="352" y2="128.25" stroke="#2A2E33" stroke-opacity="0.10" stroke-width="0.5"/>
+          <text x="30" y="131" text-anchor="end">5%</text>
+          <line x1="34" y1="91.5"  x2="352" y2="91.5"  stroke="#2A2E33" stroke-opacity="0.10" stroke-width="0.5"/>
+          <text x="30" y="94" text-anchor="end">10%</text>
+          <line x1="34" y1="54.75" x2="352" y2="54.75" stroke="#2A2E33" stroke-opacity="0.10" stroke-width="0.5"/>
+          <text x="30" y="57" text-anchor="end">15%</text>
+          <line x1="34" y1="18"    x2="352" y2="18"    stroke="#2A2E33" stroke-opacity="0.10" stroke-width="0.5"/>
+          <text x="30" y="21" text-anchor="end">20%</text>
+        </g>
+
+        <!-- затенённая зона за индивидуальными рисками (PLTR..KO), плоская заливка -->
+        <rect x="45" y="26" width="209" height="139" fill="#C77B2C" fill-opacity="0.07"/>
+
+        <!-- связующие хвосты waterfall (тонкие hairline) -->
+        <g stroke="#2A2E33" stroke-opacity="0.45" stroke-width="0.5">
+          <line x1="75.3"  y1="119.4" x2="89.9"  y2="119.4"/>
+          <line x1="119.9" y1="82.7"  x2="134.4" y2="82.7"/>
+          <line x1="164.4" y1="57.7"  x2="179.0" y2="57.7"/>
+          <line x1="209.0" y1="43.0"  x2="223.6" y2="43.0"/>
+          <line x1="253.6" y1="29.8"  x2="268.1" y2="29.8"/>
+          <line x1="298.1" y1="60.6"  x2="312.7" y2="60.6"/>
+        </g>
+
+        <!-- индивидуальные риски — амбер, набираются вверх -->
+        <rect x="45.3"  y="119.4" width="30" height="45.6" fill="#C77B2C" fill-opacity="0.88"/>
+        <rect x="89.9"  y="82.7"  width="30" height="36.7" fill="#C77B2C" fill-opacity="0.88"/>
+        <rect x="134.4" y="57.7"  width="30" height="25.0" fill="#C77B2C" fill-opacity="0.88"/>
+        <rect x="179.0" y="43.0"  width="30" height="14.7" fill="#C77B2C" fill-opacity="0.88"/>
+        <rect x="223.6" y="29.8"  width="30" height="13.2" fill="#C77B2C" fill-opacity="0.88"/>
+        <!-- эффект диверсификации — зелёный, шаг вниз -->
+        <rect x="268.1" y="29.8"  width="30" height="30.8" fill="#3F8F5F" fill-opacity="0.90"/>
+        <!-- итоговый риск — синий, полный бар от нуля -->
+        <rect x="312.7" y="60.6"  width="30" height="104.4" fill="#2F6FB3" fill-opacity="0.90"/>
+
+        <!-- значения над барами -->
+        <g font-family="IBM Plex Mono" font-size="8.5" fill="#2A2E33">
+          <text x="60.3"  y="115" text-anchor="middle">6.2%</text>
+          <text x="104.9" y="78"  text-anchor="middle">5.0%</text>
+          <text x="149.4" y="53"  text-anchor="middle">3.4%</text>
+          <text x="194.0" y="38"  text-anchor="middle">2.0%</text>
+          <text x="238.6" y="25"  text-anchor="middle">1.8%</text>
+          <text x="283.1" y="25"  text-anchor="middle" fill="#3F8F5F">−4.2%</text>
+          <text x="327.7" y="56"  text-anchor="middle" fill="#2F6FB3" font-weight="600">14.2%</text>
+        </g>
+
+        <!-- подписи баров -->
+        <g font-family="IBM Plex Mono" font-size="8.5" fill="#2A2E33">
+          <text x="60.3"  y="178" text-anchor="middle">PLTR</text>
+          <text x="104.9" y="178" text-anchor="middle">CRWD</text>
+          <text x="149.4" y="178" text-anchor="middle">AAPL</text>
+          <text x="194.0" y="178" text-anchor="middle">JNJ</text>
+          <text x="238.6" y="178" text-anchor="middle">KO</text>
+        </g>
+        <g font-family="IBM Plex Sans" font-size="7.5" fill="rgba(42,46,51,0.7)">
+          <text x="283.1" y="176" text-anchor="middle">Диверси-</text>
+          <text x="283.1" y="184" text-anchor="middle">фикация</text>
+          <text x="327.7" y="176" text-anchor="middle">Итоговый</text>
+          <text x="327.7" y="184" text-anchor="middle">риск</text>
+        </g>
+
+        <!-- скобка под индивидуальными рисками -->
+        <path d="M45.3,192 L45.3,197 L147,200 L147,203 L147,200 L253.6,197 L253.6,192"
+              fill="none" stroke="#2A2E33" stroke-opacity="0.50" stroke-width="0.5"/>
+        <text x="149.4" y="214" text-anchor="middle" font-family="IBM Plex Sans"
+              font-size="8.5" fill="rgba(42,46,51,0.65)">Риск каждой позиции по отдельности</text>
+      </svg>
+    </div>
+
+    <!-- связующий AI-комментарий -->
+    <div class="conc-ai">
+      <div class="ai-head">[ 🤖 AI_ANALYSIS // HAIKU ]</div>
+      <div class="ai-body">
+        «Простыми словами: если бы вы держали каждую бумагу <span class="flag">по
+        отдельности, их риски сложились бы в 18.4%</span> годовых колебаний. Но
+        бумаги не падают одновременно — этот «эффект диверсификации» снижает риск
+        на 4.2 пункта, и реальный риск портфеля — 14.2%. В таблице слева видно,
+        кто вносит больше всего: те же PLTR и CRWD. Диверсификация уже работает
+        на вас, но усилить её можно, добавив активы из других секторов.
+        <span class="src">[Quant Engine]</span>»
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ═══ ФУТЕР ═══ -->
+  <div class="foot">
+    CONFIDENTIAL // ADVISORY-ONLY — NOT A RECOMMENDATION // PAGE 1 OF 4 // CoVe: 4 SOURCES VERIFIED
+  </div>
+
+</div>
+</body>
+</html>

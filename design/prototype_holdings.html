@@ -1,0 +1,789 @@
+<!DOCTYPE html>
+<!--
+  ─────────────────────────────────────────────────────────────────────────
+  ПРОТОТИП (design-only, НЕ подключён к боту)
+  Секция: «ЧТО ВЫ ДЕРЖИТЕ» (holdings) — BASE-отчёт
+  Стиль: утверждённый — тёплый кремовый фон, моно тех-строки, hairline,
+         плоские заливки БЕЗ градиентов, AI-блок терминал-лог.
+  Интерактив: клик по строке → разворот SEC-фундаментала.
+  Адаптив: на узком экране таблица превращается в карточки.
+  Данные: статичные заглушки. Открыть просто в браузере.
+  ─────────────────────────────────────────────────────────────────────────
+-->
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>BASE Report — «Что вы держите» — Прототип</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg:          #F4F2EC;
+    --panel:       #FBFAF7;
+    --ink:         #2A2E33;
+    --ink-60:      rgba(42,46,51,0.60);
+    --ink-40:      rgba(42,46,51,0.40);
+    --hairline:    rgba(42,46,51,0.18);
+    --hairline-2:  rgba(42,46,51,0.10);
+    --tech-blue:   #2F6FB3;
+    --tech-blue-08:rgba(47,111,179,0.08);
+    --ai-bg:       #F0F6FF;
+    --amber:       #C77B2C;
+    --amber-08:    rgba(199,123,44,0.10);
+    --green:       #3F8F5F;
+    --neg:         #C0492F;
+
+    --font-ui:   'IBM Plex Sans', -apple-system, sans-serif;
+    --font-mono: 'IBM Plex Mono', monospace;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    background: var(--bg); color: var(--ink);
+    font-family: var(--font-ui); font-size: 13px; line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  .sheet { max-width: 1100px; margin: 0 auto; padding: 20px 30px 28px; }
+
+  /* ТЕХ-ХЕДЕР */
+  .tech-header {
+    font-family: var(--font-mono); font-size: 11px; color: var(--ink-60);
+    letter-spacing: 0.03em; padding-bottom: 12px;
+    border-bottom: 0.5pt solid var(--hairline);
+    display: flex; justify-content: space-between; flex-wrap: wrap; gap: 6px;
+  }
+  .tech-header b { color: var(--ink); font-weight: 600; }
+  .tech-header .ts { color: var(--ink-40); }
+
+  /* ЗАГОЛОВОК СЕКЦИИ */
+  .sec-head { padding: 22px 0 4px; }
+  .sec-title { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
+  .sec-sub { font-size: 11.5px; color: var(--ink-60); margin-top: 3px; }
+
+  /* ── РАСКЛАДКА: ТАБЛИЦА + ПАНЕЛЬ СЕКТОРОВ ── */
+  .holdings-layout {
+    margin-top: 14px;
+    display: flex; gap: 14px; align-items: stretch;
+  }
+
+  /* ── ТАБЛИЦА HOLDINGS ── */
+  .holdings {
+    flex: 1 1 auto; min-width: 0;
+    border: 0.5pt solid var(--hairline); border-radius: 2px;
+    background: var(--panel); overflow: hidden;
+  }
+  .h-head, .h-row {
+    display: grid;
+    grid-template-columns: 1.35fr 1.1fr 0.7fr 0.85fr 0.8fr 0.95fr 1.05fr 0.95fr;
+    align-items: center; gap: 10px;
+  }
+  .h-head {
+    padding: 8px 14px;
+    border-bottom: 0.5pt solid var(--hairline);
+    font-family: var(--font-mono); font-size: 9px; font-weight: 600;
+    letter-spacing: 0.04em; color: var(--ink-60); text-transform: uppercase;
+  }
+  .h-head .num, .h-row .num { text-align: right; }
+
+  /* разделитель перед колонкой «Действие» */
+  .h-head .sep, .h-cell.action {
+    border-left: 0.5pt solid var(--hairline); padding-left: 11px;
+  }
+
+  .h-row {
+    padding: 10px 14px;
+    border-bottom: 0.5pt solid var(--hairline-2);
+    cursor: pointer; transition: background 0.1s, box-shadow 0.1s;
+  }
+  .h-row:hover {
+    background: var(--tech-blue-08);
+    box-shadow: inset 3px 0 0 var(--tech-blue);
+  }
+  .h-row.open {
+    background: var(--tech-blue-08);
+    box-shadow: inset 3px 0 0 var(--tech-blue);
+  }
+  .h-group:last-child .h-row { border-bottom: none; }
+
+  .h-cell { font-size: 12px; }
+  .h-cell.num { font-family: var(--font-mono); text-align: right; }
+  .h-cell-label { display: none; }   /* виден только на мобильном */
+
+  .h-ticker { display: flex; align-items: center; gap: 7px; }
+  .h-ticker .tk { font-family: var(--font-mono); font-weight: 600; font-size: 12.5px; }
+  .h-flag {
+    font-family: var(--font-mono); font-size: 8px; font-weight: 600;
+    color: var(--amber); border: 0.5pt solid var(--amber);
+    border-radius: 2px; padding: 0.5px 4px; letter-spacing: 0.02em;
+  }
+  .pnl.pos { color: var(--green); }
+  .pnl.neg { color: var(--neg); }
+
+  .badge {
+    font-family: var(--font-mono); font-size: 9.5px; font-weight: 500;
+    padding: 2px 7px; border-radius: 2px; border: 0.5pt solid currentColor;
+    white-space: nowrap;
+  }
+  .badge.buy    { color: var(--green); }
+  .badge.hold   { color: var(--ink-60); }
+  .badge.trim   { color: var(--amber); }
+  .badge.sell   { color: var(--neg); }
+
+  .caret-cell { display: flex; justify-content: flex-end; }
+  /* заметная кнопка разворота строки */
+  .h-toggle {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3.5px 9px; border-radius: 3px;
+    background: var(--tech-blue);
+    font-family: var(--font-mono); font-size: 9px; font-weight: 600;
+    color: #fff; letter-spacing: 0.02em; white-space: nowrap;
+    transition: background 0.12s;
+  }
+  .h-row:hover .h-toggle { background: #25557F; }
+  .h-caret { font-size: 9px; transition: transform 0.15s; }
+  .h-row.open .h-caret { transform: rotate(90deg); }
+  .h-toggle .t-less { display: none; }
+  .h-row.open .h-toggle .t-more { display: none; }
+  .h-row.open .h-toggle .t-less { display: inline; }
+
+  /* ── РАЗВОРОТ: SEC-ФУНДАМЕНТАЛ ── */
+  .h-detail { display: none; padding: 0 14px 14px; }
+  .h-detail.open { display: block; }
+  .h-detail-inner {
+    border-left: 2px solid var(--tech-blue);
+    background: rgba(42,46,51,0.02);
+    border-radius: 0 2px 2px 0;
+    padding: 12px 14px;
+  }
+  .h-detail-name {
+    font-size: 11px; color: var(--ink-60); margin-bottom: 9px;
+  }
+  .stat-grid {
+    display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px;
+  }
+  .stat { }
+  .stat-label {
+    font-size: 8.5px; color: var(--ink-60); letter-spacing: 0.02em;
+    text-transform: uppercase; line-height: 1.3; margin-bottom: 3px;
+  }
+  .stat-value {
+    font-family: var(--font-mono); font-size: 13px; font-weight: 500; color: var(--ink);
+  }
+  .stat-value.pos { color: var(--green); }
+  .stat-value.neg { color: var(--neg); }
+  .h-detail-ai {
+    margin-top: 10px; padding-top: 9px;
+    border-top: 0.5pt solid var(--hairline-2);
+    display: flex; gap: 7px;
+  }
+  .h-detail-ai .tag { font-size: 10px; flex-shrink: 0; }
+  .h-detail-ai .txt { font-style: italic; font-size: 11px; line-height: 1.5; }
+  .h-detail-ai .txt .src {
+    font-style: normal; font-family: var(--font-mono); font-size: 9px;
+    color: var(--tech-blue);
+  }
+
+  /* ── ПАНЕЛЬ СЕКТОРОВ + PIE ── */
+  .sector-panel {
+    flex: 0 0 234px;
+    border: 0.5pt solid var(--hairline); border-radius: 2px;
+    background: var(--panel); overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+  /* заголовок-бар — зеркалит шапку таблицы */
+  .sp-head {
+    padding: 8px 14px;
+    border-bottom: 0.5pt solid var(--hairline);
+  }
+  .sp-title {
+    font-family: var(--font-mono); font-size: 9px; font-weight: 600;
+    letter-spacing: 0.04em; color: var(--ink-60); text-transform: uppercase;
+  }
+  .sp-sub { font-size: 10px; color: var(--ink-40); margin-top: 2px; }
+
+  /* тело панели растягивается и центрирует pie+легенду */
+  .sp-body {
+    flex: 1 1 auto;
+    display: flex; flex-direction: column; justify-content: center;
+    padding: 16px 14px;
+  }
+  .pie-wrap { display: flex; justify-content: center; margin-bottom: 14px; }
+  .pie {
+    position: relative; width: 152px; height: 152px; border-radius: 50%;
+    background: conic-gradient(
+      var(--amber)      0      62%,
+      var(--tech-blue)  62%    76%,
+      var(--green)      76%    92%,
+      var(--ink-60)     92%    98%,
+      var(--ink-40)     98%    100%
+    );
+  }
+  .pie::after {
+    content: ''; position: absolute; inset: 30%;
+    background: var(--panel); border-radius: 50%;
+    border: 0.5pt solid var(--hairline-2);
+  }
+  .pie-center {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; text-align: center;
+  }
+  .pie-center .pc-pct {
+    font-family: var(--font-mono); font-size: 16px; font-weight: 600;
+    color: var(--amber); line-height: 1;
+  }
+  .pie-center .pc-lbl {
+    font-family: var(--font-mono); font-size: 7.5px; color: var(--ink-60);
+    letter-spacing: 0.05em; margin-top: 2px;
+  }
+
+  .pie-legend { display: flex; flex-direction: column; gap: 5px; }
+  .lg-item { display: flex; align-items: center; gap: 7px; font-size: 11px; }
+  .lg-sw { width: 9px; height: 9px; border-radius: 2px; flex-shrink: 0; }
+  .lg-name { flex: 1; color: var(--ink); }
+  .lg-pct { font-family: var(--font-mono); font-size: 11px; color: var(--ink-60); }
+  .lg-item.over .lg-name,
+  .lg-item.over .lg-pct { color: var(--amber); font-weight: 600; }
+
+  /* предупреждение прижато к нижней кромке — вровень с таблицей */
+  .sp-warn {
+    margin: 0 14px 14px; padding: 8px 9px;
+    background: var(--amber-08); border: 0.5pt solid var(--amber);
+    border-radius: 2px; display: flex; gap: 6px;
+    font-size: 10.5px; line-height: 1.42; color: var(--amber);
+  }
+  .sp-warn b { font-weight: 600; }
+
+  /* ── СВОДНЫЙ AI-БЛОК ── */
+  .sec-ai {
+    margin-top: 16px;
+    background: var(--ai-bg); border: 0.5pt solid var(--hairline-2);
+    border-left: 2px solid var(--tech-blue); border-radius: 2px;
+    padding: 12px 15px;
+  }
+  .sec-ai .ai-head {
+    font-family: var(--font-mono); font-size: 10.5px; font-weight: 600;
+    color: var(--tech-blue); margin-bottom: 6px;
+  }
+  .sec-ai .ai-body { font-style: italic; font-size: 12.5px; line-height: 1.62; }
+  .sec-ai .ai-body p { margin: 0; }
+  .sec-ai .ai-body p + p { margin-top: 8px; }
+  .ai-sources {
+    margin-top: 10px; padding-top: 8px;
+    border-top: 0.5pt solid var(--hairline-2);
+    font-family: var(--font-mono); font-size: 9px; color: var(--ink-60);
+    letter-spacing: 0.02em; line-height: 1.7;
+  }
+  .ai-sources b { color: var(--tech-blue); font-weight: 600; }
+  .src-inline {
+    font-style: normal; font-family: var(--font-mono); font-size: 10px;
+    color: var(--tech-blue); background: var(--tech-blue-08);
+    padding: 0 4px; border-radius: 2px;
+  }
+  .flag-inline { font-style: normal; font-weight: 600; color: var(--amber); }
+
+  /* ФУТЕР */
+  .foot {
+    font-family: var(--font-mono); font-size: 10px; color: var(--ink-40);
+    text-align: center; padding-top: 14px; margin-top: 22px;
+    border-top: 0.5pt solid var(--hairline); letter-spacing: 0.05em;
+  }
+
+  /* ─────────── АДАПТИВ ─────────── */
+  /* панель секторов уходит под таблицу */
+  @media (max-width: 900px) {
+    .holdings-layout { flex-direction: column; }
+    .sector-panel { flex: 1 1 auto; width: 100%; }
+    .pie-wrap { margin: 12px 0; }
+  }
+
+  /* таблица → карточки */
+  @media (max-width: 720px) {
+    .h-head { display: none; }
+    .h-row {
+      grid-template-columns: 1fr 1fr;
+      gap: 7px 14px;
+      padding: 12px 14px;
+    }
+    .h-cell { display: flex; justify-content: space-between; align-items: baseline; font-size: 13px; }
+    .h-cell.num { text-align: left; }
+    .h-cell-label {
+      display: inline; font-size: 9px; color: var(--ink-60);
+      text-transform: uppercase; letter-spacing: 0.03em;
+    }
+    .h-cell.ticker  { grid-column: 1 / -1; }
+    .h-cell.action  {
+      grid-column: 1 / -1; justify-content: flex-start;
+      border-left: none; padding-left: 0;
+    }
+    .h-cell.caret-cell {
+      grid-column: 1 / -1; justify-content: flex-end;
+      border-top: 0.5pt solid var(--hairline-2); padding-top: 6px;
+    }
+    .h-cell.ticker .h-cell-label { display: none; }
+    .stat-grid { grid-template-columns: repeat(2, 1fr); gap: 9px 14px; }
+  }
+  @media (max-width: 480px) {
+    body { font-size: 15px; }
+    .sheet { padding: 14px 16px 22px; }
+    .tech-header { font-size: 9.5px; }
+    .sec-title { font-size: 15px; }
+    .sec-ai .ai-body { font-size: 14px; }
+  }
+</style>
+</head>
+<body>
+<div class="sheet">
+
+  <!-- ТЕХ-ХЕДЕР -->
+  <div class="tech-header">
+    <span><b>PORTFOLIO RISK REPORT</b> // TIER: BASE // ID: 2026-05-14-U1042 // RISK_ENGINE: MAC3 // SESSION: [A6C7B1F3]</span>
+    <span class="ts">PAGE 2 OF 4</span>
+  </div>
+
+  <!-- ЗАГОЛОВОК СЕКЦИИ -->
+  <div class="sec-head">
+    <div class="sec-title">Что вы держите</div>
+    <div class="sec-sub">9 позиций · нажмите на строку, чтобы увидеть фундаментал бумаги</div>
+  </div>
+
+  <!-- ТАБЛИЦА + ПАНЕЛЬ СЕКТОРОВ -->
+  <div class="holdings-layout">
+
+  <div class="holdings">
+    <!-- шапка -->
+    <div class="h-head">
+      <span>Тикер</span>
+      <span>Класс активов</span>
+      <span class="num">Вес</span>
+      <span class="num">Риск</span>
+      <span class="num">P/L %</span>
+      <span class="num">P/L $</span>
+      <span class="sep">Действие</span>
+      <span></span>
+    </div>
+
+    <!-- ── PLTR ── -->
+    <div class="h-group">
+      <div class="h-row" onclick="tg(this)">
+        <div class="h-cell ticker">
+          <div class="h-ticker"><span class="tk">PLTR</span><span class="h-flag">HOTSPOT</span></div>
+        </div>
+        <div class="h-cell"><span class="h-cell-label">Класс</span>Технологии</div>
+        <div class="h-cell num"><span class="h-cell-label">Вес</span>18.0%</div>
+        <div class="h-cell num"><span class="h-cell-label">Риск</span>24.4%</div>
+        <div class="h-cell num"><span class="h-cell-label">P/L %</span><span class="pnl pos">+32.1%</span></div>
+        <div class="h-cell num"><span class="h-cell-label">P/L $</span><span class="pnl pos">+$2 140</span></div>
+        <div class="h-cell action"><span class="badge buy">BUY</span></div>
+        <div class="h-cell caret-cell"><span class="h-toggle"><span class="t-more">Детали</span><span class="t-less">Свернуть</span><span class="h-caret">▸</span></span></div>
+      </div>
+      <div class="h-detail">
+        <div class="h-detail-inner">
+          <div class="h-detail-name">Palantir Technologies · фундаментал по данным SEC EDGAR</div>
+          <div class="stat-grid">
+            <div class="stat"><div class="stat-label">Доходность капитала (ROE)</div><div class="stat-value pos">28.4%</div></div>
+            <div class="stat"><div class="stat-label">Операц. маржа</div><div class="stat-value pos">22.1%</div></div>
+            <div class="stat"><div class="stat-label">Долг / активы</div><div class="stat-value pos">0.18</div></div>
+            <div class="stat"><div class="stat-label">Рост выручки г/г</div><div class="stat-value pos">+30.4%</div></div>
+            <div class="stat"><div class="stat-label">ATR — дневная волатильность</div><div class="stat-value neg">3.1%</div></div>
+            <div class="stat"><div class="stat-label">Beta к рынку</div><div class="stat-value neg">1.81</div></div>
+          </div>
+          <div class="h-detail-ai">
+            <span class="tag">🤖</span>
+            <span class="txt">Сильный фундаментал и рост выручки, но дневные колебания высокие
+              (ATR 3.1%) и бета 1.81 — бумага усиливает риск портфеля.
+              <span class="src">[SEC EDGAR] [Quant Engine]</span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── CRWD ── -->
+    <div class="h-group">
+      <div class="h-row" onclick="tg(this)">
+        <div class="h-cell ticker">
+          <div class="h-ticker"><span class="tk">CRWD</span><span class="h-flag">HOTSPOT</span></div>
+        </div>
+        <div class="h-cell"><span class="h-cell-label">Класс</span>Технологии</div>
+        <div class="h-cell num"><span class="h-cell-label">Вес</span>14.0%</div>
+        <div class="h-cell num"><span class="h-cell-label">Риск</span>20.8%</div>
+        <div class="h-cell num"><span class="h-cell-label">P/L %</span><span class="pnl pos">+18.5%</span></div>
+        <div class="h-cell num"><span class="h-cell-label">P/L $</span><span class="pnl pos">+$890</span></div>
+        <div class="h-cell action"><span class="badge hold">HOLD</span></div>
+        <div class="h-cell caret-cell"><span class="h-toggle"><span class="t-more">Детали</span><span class="t-less">Свернуть</span><span class="h-caret">▸</span></span></div>
+      </div>
+      <div class="h-detail">
+        <div class="h-detail-inner">
+          <div class="h-detail-name">CrowdStrike Holdings · фундаментал по данным SEC EDGAR</div>
+          <div class="stat-grid">
+            <div class="stat"><div class="stat-label">Доходность капитала (ROE)</div><div class="stat-value pos">19.7%</div></div>
+            <div class="stat"><div class="stat-label">Операц. маржа</div><div class="stat-value pos">15.2%</div></div>
+            <div class="stat"><div class="stat-label">Долг / активы</div><div class="stat-value pos">0.22</div></div>
+            <div class="stat"><div class="stat-label">Рост выручки г/г</div><div class="stat-value pos">+33.1%</div></div>
+            <div class="stat"><div class="stat-label">ATR — дневная волатильность</div><div class="stat-value neg">2.8%</div></div>
+            <div class="stat"><div class="stat-label">Beta к рынку</div><div class="stat-value neg">1.55</div></div>
+          </div>
+          <div class="h-detail-ai">
+            <span class="tag">🤖</span>
+            <span class="txt">Растёт быстро, но движется почти синхронно с PLTR — вместе они
+              дают вторую по величине концентрацию риска.
+              <span class="src">[SEC EDGAR] [Quant Engine]</span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── AAPL ── -->
+    <div class="h-group">
+      <div class="h-row" onclick="tg(this)">
+        <div class="h-cell ticker">
+          <div class="h-ticker"><span class="tk">AAPL</span></div>
+        </div>
+        <div class="h-cell"><span class="h-cell-label">Класс</span>Технологии</div>
+        <div class="h-cell num"><span class="h-cell-label">Вес</span>16.0%</div>
+        <div class="h-cell num"><span class="h-cell-label">Риск</span>17.5%</div>
+        <div class="h-cell num"><span class="h-cell-label">P/L %</span><span class="pnl pos">+12.3%</span></div>
+        <div class="h-cell num"><span class="h-cell-label">P/L $</span><span class="pnl pos">+$640</span></div>
+        <div class="h-cell action"><span class="badge buy">BUY</span></div>
+        <div class="h-cell caret-cell"><span class="h-toggle"><span class="t-more">Детали</span><span class="t-less">Свернуть</span><span class="h-caret">▸</span></span></div>
+      </div>
+      <div class="h-detail">
+        <div class="h-detail-inner">
+          <div class="h-detail-name">Apple Inc. · фундаментал по данным SEC EDGAR</div>
+          <div class="stat-grid">
+            <div class="stat"><div class="stat-label">Доходность капитала (ROE)</div><div class="stat-value pos">147%</div></div>
+            <div class="stat"><div class="stat-label">Операц. маржа</div><div class="stat-value pos">30.1%</div></div>
+            <div class="stat"><div class="stat-label">Долг / активы</div><div class="stat-value">0.31</div></div>
+            <div class="stat"><div class="stat-label">Рост выручки г/г</div><div class="stat-value">+2.0%</div></div>
+            <div class="stat"><div class="stat-label">ATR — дневная волатильность</div><div class="stat-value">1.6%</div></div>
+            <div class="stat"><div class="stat-label">Beta к рынку</div><div class="stat-value">1.21</div></div>
+          </div>
+          <div class="h-detail-ai">
+            <span class="tag">🤖</span>
+            <span class="txt">Очень прибыльная и стабильная — высокая маржа, умеренные колебания.
+              Рост выручки замедлился, но бумага «держит» портфель.
+              <span class="src">[SEC EDGAR]</span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── JNJ ── -->
+    <div class="h-group">
+      <div class="h-row" onclick="tg(this)">
+        <div class="h-cell ticker">
+          <div class="h-ticker"><span class="tk">JNJ</span></div>
+        </div>
+        <div class="h-cell"><span class="h-cell-label">Класс</span>Здравоохранение</div>
+        <div class="h-cell num"><span class="h-cell-label">Вес</span>14.0%</div>
+        <div class="h-cell num"><span class="h-cell-label">Риск</span>11.0%</div>
+        <div class="h-cell num"><span class="h-cell-label">P/L %</span><span class="pnl pos">+4.2%</span></div>
+        <div class="h-cell num"><span class="h-cell-label">P/L $</span><span class="pnl pos">+$310</span></div>
+        <div class="h-cell action"><span class="badge buy">STRONG BUY</span></div>
+        <div class="h-cell caret-cell"><span class="h-toggle"><span class="t-more">Детали</span><span class="t-less">Свернуть</span><span class="h-caret">▸</span></span></div>
+      </div>
+      <div class="h-detail">
+        <div class="h-detail-inner">
+          <div class="h-detail-name">Johnson &amp; Johnson · фундаментал по данным SEC EDGAR</div>
+          <div class="stat-grid">
+            <div class="stat"><div class="stat-label">Доходность капитала (ROE)</div><div class="stat-value pos">24.8%</div></div>
+            <div class="stat"><div class="stat-label">Операц. маржа</div><div class="stat-value pos">25.3%</div></div>
+            <div class="stat"><div class="stat-label">Долг / активы</div><div class="stat-value pos">0.34</div></div>
+            <div class="stat"><div class="stat-label">Рост выручки г/г</div><div class="stat-value">+3.4%</div></div>
+            <div class="stat"><div class="stat-label">ATR — дневная волатильность</div><div class="stat-value pos">0.9%</div></div>
+            <div class="stat"><div class="stat-label">Beta к рынку</div><div class="stat-value pos">0.74</div></div>
+          </div>
+          <div class="h-detail-ai">
+            <span class="tag">🤖</span>
+            <span class="txt">Тихая, надёжная позиция: низкая бета, маленькие колебания, крепкий
+              фундаментал — снижает общий риск портфеля.
+              <span class="src">[SEC EDGAR] [Quant Engine]</span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── KO ── -->
+    <div class="h-group">
+      <div class="h-row" onclick="tg(this)">
+        <div class="h-cell ticker">
+          <div class="h-ticker"><span class="tk">KO</span></div>
+        </div>
+        <div class="h-cell"><span class="h-cell-label">Класс</span>Потреб. товары</div>
+        <div class="h-cell num"><span class="h-cell-label">Вес</span>16.0%</div>
+        <div class="h-cell num"><span class="h-cell-label">Риск</span>9.8%</div>
+        <div class="h-cell num"><span class="h-cell-label">P/L %</span><span class="pnl neg">−1.8%</span></div>
+        <div class="h-cell num"><span class="h-cell-label">P/L $</span><span class="pnl neg">−$190</span></div>
+        <div class="h-cell action"><span class="badge hold">HOLD</span></div>
+        <div class="h-cell caret-cell"><span class="h-toggle"><span class="t-more">Детали</span><span class="t-less">Свернуть</span><span class="h-caret">▸</span></span></div>
+      </div>
+      <div class="h-detail">
+        <div class="h-detail-inner">
+          <div class="h-detail-name">The Coca-Cola Company · фундаментал по данным SEC EDGAR</div>
+          <div class="stat-grid">
+            <div class="stat"><div class="stat-label">Доходность капитала (ROE)</div><div class="stat-value pos">41.2%</div></div>
+            <div class="stat"><div class="stat-label">Операц. маржа</div><div class="stat-value pos">28.7%</div></div>
+            <div class="stat"><div class="stat-label">Долг / активы</div><div class="stat-value">0.46</div></div>
+            <div class="stat"><div class="stat-label">Рост выручки г/г</div><div class="stat-value">+1.1%</div></div>
+            <div class="stat"><div class="stat-label">ATR — дневная волатильность</div><div class="stat-value pos">0.7%</div></div>
+            <div class="stat"><div class="stat-label">Beta к рынку</div><div class="stat-value pos">0.61</div></div>
+          </div>
+          <div class="h-detail-ai">
+            <span class="tag">🤖</span>
+            <span class="txt">Самый «тихий» актив портфеля: минимальные колебания и низкая бета.
+              Сейчас в небольшом минусе, но именно он гасит общий риск.
+              <span class="src">[SEC EDGAR] [Quant Engine]</span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── MSFT ── -->
+    <div class="h-group">
+      <div class="h-row" onclick="tg(this)">
+        <div class="h-cell ticker">
+          <div class="h-ticker"><span class="tk">MSFT</span></div>
+        </div>
+        <div class="h-cell"><span class="h-cell-label">Класс</span>Технологии</div>
+        <div class="h-cell num"><span class="h-cell-label">Вес</span>10.0%</div>
+        <div class="h-cell num"><span class="h-cell-label">Риск</span>8.1%</div>
+        <div class="h-cell num"><span class="h-cell-label">P/L %</span><span class="pnl pos">+9.4%</span></div>
+        <div class="h-cell num"><span class="h-cell-label">P/L $</span><span class="pnl pos">+$420</span></div>
+        <div class="h-cell action"><span class="badge buy">BUY</span></div>
+        <div class="h-cell caret-cell"><span class="h-toggle"><span class="t-more">Детали</span><span class="t-less">Свернуть</span><span class="h-caret">▸</span></span></div>
+      </div>
+      <div class="h-detail">
+        <div class="h-detail-inner">
+          <div class="h-detail-name">Microsoft Corp. · фундаментал по данным SEC EDGAR</div>
+          <div class="stat-grid">
+            <div class="stat"><div class="stat-label">Доходность капитала (ROE)</div><div class="stat-value pos">38.5%</div></div>
+            <div class="stat"><div class="stat-label">Операц. маржа</div><div class="stat-value pos">44.6%</div></div>
+            <div class="stat"><div class="stat-label">Долг / активы</div><div class="stat-value pos">0.25</div></div>
+            <div class="stat"><div class="stat-label">Рост выручки г/г</div><div class="stat-value pos">+15.7%</div></div>
+            <div class="stat"><div class="stat-label">ATR — дневная волатильность</div><div class="stat-value">1.4%</div></div>
+            <div class="stat"><div class="stat-label">Beta к рынку</div><div class="stat-value">1.08</div></div>
+          </div>
+          <div class="h-detail-ai">
+            <span class="tag">🤖</span>
+            <span class="txt">Высокая маржа и устойчивый рост при умеренной бете — качественная
+              технологическая позиция без перекоса риска.
+              <span class="src">[SEC EDGAR]</span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── XOM ── -->
+    <div class="h-group">
+      <div class="h-row" onclick="tg(this)">
+        <div class="h-cell ticker">
+          <div class="h-ticker"><span class="tk">XOM</span></div>
+        </div>
+        <div class="h-cell"><span class="h-cell-label">Класс</span>Энергетика</div>
+        <div class="h-cell num"><span class="h-cell-label">Вес</span>6.0%</div>
+        <div class="h-cell num"><span class="h-cell-label">Риск</span>4.0%</div>
+        <div class="h-cell num"><span class="h-cell-label">P/L %</span><span class="pnl neg">−3.1%</span></div>
+        <div class="h-cell num"><span class="h-cell-label">P/L $</span><span class="pnl neg">−$160</span></div>
+        <div class="h-cell action"><span class="badge trim">TRIM</span></div>
+        <div class="h-cell caret-cell"><span class="h-toggle"><span class="t-more">Детали</span><span class="t-less">Свернуть</span><span class="h-caret">▸</span></span></div>
+      </div>
+      <div class="h-detail">
+        <div class="h-detail-inner">
+          <div class="h-detail-name">Exxon Mobil Corp. · фундаментал по данным SEC EDGAR</div>
+          <div class="stat-grid">
+            <div class="stat"><div class="stat-label">Доходность капитала (ROE)</div><div class="stat-value">14.1%</div></div>
+            <div class="stat"><div class="stat-label">Операц. маржа</div><div class="stat-value">12.8%</div></div>
+            <div class="stat"><div class="stat-label">Долг / активы</div><div class="stat-value pos">0.20</div></div>
+            <div class="stat"><div class="stat-label">Рост выручки г/г</div><div class="stat-value neg">−6.2%</div></div>
+            <div class="stat"><div class="stat-label">ATR — дневная волатильность</div><div class="stat-value">1.9%</div></div>
+            <div class="stat"><div class="stat-label">Beta к рынку</div><div class="stat-value">0.92</div></div>
+          </div>
+          <div class="h-detail-ai">
+            <span class="tag">🤖</span>
+            <span class="txt">Выручка снижается, позиция в небольшом минусе — движок предлагает
+              сократить (Trim). Вклад в риск при этом небольшой.
+              <span class="src">[SEC EDGAR] [Quant Engine]</span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── NVDA ── -->
+    <div class="h-group">
+      <div class="h-row" onclick="tg(this)">
+        <div class="h-cell ticker">
+          <div class="h-ticker"><span class="tk">NVDA</span></div>
+        </div>
+        <div class="h-cell"><span class="h-cell-label">Класс</span>Технологии</div>
+        <div class="h-cell num"><span class="h-cell-label">Вес</span>4.0%</div>
+        <div class="h-cell num"><span class="h-cell-label">Риск</span>2.9%</div>
+        <div class="h-cell num"><span class="h-cell-label">P/L %</span><span class="pnl pos">+44.0%</span></div>
+        <div class="h-cell num"><span class="h-cell-label">P/L $</span><span class="pnl pos">+$1 210</span></div>
+        <div class="h-cell action"><span class="badge hold">HOLD</span></div>
+        <div class="h-cell caret-cell"><span class="h-toggle"><span class="t-more">Детали</span><span class="t-less">Свернуть</span><span class="h-caret">▸</span></span></div>
+      </div>
+      <div class="h-detail">
+        <div class="h-detail-inner">
+          <div class="h-detail-name">NVIDIA Corp. · фундаментал по данным SEC EDGAR</div>
+          <div class="stat-grid">
+            <div class="stat"><div class="stat-label">Доходность капитала (ROE)</div><div class="stat-value pos">91.5%</div></div>
+            <div class="stat"><div class="stat-label">Операц. маржа</div><div class="stat-value pos">54.1%</div></div>
+            <div class="stat"><div class="stat-label">Долг / активы</div><div class="stat-value pos">0.14</div></div>
+            <div class="stat"><div class="stat-label">Рост выручки г/г</div><div class="stat-value pos">+122%</div></div>
+            <div class="stat"><div class="stat-label">ATR — дневная волатильность</div><div class="stat-value neg">3.6%</div></div>
+            <div class="stat"><div class="stat-label">Beta к рынку</div><div class="stat-value neg">1.74</div></div>
+          </div>
+          <div class="h-detail-ai">
+            <span class="tag">🤖</span>
+            <span class="txt">Лучший рост в портфеле (+44%), но и колебания высокие. Доля небольшая
+              (4%), поэтому общий риск пока не раздувает.
+              <span class="src">[SEC EDGAR] [Quant Engine]</span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── BND ── -->
+    <div class="h-group">
+      <div class="h-row" onclick="tg(this)">
+        <div class="h-cell ticker">
+          <div class="h-ticker"><span class="tk">BND</span></div>
+        </div>
+        <div class="h-cell"><span class="h-cell-label">Класс</span>Облигации</div>
+        <div class="h-cell num"><span class="h-cell-label">Вес</span>2.0%</div>
+        <div class="h-cell num"><span class="h-cell-label">Риск</span>1.5%</div>
+        <div class="h-cell num"><span class="h-cell-label">P/L %</span><span class="pnl pos">+0.8%</span></div>
+        <div class="h-cell num"><span class="h-cell-label">P/L $</span><span class="pnl pos">+$20</span></div>
+        <div class="h-cell action"><span class="badge hold">HOLD</span></div>
+        <div class="h-cell caret-cell"><span class="h-toggle"><span class="t-more">Детали</span><span class="t-less">Свернуть</span><span class="h-caret">▸</span></span></div>
+      </div>
+      <div class="h-detail">
+        <div class="h-detail-inner">
+          <div class="h-detail-name">Vanguard Total Bond Market ETF · облигационный фонд</div>
+          <div class="stat-grid">
+            <div class="stat"><div class="stat-label">Доходность капитала (ROE)</div><div class="stat-value">н/д</div></div>
+            <div class="stat"><div class="stat-label">Операц. маржа</div><div class="stat-value">н/д</div></div>
+            <div class="stat"><div class="stat-label">Долг / активы</div><div class="stat-value">н/д</div></div>
+            <div class="stat"><div class="stat-label">Рост выручки г/г</div><div class="stat-value">н/д</div></div>
+            <div class="stat"><div class="stat-label">ATR — дневная волатильность</div><div class="stat-value pos">0.3%</div></div>
+            <div class="stat"><div class="stat-label">Beta к рынку</div><div class="stat-value pos">0.12</div></div>
+          </div>
+          <div class="h-detail-ai">
+            <span class="tag">🤖</span>
+            <span class="txt">Облигационный фонд — фундаментала по эмитенту нет, но это сознательно:
+              почти нулевая бета, он стабилизирует портфель.
+              <span class="src">[Quant Engine]</span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /.holdings -->
+
+  <!-- ПАНЕЛЬ СЕКТОРОВ -->
+  <div class="sector-panel">
+    <div class="sp-head">
+      <div class="sp-title">Структура по секторам</div>
+      <div class="sp-sub">доля капитала · 9 позиций</div>
+    </div>
+
+    <div class="sp-body">
+    <div class="pie-wrap">
+      <div class="pie">
+        <div class="pie-center">
+          <span class="pc-pct">62%</span>
+          <span class="pc-lbl">ТЕХНОЛОГИИ</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="pie-legend">
+      <div class="lg-item over">
+        <span class="lg-sw" style="background:var(--amber)"></span>
+        <span class="lg-name">Технологии</span>
+        <span class="lg-pct">62%</span>
+      </div>
+      <div class="lg-item">
+        <span class="lg-sw" style="background:var(--tech-blue)"></span>
+        <span class="lg-name">Здравоохранение</span>
+        <span class="lg-pct">14%</span>
+      </div>
+      <div class="lg-item">
+        <span class="lg-sw" style="background:var(--green)"></span>
+        <span class="lg-name">Потреб. товары</span>
+        <span class="lg-pct">16%</span>
+      </div>
+      <div class="lg-item">
+        <span class="lg-sw" style="background:var(--ink-60)"></span>
+        <span class="lg-name">Энергетика</span>
+        <span class="lg-pct">6%</span>
+      </div>
+      <div class="lg-item">
+        <span class="lg-sw" style="background:var(--ink-40)"></span>
+        <span class="lg-name">Облигации</span>
+        <span class="lg-pct">2%</span>
+      </div>
+    </div>
+    </div><!-- /.sp-body -->
+
+    <div class="sp-warn">
+      <span>⚠</span>
+      <span><b>Перенасыщение сектора.</b> Технологии — 62% портфеля при
+        ориентире ≤ 40%. 6 из 9 бумаг в одном секторе: просадка в IT
+        ударит сразу по большей части капитала.</span>
+    </div>
+  </div><!-- /.sector-panel -->
+
+  </div><!-- /.holdings-layout -->
+
+  <!-- СВОДНЫЙ AI-БЛОК -->
+  <div class="sec-ai">
+    <div class="ai-head">[ 🤖 AI_ANALYSIS // HAIKU ]</div>
+    <div class="ai-body">
+      <p>«Простыми словами: портфель двигают две бумаги — <span class="flag-inline">PLTR
+      и CRWD</span>. Они приносят лучшую доходность, но именно они помечены
+      HOTSPOT — на них вместе приходится почти половина риска. С другого края —
+      JNJ, KO и BND: спокойные позиции с низкой бетой, которые этот риск гасят.</p>
+
+      <p>По секторам портфель сильно перевешен в технологиях —
+      <span class="flag-inline">62% против ~30% у рынка</span>. Goldman Sachs
+      ждёт повышенной волатильности в IT в этом квартале
+      <span class="src-inline">[RAG: GS_Q2_2026]</span>, а Morgan Stanley в обзоре
+      сектора понижает прогноз роста на 2026 и советует фиксировать часть прибыли
+      в перегретых именах <span class="src-inline">[RAG: MS_TechOutlook_2026]</span> —
+      это прямо про ваши PLTR, CRWD и NVDA. Зато ваши защитные сектора —
+      здравоохранение (14%) и потребительские товары (16%) — JPMorgan называет
+      «островками стабильности» на случай коррекции
+      <span class="src-inline">[RAG: JPM_Strategy_Q2_2026]</span>. По энергетике
+      (6%) банки осторожны при текущих ценах на нефть — и XOM у вас уже помечен на
+      сокращение. Подробности концентрации — на странице «Где сосредоточен риск».»</p>
+    </div>
+    <div class="ai-sources">
+      ИСТОЧНИКИ — ОТЧЁТЫ ИНВЕСТБАНКОВ:
+      <b>Goldman Sachs</b> «Q2 2026 Market Outlook» ·
+      <b>Morgan Stanley</b> «Technology Sector Outlook 2026» ·
+      <b>JPMorgan</b> «Q2 2026 Strategy &amp; Allocation»
+    </div>
+  </div>
+
+  <!-- ФУТЕР -->
+  <div class="foot">
+    CONFIDENTIAL // ADVISORY-ONLY — NOT A RECOMMENDATION // PAGE 2 OF 4 // CoVe: 6 SOURCES VERIFIED
+  </div>
+
+</div>
+
+<script>
+  // Разворот/сворачивание строки holdings
+  function tg(rowEl) {
+    rowEl.classList.toggle('open');
+    var detail = rowEl.nextElementSibling;
+    if (detail && detail.classList.contains('h-detail')) {
+      detail.classList.toggle('open');
+    }
+  }
+</script>
+</body>
+</html>

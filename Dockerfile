@@ -8,55 +8,34 @@ FROM python:3.11-slim
 
 # System packages
 #   gcc / libffi-dev / libssl-dev  — needed to compile cryptography wheel
-#   ca-certificates                — yfinance / requests need valid TLS roots
-#   remaining packages             — Chromium system dependencies for Cloud Run
+#   ca-certificates                — requests need valid TLS roots
+# Chromium system deps removed 2026-05-17: PDF generation was retired,
+# reports now ship as interactive HTML URLs via Cloud Storage.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         gcc \
         libffi-dev \
         libssl-dev \
         ca-certificates \
-        libnss3 \
-        libnspr4 \
-        libatk1.0-0 \
-        libatk-bridge2.0-0 \
-        libcups2 \
-        libdrm2 \
-        libdbus-1-3 \
-        libxkbcommon0 \
-        libx11-6 \
-        libxcomposite1 \
-        libxdamage1 \
-        libxext6 \
-        libxfixes3 \
-        libxrandr2 \
-        libgbm1 \
-        libpango-1.0-0 \
-        libcairo2 \
-        libasound2 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 # ── Python dependencies (cached layer — only rebuilds on requirements change) ─
-# apt-get update is re-run here so playwright --with-deps can resolve any
-# remaining Chromium dependencies after the cache was cleared above.
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -r requirements.txt \
-    && apt-get update \
-    && playwright install chromium --with-deps \
-    && rm -rf /var/lib/apt/lists/*
+    && pip install --no-cache-dir -r requirements.txt
 
 # ── Application source ────────────────────────────────────────────────────────
 COPY src/ ./src/
 
 # ── Runtime data directories ──────────────────────────────────────────────────
 # NOTE: Cloud Run containers are ephemeral — SQLite data is lost on restart.
-# For production, migrate to Cloud SQL (PostgreSQL) and Cloud Storage for PDFs.
+# Reports are rendered to /tmp/user_reports (writable, ephemeral) and then
+# uploaded to GCS via services/report_storage.py — see REPORT_BUCKET_NAME.
 # /app/data/chroma_db is pre-warmed on boot from gs://ramp-bot-chroma-db/
 # (see entrypoint.py:_download_chroma_db) so RAG sees the freshest snapshot.
-RUN mkdir -p /app/data/user_reports /app/data/chroma_db
+RUN mkdir -p /app/data/chroma_db
 
 # Pre-bake the Chroma ONNX embedding model (79 MB) so it's in the image layer.
 # Without this every first ChromaDB query downloads it from S3, adding ~2s latency.

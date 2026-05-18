@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<!--
+  ─────────────────────────────────────────────────────────────────────────
+  ПРОТОТИП (design-only, НЕ подключён к боту)
+  Секция: «ИДЕИ ИИ» (AI-generated ideas) — BASE-отчёт
+  Стиль: утверждённый — тёплый кремовый фон, моно тех-строки, hairline,
+         плоские заливки БЕЗ градиентов, AI-блок терминал-лог.
+  Интерактив: клик по карточке разворачивает детали.
+    Свёрнуто:  категория, приоритет, № идеи, заголовок, обоснование,
+               «Идеи по замене» — тикеры вне портфеля + общее пояснение.
+    Развёрнуто: конвейер Factor→Regime→RAG, разбор выбора бумаг,
+               эффект, источники.
+  Данные: статичные заглушки. Открыть просто в браузере.
+  ─────────────────────────────────────────────────────────────────────────
+-->
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>BASE Report — «Идеи ИИ» — Прототип</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg:          #F4F2EC;
+    --panel:       #FBFAF7;
+    --ink:         #2A2E33;
+    --ink-60:      rgba(42,46,51,0.60);
+    --ink-40:      rgba(42,46,51,0.40);
+    --hairline:    rgba(42,46,51,0.18);
+    --hairline-2:  rgba(42,46,51,0.10);
+    --tech-blue:   #2F6FB3;
+    --tech-blue-08:rgba(47,111,179,0.08);
+    --ai-bg:       #F0F6FF;
+    --amber:       #C77B2C;
+    --amber-08:    rgba(199,123,44,0.10);
+    --green:       #3F8F5F;
+    --green-08:    rgba(63,143,95,0.10);
+    --neg:         #C0492F;
+
+    --font-ui:   'IBM Plex Sans', -apple-system, sans-serif;
+    --font-mono: 'IBM Plex Mono', monospace;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    background: var(--bg); color: var(--ink);
+    font-family: var(--font-ui); font-size: 13px; line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  .sheet { max-width: 1100px; margin: 0 auto; padding: 20px 30px 28px; }
+
+  /* ТЕХ-ХЕДЕР */
+  .tech-header {
+    font-family: var(--font-mono); font-size: 11px; color: var(--ink-60);
+    letter-spacing: 0.03em; padding-bottom: 12px;
+    border-bottom: 0.5pt solid var(--hairline);
+    display: flex; justify-content: space-between; flex-wrap: wrap; gap: 6px;
+  }
+  .tech-header b { color: var(--ink); font-weight: 600; }
+  .tech-header .ts { color: var(--ink-40); }
+
+  /* ЗАГОЛОВОК СЕКЦИИ */
+  .sec-head { padding: 18px 0 4px; }
+  .sec-title { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
+  .sec-sub { font-size: 11.5px; color: var(--ink-60); margin-top: 3px; }
+
+  /* ── ВВОДНЫЙ AI-БЛОК ── */
+  .sec-ai {
+    margin-top: 12px;
+    background: var(--ai-bg); border: 0.5pt solid var(--hairline-2);
+    border-left: 2px solid var(--tech-blue); border-radius: 2px;
+    padding: 12px 15px;
+  }
+  .sec-ai .ai-head {
+    font-family: var(--font-mono); font-size: 10.5px; font-weight: 600;
+    color: var(--tech-blue); margin-bottom: 6px;
+  }
+  .sec-ai .ai-body { font-style: italic; font-size: 12.5px; line-height: 1.62; }
+  .src-inline {
+    font-style: normal; font-family: var(--font-mono); font-size: 10px;
+    color: var(--tech-blue); background: var(--tech-blue-08);
+    padding: 0 4px; border-radius: 2px;
+  }
+  .flag-inline { font-style: normal; font-weight: 600; color: var(--amber); }
+
+  /* ── СЕТКА ИДЕЙ ── */
+  .ideas-grid {
+    margin-top: 10px;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+    align-items: start;          /* раскрывается только нужная карточка */
+  }
+  .idea-card {
+    border: 0.5pt solid var(--hairline); border-radius: 2px;
+    background: var(--panel);
+    border-left: 2px solid var(--ink-40);
+    padding: 11px 13px 12px;
+  }
+  .idea-card.risk      { border-left-color: var(--amber); }
+  .idea-card.diversify { border-left-color: var(--tech-blue); }
+  .idea-card.rebalance { border-left-color: var(--ink-60); }
+  .idea-card.grow      { border-left-color: var(--green); }
+
+  /* ── КЛИКАБЕЛЬНАЯ ШАПКА КАРТОЧКИ ── */
+  .idea-head { cursor: pointer; }
+
+  .idea-top {
+    display: flex; justify-content: space-between; align-items: center;
+    gap: 8px; margin-bottom: 8px;
+  }
+  .idea-cat {
+    font-family: var(--font-mono); font-size: 9px; font-weight: 600;
+    letter-spacing: 0.03em; text-transform: uppercase;
+    padding: 2px 7px; border-radius: 2px; border: 0.5pt solid currentColor;
+  }
+  .idea-card.risk      .idea-cat { color: var(--amber); }
+  .idea-card.diversify .idea-cat { color: var(--tech-blue); }
+  .idea-card.rebalance .idea-cat { color: var(--ink-60); }
+  .idea-card.grow      .idea-cat { color: var(--green); }
+
+  .idea-prio {
+    font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.02em;
+    display: flex; align-items: center; gap: 5px;
+  }
+  .idea-prio::before {
+    content: ''; width: 6px; height: 6px; border-radius: 50%;
+    background: currentColor; display: inline-block;
+  }
+  .idea-prio.high { color: var(--amber); }
+  .idea-prio.mid  { color: var(--ink-40); }
+
+  .idea-num {
+    font-family: var(--font-mono); font-size: 9px; color: var(--ink-40);
+    margin-bottom: 3px;
+  }
+  .idea-title {
+    font-size: 13px; font-weight: 600; line-height: 1.35;
+    letter-spacing: -0.01em;
+  }
+  .idea-why {
+    font-size: 11px; color: var(--ink); line-height: 1.54;
+    margin-top: 6px;
+  }
+  .idea-why b { font-weight: 600; }
+
+  /* ── ИДЕИ ПО ЗАМЕНЕ — ТИКЕРЫ ВНЕ ПОРТФЕЛЯ (видны свёрнуто) ── */
+  .idea-swap { margin-top: 9px; }
+  .swap-label {
+    font-family: var(--font-mono); font-size: 8px; font-weight: 600;
+    letter-spacing: 0.04em; color: var(--ink-60); text-transform: uppercase;
+    margin-bottom: 5px;
+  }
+  .swap-tickers { display: flex; flex-wrap: wrap; gap: 5px; }
+  .tk-chip {
+    font-family: var(--font-mono); font-size: 9.5px; font-weight: 600;
+    color: var(--tech-blue); background: var(--tech-blue-08);
+    border: 0.5pt solid rgba(47,111,179,0.22);
+    padding: 1.5px 6px; border-radius: 2px;
+  }
+  .swap-note {
+    margin-top: 7px;
+    font-size: 10px; line-height: 1.5; color: var(--ink-60);
+    font-style: italic;
+  }
+  .swap-note .expand-hint { color: var(--tech-blue); font-style: normal; }
+
+  /* ── ПЕРЕКЛЮЧАТЕЛЬ РАЗВОРОТА ── */
+  .idea-toggle {
+    margin-top: 11px;
+    display: flex; align-items: center; justify-content: center; gap: 7px;
+    padding: 8px 10px; border-radius: 3px;
+    background: var(--tech-blue);
+    font-family: var(--font-mono); font-size: 9.5px; font-weight: 600;
+    color: #fff; letter-spacing: 0.03em;
+    transition: background 0.12s;
+  }
+  .idea-head:hover .idea-toggle { background: #25557F; }
+  .idea-caret {
+    display: inline-flex; color: #fff; font-size: 10px;
+    transition: transform 0.15s;
+  }
+  .idea-card.open .idea-caret { transform: rotate(90deg); }
+  .idea-toggle .t-less { display: none; }
+  .idea-card.open .idea-toggle .t-more { display: none; }
+  .idea-card.open .idea-toggle .t-less { display: inline; }
+
+  /* ── РАЗВОРАЧИВАЕМЫЕ ДЕТАЛИ ── */
+  .idea-detail { display: none; }
+  .idea-card.open .idea-detail { display: block; }
+
+  /* ── КОНВЕЙЕР ОТБОРА: FACTOR → REGIME → RAG ── */
+  .idea-pipeline {
+    margin-top: 10px; padding: 8px 10px;
+    background: var(--tech-blue-08); border-radius: 2px;
+  }
+  .pl-label {
+    font-family: var(--font-mono); font-size: 8px; font-weight: 600;
+    letter-spacing: 0.04em; color: var(--tech-blue); text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .pl-flow { display: flex; align-items: stretch; }
+  .pl-stage { flex: 1; min-width: 0; }
+  .pl-stage-name {
+    font-family: var(--font-mono); font-size: 8px; font-weight: 600;
+    letter-spacing: 0.03em; color: var(--tech-blue); margin-bottom: 3px;
+  }
+  .pl-stage-text { font-size: 9px; line-height: 1.36; color: var(--ink); }
+  .pl-sep {
+    flex: 0 0 auto; display: flex; align-items: center;
+    padding: 0 7px; color: var(--tech-blue); font-size: 11px;
+  }
+
+  /* ── ПОЧЕМУ ИМЕННО ЭТИ БУМАГИ (разбор кандидатов вне портфеля) ── */
+  .cand-list { margin-top: 10px; }
+  .cand-label {
+    font-family: var(--font-mono); font-size: 8px; font-weight: 600;
+    letter-spacing: 0.05em; color: var(--ink-60); text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+  .cand { display: flex; gap: 8px; padding: 6px 0; align-items: baseline; }
+  .cand + .cand { border-top: 0.5pt solid var(--hairline-2); }
+  .cand-tk {
+    font-family: var(--font-mono); font-size: 11px; font-weight: 600;
+    color: var(--ink); width: 48px; flex-shrink: 0;
+  }
+  .cand-body { font-size: 10px; line-height: 1.45; color: var(--ink); }
+  .cand-name { font-weight: 600; }
+  .cand-scn {
+    display: inline-block; font-family: var(--font-mono); font-size: 8.5px;
+    color: var(--tech-blue); background: var(--tech-blue-08);
+    padding: 0 4px; border-radius: 2px; margin-top: 2px;
+  }
+
+  /* ── ОЖИДАЕМЫЙ ЭФФЕКТ ── */
+  .idea-effect {
+    margin-top: 10px; padding: 7px 9px;
+    background: rgba(42,46,51,0.035); border-radius: 2px;
+    border: 0.5pt solid var(--hairline-2);
+  }
+  .idea-effect-label {
+    font-family: var(--font-mono); font-size: 8px; font-weight: 600;
+    letter-spacing: 0.05em; color: var(--ink-60); text-transform: uppercase;
+    margin-bottom: 3px;
+  }
+  .idea-effect-val {
+    font-family: var(--font-mono); font-size: 11px; color: var(--ink);
+    line-height: 1.5;
+  }
+  .idea-effect-val .arrow { color: var(--tech-blue); }
+
+  /* ── ИСТОЧНИКИ ── */
+  .idea-src {
+    margin-top: 10px; padding-top: 10px;
+    border-top: 0.5pt solid var(--hairline-2);
+    display: flex; flex-wrap: wrap; gap: 5px;
+  }
+  .src-chip {
+    font-family: var(--font-mono); font-size: 8.5px;
+    color: var(--tech-blue); background: var(--tech-blue-08);
+    padding: 1.5px 5px; border-radius: 2px;
+  }
+  .src-chip.data { color: var(--ink-60); background: rgba(42,46,51,0.05); }
+
+  /* ── ДИСКЛЕЙМЕР ── */
+  .disclaimer {
+    margin-top: 12px; padding: 10px 13px;
+    background: var(--amber-08); border: 0.5pt solid var(--amber);
+    border-radius: 2px; display: flex; gap: 9px;
+    font-size: 11px; line-height: 1.5; color: var(--ink);
+  }
+  .disclaimer .dc-icon { color: var(--amber); flex-shrink: 0; }
+  .disclaimer b { font-weight: 600; color: var(--amber); }
+
+  /* ── ПОЛОСА ИСТОЧНИКОВ ── */
+  .ai-sources {
+    margin-top: 10px; padding: 9px 14px;
+    border: 0.5pt solid var(--hairline-2); border-radius: 2px;
+    background: var(--panel);
+    font-family: var(--font-mono); font-size: 9px; color: var(--ink-60);
+    letter-spacing: 0.02em; line-height: 1.7;
+  }
+  .ai-sources b { color: var(--tech-blue); font-weight: 600; }
+
+  /* ФУТЕР */
+  .foot {
+    font-family: var(--font-mono); font-size: 10px; color: var(--ink-40);
+    text-align: center; padding-top: 14px; margin-top: 22px;
+    border-top: 0.5pt solid var(--hairline); letter-spacing: 0.05em;
+  }
+
+  /* ─────────── АДАПТИВ ─────────── */
+  @media (max-width: 720px) {
+    .ideas-grid { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 480px) {
+    body { font-size: 15px; }
+    .sheet { padding: 14px 16px 22px; }
+    .tech-header { font-size: 9.5px; }
+    .sec-title { font-size: 15px; }
+    .sec-ai .ai-body { font-size: 14px; }
+    .idea-title { font-size: 15px; }
+    .idea-why { font-size: 13px; }
+  }
+</style>
+</head>
+<body>
+<div class="sheet">
+
+  <!-- ТЕХ-ХЕДЕР -->
+  <div class="tech-header">
+    <span><b>PORTFOLIO RISK REPORT</b> // TIER: BASE // ID: 2026-05-14-U1042 // RISK_ENGINE: MAC3 // SESSION: [A6C7B1F3]</span>
+    <span class="ts">PAGE 4 OF 4</span>
+  </div>
+
+  <!-- ЗАГОЛОВОК СЕКЦИИ -->
+  <div class="sec-head">
+    <div class="sec-title">Идеи ИИ</div>
+    <div class="sec-sub">4 идеи на основе данных портфеля, отчётности SEC и обзоров инвестбанков · нажмите на карточку, чтобы раскрыть детали</div>
+  </div>
+
+  <!-- ВВОДНЫЙ AI-БЛОК -->
+  <div class="sec-ai">
+    <div class="ai-head">[ 🤖 AI_ANALYSIS // HAIKU ]</div>
+    <div class="ai-body">
+      «Главная мысль одной строкой: портфель зарабатывает, но риск собран в
+      одном углу — <span class="flag-inline">62% в технологиях</span>. Идеи ниже
+      — про то, как сохранить рост и при этом сделать портфель устойчивее к
+      просадке. Каждая идея отсортирована по приоритету и снабжена источником.»
+    </div>
+  </div>
+
+  <!-- СЕТКА ИДЕЙ -->
+  <div class="ideas-grid">
+
+    <!-- ИДЕЯ 1 -->
+    <div class="idea-card risk">
+      <div class="idea-head" onclick="tg(this)">
+        <div class="idea-top">
+          <span class="idea-cat">Снижение риска</span>
+          <span class="idea-prio high">Высокий приоритет</span>
+        </div>
+        <div class="idea-num">ИДЕЯ 01</div>
+        <div class="idea-title">Сократить долю PLTR с 18% до ~12%</div>
+        <div class="idea-why">
+          PLTR помечен <b>HOTSPOT</b> — одна бумага даёт 24% всего риска
+          портфеля. Morgan Stanley советует фиксировать прибыль в перегретых
+          техах, а позиция сейчас в плюсе <b>+32%</b> — есть что зафиксировать
+          без убытка.
+        </div>
+        <div class="idea-swap">
+          <div class="swap-label">Идеи по замене — нет в портфеле</div>
+          <div class="swap-tickers">
+            <span class="tk-chip">TXN</span>
+            <span class="tk-chip">CSCO</span>
+            <span class="tk-chip">ACN</span>
+          </div>
+          <div class="swap-note">
+            Бумаги выше — не из вашего портфеля: ИИ подбирает их под смысл идеи,
+            с лучшим балансом риска и качества.
+            <span class="expand-hint">Разверните карточку — внутри разбор, почему выбран именно этот список.</span>
+          </div>
+        </div>
+        <div class="idea-toggle">
+          <span class="idea-caret">▸</span>
+          <span class="t-more">Развернуть детали идеи</span>
+          <span class="t-less">Свернуть детали</span>
+        </div>
+      </div>
+      <div class="idea-detail">
+        <div class="idea-pipeline">
+          <div class="pl-label">Конвейер отбора · Factor → Regime → RAG</div>
+          <div class="pl-flow">
+            <div class="pl-stage">
+              <div class="pl-stage-name">FACTOR</div>
+              <div class="pl-stage-text">PLTR даёт 24% риска, HOTSPOT</div>
+            </div>
+            <div class="pl-sep">→</div>
+            <div class="pl-stage">
+              <div class="pl-stage-name">REGIME</div>
+              <div class="pl-stage-text">ждём роста волатильности в IT</div>
+            </div>
+            <div class="pl-sep">→</div>
+            <div class="pl-stage">
+              <div class="pl-stage-name">RAG</div>
+              <div class="pl-stage-text">Morgan Stanley: фиксировать прибыль</div>
+            </div>
+          </div>
+        </div>
+        <div class="cand-list">
+          <div class="cand-label">Почему именно эти бумаги — нет в портфеле</div>
+          <div class="cand">
+            <span class="cand-tk">TXN</span>
+            <span class="cand-body"><span class="cand-name">Texas Instruments</span> — стабильный производитель чипов, волатильность вдвое ниже PLTR.<br />
+              <span class="cand-scn">сценарий: спрос на качество в IT</span></span>
+          </div>
+          <div class="cand">
+            <span class="cand-tk">CSCO</span>
+            <span class="cand-body"><span class="cand-name">Cisco</span> — зрелый тех с дивидендом и низкой бетой.<br />
+              <span class="cand-scn">сценарий: ротация в защитный тех</span></span>
+          </div>
+          <div class="cand">
+            <span class="cand-tk">ACN</span>
+            <span class="cand-body"><span class="cand-name">Accenture</span> — IT-консалтинг с устойчивой выручкой, мягче в просадке.<br />
+              <span class="cand-scn">сценарий: замедление без рецессии</span></span>
+          </div>
+        </div>
+        <div class="idea-effect">
+          <div class="idea-effect-label">Ожидаемый эффект</div>
+          <div class="idea-effect-val">
+            Вклад PLTR в риск: 24.4% <span class="arrow">→</span> ~16%<br />
+            Доля IT-сектора: 62% <span class="arrow">→</span> ~56%
+          </div>
+        </div>
+        <div class="idea-src">
+          <span class="src-chip data">[Quant Engine]</span>
+          <span class="src-chip data">[SEC EDGAR]</span>
+          <span class="src-chip">[RAG: MS_TechOutlook_2026]</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ИДЕЯ 2 -->
+    <div class="idea-card diversify">
+      <div class="idea-head" onclick="tg(this)">
+        <div class="idea-top">
+          <span class="idea-cat">Диверсификация</span>
+          <span class="idea-prio high">Высокий приоритет</span>
+        </div>
+        <div class="idea-num">ИДЕЯ 02</div>
+        <div class="idea-title">Усилить защитные сектора — здравоохранение и товары</div>
+        <div class="idea-why">
+          6 из 9 бумаг — технологии. JPMorgan называет здравоохранение и
+          потребительские товары <b>«островками стабильности»</b> на случай
+          коррекции. У вас уже есть JNJ и KO с низкой бетой — их логично
+          нарастить за счёт высвобождаемого капитала.
+        </div>
+        <div class="idea-swap">
+          <div class="swap-label">Идеи по замене — нет в портфеле</div>
+          <div class="swap-tickers">
+            <span class="tk-chip">PG</span>
+            <span class="tk-chip">MRK</span>
+            <span class="tk-chip">PEP</span>
+          </div>
+          <div class="swap-note">
+            Бумаги выше — не из вашего портфеля: ИИ подбирает их под смысл идеи,
+            с лучшим балансом риска и качества.
+            <span class="expand-hint">Разверните карточку — внутри разбор, почему выбран именно этот список.</span>
+          </div>
+        </div>
+        <div class="idea-toggle">
+          <span class="idea-caret">▸</span>
+          <span class="t-more">Развернуть детали идеи</span>
+          <span class="t-less">Свернуть детали</span>
+        </div>
+      </div>
+      <div class="idea-detail">
+        <div class="idea-pipeline">
+          <div class="pl-label">Конвейер отбора · Factor → Regime → RAG</div>
+          <div class="pl-flow">
+            <div class="pl-stage">
+              <div class="pl-stage-name">FACTOR</div>
+              <div class="pl-stage-text">6 из 9 бумаг в IT, бета 1.18</div>
+            </div>
+            <div class="pl-sep">→</div>
+            <div class="pl-stage">
+              <div class="pl-stage-name">REGIME</div>
+              <div class="pl-stage-text">поздний цикл — спрос на защиту</div>
+            </div>
+            <div class="pl-sep">→</div>
+            <div class="pl-stage">
+              <div class="pl-stage-name">RAG</div>
+              <div class="pl-stage-text">JPMorgan: healthcare и staples устойчивы</div>
+            </div>
+          </div>
+        </div>
+        <div class="cand-list">
+          <div class="cand-label">Почему именно эти бумаги — нет в портфеле</div>
+          <div class="cand">
+            <span class="cand-tk">PG</span>
+            <span class="cand-body"><span class="cand-name">Procter &amp; Gamble</span> — потребтовары, очень низкая бета, стабильный денежный поток.<br />
+              <span class="cand-scn">сценарий: коррекция рынка</span></span>
+          </div>
+          <div class="cand">
+            <span class="cand-tk">MRK</span>
+            <span class="cand-body"><span class="cand-name">Merck</span> — крупная фарма, защитный сектор, недорогие мультипликаторы.<br />
+              <span class="cand-scn">сценарий: ротация в защиту</span></span>
+          </div>
+          <div class="cand">
+            <span class="cand-tk">PEP</span>
+            <span class="cand-body"><span class="cand-name">PepsiCo</span> — staples с дивидендом, слабая связь с IT.<br />
+              <span class="cand-scn">сценарий: рост волатильности</span></span>
+          </div>
+        </div>
+        <div class="idea-effect">
+          <div class="idea-effect-label">Ожидаемый эффект</div>
+          <div class="idea-effect-val">
+            Доля IT-сектора: 62% <span class="arrow">→</span> ~50%<br />
+            Бета портфеля: 1.18 <span class="arrow">→</span> ~1.05
+          </div>
+        </div>
+        <div class="idea-src">
+          <span class="src-chip data">[Quant Engine]</span>
+          <span class="src-chip">[RAG: JPM_Strategy_Q2_2026]</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ИДЕЯ 3 -->
+    <div class="idea-card rebalance">
+      <div class="idea-head" onclick="tg(this)">
+        <div class="idea-top">
+          <span class="idea-cat">Ребалансировка</span>
+          <span class="idea-prio mid">Средний приоритет</span>
+        </div>
+        <div class="idea-num">ИДЕЯ 03</div>
+        <div class="idea-title">Сократить или закрыть позицию XOM</div>
+        <div class="idea-why">
+          Выручка Exxon снижается (<b>−6% г/г</b> по данным SEC), риск-движок
+          дал сигнал <b>Trim</b>, банки осторожны по энергетике при текущих
+          ценах на нефть. Позиция небольшая (6%) и сейчас в минусе — закрытие
+          почти не затронет доходность.
+        </div>
+        <div class="idea-swap">
+          <div class="swap-label">Идеи по замене — нет в портфеле</div>
+          <div class="swap-tickers">
+            <span class="tk-chip">NEE</span>
+            <span class="tk-chip">DUK</span>
+            <span class="tk-chip">SO</span>
+          </div>
+          <div class="swap-note">
+            Бумаги выше — не из вашего портфеля: ИИ подбирает их под смысл идеи,
+            с лучшим балансом риска и качества.
+            <span class="expand-hint">Разверните карточку — внутри разбор, почему выбран именно этот список.</span>
+          </div>
+        </div>
+        <div class="idea-toggle">
+          <span class="idea-caret">▸</span>
+          <span class="t-more">Развернуть детали идеи</span>
+          <span class="t-less">Свернуть детали</span>
+        </div>
+      </div>
+      <div class="idea-detail">
+        <div class="idea-pipeline">
+          <div class="pl-label">Конвейер отбора · Factor → Regime → RAG</div>
+          <div class="pl-flow">
+            <div class="pl-stage">
+              <div class="pl-stage-name">FACTOR</div>
+              <div class="pl-stage-text">выручка XOM −6% г/г, сигнал Trim</div>
+            </div>
+            <div class="pl-sep">→</div>
+            <div class="pl-stage">
+              <div class="pl-stage-name">REGIME</div>
+              <div class="pl-stage-text">слабый цикл в энергетике</div>
+            </div>
+            <div class="pl-sep">→</div>
+            <div class="pl-stage">
+              <div class="pl-stage-name">RAG</div>
+              <div class="pl-stage-text">банки осторожны по ценам на нефть</div>
+            </div>
+          </div>
+        </div>
+        <div class="cand-list">
+          <div class="cand-label">Почему именно эти бумаги — нет в портфеле</div>
+          <div class="cand">
+            <span class="cand-tk">NEE</span>
+            <span class="cand-body"><span class="cand-name">NextEra Energy</span> — коммунальщик и ВИЭ, стабильный спрос вместо цикличной нефти.<br />
+              <span class="cand-scn">сценарий: слабый цикл в энергетике</span></span>
+          </div>
+          <div class="cand">
+            <span class="cand-tk">DUK</span>
+            <span class="cand-body"><span class="cand-name">Duke Energy</span> — регулируемая коммуналка, предсказуемый доход.<br />
+              <span class="cand-scn">сценарий: уход от сырьевого риска</span></span>
+          </div>
+          <div class="cand">
+            <span class="cand-tk">SO</span>
+            <span class="cand-body"><span class="cand-name">Southern Company</span> — высокий дивиденд, низкая бета.<br />
+              <span class="cand-scn">сценарий: спрос на доходные защитные бумаги</span></span>
+          </div>
+        </div>
+        <div class="idea-effect">
+          <div class="idea-effect-label">Ожидаемый эффект</div>
+          <div class="idea-effect-val">
+            Высвобождает ~6% капитала<br />
+            под защитный блок (идея 02)
+          </div>
+        </div>
+        <div class="idea-src">
+          <span class="src-chip data">[SEC EDGAR]</span>
+          <span class="src-chip data">[Quant Engine]</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ИДЕЯ 4 -->
+    <div class="idea-card grow">
+      <div class="idea-head" onclick="tg(this)">
+        <div class="idea-top">
+          <span class="idea-cat">Увеличение риска</span>
+          <span class="idea-prio mid">Средний приоритет</span>
+        </div>
+        <div class="idea-num">ИДЕЯ 04</div>
+        <div class="idea-title">Увеличить риск качественно — 3 бумаги вне портфеля</div>
+        <div class="idea-why">
+          Защитный блок в норме — есть запас, чтобы аккуратно добавить
+          доходности. Но наращивать риск стоит <b>через качество и новые
+          сектора</b>, а не через ещё больше того же IT. Кандидаты отобраны
+          конвейером Factor → Regime → RAG.
+        </div>
+        <div class="idea-swap">
+          <div class="swap-label">Идеи по замене — нет в портфеле</div>
+          <div class="swap-tickers">
+            <span class="tk-chip">GOOGL</span>
+            <span class="tk-chip">LLY</span>
+            <span class="tk-chip">V</span>
+          </div>
+          <div class="swap-note">
+            Бумаги выше — не из вашего портфеля: ИИ подбирает их под смысл идеи,
+            с лучшим балансом риска и качества.
+            <span class="expand-hint">Разверните карточку — внутри разбор, почему выбран именно этот список.</span>
+          </div>
+        </div>
+        <div class="idea-toggle">
+          <span class="idea-caret">▸</span>
+          <span class="t-more">Развернуть детали идеи</span>
+          <span class="t-less">Свернуть детали</span>
+        </div>
+      </div>
+      <div class="idea-detail">
+        <div class="idea-pipeline">
+          <div class="pl-label">Конвейер отбора · Factor → Regime → RAG</div>
+          <div class="pl-flow">
+            <div class="pl-stage">
+              <div class="pl-stage-name">FACTOR</div>
+              <div class="pl-stage-text">фильтр качества: ROE↑, долг↓, маржа</div>
+            </div>
+            <div class="pl-sep">→</div>
+            <div class="pl-stage">
+              <div class="pl-stage-name">REGIME</div>
+              <div class="pl-stage-text">поздний цикл → качество и не-IT</div>
+            </div>
+            <div class="pl-sep">→</div>
+            <div class="pl-stage">
+              <div class="pl-stage-name">RAG</div>
+              <div class="pl-stage-text">сверка с Goldman Sachs и JPMorgan</div>
+            </div>
+          </div>
+        </div>
+        <div class="cand-list">
+          <div class="cand-label">Почему именно эти бумаги — нет в портфеле</div>
+          <div class="cand">
+            <span class="cand-tk">GOOGL</span>
+            <span class="cand-body"><span class="cand-name">Alphabet</span> — качество и ИИ-экспозиция дешевле по мультипликаторам, чем PLTR.<br />
+              <span class="cand-scn">сценарий: ИИ-цикл продолжается</span></span>
+          </div>
+          <div class="cand">
+            <span class="cand-tk">LLY</span>
+            <span class="cand-body"><span class="cand-name">Eli Lilly</span> — структурный рост в здравоохранении, слабая связь с вашим IT-ядром.<br />
+              <span class="cand-scn">сценарий: ротация в защитный рост</span></span>
+          </div>
+          <div class="cand">
+            <span class="cand-tk">V</span>
+            <span class="cand-body"><span class="cand-name">Visa</span> — компаундер высокого качества, добавляет сектор финансов.<br />
+              <span class="cand-scn">сценарий: мягкая посадка экономики</span></span>
+          </div>
+        </div>
+        <div class="idea-effect">
+          <div class="idea-effect-label">Ожидаемый эффект</div>
+          <div class="idea-effect-val">
+            Потенциал доходности: <span class="arrow">↑</span> при контролируемом риске<br />
+            Сектора: +финансы, +здравоохранение · корреляция с IT-ядром: <span class="arrow">↓</span>
+          </div>
+        </div>
+        <div class="idea-src">
+          <span class="src-chip data">[Factor Engine]</span>
+          <span class="src-chip data">[Regime Model]</span>
+          <span class="src-chip">[RAG: GS_Q2_2026]</span>
+          <span class="src-chip">[RAG: JPM_Strategy_Q2_2026]</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ДИСКЛЕЙМЕР -->
+  <div class="disclaimer">
+    <span class="dc-icon">⚠</span>
+    <span><b>Это аналитические идеи, а не инвестиционная рекомендация.</b>
+      Расчёты основаны на исторических данных и публичной отчётности; они не
+      учитывают вашу налоговую ситуацию, горизонт и цели. Окончательное решение —
+      за вами или вашим финансовым консультантом.</span>
+  </div>
+
+  <!-- ПОЛОСА ИСТОЧНИКОВ -->
+  <div class="ai-sources">
+    ИСТОЧНИКИ:
+    <b>SEC EDGAR</b> — публичная отчётность эмитентов ·
+    <b>Quant Engine MAC3</b> — расчёт риска и сигналов ·
+    <b>Factor Engine</b> — фактор-скрининг качества ·
+    <b>Regime Model</b> — определение режима рынка ·
+    <b>Goldman Sachs</b> «Q2 2026 Market Outlook» ·
+    <b>Morgan Stanley</b> «Technology Sector Outlook 2026» ·
+    <b>JPMorgan</b> «Q2 2026 Strategy &amp; Allocation»
+  </div>
+
+  <!-- ФУТЕР -->
+  <div class="foot">
+    CONFIDENTIAL // ADVISORY-ONLY — NOT A RECOMMENDATION // PAGE 4 OF 4 // CoVe: 7 SOURCES VERIFIED
+  </div>
+
+</div>
+
+<script>
+  // Разворот/сворачивание карточки идеи
+  function tg(headEl) {
+    headEl.parentElement.classList.toggle('open');
+  }
+</script>
+</body>
+</html>
