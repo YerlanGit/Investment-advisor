@@ -137,82 +137,203 @@ def _mock_payload(tier: str = "base") -> dict:
         # Synthesise mock stress/effect/macro/regime so the design pages
         # render fully populated.  Engine produces identical shapes in
         # production from real inputs (FRED + simulate_after_plan).
-        payload["stress_scenarios"] = [
-            {"name": "Equity DM −20%",  "port_pct": -0.158, "port_dollar":  -7900,
-             "max_dd_pct": -0.220, "recovery_months": 6, "tag": "Tech sell-off"},
-            {"name": "Equity EM −25%",  "port_pct": -0.075, "port_dollar":  -3750,
-             "max_dd_pct": -0.110, "recovery_months": 4, "tag": "EM rout"},
-            {"name": "Rates +100 bp",   "port_pct": -0.038, "port_dollar":  -1900,
-             "max_dd_pct": -0.062, "recovery_months": 3, "tag": "Duration shock"},
-            {"name": "HY Credit +200bp","port_pct": -0.028, "port_dollar":  -1400,
-             "max_dd_pct": -0.044, "recovery_months": 3, "tag": "Credit widening"},
-            {"name": "USD +10% (proxy)","port_pct":  0.012, "port_dollar":    600,
-             "max_dd_pct": -0.018, "recovery_months": 2, "tag": "DXY rally"},
-            {"name": "Oil −30%",        "port_pct": -0.014, "port_dollar":   -700,
-             "max_dd_pct": -0.025, "recovery_months": 2, "tag": "Energy drawdown"},
-            {"name": "CPI +1pp (proxy)","port_pct": -0.022, "port_dollar":  -1100,
-             "max_dd_pct": -0.038, "recovery_months": 3, "tag": "Inflation surprise"},
-        ]
-        payload["expected_effect"] = {
-            "risk_index":      {"before": 62,    "after": 54,    "delta_pp": -8,    "favourable": True},
-            "cvar_95":         {"before": -0.052,"after": -0.041,"delta_pp": 1.1,   "favourable": True},
-            "sharpe":          {"before": 1.18,  "after": 1.32,  "delta_pp": 0.14,  "favourable": True},
-            "max_drawdown":    {"before": -0.128,"after": -0.104,"delta_pp": 2.4,   "favourable": True},
-            "vol":             {"before": 0.148, "after": 0.126, "delta_pp": -2.2,  "favourable": True},
-            "max_erc_pct":     {"before": 0.244, "after": 0.168, "delta_pp": -7.6,  "favourable": True},
-            "expected_return": {"before": 0.142, "after": 0.126, "delta_pp": -1.6,  "favourable": False},
-            "it_share":        {"before": 0.62,  "after": 0.50,  "delta_pp": -12.0, "favourable": True},
-        }
-        payload["macro_drivers"] = {
-            "as_of":   "2026-05-14",
-            "regime":  "Expansion (late)",
-            "series": [
-                {"id":"T10Y2Y","name":"Yield curve 10Y−2Y","value":"+0.18 pp","as_of":"2026-05-14","status":"ok",
-                 "comment":"положительный наклон — рецессия не сигналит"},
-                {"id":"BAMLH0A0HYM2","name":"HY OAS (ICE BofA)","value":"312 bp","as_of":"2026-05-14","status":"ok",
-                 "comment":"спреды узкие — рынок не закладывает кредитный риск"},
-                {"id":"NAPM","name":"ISM Manufacturing PMI","value":"51.4","as_of":"2026-04-01","status":"ok",
-                 "comment":"чуть выше 50 — производство расширяется"},
-                {"id":"VIXCLS","name":"CBOE VIX","value":"14.2","as_of":"2026-05-14","status":"ok",
-                 "comment":"низкая ожидаемая волатильность — комфортная зона"},
-                {"id":"T10YIE","name":"10Y Breakeven Inflation","value":"2.34%","as_of":"2026-05-14","status":"ok",
-                 "comment":"инфляционные ожидания у цели ФРС 2%"},
-            ],
-        }
-        payload["regime"] = {
-            "label":      "Expansion (late)",
-            "confidence": 72,
-            "growth":     0.08,
-            "cycle":      0.04,
-            "explainers": [
-                "SPY обгоняет IEF на +4.1% за 60 дней (рост vs облигации)",
-                "Discretionary > Staples: +2.8% за 60д (цикличные on)",
-                "EEM 60д +1.2% (EM risk-on)",
-            ],
-        }
-        payload["action_plan"] = [
-            {"ticker":"AAPL","action":"Sell 25%","reason":"HOTSPOT 24% риска; фиксируем часть прибыли (+25%)",
-             "price":"$197.40","buy_zone":"$182–188","sell_target":"$215","stop_loss":"$175"},
-            {"ticker":"KSPI","action":"Reduce 50%","reason":"TRC 22% при просадке −16.7% — концентрация выше порога",
-             "price":"₸123.50","buy_zone":"₸115–119","sell_target":"₸140","stop_loss":"₸108"},
-            {"ticker":"BND","action":"Hold","reason":"Hedge против rate shock; держим вес 20%",
-             "price":"$72.18","buy_zone":"$71–73","sell_target":"$76","stop_loss":"$69"},
-        ]
-        payload["hotspots"] = [
-            {"ticker":"AAPL","trc_pct":18.4,"reason":"TRC 18.4% при весе 50% — высокая концентрация"},
-            {"ticker":"KSPI","trc_pct":22.1,"reason":"TRC 22% — KSPI EM hotspot"},
-        ]
-        payload["risk_waterfall"] = {
-            "structural": 14.8,
-            "concentration_add": 4.2,
-            "stress_add":        2.4,
-            "diversif_credit":  -3.4,
-            "final":            18.0,
-            "narrative": "Базовая волатильность 14.8% растёт до 18.0% после поправок на "
-                         "концентрацию (+4.2) и стресс-сценарии (+2.4), компенсируется "
-                         "диверсификационным кредитом (−3.4 pp).",
-        }
+        payload["stress_scenarios"] = _MOCK_STRESS_SCENARIOS
+        payload["expected_effect"]  = _MOCK_EXPECTED_EFFECT
+        payload["macro_drivers"]    = _MOCK_MACRO_DRIVERS
+        payload["regime"]           = _MOCK_REGIME
+        payload["action_plan"]      = _MOCK_ACTION_PLAN
+        payload["hotspots"]         = _MOCK_HOTSPOTS
+        payload["risk_waterfall"]   = _MOCK_RISK_WATERFALL
+        payload["score_breakdown"]  = _MOCK_SCORE_BREAKDOWN
+    # Shared mock keys for BOTH tiers — engine-correct shapes,
+    # so the same template bindings work in production.
+    if not payload.get("scenarios"):
+        payload["scenarios"] = _MOCK_SCENARIOS
+    if not payload.get("period_returns_table"):
+        payload["period_returns_table"] = _MOCK_PERIOD_RETURNS
+    if not payload.get("risk_waterfall") and tier == "base":
+        payload["risk_waterfall"] = _MOCK_RISK_WATERFALL
+    if not payload.get("ai_stock_picks"):
+        payload["ai_stock_picks"] = _MOCK_AI_STOCK_PICKS
     return payload
+
+
+# ── Mock fixtures (smoke render only — production uses real engine output) ──
+# All shapes mirror what build_payload / engine helpers emit, so the same
+# Jinja bindings work without modification in production.
+
+_MOCK_STRESS_SCENARIOS = [
+    {"name": "Equity DM −20%",  "port_pct": -0.158, "port_dollar":  -7900,
+     "max_dd_pct": -0.220, "recovery_months": 6, "tag": "Tech sell-off"},
+    {"name": "Equity EM −25%",  "port_pct": -0.075, "port_dollar":  -3750,
+     "max_dd_pct": -0.110, "recovery_months": 4, "tag": "EM rout"},
+    {"name": "Rates +100 bp",   "port_pct": -0.038, "port_dollar":  -1900,
+     "max_dd_pct": -0.062, "recovery_months": 3, "tag": "Duration shock"},
+    {"name": "HY Credit +200bp","port_pct": -0.028, "port_dollar":  -1400,
+     "max_dd_pct": -0.044, "recovery_months": 3, "tag": "Credit widening"},
+    {"name": "USD +10% (proxy)","port_pct":  0.012, "port_dollar":    600,
+     "max_dd_pct": -0.018, "recovery_months": 2, "tag": "DXY rally"},
+    {"name": "Oil −30%",        "port_pct": -0.014, "port_dollar":   -700,
+     "max_dd_pct": -0.025, "recovery_months": 2, "tag": "Energy drawdown"},
+    {"name": "CPI +1pp (proxy)","port_pct": -0.022, "port_dollar":  -1100,
+     "max_dd_pct": -0.038, "recovery_months": 3, "tag": "Inflation surprise"},
+]
+
+_MOCK_EXPECTED_EFFECT = {
+    "risk_index":      {"before": 62,    "after": 54,    "delta_pp": -8,    "favourable": True},
+    "cvar_95":         {"before": -0.052,"after": -0.041,"delta_pp": 1.1,   "favourable": True},
+    "sharpe":          {"before": 1.18,  "after": 1.32,  "delta_pp": 0.14,  "favourable": True},
+    "max_drawdown":    {"before": -0.128,"after": -0.104,"delta_pp": 2.4,   "favourable": True},
+    "vol":             {"before": 0.148, "after": 0.126, "delta_pp": -2.2,  "favourable": True},
+    "max_erc_pct":     {"before": 0.244, "after": 0.168, "delta_pp": -7.6,  "favourable": True},
+    "expected_return": {"before": 0.142, "after": 0.126, "delta_pp": -1.6,  "favourable": False},
+    "it_share":        {"before": 0.62,  "after": 0.50,  "delta_pp": -12.0, "favourable": True},
+}
+
+_MOCK_MACRO_DRIVERS = {
+    "as_of":  "2026-05-14",
+    "regime": "Expansion (late)",
+    "series": [
+        {"id":"T10Y2Y","name":"Yield curve 10Y−2Y","value":"+0.18 pp","as_of":"2026-05-14","status":"ok",
+         "comment":"положительный наклон — рецессия не сигналит"},
+        {"id":"BAMLH0A0HYM2","name":"HY OAS (ICE BofA)","value":"312 bp","as_of":"2026-05-14","status":"ok",
+         "comment":"спреды узкие — рынок не закладывает кредитный риск"},
+        {"id":"NAPM","name":"ISM Manufacturing PMI","value":"51.4","as_of":"2026-04-01","status":"ok",
+         "comment":"чуть выше 50 — производство расширяется"},
+        {"id":"VIXCLS","name":"CBOE VIX","value":"14.2","as_of":"2026-05-14","status":"ok",
+         "comment":"низкая ожидаемая волатильность — комфортная зона"},
+        {"id":"T10YIE","name":"10Y Breakeven Inflation","value":"2.34%","as_of":"2026-05-14","status":"ok",
+         "comment":"инфляционные ожидания у цели ФРС 2%"},
+    ],
+}
+
+_MOCK_REGIME = {
+    "label":      "Expansion (late)",
+    "confidence": 72,
+    "growth":     0.08,
+    "cycle":      0.04,
+    "explainers": [
+        "SPY обгоняет IEF на +4.1% за 60 дней (рост vs облигации)",
+        "Discretionary > Staples: +2.8% за 60д (цикличные on)",
+        "EEM 60д +1.2% (EM risk-on)",
+    ],
+}
+
+_MOCK_ACTION_PLAN = [
+    {"ticker":"AAPL","action":"Sell 25%","reason":"HOTSPOT 24% риска; фиксируем часть прибыли (+25%)",
+     "price":"$197.40","buy_zone":"$182–188","sell_target":"$215","stop_loss":"$175"},
+    {"ticker":"KSPI","action":"Reduce 50%","reason":"TRC 22% при просадке −16.7% — концентрация выше порога",
+     "price":"₸123.50","buy_zone":"₸115–119","sell_target":"₸140","stop_loss":"₸108"},
+    {"ticker":"BND","action":"Hold","reason":"Hedge против rate shock; держим вес 20%",
+     "price":"$72.18","buy_zone":"$71–73","sell_target":"$76","stop_loss":"$69"},
+]
+
+_MOCK_HOTSPOTS = [
+    {"ticker":"AAPL","trc_pct":18.4,"reason":"TRC 18.4% при весе 50% — высокая концентрация"},
+    {"ticker":"KSPI","trc_pct":22.1,"reason":"TRC 22% — KSPI EM hotspot"},
+]
+
+# Risk waterfall — engine shape from pdf_payload._build_risk_waterfall.
+# Sample numbers chosen so sum_standalone − total = positive diversification.
+_MOCK_RISK_WATERFALL = {
+    "contributions": [
+        {"ticker": "AAPL", "weight_pct": 50.0, "standalone_vol_pct": 24.5,
+         "standalone_pp": 12.25, "standalone_share_pct": 67.3},
+        {"ticker": "KSPI", "weight_pct": 30.0, "standalone_vol_pct": 18.0,
+         "standalone_pp":  5.40, "standalone_share_pct": 29.7},
+        {"ticker": "BND",  "weight_pct": 20.0, "standalone_vol_pct":  2.7,
+         "standalone_pp":  0.54, "standalone_share_pct":  3.0},
+    ],
+    "sum_standalone_pp":     18.19,
+    "total_vol_pp":          14.20,
+    "diversification_pp":     3.99,
+    "diversification_ratio":  0.219,
+    "method": ("σᵢ = √Σᵢᵢ (annualised) · standalone = wᵢ·σᵢ · "
+                "diversified = √(w'Σw) · benefit = Σstandalone − diversified"),
+}
+
+# 4-pillar scoring — engine shape from pdf_payload (asset_scores).
+_MOCK_SCORE_BREAKDOWN = [
+    {"ticker":"AAPL","fundamentals":"+2.0","valuations": "0.0","technicals":"+1.0","credit":"+1.0",
+     "total":"+4.0","action":"Buy","action_color":"pos"},
+    {"ticker":"KSPI","fundamentals":"+1.0","valuations":"+0.5","technicals":"-1.0","credit": "0.0",
+     "total":"+0.5","action":"Hold","action_color":"neut"},
+    {"ticker":"BND", "fundamentals": "0.0","valuations": "0.0","technicals": "0.0","credit":"+1.0",
+     "total":"+1.0","action":"Hold","action_color":"neut"},
+]
+
+# Scenarios (benchmark comparison) — payload shape from pdf_payload (scenarios).
+_MOCK_SCENARIOS = [
+    {"name": "S&P 500", "excess": "+5.1%", "te": "8.4%", "ir": "0.61",
+     "beating": True,  "color": "pos", "pnl": "+9.1%"},
+]
+
+# Multi-period returns — payload shape from results.period_returns_table.
+# Engine builds this from benchmark_comparison.periods list.  Per-period
+# shape: {period_label, portfolio_return, benchmark_return, excess}.
+_MOCK_PERIOD_RETURNS = {
+    "S&P 500": {
+        "periods": [
+            {"label":"1М",  "portfolio":"+2.0%", "benchmark":"+1.4%", "excess":"+0.6 пп"},
+            {"label":"3М",  "portfolio":"+5.5%", "benchmark":"+3.6%", "excess":"+1.9 пп"},
+            {"label":"6М",  "portfolio":"+9.4%", "benchmark":"+6.0%", "excess":"+3.4 пп"},
+            {"label":"YTD", "portfolio":"+7.1%", "benchmark":"+4.4%", "excess":"+2.7 пп"},
+            {"label":"12М", "portfolio":"+14.2%","benchmark":"+9.1%", "excess":"+5.1 пп"},
+        ],
+        "window_start": "2025-05-15",
+        "window_end":   "2026-05-14",
+    },
+}
+
+# AI stock picks — Haiku output shape (verdict + buckets of ideas with
+# rationale + candidate tickers).  Engine populates from
+# AdvisorBot.generate_stock_picks().
+_MOCK_AI_STOCK_PICKS = {
+    "risk_reduction": [
+        {"idea_num":"01", "category":"Снижение риска", "priority":"high",
+         "title":"Сократить долю AAPL с 50% до ~30%",
+         "rationale":"Позиция помечена HOTSPOT — даёт 18% всего риска портфеля.  "
+                     "Положение в плюсе +25% — есть что зафиксировать без убытка.",
+         "candidates":[
+            {"ticker":"TXN","name":"Texas Instruments","scenario":"спрос на качество в IT"},
+            {"ticker":"CSCO","name":"Cisco","scenario":"ротация в защитный тех"},
+            {"ticker":"ACN","name":"Accenture","scenario":"замедление без рецессии"},
+         ],
+         "pipeline":[
+            ("FACTOR","AAPL даёт 18% риска, HOTSPOT"),
+            ("REGIME","ждём роста волатильности в IT"),
+            ("RAG","Morgan Stanley: фиксировать прибыль"),
+         ],
+         "expected_effect":[
+            ("Вклад AAPL в риск","18.4%","~12%"),
+            ("Доля IT-сектора","50%","~38%"),
+         ],
+         "sources":["Quant Engine","SEC EDGAR","RAG: MS_TechOutlook_2026"],
+        },
+    ],
+    "diversification": [
+        {"idea_num":"02", "category":"Диверсификация", "priority":"medium",
+         "title":"Добавить защитные сектора 10–15%",
+         "rationale":"Текущая структура перевешена в IT (50%) + KSPI (30% EM).  "
+                     "Healthcare / Consumer Staples сглаживают просадки в late-cycle.",
+         "candidates":[
+            {"ticker":"JNJ","name":"Johnson & Johnson","scenario":"healthcare hedge"},
+            {"ticker":"KO","name":"Coca-Cola","scenario":"defensive staples"},
+            {"ticker":"PG","name":"Procter & Gamble","scenario":"low-beta yielder"},
+         ],
+         "pipeline":[
+            ("FACTOR","TRC concentration HHI > 3500"),
+            ("REGIME","late-cycle transition: защитные растут"),
+            ("RAG","JPMorgan: 'islands of stability'"),
+         ],
+         "expected_effect":[
+            ("Concentration HHI","3520","~2200"),
+            ("Beta к рынку","1.18","~0.95"),
+         ],
+         "sources":["Quant Engine","RAG: JPM_Strategy_Q2_2026"],
+        },
+    ],
+}
 
 
 MOCK_DATA: dict = {}   # lazily filled by the CLI / smoke entry-point below.

@@ -1439,7 +1439,7 @@
   
   <div class="tech-header">
     <span><b>PORTFOLIO RISK REPORT</b> // TIER: DEEP // ID: Usample // RISK_ENGINE: MAC3</span>
-    <span class="ts">GENERATED 18.05.2026 04:17 UTC+5</span>
+    <span class="ts">GENERATED 18.05.2026 05:07 UTC+5</span>
   </div>
 
   <!-- ═══ COVER ═══ -->
@@ -1595,9 +1595,9 @@
       <div class="kpi-ai">
         <span class="tag">🤖</span>
         <span class="txt">«Средний убыток портфеля за один худший день при самом
-          плохом сценарии в будущем. У вас ≈&nbsp;<b>−5.2%</b> (−$1&nbsp;240 от $24&nbsp;000);
-          за месяц −0.3&nbsp;пп — стало мягче.»
-          <span class="src">[Quant Engine]</span></span>
+          плохом сценарии в будущем. У вас ≈&nbsp;<b>-5.2%</b> ($2,600 от $50,000).
+          Доверительный интервал (95%): CI: -7.0% … -4.5%.»
+          <span class="src">[Quant Engine · Politis-Romano bootstrap]</span></span>
       </div>
     </div>
 
@@ -1634,9 +1634,9 @@
       <div class="kpi-ai">
         <span class="tag">🤖</span>
         <span class="txt">«Сколько прибыли приносит каждая единица риска. У вас
-          <b>1.18</b> — заметно выше бенчмарка (0.74); за месяц +0.06.
-          Норма ≥&nbsp;1.0, ≥&nbsp;1.5 — отлично.»
-          <span class="src">[Quant Engine]</span></span>
+          <b>1.34</b> (Sortino 1.62 — учитывает только просадки).
+          Норма ≥&nbsp;1.0, ≥&nbsp;1.5 — отлично; &lt; 0 — портфель проигрывает безриск. ставке.»
+          <span class="src">[Quant Engine · RFR 14%]</span></span>
       </div>
     </div>
 
@@ -1676,9 +1676,11 @@
       <div class="kpi-ai">
         <span class="tag">🤖</span>
         <span class="txt">«Максимальное падение портфеля от его пика за всю историю.
-          У вас <b>−12.8%</b> (≈ −$3&nbsp;070); основной вклад — <b>PLTR</b> и <b>CRWD</b>:
-          снижение их веса сгладит будущие просадки.»
-          <span class="src">[Quant Engine]</span></span>
+          У вас <b>-12.8%</b> (≈ $6,400).
+          
+            Основной вклад — <b>AAPL</b> и <b>KSPI</b>: снижение их веса сгладит будущие просадки.
+          »
+          <span class="src">[Quant Engine · peak-to-trough на equity curve]</span></span>
       </div>
     </div>
 
@@ -1828,24 +1830,32 @@
           <line x1="313.4" y1="61.2"  x2="342.0" y2="61.2"/>
         </g>
 
-        <!-- значения над барами -->
+        
+        
+        
+        
+        
         <g font-family="IBM Plex Mono" font-size="8.5" fill="#2A2E33">
-          <text x="60.3"  y="115" text-anchor="middle">6.2%</text>
-          <text x="104.9" y="78"  text-anchor="middle">5.0%</text>
-          <text x="149.4" y="53"  text-anchor="middle">3.4%</text>
-          <text x="194.0" y="38"  text-anchor="middle">2.0%</text>
-          <text x="238.6" y="25"  text-anchor="middle">1.8%</text>
-          <text x="283.1" y="25"  text-anchor="middle" fill="#2F7048" font-weight="600">−4.2%</text>
+          
+            <text x="60.3" y="115" text-anchor="middle">12.2%</text>
+          
+            <text x="104.9" y="78" text-anchor="middle">5.4%</text>
+          
+            <text x="149.4" y="53" text-anchor="middle">0.5%</text>
+          
+          <text x="283.1" y="25"  text-anchor="middle" fill="#2F7048" font-weight="600">−4.0%</text>
           <text x="327.7" y="56"  text-anchor="middle" fill="#23588F" font-weight="600">14.2%</text>
         </g>
 
         <!-- подписи баров -->
         <g font-family="IBM Plex Mono" font-size="8.5" fill="#2A2E33">
-          <text x="60.3"  y="178" text-anchor="middle">PLTR</text>
-          <text x="104.9" y="178" text-anchor="middle">CRWD</text>
-          <text x="149.4" y="178" text-anchor="middle">AAPL</text>
-          <text x="194.0" y="178" text-anchor="middle">JNJ</text>
-          <text x="238.6" y="178" text-anchor="middle">KO</text>
+          
+            <text x="60.3" y="178" text-anchor="middle">AAPL</text>
+          
+            <text x="104.9" y="178" text-anchor="middle">KSPI</text>
+          
+            <text x="149.4" y="178" text-anchor="middle">BND</text>
+          
         </g>
         <g font-family="IBM Plex Sans" font-size="7.5" fill="rgba(42,46,51,0.7)">
           <text x="283.1" y="176" text-anchor="middle">Диверси-</text>
@@ -2458,215 +2468,135 @@
         <span class="src">[Quant Engine + SEC EDGAR]</span></div>
     </div>
 
+    
+    
     <div class="score-grid">
-
-      <!-- PLTR -->
-      <div class="score-card act-trim">
-        <div class="sc-head">
-          <span class="sc-ticker">PLTR</span>
-          <span class="sc-total pos">Итог: +2</span>
-        </div>
-        <div class="sc-pillars">
-          <div class="sc-pillar">
-            <span class="sc-pillar-name">F</span>
-            <span class="sc-pillar-bar"><span class="sc-pillar-fill pos" style="left:50%; width:50%;"></span></span>
-            <span class="sc-pillar-val pos">+2</span>
-          </div>
-          <div class="sc-pillar">
-            <span class="sc-pillar-name">V</span>
-            <span class="sc-pillar-bar"><span class="sc-pillar-fill neg" style="left:25%; width:25%;"></span></span>
-            <span class="sc-pillar-val neg">−1</span>
-          </div>
-          <div class="sc-pillar">
-            <span class="sc-pillar-name">T</span>
-            <span class="sc-pillar-bar"><span class="sc-pillar-fill pos" style="left:50%; width:50%;"></span></span>
-            <span class="sc-pillar-val pos">+2</span>
-          </div>
-          <div class="sc-pillar">
-            <span class="sc-pillar-name">C</span>
-            <span class="sc-pillar-bar"><span class="sc-pillar-fill pos" style="left:50%; width:12.5%;"></span></span>
-            <span class="sc-pillar-val">+0.5</span>
-          </div>
-        </div>
-        <div class="sc-foot">
-          <span class="sc-action act-trim">TRIM</span>
-          <span class="sc-reason">сильный моментум, но дорогая оценка → фиксировать часть</span>
-        </div>
-      </div>
-
-      <!-- CRWD -->
-      <div class="score-card act-hold">
-        <div class="sc-head">
-          <span class="sc-ticker">CRWD</span>
-          <span class="sc-total pos">Итог: +1</span>
-        </div>
-        <div class="sc-pillars">
-          <div class="sc-pillar">
-            <span class="sc-pillar-name">F</span>
-            <span class="sc-pillar-bar"><span class="sc-pillar-fill pos" style="left:50%; width:37.5%;"></span></span>
-            <span class="sc-pillar-val pos">+1.5</span>
-          </div>
-          <div class="sc-pillar">
-            <span class="sc-pillar-name">V</span>
-            <span class="sc-pillar-bar"><span class="sc-pillar-fill neg" style="left:25%; width:25%;"></span></span>
-            <span class="sc-pillar-val neg">−1</span>
-          </div>
-          <div class="sc-pillar">
-            <span class="sc-pillar-name">T</span>
-            <span class="sc-pillar-bar"><span class="sc-pillar-fill pos" style="left:50%; width:37.5%;"></span></span>
-            <span class="sc-pillar-val pos">+1.5</span>
-          </div>
-          <div class="sc-pillar">
-            <span class="sc-pillar-name">C</span>
-            <span class="sc-pillar-bar"><span class="sc-pillar-fill pos" style="left:50%; width:12.5%;"></span></span>
-            <span class="sc-pillar-val">+0.5</span>
-          </div>
-        </div>
-        <div class="sc-foot">
-          <span class="sc-action act-hold">HOLD</span>
-          <span class="sc-reason">синхронна с PLTR — общая концентрация риска</span>
-        </div>
-      </div>
-
-      <!-- AAPL -->
+      
+        
+        
+        
+        
+        
+        
+        
       <div class="score-card act-buy">
         <div class="sc-head">
           <span class="sc-ticker">AAPL</span>
-          <span class="sc-total pos">Итог: +3</span>
+          <span class="sc-total pos">Итог: +4.0</span>
         </div>
         <div class="sc-pillars">
           <div class="sc-pillar">
             <span class="sc-pillar-name">F</span>
-            <span class="sc-pillar-bar"><span class="sc-pillar-fill pos" style="left:50%; width:50%;"></span></span>
-            <span class="sc-pillar-val pos">+2</span>
+            <span class="sc-pillar-bar"><span class="sc-pillar-fill pos" style="left:50.0%; width:50.0%;"></span></span>
+            <span class="sc-pillar-val pos">+2.0</span>
           </div>
           <div class="sc-pillar">
             <span class="sc-pillar-name">V</span>
-            <span class="sc-pillar-bar"><span class="sc-pillar-fill" style="left:50%; width:0;"></span></span>
-            <span class="sc-pillar-val">0</span>
+            <span class="sc-pillar-bar"><span class="sc-pillar-fill " style="left:50.0%; width:0.0%;"></span></span>
+            <span class="sc-pillar-val ">0.0</span>
           </div>
           <div class="sc-pillar">
             <span class="sc-pillar-name">T</span>
-            <span class="sc-pillar-bar"><span class="sc-pillar-fill pos" style="left:50%; width:25%;"></span></span>
-            <span class="sc-pillar-val pos">+1</span>
+            <span class="sc-pillar-bar"><span class="sc-pillar-fill pos" style="left:50.0%; width:25.0%;"></span></span>
+            <span class="sc-pillar-val pos">+1.0</span>
           </div>
           <div class="sc-pillar">
             <span class="sc-pillar-name">C</span>
-            <span class="sc-pillar-bar"><span class="sc-pillar-fill pos" style="left:50%; width:25%;"></span></span>
-            <span class="sc-pillar-val pos">+1</span>
+            <span class="sc-pillar-bar"><span class="sc-pillar-fill pos" style="left:50.0%; width:25.0%;"></span></span>
+            <span class="sc-pillar-val pos">+1.0</span>
           </div>
         </div>
         <div class="sc-foot">
           <span class="sc-action act-buy">BUY</span>
-          <span class="sc-reason">маржа и кэш-флоу высокие, оценка справедливая</span>
+          <span class="sc-reason">сильный совокупный сигнал</span>
         </div>
       </div>
-
-      <!-- JNJ -->
-      <div class="score-card act-buy">
-        <div class="sc-head">
-          <span class="sc-ticker">JNJ</span>
-          <span class="sc-total pos">Итог: +5</span>
-        </div>
-        <div class="sc-pillars">
-          <div class="sc-pillar">
-            <span class="sc-pillar-name">F</span>
-            <span class="sc-pillar-bar"><span class="sc-pillar-fill pos" style="left:50%; width:50%;"></span></span>
-            <span class="sc-pillar-val pos">+2</span>
-          </div>
-          <div class="sc-pillar">
-            <span class="sc-pillar-name">V</span>
-            <span class="sc-pillar-bar"><span class="sc-pillar-fill pos" style="left:50%; width:37.5%;"></span></span>
-            <span class="sc-pillar-val pos">+1.5</span>
-          </div>
-          <div class="sc-pillar">
-            <span class="sc-pillar-name">T</span>
-            <span class="sc-pillar-bar"><span class="sc-pillar-fill pos" style="left:50%; width:12.5%;"></span></span>
-            <span class="sc-pillar-val">+0.5</span>
-          </div>
-          <div class="sc-pillar">
-            <span class="sc-pillar-name">C</span>
-            <span class="sc-pillar-bar"><span class="sc-pillar-fill pos" style="left:50%; width:25%;"></span></span>
-            <span class="sc-pillar-val pos">+1</span>
-          </div>
-        </div>
-        <div class="sc-foot">
-          <span class="sc-action act-buy">STRONG&nbsp;BUY</span>
-          <span class="sc-reason">защитный сектор, низкая бета, фундаментал крепкий</span>
-        </div>
-      </div>
-
-      <!-- KO -->
+      
+        
+        
+        
+        
+        
+        
       <div class="score-card act-hold">
         <div class="sc-head">
-          <span class="sc-ticker">KO</span>
-          <span class="sc-total pos">Итог: +2</span>
+          <span class="sc-ticker">KSPI</span>
+          <span class="sc-total pos">Итог: +0.5</span>
         </div>
         <div class="sc-pillars">
           <div class="sc-pillar">
             <span class="sc-pillar-name">F</span>
-            <span class="sc-pillar-bar"><span class="sc-pillar-fill pos" style="left:50%; width:37.5%;"></span></span>
-            <span class="sc-pillar-val pos">+1.5</span>
+            <span class="sc-pillar-bar"><span class="sc-pillar-fill pos" style="left:50.0%; width:25.0%;"></span></span>
+            <span class="sc-pillar-val pos">+1.0</span>
           </div>
           <div class="sc-pillar">
             <span class="sc-pillar-name">V</span>
-            <span class="sc-pillar-bar"><span class="sc-pillar-fill neg" style="left:37.5%; width:12.5%;"></span></span>
-            <span class="sc-pillar-val neg">−0.5</span>
+            <span class="sc-pillar-bar"><span class="sc-pillar-fill pos" style="left:50.0%; width:12.5%;"></span></span>
+            <span class="sc-pillar-val pos">+0.5</span>
           </div>
           <div class="sc-pillar">
             <span class="sc-pillar-name">T</span>
-            <span class="sc-pillar-bar"><span class="sc-pillar-fill" style="left:50%; width:0;"></span></span>
-            <span class="sc-pillar-val">0</span>
+            <span class="sc-pillar-bar"><span class="sc-pillar-fill neg" style="left:25.0%; width:25.0%;"></span></span>
+            <span class="sc-pillar-val neg">-1.0</span>
           </div>
           <div class="sc-pillar">
             <span class="sc-pillar-name">C</span>
-            <span class="sc-pillar-bar"><span class="sc-pillar-fill pos" style="left:50%; width:25%;"></span></span>
-            <span class="sc-pillar-val pos">+1</span>
+            <span class="sc-pillar-bar"><span class="sc-pillar-fill " style="left:50.0%; width:0.0%;"></span></span>
+            <span class="sc-pillar-val ">0.0</span>
           </div>
         </div>
         <div class="sc-foot">
           <span class="sc-action act-hold">HOLD</span>
-          <span class="sc-reason">«тихий» актив гасит общий риск, но оценка дороже среднего</span>
+          <span class="sc-reason">положительный профиль</span>
         </div>
       </div>
-
-      <!-- XOM -->
-      <div class="score-card act-trim">
+      
+        
+        
+        
+        
+        
+        
+      <div class="score-card act-hold">
         <div class="sc-head">
-          <span class="sc-ticker">XOM</span>
-          <span class="sc-total neg">Итог: −2</span>
+          <span class="sc-ticker">BND</span>
+          <span class="sc-total pos">Итог: +1.0</span>
         </div>
         <div class="sc-pillars">
           <div class="sc-pillar">
             <span class="sc-pillar-name">F</span>
-            <span class="sc-pillar-bar"><span class="sc-pillar-fill neg" style="left:25%; width:25%;"></span></span>
-            <span class="sc-pillar-val neg">−1</span>
+            <span class="sc-pillar-bar"><span class="sc-pillar-fill " style="left:50.0%; width:0.0%;"></span></span>
+            <span class="sc-pillar-val ">0.0</span>
           </div>
           <div class="sc-pillar">
             <span class="sc-pillar-name">V</span>
-            <span class="sc-pillar-bar"><span class="sc-pillar-fill pos" style="left:50%; width:12.5%;"></span></span>
-            <span class="sc-pillar-val">+0.5</span>
+            <span class="sc-pillar-bar"><span class="sc-pillar-fill " style="left:50.0%; width:0.0%;"></span></span>
+            <span class="sc-pillar-val ">0.0</span>
           </div>
           <div class="sc-pillar">
             <span class="sc-pillar-name">T</span>
-            <span class="sc-pillar-bar"><span class="sc-pillar-fill neg" style="left:25%; width:25%;"></span></span>
-            <span class="sc-pillar-val neg">−1</span>
+            <span class="sc-pillar-bar"><span class="sc-pillar-fill " style="left:50.0%; width:0.0%;"></span></span>
+            <span class="sc-pillar-val ">0.0</span>
           </div>
           <div class="sc-pillar">
             <span class="sc-pillar-name">C</span>
-            <span class="sc-pillar-bar"><span class="sc-pillar-fill neg" style="left:37.5%; width:12.5%;"></span></span>
-            <span class="sc-pillar-val neg">−0.5</span>
+            <span class="sc-pillar-bar"><span class="sc-pillar-fill pos" style="left:50.0%; width:25.0%;"></span></span>
+            <span class="sc-pillar-val pos">+1.0</span>
           </div>
         </div>
         <div class="sc-foot">
-          <span class="sc-action act-trim">TRIM</span>
-          <span class="sc-reason">выручка −6% г/г, тренд слабый</span>
+          <span class="sc-action act-hold">HOLD</span>
+          <span class="sc-reason">положительный профиль</span>
         </div>
       </div>
-
+      
     </div>
     <div style="margin-top:6px; font-size:9px; color:var(--ink-60);">
-      Показаны 6 из 9 позиций — остальные (MSFT, NVDA, BND) в HOLD-зоне без триггеров.
+      
+      
+      
+        Все 3 позиций со скорингом.
+      
     </div>
   </div>
 
