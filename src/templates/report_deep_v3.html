@@ -1571,6 +1571,15 @@
           (95% CL · 1 день{% if data.cvar_dollar %} · ≈ {{ data.cvar_dollar }}{% endif %}{% if data.cvar_ci %} · CI {{ data.cvar_ci }}{% endif %})
         </span>
       </div>
+{# KPI sparkline — historical trend chart for this metric.
+         Gated behind data.kpi_sparklines because the engine doesn't yet
+         emit per-KPI history series.  When the future helper
+         tg_bot._build_kpi_sparkline_series() lands, the chart re-appears
+         automatically; until then the hardcoded prototype polyline would
+         be misleading (it implies real history) — so we hide it cleanly.
+         The headline value + AI commentary above + below remain wired to
+         real engine data, so the KPI is still informative. #}
+      {% if data.kpi_sparklines %}
       <div class="kpi-spark">
         <svg viewBox="0 0 240 36" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
           <defs>
@@ -1600,6 +1609,7 @@
           <circle cx="236" cy="28" r="3.0" fill="#FBFAF7" stroke="#3F8F5F" stroke-width="1.1"/>
         </svg>
       </div>
+      {% endif %}
       <div class="kpi-ai">
         <span class="tag">🤖</span>
         <span class="txt">«Средний убыток портфеля за один худший день при самом
@@ -1616,6 +1626,15 @@
         <span class="kpi-value">{{ data.sharpe }}</span>
         <span class="kpi-sub">(Sortino {{ data.sortino }})</span>
       </div>
+{# KPI sparkline — historical trend chart for this metric.
+         Gated behind data.kpi_sparklines because the engine doesn't yet
+         emit per-KPI history series.  When the future helper
+         tg_bot._build_kpi_sparkline_series() lands, the chart re-appears
+         automatically; until then the hardcoded prototype polyline would
+         be misleading (it implies real history) — so we hide it cleanly.
+         The headline value + AI commentary above + below remain wired to
+         real engine data, so the KPI is still informative. #}
+      {% if data.kpi_sparklines %}
       <div class="kpi-spark">
         <svg viewBox="0 0 240 36" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
           <defs>
@@ -1639,6 +1658,7 @@
           <circle cx="236" cy="5" r="3.0" fill="#FBFAF7" stroke="#2F6FB3" stroke-width="1.1"/>
         </svg>
       </div>
+      {% endif %}
       <div class="kpi-ai">
         <span class="tag">🤖</span>
         <span class="txt">«Сколько прибыли приносит каждая единица риска. У вас
@@ -1655,6 +1675,15 @@
         <span class="kpi-value">{{ data.max_drawdown }}</span>
         <span class="kpi-sub">(пик→дно{% if data.mdd_dollar %} · ≈ {{ data.mdd_dollar }}{% endif %})</span>
       </div>
+{# KPI sparkline — historical trend chart for this metric.
+         Gated behind data.kpi_sparklines because the engine doesn't yet
+         emit per-KPI history series.  When the future helper
+         tg_bot._build_kpi_sparkline_series() lands, the chart re-appears
+         automatically; until then the hardcoded prototype polyline would
+         be misleading (it implies real history) — so we hide it cleanly.
+         The headline value + AI commentary above + below remain wired to
+         real engine data, so the KPI is still informative. #}
+      {% if data.kpi_sparklines %}
       <div class="kpi-spark">
         <svg viewBox="0 0 240 36" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
           <defs>
@@ -1681,6 +1710,7 @@
           <circle cx="236" cy="12" r="3.0" fill="#FBFAF7" stroke="#C0492F" stroke-width="1.1"/>
         </svg>
       </div>
+      {% endif %}
       <div class="kpi-ai">
         <span class="tag">🤖</span>
         <span class="txt">«Максимальное падение портфеля от его пика за всю историю.
@@ -1779,7 +1809,32 @@
           </filter>
         </defs>
 
-        <!-- сетка Y: 0/5/10/15/20 % -->
+        {# ─── Adaptive risk waterfall ───────────────────────────────────────
+             Data source: data.risk_waterfall (engine: pdf_payload.
+             _build_risk_waterfall — Σᵢ = √Σᵢᵢ, standaloneᵢ = wᵢσᵢ,
+             diversified = √(w'Σw), benefit = Σstandalone − diversified).
+
+             Geometry:
+               • Y-axis fixed [0..20%], 7.35 px per pp (165 = 0%, 18 = 20%)
+               • X-axis adapts to N=min(positions,5) + 2 slots (amber × N
+                 + green + blue).  Step = 314 / (slot_count + 0.5);
+                 each bar = step × 0.7, centered at step × (i + 0.5).
+               • Amber bars cumulatively stack (waterfall pattern).
+               • Green bar sits above amber stack, descends by
+                 diversification_pp.
+               • Blue bar is the full diversified total (from 0 to
+                 total_vol_pp).
+               • Adapts to portfolios with 1-5+ positions; 5+ shows top-5,
+                 with HHI from the truncated tail logged via cove_lineage.
+        #}
+        {% set _wf       = data.risk_waterfall or {} %}
+        {% set _contribs = (_wf.contributions or [])[:5] %}
+        {% set _N        = _contribs | length %}
+        {% set _sum_pp   = _wf.sum_standalone_pp or 0 %}
+        {% set _div_pp   = _wf.diversification_pp or 0 %}
+        {% set _tot_pp   = _wf.total_vol_pp or 0 %}
+
+        {# ─── Y-axis grid 0..20% (always shown) ──────────────────────────── #}
         <g font-family="IBM Plex Mono" font-size="8" fill="rgba(42,46,51,0.45)">
           <line x1="34" y1="165"    x2="352" y2="165"    stroke="#2A2E33" stroke-opacity="0.22" stroke-width="0.5"/>
           <text x="30" y="168" text-anchor="end">0%</text>
@@ -1793,82 +1848,124 @@
           <text x="30" y="21" text-anchor="end">20%</text>
         </g>
 
-        <!-- затенённая зона за индивидуальными рисками -->
-        <rect x="45" y="26" width="209" height="139" fill="#C77B2C" fill-opacity="0.05"/>
+        {% if _N > 0 and _tot_pp > 0 %}
+          {% set _slot_count = _N + 2 %}
+          {% set _step  = 314.0 / (_slot_count + 0.5) %}
+          {% set _bar_w = _step * 0.7 %}
+          {% set _plot_x0 = 38.0 %}
 
-        <!-- связующие хвосты waterfall -->
-        <g stroke="#2A2E33" stroke-opacity="0.42" stroke-width="0.5" stroke-dasharray="2.5 2">
-          <line x1="75.3"  y1="119.4" x2="89.9"  y2="119.4"/>
-          <line x1="119.9" y1="82.7"  x2="134.4" y2="82.7"/>
-          <line x1="164.4" y1="57.7"  x2="179.0" y2="57.7"/>
-          <line x1="209.0" y1="43.0"  x2="223.6" y2="43.0"/>
-          <line x1="253.6" y1="29.8"  x2="268.1" y2="29.8"/>
-          <line x1="298.1" y1="60.6"  x2="312.7" y2="60.6"/>
-        </g>
+          {# Shaded zone behind amber bars (faint amber wash) #}
+          {% set _shade_x = _plot_x0 + _step * 0.15 %}
+          {% set _shade_w = _step * _N %}
+          <rect x="{{ '%.1f' % _shade_x }}" y="26" width="{{ '%.1f' % _shade_w }}" height="139"
+                fill="#C77B2C" fill-opacity="0.05"/>
 
-        <!-- индивидуальные риски — амбер -->
-        <g filter="url(#barShadow)">
-          <rect x="45.3"  y="119.4" width="30" height="45.6" fill="url(#barAmber)" rx="1"/>
-          <rect x="89.9"  y="82.7"  width="30" height="36.7" fill="url(#barAmber)" rx="1"/>
-          <rect x="134.4" y="57.7"  width="30" height="25.0" fill="url(#barAmber)" rx="1"/>
-          <rect x="179.0" y="43.0"  width="30" height="14.7" fill="url(#barAmber)" rx="1"/>
-          <rect x="223.6" y="29.8"  width="30" height="13.2" fill="url(#barAmber)" rx="1"/>
-          <rect x="268.1" y="29.8"  width="30" height="30.8" fill="url(#barGreen)" rx="1"/>
-          <rect x="312.7" y="60.6"  width="30" height="104.4" fill="url(#barBlue)" rx="1"/>
-        </g>
-        <!-- rim-light на верхней кромке каждого бара -->
-        <g stroke="rgba(255,255,255,0.45)" stroke-width="0.8">
-          <line x1="46.0"  y1="120.0" x2="74.6"  y2="120.0"/>
-          <line x1="90.6"  y1="83.3"  x2="119.2" y2="83.3"/>
-          <line x1="135.1" y1="58.3"  x2="163.7" y2="58.3"/>
-          <line x1="179.7" y1="43.6"  x2="208.3" y2="43.6"/>
-          <line x1="224.3" y1="30.4"  x2="252.9" y2="30.4"/>
-          <line x1="268.8" y1="30.4"  x2="297.4" y2="30.4"/>
-          <line x1="313.4" y1="61.2"  x2="342.0" y2="61.2"/>
-        </g>
-
-        {# Waterfall labels — top-5 individual contributions + diversification +
-           total.  Data: data.risk_waterfall (engine: pdf_payload._build_risk_waterfall).
-           Bar geometry is fixed (5 slots × 30px @ x=45.3..238.6); labels positioned
-           above each bar.  When a slot has no asset (portfolio < 5 positions),
-           it's rendered blank.  Diversification + total ALWAYS show from
-           data.risk_waterfall summary fields. #}
-        {% set _wf      = data.risk_waterfall or {} %}
-        {% set _contribs = (_wf.contributions or [])[:5] %}
-        {% set _wf_xs    = [60.3, 104.9, 149.4, 194.0, 238.6] %}
-        {% set _wf_ys    = [115, 78, 53, 38, 25] %}
-        <g font-family="IBM Plex Mono" font-size="8.5" fill="#2A2E33">
+          {# Amber waterfall — cumulative stack of contributions #}
+          {% set _ns = namespace(cum=0.0) %}
+          <g filter="url(#barShadow)">
           {% for c in _contribs %}
-            <text x="{{ _wf_xs[loop.index0] }}" y="{{ _wf_ys[loop.index0] }}" text-anchor="middle">{{ '%.1f' % c.standalone_pp }}%</text>
+            {% set _x_left = _plot_x0 + _step * (loop.index0 + 0.15) %}
+            {% set _ns.cum = _ns.cum + (c.standalone_pp or 0) %}
+            {% set _y_top  = 165.0 - 7.35 * _ns.cum %}
+            {% set _h      = 7.35 * (c.standalone_pp or 0) %}
+            <rect x="{{ '%.1f' % _x_left }}" y="{{ '%.1f' % _y_top }}"
+                  width="{{ '%.1f' % _bar_w }}" height="{{ '%.1f' % _h }}"
+                  fill="url(#barAmber)" rx="1"/>
           {% endfor %}
-          <text x="283.1" y="25"  text-anchor="middle" fill="#2F7048" font-weight="600">{% if _wf.diversification_pp %}−{{ '%.1f' % _wf.diversification_pp }}{% else %}—{% endif %}%</text>
-          <text x="327.7" y="56"  text-anchor="middle" fill="#23588F" font-weight="600">{% if _wf.total_vol_pp %}{{ '%.1f' % _wf.total_vol_pp }}{% else %}—{% endif %}%</text>
-        </g>
 
-        <!-- подписи баров -->
-        <g font-family="IBM Plex Mono" font-size="8.5" fill="#2A2E33">
+            {# Green: diversification — sits at amber-stack top, descends down #}
+            {% set _green_x = _plot_x0 + _step * (_N + 0.15) %}
+            {% set _green_y = 165.0 - 7.35 * _sum_pp %}
+            {% set _green_h = 7.35 * _div_pp %}
+            <rect x="{{ '%.1f' % _green_x }}" y="{{ '%.1f' % _green_y }}"
+                  width="{{ '%.1f' % _bar_w }}" height="{{ '%.1f' % _green_h }}"
+                  fill="url(#barGreen)" rx="1"/>
+
+            {# Blue: total diversified volatility — full bar from 0 #}
+            {% set _blue_x = _plot_x0 + _step * (_N + 1 + 0.15) %}
+            {% set _blue_h = 7.35 * _tot_pp %}
+            {% set _blue_y = 165.0 - _blue_h %}
+            <rect x="{{ '%.1f' % _blue_x }}" y="{{ '%.1f' % _blue_y }}"
+                  width="{{ '%.1f' % _bar_w }}" height="{{ '%.1f' % _blue_h }}"
+                  fill="url(#barBlue)" rx="1"/>
+          </g>
+
+          {# Connector tails (dashed) between cumulative tops of adjacent amber bars #}
+          {% set _ns2 = namespace(cum=0.0) %}
+          <g stroke="#2A2E33" stroke-opacity="0.42" stroke-width="0.5" stroke-dasharray="2.5 2">
           {% for c in _contribs %}
-            <text x="{{ _wf_xs[loop.index0] }}" y="178" text-anchor="middle">{{ c.ticker }}</text>
+            {% set _x_right_of_this = _plot_x0 + _step * (loop.index0 + 0.15) + _bar_w %}
+            {% set _x_left_of_next  = _plot_x0 + _step * (loop.index0 + 1 + 0.15) %}
+            {% set _ns2.cum = _ns2.cum + (c.standalone_pp or 0) %}
+            {% set _y_connect = 165.0 - 7.35 * _ns2.cum %}
+            <line x1="{{ '%.1f' % _x_right_of_this }}" y1="{{ '%.1f' % _y_connect }}"
+                  x2="{{ '%.1f' % _x_left_of_next }}"  y2="{{ '%.1f' % _y_connect }}"/>
           {% endfor %}
-        </g>
-        <g font-family="IBM Plex Sans" font-size="7.5" fill="rgba(42,46,51,0.7)">
-          <text x="283.1" y="176" text-anchor="middle">Диверси-</text>
-          <text x="283.1" y="184" text-anchor="middle">фикация</text>
-          <text x="327.7" y="176" text-anchor="middle">Итоговый</text>
-          <text x="327.7" y="184" text-anchor="middle">риск</text>
-        </g>
+          </g>
 
-        <!-- скобка под индивидуальными рисками -->
-        <path d="M45.3,192 L45.3,197 L147,200 L147,203 L147,200 L253.6,197 L253.6,192"
-              fill="none" stroke="#2A2E33" stroke-opacity="0.50" stroke-width="0.5"/>
-        <text x="149.4" y="214" text-anchor="middle" font-family="IBM Plex Sans"
-              font-size="8.5" fill="rgba(42,46,51,0.65)">Риск каждой позиции по отдельности</text>
-      </svg>
+          {# Value labels above each bar #}
+          {% set _ns3 = namespace(cum=0.0) %}
+          <g font-family="IBM Plex Mono" font-size="8.5" fill="#2A2E33">
+          {% for c in _contribs %}
+            {% set _cx = _plot_x0 + _step * (loop.index0 + 0.5) %}
+            {% set _ns3.cum = _ns3.cum + (c.standalone_pp or 0) %}
+            {% set _y = 165.0 - 7.35 * _ns3.cum - 4 %}
+            <text x="{{ '%.1f' % _cx }}" y="{{ '%.1f' % _y }}" text-anchor="middle">{{ '%.1f' % (c.standalone_pp or 0) }}%</text>
+          {% endfor %}
+            {# Green label — at top of green bar #}
+            {% set _green_cx  = _plot_x0 + _step * (_N + 0.5) %}
+            {% set _green_lbl_y = 165.0 - 7.35 * _sum_pp - 4 %}
+            <text x="{{ '%.1f' % _green_cx }}" y="{{ '%.1f' % _green_lbl_y }}"
+                  text-anchor="middle" fill="#2F7048" font-weight="600">−{{ '%.1f' % _div_pp }}%</text>
+            {# Blue label — at top of blue bar #}
+            {% set _blue_cx  = _plot_x0 + _step * (_N + 1 + 0.5) %}
+            {% set _blue_lbl_y = 165.0 - 7.35 * _tot_pp - 4 %}
+            <text x="{{ '%.1f' % _blue_cx }}" y="{{ '%.1f' % _blue_lbl_y }}"
+                  text-anchor="middle" fill="#23588F" font-weight="600">{{ '%.1f' % _tot_pp }}%</text>
+          </g>
+
+          {# Ticker labels below each amber bar #}
+          <g font-family="IBM Plex Mono" font-size="8.5" fill="#2A2E33">
+          {% for c in _contribs %}
+            {% set _cx = _plot_x0 + _step * (loop.index0 + 0.5) %}
+            <text x="{{ '%.1f' % _cx }}" y="178" text-anchor="middle">{{ c.ticker }}</text>
+          {% endfor %}
+          </g>
+
+          {# Two-line legend under green + blue bars #}
+          <g font-family="IBM Plex Sans" font-size="7.5" fill="rgba(42,46,51,0.7)">
+            <text x="{{ '%.1f' % _green_cx }}" y="176" text-anchor="middle">Диверси-</text>
+            <text x="{{ '%.1f' % _green_cx }}" y="184" text-anchor="middle">фикация</text>
+            <text x="{{ '%.1f' % _blue_cx }}"  y="176" text-anchor="middle">Итоговый</text>
+            <text x="{{ '%.1f' % _blue_cx }}"  y="184" text-anchor="middle">риск</text>
+          </g>
+
+          {# Bracket + caption beneath the amber zone #}
+          {% set _bracket_x1 = _plot_x0 + _step * 0.15 %}
+          {% set _bracket_x2 = _plot_x0 + _step * (_N - 1 + 0.15) + _bar_w %}
+          {% set _bracket_xm = (_bracket_x1 + _bracket_x2) / 2 %}
+          <path d="M{{ '%.1f' % _bracket_x1 }},192 L{{ '%.1f' % _bracket_x1 }},197 L{{ '%.1f' % _bracket_xm }},200 L{{ '%.1f' % _bracket_xm }},203 L{{ '%.1f' % _bracket_xm }},200 L{{ '%.1f' % _bracket_x2 }},197 L{{ '%.1f' % _bracket_x2 }},192"
+                fill="none" stroke="#2A2E33" stroke-opacity="0.50" stroke-width="0.5"/>
+          <text x="{{ '%.1f' % _bracket_xm }}" y="214" text-anchor="middle"
+                font-family="IBM Plex Sans" font-size="8.5" fill="rgba(42,46,51,0.65)">Риск каждой позиции по отдельности</text>
+
+        {% else %}
+          {# Empty-state: no covariance matrix available #}
+          <text x="180" y="95" text-anchor="middle"
+                font-family="IBM Plex Sans" font-size="11" fill="rgba(42,46,51,0.55)">
+            Декомпозиция риска недоступна
+          </text>
+          <text x="180" y="112" text-anchor="middle"
+                font-family="IBM Plex Sans" font-size="9" fill="rgba(42,46,51,0.45)">
+            нужна ковариационная матрица (≥ 30 дней истории)
+          </text>
+        {% endif %}
+            </svg>
     </div>
 
     <!-- связующий AI-комментарий -->
     <div class="conc-ai">
-      <div class="ai-head">[ 🤖 AI_ANALYSIS // HAIKU ]</div>
+      <div class="ai-head">[ 🤖 AI_ANALYSIS // {{ (data.ai_model_used or 'SONNET') | upper }} ]</div>
       <div class="ai-body">
         «Простыми словами: если бы вы держали каждую бумагу <span class="flag">по
         отдельности, их риски сложились бы в 18.4%</span> годовых колебаний. Но
@@ -1984,15 +2081,42 @@
           <div class="h-detail-ai">
             <span class="tag">🤖</span>
             <span class="txt">
-              {%- if asset.hotspot -%}
-                Крупнейший вклад в риск портфеля — TRC {{ asset.euler_risk }}.  Концентрация
-                требует контроля; рассмотрите частичную фиксацию.
-              {%- elif asset.extremes -%}
-                Особенности: {{ asset.extremes | join(' · ') }}.
+              {%- if asset.ai_comment -%}
+                {{ asset.ai_comment }}
               {%- else -%}
-                Вклад в риск умеренный (TRC {{ asset.euler_risk }}).
+                {# Rule-based fallback when engine hasn't generated a per-asset
+                   Haiku comment.  Branches by signal priority:
+                     1. HOTSPOT      → concentration warning + TRC + P/L context
+                     2. atr_extreme  → volatility warning + asset_class context
+                     3. pnl_color=neg → drawdown context with current P/L
+                     4. extremes any → join the list of triggers
+                     5. default      → quiet hold message #}
+                {%- if asset.hotspot -%}
+                  Крупнейший вклад в риск портфеля — <b>TRC {{ asset.euler_risk }}</b>
+                  {%- if asset.pnl_pct -%} при доходности {{ asset.pnl_pct }}{%- endif -%}.
+                  Концентрация выше порога 20%; рассмотрите частичную фиксацию для
+                  снижения зависимости портфеля от одной бумаги.
+                {%- elif asset.atr_extreme -%}
+                  Повышенная внутридневная волатильность (<b>ATR {{ asset.atr_pct }}</b>) —
+                  бумага «дёргается» сильнее среднего по портфелю.
+                  {%- if asset.asset_class -%} {{ asset.asset_class }} в режиме высокой
+                  чувствительности к рыночным новостям.{%- endif -%}
+                {%- elif asset.pnl_color == 'neg' -%}
+                  В минусе ({{ asset.pnl_pct }}); вклад в риск {{ asset.euler_risk }}.
+                  {%- if (asset.extremes or []) | length > 0 -%}
+                    Дополнительные триггеры: {{ asset.extremes | join(' · ') }}.
+                  {%- endif -%}
+                {%- elif asset.extremes -%}
+                  Особенности позиции: {{ asset.extremes | join(' · ') }} — следите за
+                  динамикой через панель Action Plan.
+                {%- else -%}
+                  Вклад в риск умеренный ({{ asset.euler_risk }}); сейчас без
+                  специальных триггеров.  Удерживаем согласно профилю.
+                {%- endif %}
               {%- endif %}
-              <span class="h-cite">[SEC EDGAR] [Quant Engine]</span>
+              <span class="h-cite">[SEC EDGAR] [Quant Engine]
+                {%- if asset.ai_comment %} [{{ data.ai_model_used or 'AI' }}]{% endif -%}
+              </span>
             </span>
           </div>
         </div>
@@ -2083,7 +2207,7 @@
 
   <!-- СВОДНЫЙ AI-БЛОК -->
   <div class="sec-ai">
-    <div class="ai-head">[ 🤖 AI_ANALYSIS // HAIKU ]</div>
+    <div class="ai-head">[ 🤖 AI_ANALYSIS // {{ (data.ai_model_used or 'SONNET') | upper }} ]</div>
     <div class="ai-body">
       <p>«Простыми словами: портфель двигают две бумаги — <span class="flag-inline">PLTR
       и CRWD</span>. Они приносят лучшую доходность, но именно они помечены
@@ -2267,7 +2391,7 @@
     </div>
 
     <div class="conc-ai" style="margin-top:14px;">
-      <div class="ai-head">[ 🤖 AI_ANALYSIS // HAIKU ]</div>
+      <div class="ai-head">[ 🤖 AI_ANALYSIS // {{ (data.ai_model_used or 'SONNET') | upper }} ]</div>
       <div class="ai-body">
         «Портфель сильно тянет <span class="flag">Momentum (β=1.05)</span> и
         <span class="flag">Market (β=1.18)</span> — знакомый перевес в IT.
@@ -2428,7 +2552,7 @@
     </div>
 
     <div class="conc-ai" style="margin-top:12px;">
-      <div class="ai-head">[ 🤖 AI_ANALYSIS // HAIKU ]</div>
+      <div class="ai-head">[ 🤖 AI_ANALYSIS // {{ (data.ai_model_used or 'SONNET') | upper }} ]</div>
       <div class="ai-body">
         «Худшие сценарии для вас — <span class="flag">tech sell-off (−9.3%)</span> и
         <span class="flag">геополитический риск-офф (−8.1%)</span>: оба бьют именно по
@@ -2573,7 +2697,7 @@
     </div>
 
     <div class="conc-ai" style="margin-top:12px;">
-      <div class="ai-head">[ 🤖 AI_ANALYSIS // HAIKU ]</div>
+      <div class="ai-head">[ 🤖 AI_ANALYSIS // {{ (data.ai_model_used or 'SONNET') | upper }} ]</div>
       <div class="ai-body">
         «Чистый эффект — индекс риска уходит с 62 в середину «умеренной» зоны (54),
         исчезает HOTSPOT-перегрев одной бумаги, Sharpe растёт до
@@ -2828,7 +2952,7 @@
     </div>
 
     <div class="conc-ai" style="margin-top:14px;">
-      <div class="ai-head">[ 🤖 AI_ANALYSIS // HAIKU ]</div>
+      <div class="ai-head">[ 🤖 AI_ANALYSIS // {{ (data.ai_model_used or 'SONNET') | upper }} ]</div>
       <div class="ai-body">
         «Точка портфеля на квадранте — <span class="flag">правый верхний (Expansion),
         но близко к границе со Slowdown</span>: Growth ещё положительный (+0.08),
