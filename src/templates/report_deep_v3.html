@@ -1709,31 +1709,26 @@
           </tr>
         </thead>
         <tbody>
+          {# Top concentration rows — sorted by TRC (Euler) descending.
+             HOTSPOT pill when TRC > 20% (engine's hotspot threshold).
+             Source: data.assets (already sorted by weight in build_payload).
+             We surface the top 5 by TRC to keep the panel compact. #}
+          {% set _sorted = (data.assets or []) | sort(attribute='euler_risk', reverse=true) %}
+          {% for a in _sorted[:5] %}
+            {% set trc_num = a.euler_risk | replace('%','') | float if a.euler_risk else 0 %}
+            {% set is_hot  = a.hotspot or trc_num > 20 %}
           <tr>
-            <td>PLTR</td><td>18.0</td><td>1.81</td>
-            <td class="hl-col">24.4</td>
-            <td><span class="pill watch">HOTSPOT</span></td>
+            <td>{{ a.ticker }}</td>
+            <td>{{ a.weight | replace('%','') }}</td>
+            <td>—</td>
+            <td class="hl-col">{{ a.euler_risk | replace('%','') }}</td>
+            <td><span class="pill {% if is_hot %}watch{% else %}normal{% endif %}">{% if is_hot %}HOTSPOT{% else %}NORMAL{% endif %}</span></td>
           </tr>
+          {% else %}
           <tr>
-            <td>CRWD</td><td>14.0</td><td>1.55</td>
-            <td class="hl-col">20.8</td>
-            <td><span class="pill watch">HOTSPOT</span></td>
+            <td colspan="5" style="opacity:0.6; text-align:center; padding:14px;">Нет позиций.</td>
           </tr>
-          <tr>
-            <td>AAPL</td><td>16.0</td><td>1.21</td>
-            <td class="hl-col">17.5</td>
-            <td><span class="pill normal">NORMAL</span></td>
-          </tr>
-          <tr>
-            <td>JNJ</td><td>22.0</td><td>0.74</td>
-            <td class="hl-col">11.0</td>
-            <td><span class="pill normal">NORMAL</span></td>
-          </tr>
-          <tr>
-            <td>KO</td><td>30.0</td><td>0.61</td>
-            <td class="hl-col">9.8</td>
-            <td><span class="pill normal">NORMAL</span></td>
-          </tr>
+          {% endfor %}
         </tbody>
       </table>
     </div>
@@ -2522,62 +2517,32 @@
         </tr>
       </thead>
       <tbody>
+        {# Data-driven: data.stress_scenarios is list[dict] from finance.stress.run_stress_scenarios.
+           Per-row fields: name · port_pct (decimal) · port_dollar · max_dd_pct · recovery_months.
+           Impact bar width = min(|port_pct| × 100 ÷ 20, 1) × 50 — normalised to ±20%. #}
+        {% for s in (data.stress_scenarios or []) %}
+          {% set pct       = s.port_pct or 0 %}
+          {% set is_neg    = pct < 0 %}
+          {% set dd        = s.max_dd_pct or 0 %}
+          {% set bar_w     = (([(pct | abs) * 100, 20] | min) / 20.0) * 50.0 %}
+          {% set bar_side  = 'right:50%' if is_neg else 'left:50%' %}
+          {% set fill_cls  = 'neg' if is_neg else 'pos' %}
+          {% set port_sign = '−' if is_neg else '+' %}
         <tr>
-          <td class="scenario-col">Tech sell-off (как Q2 2022) · IT&nbsp;−15%</td>
-          <td><span class="impact-val neg">−9.3%</span></td>
-          <td><span class="impact-val neg">−$2 230</span></td>
-          <td class="impact-cell"><div class="impact-bar"><span class="impact-fill neg" style="right:50%; width:46.5%;"></span></div></td>
-          <td><span class="impact-val neg">−11.0%</span></td>
-          <td>4–6 мес</td>
+          <td class="scenario-col">{{ s.name }}{% if s.tag %} · <span style="color:var(--ink-60); font-size:9px;">{{ s.tag }}</span>{% endif %}</td>
+          <td><span class="impact-val {{ fill_cls }}">{{ port_sign }}{{ '%.1f' | format((pct | abs) * 100) }}%</span></td>
+          <td><span class="impact-val {{ fill_cls }}">{{ port_sign }}${{ '{:,}'.format((s.port_dollar | abs) | int) | replace(',', ' ') }}</span></td>
+          <td class="impact-cell"><div class="impact-bar"><span class="impact-fill {{ fill_cls }}" style="{{ bar_side }}; width:{{ '%.1f' | format(bar_w) }}%;"></span></div></td>
+          <td>{% if dd %}<span class="impact-val neg">−{{ '%.1f' | format((dd | abs) * 100) }}%</span>{% else %}<span class="impact-val">—</span>{% endif %}</td>
+          <td>{% if s.recovery_months %}{{ s.recovery_months }} мес{% else %}—{% endif %}</td>
         </tr>
+        {% else %}
         <tr>
-          <td class="scenario-col">Credit spread blow-out (+200&nbsp;bps HY)</td>
-          <td><span class="impact-val neg">−6.8%</span></td>
-          <td><span class="impact-val neg">−$1 630</span></td>
-          <td class="impact-cell"><div class="impact-bar"><span class="impact-fill neg" style="right:50%; width:34%;"></span></div></td>
-          <td><span class="impact-val neg">−7.5%</span></td>
-          <td>3–5 мес</td>
+          <td class="scenario-col" colspan="6" style="opacity:0.6; text-align:center; padding:18px;">
+            Стресс-сценарии не рассчитаны для этого портфеля.
+          </td>
         </tr>
-        <tr>
-          <td class="scenario-col">Fed +50&nbsp;bps сюрприз</td>
-          <td><span class="impact-val neg">−4.2%</span></td>
-          <td><span class="impact-val neg">−$1 010</span></td>
-          <td class="impact-cell"><div class="impact-bar"><span class="impact-fill neg" style="right:50%; width:21%;"></span></div></td>
-          <td><span class="impact-val neg">−5.0%</span></td>
-          <td>2–3 мес</td>
-        </tr>
-        <tr>
-          <td class="scenario-col">USD&nbsp;+5% rally</td>
-          <td><span class="impact-val neg">−2.6%</span></td>
-          <td><span class="impact-val neg">−$620</span></td>
-          <td class="impact-cell"><div class="impact-bar"><span class="impact-fill neg" style="right:50%; width:13%;"></span></div></td>
-          <td><span class="impact-val neg">−3.1%</span></td>
-          <td>1–2 мес</td>
-        </tr>
-        <tr>
-          <td class="scenario-col">Инфляционный шок (+1пп CPI)</td>
-          <td><span class="impact-val neg">−5.4%</span></td>
-          <td><span class="impact-val neg">−$1 295</span></td>
-          <td class="impact-cell"><div class="impact-bar"><span class="impact-fill neg" style="right:50%; width:27%;"></span></div></td>
-          <td><span class="impact-val neg">−6.2%</span></td>
-          <td>3–4 мес</td>
-        </tr>
-        <tr>
-          <td class="scenario-col">Геополитический шок (риск-офф)</td>
-          <td><span class="impact-val neg">−8.1%</span></td>
-          <td><span class="impact-val neg">−$1 945</span></td>
-          <td class="impact-cell"><div class="impact-bar"><span class="impact-fill neg" style="right:50%; width:40.5%;"></span></div></td>
-          <td><span class="impact-val neg">−9.4%</span></td>
-          <td>4–6 мес</td>
-        </tr>
-        <tr>
-          <td class="scenario-col">Fed cut surprise (−50&nbsp;bps)</td>
-          <td><span class="impact-val pos">+5.2%</span></td>
-          <td><span class="impact-val pos">+$1 250</span></td>
-          <td class="impact-cell"><div class="impact-bar"><span class="impact-fill pos" style="left:50%; width:26%;"></span></div></td>
-          <td><span class="impact-val">—</span></td>
-          <td>—</td>
-        </tr>
+        {% endfor %}
       </tbody>
     </table>
     <div style="margin-top:6px; font-size:9px; color:var(--ink-60);">
@@ -2630,105 +2595,40 @@
         <tr>
           <th class="l">Тикер</th>
           <th class="l">Action</th>
-          <th>Δw, п.п.</th>
-          <th>Qty Δ</th>
+          <th>Цена</th>
           <th>Buy zone</th>
           <th>Sell target</th>
           <th>Stop loss</th>
-          <th class="l">Причина</th>
+          <th colspan="2" class="l">Причина</th>
         </tr>
       </thead>
       <tbody>
+        {# data.action_plan — list of {ticker, action, reason, price, buy_zone,
+           sell_target, stop_loss}.  Engine source: investment_logic.action_levels
+           via pdf_payload._action_plan.  Action verb → badge class:
+             BUY/Buy   → act-buy ·  HOLD → act-hold ·  SELL/Trim/Reduce → act-trim. #}
+        {% for r in (data.action_plan or []) %}
+          {% set act_raw = (r.action or 'HOLD') | string %}
+          {% set act_up  = act_raw | upper %}
+          {% if 'BUY' in act_up %}{% set badge = 'act-buy' %}
+          {% elif 'SELL' in act_up or 'TRIM' in act_up or 'REDUCE' in act_up %}{% set badge = 'act-trim' %}
+          {% else %}{% set badge = 'act-hold' %}{% endif %}
         <tr>
-          <td class="l"><span class="ticker">PLTR</span></td>
-          <td class="l"><span class="badge act-trim">TRIM</span></td>
-          <td class="neg">−6.0</td>
-          <td>−14 шт</td>
-          <td>22.40 / 23.10</td>
-          <td class="level-pos">28.50</td>
-          <td class="level-neg">19.80</td>
-          <td class="l reason">HOTSPOT 24% риска; фиксируем часть прибыли (+32%)</td>
+          <td class="l"><span class="ticker">{{ r.ticker }}</span></td>
+          <td class="l"><span class="badge {{ badge }}">{{ act_up }}</span></td>
+          <td>{{ r.price or '—' }}</td>
+          <td>{{ r.buy_zone or '—' }}</td>
+          <td class="level-pos">{{ r.sell_target or '—' }}</td>
+          <td class="level-neg">{{ r.stop_loss or '—' }}</td>
+          <td colspan="2" class="l reason">{{ r.reason or '—' }}</td>
         </tr>
+        {% else %}
         <tr>
-          <td class="l"><span class="ticker">CRWD</span></td>
-          <td class="l"><span class="badge act-hold">HOLD</span></td>
-          <td>0.0</td>
-          <td>0</td>
-          <td>318 / 322</td>
-          <td class="level-pos">365</td>
-          <td class="level-neg">295</td>
-          <td class="l reason">HOTSPOT, но фундаментал крепкий; следим за уровнем 295</td>
+          <td colspan="8" class="l reason" style="opacity:0.6; text-align:center; padding:18px;">
+            Action plan не сформирован — нет позиций или engine не отдал уровни.
+          </td>
         </tr>
-        <tr>
-          <td class="l"><span class="ticker">AAPL</span></td>
-          <td class="l"><span class="badge act-buy">BUY</span></td>
-          <td class="pos">+3.0</td>
-          <td>+8 шт</td>
-          <td>178 / 182</td>
-          <td class="level-pos">205</td>
-          <td class="level-neg">168</td>
-          <td class="l reason">Score +3, RSI 52, выше SMA200 — добор на откатах</td>
-        </tr>
-        <tr>
-          <td class="l"><span class="ticker">JNJ</span></td>
-          <td class="l"><span class="badge act-buy">BUY</span></td>
-          <td class="pos">+4.0</td>
-          <td>+13 шт</td>
-          <td>148 / 151</td>
-          <td class="level-pos">165</td>
-          <td class="level-neg">143</td>
-          <td class="l reason">Score +5, защитный сектор, β=0.74</td>
-        </tr>
-        <tr>
-          <td class="l"><span class="ticker">KO</span></td>
-          <td class="l"><span class="badge act-hold">HOLD</span></td>
-          <td>0.0</td>
-          <td>0</td>
-          <td>60.5 / 61.8</td>
-          <td class="level-pos">68.0</td>
-          <td class="level-neg">58.0</td>
-          <td class="l reason">Стабилизатор портфеля; вес уже целевой</td>
-        </tr>
-        <tr>
-          <td class="l"><span class="ticker">XOM</span></td>
-          <td class="l"><span class="badge act-trim">TRIM</span></td>
-          <td class="neg">−4.0</td>
-          <td>−18 шт</td>
-          <td>—</td>
-          <td class="level-pos">115</td>
-          <td class="level-neg">102</td>
-          <td class="l reason">Выручка −6% г/г, тренд слабый; высвобождает капитал</td>
-        </tr>
-        <tr>
-          <td class="l"><span class="ticker">MSFT</span></td>
-          <td class="l"><span class="badge act-buy">BUY</span></td>
-          <td class="pos">+2.0</td>
-          <td>+4 шт</td>
-          <td>402 / 408</td>
-          <td class="level-pos">445</td>
-          <td class="level-neg">388</td>
-          <td class="l reason">Качество в IT без перегрева; диверсификация ядра</td>
-        </tr>
-        <tr>
-          <td class="l"><span class="ticker">NVDA</span></td>
-          <td class="l"><span class="badge act-hold">HOLD</span></td>
-          <td>0.0</td>
-          <td>0</td>
-          <td>118 / 122</td>
-          <td class="level-pos">142</td>
-          <td class="level-neg">108</td>
-          <td class="l reason">+44% от входа; стоп подтянут — дальнейший рост свободный</td>
-        </tr>
-        <tr>
-          <td class="l"><span class="ticker">BND</span></td>
-          <td class="l"><span class="badge act-buy">BUY</span></td>
-          <td class="pos">+1.0</td>
-          <td>+3 шт</td>
-          <td>71.8 / 72.3</td>
-          <td class="level-pos">75.5</td>
-          <td class="level-neg">70.0</td>
-          <td class="l reason">Хедж дюрации — снижает стресс-чувствительность</td>
-        </tr>
+        {% endfor %}
       </tbody>
     </table>
   </div>
@@ -2745,79 +2645,54 @@
         <span class="src">[Quant Engine]</span></div>
     </div>
 
+    {# ─── Expected effect — data-driven 8-card grid ─────────────────────────
+         Each card pulls before / after / delta_pp / favourable from
+         data.expected_effect (dict of metric → {before, after, delta_pp,
+         favourable}).  Formatters depend on metric type:
+           · risk_index, max_erc_pct, it_share          → integer/% as-is
+           · cvar_95, sharpe, max_drawdown, vol         → 2 dp with %/raw
+           · expected_return                            → +X.X% with sign
+         "favourable" flag toggles green (good) / red (bad) on the delta. #}
+    {% set _ee = data.expected_effect or {} %}
+    {% macro _ef_card(key, label, fmt='pct', unit_lbl='пп') -%}
+      {%- set m = _ee.get(key) -%}
+      {%- if m -%}
+        {%- set b = m.before -%}
+        {%- set a = m.after -%}
+        {%- set d = m.delta_pp -%}
+        {%- set fav = m.favourable -%}
+        <div class="effect-card">
+          <div class="ef-name">{{ label }}</div>
+          <div class="ef-row">
+            <span class="ef-before">
+              {%- if fmt == 'pct'   -%}{{ '%+.1f' % (b * 100) if (b is number and b is not none) else '—' }}%
+              {%- elif fmt == 'int' -%}{{ b | round | int if (b is not none) else '—' }}
+              {%- elif fmt == 'raw' -%}{{ '%.2f' % b if (b is number and b is not none) else '—' }}
+              {%- endif -%}
+            </span>
+            <span class="ef-arrow">→</span>
+            <span class="ef-after">
+              {%- if fmt == 'pct'   -%}{{ '%+.1f' % (a * 100) if (a is number and a is not none) else '—' }}%
+              {%- elif fmt == 'int' -%}{{ a | round | int if (a is not none) else '—' }}
+              {%- elif fmt == 'raw' -%}{{ '%.2f' % a if (a is number and a is not none) else '—' }}
+              {%- endif -%}
+            </span>
+          </div>
+          <div class="ef-delta {% if fav %}pos{% else %}neg{% endif %}">
+            {%- if d is not none -%}{{ '%+.1f' % d }} {{ unit_lbl }}{% else %}—{% endif -%}
+          </div>
+        </div>
+      {%- endif -%}
+    {%- endmacro %}
     <div class="effect-grid">
-      <div class="effect-card">
-        <div class="ef-name">Индекс риска</div>
-        <div class="ef-row">
-          <span class="ef-before">62</span>
-          <span class="ef-arrow">→</span>
-          <span class="ef-after">54</span>
-        </div>
-        <div class="ef-delta pos">−8 пунктов · «умеренный»</div>
-      </div>
-      <div class="effect-card">
-        <div class="ef-name">CVaR 95%</div>
-        <div class="ef-row">
-          <span class="ef-before">−5.2%</span>
-          <span class="ef-arrow">→</span>
-          <span class="ef-after">−4.3%</span>
-        </div>
-        <div class="ef-delta pos">−0.9 пп · мягче</div>
-      </div>
-      <div class="effect-card">
-        <div class="ef-name">Sharpe Ratio</div>
-        <div class="ef-row">
-          <span class="ef-before">1.18</span>
-          <span class="ef-arrow">→</span>
-          <span class="ef-after">1.32</span>
-        </div>
-        <div class="ef-delta pos">+0.14 · эффективнее</div>
-      </div>
-      <div class="effect-card">
-        <div class="ef-name">Max Drawdown (модель)</div>
-        <div class="ef-row">
-          <span class="ef-before">−12.8%</span>
-          <span class="ef-arrow">→</span>
-          <span class="ef-after">−10.4%</span>
-        </div>
-        <div class="ef-delta pos">−2.4 пп · ниже</div>
-      </div>
-      <div class="effect-card">
-        <div class="ef-name">Волатильность (год.)</div>
-        <div class="ef-row">
-          <span class="ef-before">14.8%</span>
-          <span class="ef-arrow">→</span>
-          <span class="ef-after">12.9%</span>
-        </div>
-        <div class="ef-delta pos">−1.9 пп</div>
-      </div>
-      <div class="effect-card">
-        <div class="ef-name">Max TRC (одной позиции)</div>
-        <div class="ef-row">
-          <span class="ef-before">24.4%</span>
-          <span class="ef-arrow">→</span>
-          <span class="ef-after">16.8%</span>
-        </div>
-        <div class="ef-delta pos">−7.6 пп · нет HOTSPOT</div>
-      </div>
-      <div class="effect-card">
-        <div class="ef-name">Доля IT-сектора</div>
-        <div class="ef-row">
-          <span class="ef-before">62%</span>
-          <span class="ef-arrow">→</span>
-          <span class="ef-after">50%</span>
-        </div>
-        <div class="ef-delta pos">−12 пп</div>
-      </div>
-      <div class="effect-card">
-        <div class="ef-name">Ожид. доходность (год.)</div>
-        <div class="ef-row">
-          <span class="ef-before">+14.2%</span>
-          <span class="ef-arrow">→</span>
-          <span class="ef-after">+12.6%</span>
-        </div>
-        <div class="ef-delta neg">−1.6 пп · цена за защиту</div>
-      </div>
+      {{ _ef_card('risk_index',     'Индекс риска',                fmt='int', unit_lbl='пунктов') }}
+      {{ _ef_card('cvar_95',        'CVaR 95%',                   fmt='pct') }}
+      {{ _ef_card('sharpe',         'Sharpe Ratio',                fmt='raw') }}
+      {{ _ef_card('max_drawdown',   'Max Drawdown (модель)',       fmt='pct') }}
+      {{ _ef_card('vol',            'Волатильность (год.)',        fmt='pct') }}
+      {{ _ef_card('max_erc_pct',    'Max TRC (одной позиции)',     fmt='pct') }}
+      {{ _ef_card('it_share',       'Доля IT-сектора',             fmt='pct') }}
+      {{ _ef_card('expected_return','Ожид. доходность (год.)',     fmt='pct') }}
     </div>
 
     <div class="conc-ai" style="margin-top:12px;">
@@ -3010,62 +2885,67 @@
       </div>
 
       <!-- Сводная по режиму -->
+      {# ─── Regime summary — data.regime from finance.regime.classify ───────
+           Fields: label (Expansion/Recovery/Slowdown/Recession), confidence
+           (int %, 0-100), growth (float), cycle (float), explainers (list).
+           Growth + Cycle factors get pos/neg/neut colour based on sign. #}
+      {% set _r = data.regime or {} %}
       <div class="regime-summary">
         <div class="block-label" style="font-size:9px; margin-bottom:6px;">Текущий режим</div>
-        <div class="reg-name">Expansion · поздняя фаза</div>
-        <div class="reg-conf">Уверенность модели <b>72%</b> · стабильно последние 4 недели</div>
+        <div class="reg-name">{{ _r.label or 'Режим не определён' }}</div>
+        <div class="reg-conf">Уверенность модели <b>{{ _r.confidence if _r.confidence is not none else '—' }}%</b>{% if _r.explainers %} · {{ _r.explainers | length }} подтверждающ. сигнал(ов){% endif %}</div>
 
         <div class="reg-factors">
+          {% set g = _r.growth %}
+          {% set c = _r.cycle  %}
           <div class="reg-f">
             <span class="reg-f-name">Growth-фактор</span>
-            <span class="reg-f-val pos">+0.08</span>
-            <span class="reg-f-note">умеренно положительный, замедляется</span>
+            <span class="reg-f-val {% if g is number and g > 0.02 %}pos{% elif g is number and g < -0.02 %}neg{% else %}neut{% endif %}">{% if g is number %}{{ '%+.2f' % g }}{% else %}—{% endif %}</span>
+            <span class="reg-f-note">{% if g is number and g > 0.05 %}здоровый рост{% elif g is number and g > 0 %}умеренный рост{% elif g is number and g < 0 %}сжатие{% else %}нейтральный{% endif %}</span>
           </div>
           <div class="reg-f">
             <span class="reg-f-name">Cycle-фактор</span>
-            <span class="reg-f-val pos">+0.04</span>
-            <span class="reg-f-note">слабая экспансия, поздняя фаза</span>
+            <span class="reg-f-val {% if c is number and c > 0.02 %}pos{% elif c is number and c < -0.02 %}neg{% else %}neut{% endif %}">{% if c is number %}{{ '%+.2f' % c }}{% else %}—{% endif %}</span>
+            <span class="reg-f-note">{% if c is number and c > 0.05 %}цикл. экспансия{% elif c is number and c > 0 %}слабая экспансия{% elif c is number and c < 0 %}слабая контракция{% else %}нейтральный{% endif %}</span>
           </div>
+          {% if _r.explainers %}
+            {% for ex in _r.explainers[:2] %}
           <div class="reg-f">
-            <span class="reg-f-name">Inflation-импульс</span>
-            <span class="reg-f-val neut">±0.0</span>
-            <span class="reg-f-note">стабилизация около цели</span>
+            <span class="reg-f-name">{{ ex.split(':')[0] if ':' in ex else 'Сигнал' }}</span>
+            <span class="reg-f-val neut" style="font-size:9px; font-weight:500;">RAG</span>
+            <span class="reg-f-note">{{ (ex.split(':')[1] | trim) if ':' in ex else ex }}</span>
           </div>
-          <div class="reg-f">
-            <span class="reg-f-name">Vol-режим</span>
-            <span class="reg-f-val pos">низкий</span>
-            <span class="reg-f-note">VIX 14.2 · ниже среднего</span>
-          </div>
+            {% endfor %}
+          {% endif %}
         </div>
 
+        {# ─── Macro drivers — FRED 5 series, fully data-driven ───────────────
+             data.macro_drivers.series → list of {id, name, value, as_of,
+             status, comment}.  status is engine vocab: ok/warn/stale/missing.
+             Visual mapping mirrors CoVe: ok→bull (pos), warn→warn,
+             stale/missing→neg.  Empty payload renders graceful "недоступно". #}
         <div class="reg-signals">
-          <div class="reg-signals-label">Сигналы-драйверы (топ-5) ·
-            <span style="text-transform:none; font-weight:500; color:var(--tech-blue);">data.macro_drivers</span> [Step 4]</div>
+          <div class="reg-signals-label">Сигналы-драйверы ·
+            <span style="text-transform:none; font-weight:500; color:var(--tech-blue);">data.macro_drivers</span>
+            {% if data.macro_drivers and data.macro_drivers.as_of %} · as_of {{ data.macro_drivers.as_of }}{% endif %}</div>
+          {% set _series = (data.macro_drivers.series if data.macro_drivers else []) or [] %}
+          {% for s in _series %}
+            {% set st     = s.status or 'ok' %}
+            {% set valcls = 'pos' if st == 'ok' else ('warn' if st in ('warn','stale') else 'neg') %}
+            {% set stcls  = 'bull' if st == 'ok' else ('warn' if st in ('warn','stale') else 'flat') %}
+            {% set stlbl  = 'актуально' if st == 'ok' else ('устарело' if st == 'stale' else ('частично' if st == 'warn' else 'нет данных')) %}
           <div class="reg-signal-row">
-            <span class="reg-signal-name">Yield curve 10Y−2Y</span>
-            <span class="reg-signal-val pos">+18 bps</span>
-            <span class="reg-signal-state bull">нормализуется</span>
+            <span class="reg-signal-name">{{ s.name }}{% if s.comment %} · <span style="color:var(--ink-60); font-weight:400; font-size:8.5px;">{{ s.comment }}</span>{% endif %}</span>
+            <span class="reg-signal-val {{ valcls }}">{{ s.value }}</span>
+            <span class="reg-signal-state {{ stcls }}">{{ stlbl }}</span>
           </div>
+          {% else %}
           <div class="reg-signal-row">
-            <span class="reg-signal-name">HY credit spread</span>
-            <span class="reg-signal-val pos">312 bps</span>
-            <span class="reg-signal-state bull">узкий</span>
+            <span class="reg-signal-name" style="opacity:0.6;">FRED источник недоступен</span>
+            <span class="reg-signal-val">—</span>
+            <span class="reg-signal-state warn">пропущено</span>
           </div>
-          <div class="reg-signal-row">
-            <span class="reg-signal-name">Manufacturing PMI</span>
-            <span class="reg-signal-val pos">51.4</span>
-            <span class="reg-signal-state bull">экспансия</span>
-          </div>
-          <div class="reg-signal-row">
-            <span class="reg-signal-name">Market breadth (% &gt; SMA200)</span>
-            <span class="reg-signal-val neut">62%</span>
-            <span class="reg-signal-state flat">средний</span>
-          </div>
-          <div class="reg-signal-row">
-            <span class="reg-signal-name">Earnings revisions ratio</span>
-            <span class="reg-signal-val neg">0.92</span>
-            <span class="reg-signal-state warn">остывают</span>
-          </div>
+          {% endfor %}
         </div>
       </div>
     </div>
