@@ -1581,33 +1581,7 @@
          real engine data, so the KPI is still informative. #}
       {% if data.kpi_sparklines %}
       <div class="kpi-spark">
-        <svg viewBox="0 0 240 36" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
-          <defs>
-            <linearGradient id="sparkArea1" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%"  stop-color="#3F8F5F" stop-opacity="0.28"/>
-              <stop offset="100%" stop-color="#3F8F5F" stop-opacity="0"/>
-            </linearGradient>
-            <linearGradient id="sparkLine1" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%"  stop-color="#4FAA72"/>
-              <stop offset="100%" stop-color="#3F8F5F"/>
-            </linearGradient>
-            <filter id="sparkShadow1" x="-5%" y="-30%" width="110%" height="170%">
-              <feDropShadow dx="0" dy="0.7" stdDeviation="0.6" flood-opacity="0.18"/>
-            </filter>
-          </defs>
-          <!-- область под линией -->
-          <path d="M4,29 L28,25 L52,21 L76,16 L100,11 L124,9 L148,13 L172,19 L196,24 L220,27 L236,28 L236,34 L4,34 Z"
-                fill="url(#sparkArea1)"/>
-          <!-- линия с лёгкой тенью -->
-          <polyline points="4,29 28,25 52,21 76,16 100,11 124,9 148,13 172,19 196,24 220,27 236,28"
-                    fill="none" stroke="url(#sparkLine1)" stroke-width="1.5"
-                    stroke-linejoin="round" stroke-linecap="round" filter="url(#sparkShadow1)"/>
-          <!-- маркер минимума с гало -->
-          <circle cx="124" cy="9" r="3.4" fill="#3F8F5F" fill-opacity="0.18"/>
-          <circle cx="124" cy="9" r="1.7" fill="#3F8F5F"/>
-          <!-- маркер «сегодня» справа -->
-          <circle cx="236" cy="28" r="3.0" fill="#FBFAF7" stroke="#3F8F5F" stroke-width="1.1"/>
-        </svg>
+        {{ data.kpi_sparklines.cvar_svg | safe }}
       </div>
       {% endif %}
       <div class="kpi-ai">
@@ -1636,27 +1610,7 @@
          real engine data, so the KPI is still informative. #}
       {% if data.kpi_sparklines %}
       <div class="kpi-spark">
-        <svg viewBox="0 0 240 36" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
-          <defs>
-            <linearGradient id="sparkArea2" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%"  stop-color="#2F6FB3" stop-opacity="0.30"/>
-              <stop offset="100%" stop-color="#2F6FB3" stop-opacity="0"/>
-            </linearGradient>
-            <linearGradient id="sparkLine2" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%"  stop-color="#3F88D2"/>
-              <stop offset="100%" stop-color="#2F6FB3"/>
-            </linearGradient>
-            <filter id="sparkShadow2" x="-5%" y="-30%" width="110%" height="170%">
-              <feDropShadow dx="0" dy="0.7" stdDeviation="0.6" flood-opacity="0.18"/>
-            </filter>
-          </defs>
-          <path d="M4,28 L28,29 L52,25 L76,22 L100,23 L124,17 L148,14 L172,15 L196,9 L220,7 L236,5 L236,34 L4,34 Z"
-                fill="url(#sparkArea2)"/>
-          <polyline points="4,28 28,29 52,25 76,22 100,23 124,17 148,14 172,15 196,9 220,7 236,5"
-                    fill="none" stroke="url(#sparkLine2)" stroke-width="1.5"
-                    stroke-linejoin="round" stroke-linecap="round" filter="url(#sparkShadow2)"/>
-          <circle cx="236" cy="5" r="3.0" fill="#FBFAF7" stroke="#2F6FB3" stroke-width="1.1"/>
-        </svg>
+        {{ data.kpi_sparklines.sharpe_svg | safe }}
       </div>
       {% endif %}
       <div class="kpi-ai">
@@ -1685,30 +1639,7 @@
          real engine data, so the KPI is still informative. #}
       {% if data.kpi_sparklines %}
       <div class="kpi-spark">
-        <svg viewBox="0 0 240 36" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
-          <defs>
-            <linearGradient id="sparkArea3" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%"  stop-color="#C0492F" stop-opacity="0.06"/>
-              <stop offset="100%" stop-color="#C0492F" stop-opacity="0.22"/>
-            </linearGradient>
-            <linearGradient id="sparkLine3" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%"  stop-color="#D85C42"/>
-              <stop offset="100%" stop-color="#C0492F"/>
-            </linearGradient>
-            <filter id="sparkShadow3" x="-5%" y="-30%" width="110%" height="170%">
-              <feDropShadow dx="0" dy="0.7" stdDeviation="0.6" flood-opacity="0.20"/>
-            </filter>
-          </defs>
-          <path d="M4,11 L28,8 L52,12 L76,10 L100,16 L124,28 L148,31 L172,24 L196,18 L220,14 L236,12 L236,34 L4,34 Z"
-                fill="url(#sparkArea3)"/>
-          <polyline points="4,11 28,8 52,12 76,10 100,16 124,28 148,31 172,24 196,18 220,14 236,12"
-                    fill="none" stroke="url(#sparkLine3)" stroke-width="1.5"
-                    stroke-linejoin="round" stroke-linecap="round" filter="url(#sparkShadow3)"/>
-          <!-- маркер просадки (дно) -->
-          <circle cx="148" cy="31" r="3.6" fill="#C0492F" fill-opacity="0.18"/>
-          <circle cx="148" cy="31" r="1.9" fill="#C0492F"/>
-          <circle cx="236" cy="12" r="3.0" fill="#FBFAF7" stroke="#C0492F" stroke-width="1.1"/>
-        </svg>
+        {{ data.kpi_sparklines.mdd_svg | safe }}
       </div>
       {% endif %}
       <div class="kpi-ai">
@@ -1828,7 +1759,26 @@
                  with HHI from the truncated tail logged via cove_lineage.
         #}
         {% set _wf       = data.risk_waterfall or {} %}
-        {% set _contribs = (_wf.contributions or [])[:5] %}
+        {% set _all_contribs = _wf.contributions or [] %}
+        {% if _all_contribs | length > 5 %}
+          {# More than 5 positions — show top-4 + aggregate "Others" bar so
+             the waterfall stays readable AND every position still contributes
+             to the displayed sum (no silent drops).  Math: others_pp =
+             Σ remaining standalone_pp; ticker label "+N" shows how many
+             positions are folded in. #}
+          {% set _top4 = _all_contribs[:4] %}
+          {% set _rest = _all_contribs[4:] %}
+          {% set _ns_rest = namespace(s=0.0) %}
+          {% for c in _rest %}{% set _ns_rest.s = _ns_rest.s + (c.standalone_pp or 0) %}{% endfor %}
+          {% set _others_row = {'ticker': '+' ~ (_rest | length) ~ ' др.',
+                                'standalone_pp': _ns_rest.s,
+                                'weight_pct': 0,
+                                'standalone_vol_pct': 0,
+                                'standalone_share_pct': 0} %}
+          {% set _contribs = _top4 + [_others_row] %}
+        {% else %}
+          {% set _contribs = _all_contribs %}
+        {% endif %}
         {% set _N        = _contribs | length %}
         {% set _sum_pp   = _wf.sum_standalone_pp or 0 %}
         {% set _div_pp   = _wf.diversification_pp or 0 %}

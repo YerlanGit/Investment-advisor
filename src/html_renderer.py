@@ -163,7 +163,57 @@ def _mock_payload(tier: str = "base") -> dict:
         payload["risk_waterfall"] = _MOCK_RISK_WATERFALL
     if not payload.get("ai_stock_picks"):
         payload["ai_stock_picks"] = _MOCK_AI_STOCK_PICKS
+    if not payload.get("kpi_sparklines"):
+        payload["kpi_sparklines"] = _build_mock_sparklines()
     return payload
+
+
+def _build_mock_sparklines() -> dict:
+    """
+    Generate 3 mock 12-point sparkline SVGs for the cover KPI strip.
+
+    Uses tg_bot._sparkline_svg if available (production rendering path);
+    falls back to a synthetic SVG matching the production output format
+    when tg_bot can't import (e.g. local-dev without dotenv).
+    """
+    # Synthetic 12-month series — realistic banker shapes:
+    #   CVaR worsens then recovers (V-shape)
+    #   Sharpe steady improvement
+    #   MaxDD drawdown then partial recovery
+    cvar_pts   = [-0.030, -0.035, -0.041, -0.048, -0.055, -0.060,
+                   -0.058, -0.052, -0.047, -0.045, -0.050, -0.052]
+    sharpe_pts = [ 0.94,   1.02,   1.10,   1.05,   0.92,   0.88,
+                    0.99,   1.12,   1.20,   1.28,   1.30,   1.34]
+    mdd_pts    = [-0.040, -0.055, -0.072, -0.095, -0.110, -0.128,
+                   -0.115, -0.108, -0.105, -0.100, -0.110, -0.128]
+    try:
+        from tg_bot import _sparkline_svg
+        return {
+            "cvar_svg":   _sparkline_svg(cvar_pts,   color="#3F8F5F", invert=True),
+            "sharpe_svg": _sparkline_svg(sharpe_pts, color="#2F6FB3", invert=False),
+            "mdd_svg":    _sparkline_svg(mdd_pts,    color="#C0492F", invert=True),
+        }
+    except Exception:
+        # Inline minimal SVG fallback so the smoke render still shows
+        # the sparkline cells with the gradient + polyline.
+        def _fallback(values, color):
+            vmin, vmax = min(values), max(values)
+            rng = vmax - vmin or 1
+            xs = [4 + i * 232 / 11 for i in range(12)]
+            ys = [4 + 28 - (v - vmin) / rng * 28 for v in values]
+            pts = " ".join(f"{x:.1f},{y:.1f}" for x, y in zip(xs, ys))
+            return (f'<svg viewBox="0 0 240 36" preserveAspectRatio="none" '
+                     f'xmlns="http://www.w3.org/2000/svg">'
+                     f'<polyline points="{pts}" fill="none" stroke="{color}" '
+                     f'stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>'
+                     f'<circle cx="{xs[-1]:.1f}" cy="{ys[-1]:.1f}" r="3" '
+                     f'fill="#FBFAF7" stroke="{color}" stroke-width="1.1"/>'
+                     f'</svg>')
+        return {
+            "cvar_svg":   _fallback(cvar_pts,   "#3F8F5F"),
+            "sharpe_svg": _fallback(sharpe_pts, "#2F6FB3"),
+            "mdd_svg":    _fallback(mdd_pts,    "#C0492F"),
+        }
 
 
 # ── Mock fixtures (smoke render only — production uses real engine output) ──
