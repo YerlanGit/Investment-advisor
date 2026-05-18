@@ -1,14 +1,7 @@
-"""Python package placeholder for the archived `services` subsystem."""
+"""Services package — runtime adapters for external systems (GCS, FRED, etc.).
 
-from __future__ import annotations
-
-from src._archive_helper import load_archive_metadata
-
-_SNAPSHOT = load_archive_metadata("services")
-
-ARCHIVE_NAME = _SNAPSHOT["archive_name"]
-MODULE_COUNT = _SNAPSHOT["module_count"]
-SAMPLE_FILES = tuple(_SNAPSHOT["sample_files"])
-PORTING_NOTE = f"Python placeholder package for '{ARCHIVE_NAME}' with {MODULE_COUNT} archived module references."
-
-__all__ = ["ARCHIVE_NAME", "MODULE_COUNT", "PORTING_NOTE", "SAMPLE_FILES"]
+Previously a placeholder for an archived subsystem; reactivated in Step 6.1
+when report_storage.py + macro_data.py landed as production modules.
+Kept minimal to avoid PYTHONPATH-dependent imports (Cloud Run sets
+PYTHONPATH=/app/src, so `from src._archive_helper` would fail).
+"""
