@@ -2,21 +2,20 @@
 <!--
   ─────────────────────────────────────────────────────────────────────────
   ПРОТОТИП (design-only, НЕ подключён к боту)
-  ОБЪЕДИНЁННЫЙ DEEP-ОТЧЁТ — все 5 страниц в одном файле:
-    1. Обложка · KPI · концентрация риска  (наследует BASE)
-    2. Что вы держите (holdings)            (наследует BASE)
-    3. Факторное разложение · 4-Pillar Scoring · стресс-сценарии  [DEEP]
-    4. Action Plan · Ожидаемый эффект · CoVe                       [DEEP]
-    5. Рыночный режим                                              [DEEP]
-  Дизайн-язык совпадает с BASE: gauge-level графики, hairline-detail,
-  IBM Plex, кремовый фон. Открыть просто в браузере.
+  ОБЪЕДИНЁННЫЙ BASE-ОТЧЁТ — все 4 страницы в одном файле:
+    1. Обложка · KPI · концентрация риска
+    2. Что вы держите (holdings)
+    3. Рост против рынка
+    4. Идеи ИИ
+  Собран из 4 отдельных прототипов; конфликты классов/функций разведены.
+  Открыть просто в браузере.
   ─────────────────────────────────────────────────────────────────────────
 -->
 <html lang="ru">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>DEEP Report — полный отчёт (5 страниц) — Прототип</title>
+<title>BASE Report — полный отчёт (4 страницы) — Прототип</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -1079,366 +1078,15 @@
     .idea-title { font-size: 15px; }
     .idea-why { font-size: 13px; }
   }
-
-/* ════════════════════════════════════════════════════════════════════════
-   DEEP-only components: factor radar · 4-pillar scoring · stress scenarios
-   action plan · expected effect · CoVe · regime quadrant
-   ════════════════════════════════════════════════════════════════════════ */
-
-  /* ── общий контейнер блока (используется на P3/P4/P5) ── */
-  .d3-block {
-    margin-top: 22px;
-    background: var(--panel); border: 0.5pt solid var(--hairline);
-    border-radius: 2px; padding: 14px 17px 15px;
-  }
-  .d3-block + .d3-block { margin-top: 14px; }
-  .d3-block-head { margin-bottom: 10px; }
-  .d3-block-head .panel-title { margin-bottom: 3px; }
-  .d3-block-sub { font-size: 10.5px; color: var(--ink-60); }
-  .d3-block-sub .src {
-    font-family: var(--font-mono); font-size: 9px;
-    color: var(--tech-blue); background: var(--tech-blue-08);
-    padding: 0 4px; border-radius: 2px; margin-left: 4px;
-  }
-
-  /* ── A. FACTOR β-RADAR ── */
-  .factor-layout {
-    display: grid; grid-template-columns: 1.05fr 1fr; gap: 14px;
-    align-items: center;
-  }
-  .factor-radar-svg { width: 100%; height: auto; max-width: 360px; display: block; margin: 0 auto; }
-
-  table.factor-table { width: 100%; border-collapse: collapse; }
-  table.factor-table thead th {
-    font-family: var(--font-mono); font-size: 9px; font-weight: 600;
-    letter-spacing: 0.03em; color: var(--ink-60); text-align: right;
-    padding: 5px 7px; border-bottom: 0.5pt solid var(--hairline);
-    text-transform: uppercase;
-  }
-  table.factor-table thead th:first-child { text-align: left; }
-  table.factor-table tbody td {
-    font-family: var(--font-mono); font-size: 11px; text-align: right;
-    padding: 6px 7px; border-bottom: 0.5pt solid var(--hairline-2);
-  }
-  table.factor-table tbody td:first-child { text-align: left; font-weight: 500; }
-  table.factor-table tbody tr:last-child td { border-bottom: none; }
-  table.factor-table td.delta-pos { color: var(--amber); font-weight: 600; }
-  table.factor-table td.delta-neg { color: var(--green); font-weight: 600; }
-
-  /* ── B. 4-PILLAR SCORING ── */
-  .score-grid {
-    display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
-    margin-top: 4px;
-  }
-  .score-card {
-    background: #FFFFFF; border: 0.5pt solid var(--hairline);
-    border-left: 2px solid var(--ink-40);
-    border-radius: 2px; padding: 10px 12px;
-    display: flex; flex-direction: column;
-  }
-  .score-card.act-buy   { border-left-color: var(--green); }
-  .score-card.act-hold  { border-left-color: var(--ink-60); }
-  .score-card.act-trim  { border-left-color: var(--amber); }
-  .score-card.act-sell  { border-left-color: var(--neg); }
-  .sc-head {
-    display: flex; justify-content: space-between; align-items: baseline;
-    margin-bottom: 7px;
-  }
-  .sc-ticker {
-    font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--ink);
-  }
-  .sc-total {
-    font-family: var(--font-mono); font-size: 12px; font-weight: 600;
-  }
-  .sc-total.pos { color: var(--green); }
-  .sc-total.neg { color: var(--neg); }
-  .sc-total.neut { color: var(--ink-60); }
-  .sc-pillars { display: flex; flex-direction: column; gap: 5px; }
-  .sc-pillar {
-    display: grid; grid-template-columns: 14px 1fr 22px;
-    align-items: center; gap: 7px;
-    font-family: var(--font-mono); font-size: 9px;
-  }
-  .sc-pillar-name { color: var(--ink-60); font-weight: 600; }
-  .sc-pillar-bar {
-    position: relative; height: 6px;
-    background: rgba(42,46,51,0.06); border-radius: 1px;
-  }
-  /* центральная ось 0 */
-  .sc-pillar-bar::before {
-    content: ''; position: absolute; left: 50%; top: -1px; bottom: -1px;
-    width: 0.5pt; background: rgba(42,46,51,0.30);
-  }
-  /* заполнение от 0: позиция и ширина зависят от значения через CSS-vars */
-  .sc-pillar-fill {
-    position: absolute; top: 0.5px; bottom: 0.5px;
-    border-radius: 1px;
-  }
-  .sc-pillar-fill.pos { background: linear-gradient(90deg, #4FAA72, #2F7048); }
-  .sc-pillar-fill.neg { background: linear-gradient(90deg, #A85F1C, #D85C42); }
-  .sc-pillar-val {
-    text-align: right; color: var(--ink); font-weight: 600;
-  }
-  .sc-pillar-val.pos { color: var(--green); }
-  .sc-pillar-val.neg { color: var(--neg); }
-  .sc-foot {
-    margin-top: 9px; padding-top: 7px;
-    border-top: 0.5pt solid var(--hairline-2);
-    display: flex; align-items: baseline; gap: 8px;
-  }
-  .sc-action {
-    font-family: var(--font-mono); font-size: 8.5px; font-weight: 600;
-    padding: 1.5px 6px; border-radius: 2px;
-    border: 0.5pt solid currentColor; white-space: nowrap;
-  }
-  .sc-action.act-buy  { color: var(--green); }
-  .sc-action.act-hold { color: var(--ink-60); }
-  .sc-action.act-trim { color: var(--amber); }
-  .sc-action.act-sell { color: var(--neg); }
-  .sc-reason { font-size: 9.5px; color: var(--ink-60); line-height: 1.4; }
-
-  /* ── C. STRESS SCENARIOS ── */
-  table.stress-table { width: 100%; border-collapse: collapse; }
-  table.stress-table thead th {
-    font-family: var(--font-mono); font-size: 9px; font-weight: 600;
-    letter-spacing: 0.03em; color: var(--ink-60); text-align: right;
-    padding: 6px 7px; border-bottom: 0.5pt solid var(--hairline);
-    text-transform: uppercase;
-  }
-  table.stress-table thead th:first-child,
-  table.stress-table thead th.scenario-col { text-align: left; }
-  table.stress-table tbody td {
-    font-family: var(--font-mono); font-size: 11px; text-align: right;
-    padding: 8px 7px; border-bottom: 0.5pt solid var(--hairline-2);
-  }
-  table.stress-table tbody td:first-child,
-  table.stress-table tbody td.scenario-col {
-    text-align: left; font-family: var(--font-ui); font-size: 11px;
-  }
-  table.stress-table tbody tr:last-child td { border-bottom: none; }
-  table.stress-table td.impact-cell {
-    position: relative; min-width: 140px; padding-right: 12px;
-  }
-  .impact-bar {
-    height: 6px; background: rgba(42,46,51,0.06); border-radius: 1px;
-    position: relative; overflow: hidden;
-  }
-  .impact-bar::before {
-    content: ''; position: absolute; left: 50%; top: 0; bottom: 0;
-    width: 0.5pt; background: rgba(42,46,51,0.30);
-  }
-  .impact-fill {
-    position: absolute; top: 0.5px; bottom: 0.5px; border-radius: 1px;
-  }
-  .impact-fill.neg { background: linear-gradient(90deg, #A85F1C, #C0492F); }
-  .impact-fill.pos { background: linear-gradient(90deg, #4FAA72, #2F7048); }
-  .impact-val { font-family: var(--font-mono); font-weight: 600; }
-  .impact-val.neg { color: var(--neg); }
-  .impact-val.pos { color: var(--green); }
-
-  /* ── D. ACTION PLAN (P4) ── */
-  table.action-table { width: 100%; border-collapse: collapse; }
-  table.action-table thead th {
-    font-family: var(--font-mono); font-size: 9px; font-weight: 600;
-    letter-spacing: 0.03em; color: var(--ink-60); text-align: right;
-    padding: 6px 7px; border-bottom: 0.5pt solid var(--hairline);
-    text-transform: uppercase;
-  }
-  table.action-table thead th:first-child,
-  table.action-table thead th.l { text-align: left; }
-  table.action-table tbody td {
-    font-family: var(--font-mono); font-size: 10.5px; text-align: right;
-    padding: 7px 7px; border-bottom: 0.5pt solid var(--hairline-2);
-    vertical-align: middle;
-  }
-  table.action-table tbody td:first-child,
-  table.action-table tbody td.l { text-align: left; }
-  table.action-table tbody td.l.reason { font-family: var(--font-ui); font-size: 10px; color: var(--ink-60); line-height: 1.4; }
-  table.action-table tbody tr:last-child td { border-bottom: none; }
-  table.action-table .ticker { font-weight: 600; color: var(--ink); }
-  table.action-table .badge {
-    font-family: var(--font-mono); font-size: 8.5px; font-weight: 600;
-    padding: 1.5px 6px; border-radius: 2px; border: 0.5pt solid currentColor;
-    white-space: nowrap;
-  }
-  table.action-table .badge.act-buy  { color: var(--green); }
-  table.action-table .badge.act-hold { color: var(--ink-60); }
-  table.action-table .badge.act-trim { color: var(--amber); }
-  table.action-table .badge.act-sell { color: var(--neg); }
-  table.action-table .pos { color: var(--green); font-weight: 600; }
-  table.action-table .neg { color: var(--neg); font-weight: 600; }
-  table.action-table .level-pos { color: var(--green); }
-  table.action-table .level-neg { color: var(--neg); }
-
-  /* ── E. ОЖИДАЕМЫЙ ЭФФЕКТ — before/after ── */
-  .effect-grid {
-    display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;
-    margin-top: 4px;
-  }
-  .effect-card {
-    background: #FFFFFF; border: 0.5pt solid var(--hairline);
-    border-radius: 2px; padding: 10px 12px;
-  }
-  .ef-name {
-    font-family: var(--font-mono); font-size: 9px; font-weight: 600;
-    letter-spacing: 0.04em; color: var(--ink-60); text-transform: uppercase;
-    margin-bottom: 6px;
-  }
-  .ef-row {
-    display: flex; align-items: baseline; gap: 6px;
-    font-family: var(--font-mono); font-size: 13px;
-  }
-  .ef-before { color: var(--ink-40); }
-  .ef-arrow { color: var(--tech-blue); font-size: 12px; }
-  .ef-after  { color: var(--ink); font-weight: 600; }
-  .ef-delta {
-    margin-top: 5px;
-    font-family: var(--font-mono); font-size: 10px; font-weight: 600;
-  }
-  .ef-delta.pos { color: var(--green); }
-  .ef-delta.neg { color: var(--neg); }
-  .ef-delta.neut { color: var(--ink-60); }
-
-  /* ── F. CoVe — верификация источников ── */
-  .cove-grid {
-    display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px;
-    margin-top: 4px;
-  }
-  .cove-item {
-    display: grid; grid-template-columns: 18px 1fr; gap: 7px;
-    padding: 6px 0;
-    border-bottom: 0.5pt solid var(--hairline-2);
-    align-items: baseline;
-  }
-  .cove-item:last-child,
-  .cove-item:nth-last-child(2) { border-bottom: none; }
-  .cove-check {
-    color: var(--green); font-family: var(--font-mono); font-weight: 700;
-    text-align: center;
-  }
-  .cove-item.warn .cove-check { color: var(--amber); }
-  .cove-item.fail .cove-check { color: var(--neg); }
-  .cove-body {
-    font-size: 10.5px; line-height: 1.5; color: var(--ink);
-  }
-  .cove-body b { font-weight: 600; }
-  .cove-meta {
-    font-family: var(--font-mono); font-size: 9px; color: var(--ink-60);
-  }
-
-  /* ── G. РЕЖИМ — P5 ── */
-  .regime-layout {
-    display: grid; grid-template-columns: 1.05fr 1fr; gap: 14px;
-    align-items: stretch;
-  }
-  .regime-quadrant {
-    background: var(--panel); border: 0.5pt solid var(--hairline);
-    border-radius: 2px; padding: 12px 14px;
-  }
-  .regime-summary {
-    background: var(--panel); border: 0.5pt solid var(--hairline);
-    border-radius: 2px; padding: 12px 14px;
-    display: flex; flex-direction: column;
-  }
-  .reg-name {
-    font-size: 18px; font-weight: 700; color: var(--ink);
-    letter-spacing: -0.01em; margin-bottom: 4px;
-  }
-  .reg-conf {
-    font-family: var(--font-mono); font-size: 10px; color: var(--ink-60);
-    letter-spacing: 0.02em;
-  }
-  .reg-conf b { color: var(--tech-blue); font-weight: 600; }
-  .reg-factors {
-    margin-top: 10px; padding-top: 9px;
-    border-top: 0.5pt solid var(--hairline-2);
-    display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px;
-  }
-  .reg-f {
-    display: flex; flex-direction: column;
-  }
-  .reg-f-name {
-    font-family: var(--font-mono); font-size: 8.5px; font-weight: 600;
-    letter-spacing: 0.04em; color: var(--ink-60); text-transform: uppercase;
-  }
-  .reg-f-val {
-    font-family: var(--font-mono); font-size: 14px; font-weight: 600;
-    margin-top: 2px;
-  }
-  .reg-f-val.pos { color: var(--green); }
-  .reg-f-val.neg { color: var(--neg); }
-  .reg-f-val.neut { color: var(--ink); }
-  .reg-f-note { font-size: 9.5px; color: var(--ink-60); margin-top: 2px; }
-
-  .reg-quadrant-svg { width: 100%; height: auto; max-width: 360px; display: block; margin: 0 auto; }
-
-  /* список сигналов режима */
-  .reg-signals {
-    margin-top: 14px;
-  }
-  .reg-signals-label {
-    font-family: var(--font-mono); font-size: 8.5px; font-weight: 600;
-    letter-spacing: 0.04em; color: var(--ink-60); text-transform: uppercase;
-    margin-bottom: 7px;
-  }
-  .reg-signal-row {
-    display: grid; grid-template-columns: 1fr auto auto; gap: 10px;
-    padding: 6px 0; border-bottom: 0.5pt solid var(--hairline-2);
-    align-items: baseline;
-  }
-  .reg-signal-row:last-child { border-bottom: none; }
-  .reg-signal-name { font-size: 10.5px; }
-  .reg-signal-val { font-family: var(--font-mono); font-size: 10.5px; font-weight: 600; }
-  .reg-signal-val.pos { color: var(--green); }
-  .reg-signal-val.neg { color: var(--neg); }
-  .reg-signal-val.neut { color: var(--ink-60); }
-  .reg-signal-state {
-    font-family: var(--font-mono); font-size: 8.5px; font-weight: 600;
-    padding: 1.5px 6px; border-radius: 2px; border: 0.5pt solid currentColor;
-  }
-  .reg-signal-state.bull { color: var(--green); }
-  .reg-signal-state.bear { color: var(--neg); }
-  .reg-signal-state.flat { color: var(--ink-60); }
-  .reg-signal-state.warn { color: var(--amber); }
-
-  /* Bank RAG quote cards */
-  .rag-quotes {
-    margin-top: 22px;
-    display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
-  }
-  .rag-quote {
-    background: var(--panel); border: 0.5pt solid var(--hairline);
-    border-left: 2px solid var(--tech-blue);
-    border-radius: 2px; padding: 11px 13px;
-  }
-  .rag-bank {
-    font-family: var(--font-mono); font-size: 9.5px; font-weight: 600;
-    color: var(--tech-blue); letter-spacing: 0.03em;
-  }
-  .rag-doc {
-    font-family: var(--font-mono); font-size: 8.5px; color: var(--ink-60);
-    margin-top: 1px;
-  }
-  .rag-text {
-    margin-top: 7px;
-    font-size: 11px; font-style: italic; line-height: 1.55; color: var(--ink);
-  }
-  .rag-tag {
-    margin-top: 6px;
-    font-family: var(--font-mono); font-size: 8.5px;
-    color: var(--tech-blue); background: var(--tech-blue-08);
-    padding: 1.5px 5px; border-radius: 2px;
-    display: inline-block;
-  }
 </style>
 </head>
 <body>
 
 <div class="sheet">
 
-  
+  <!-- ═══ ТЕХ-ХЕДЕР ═══ -->
   <div class="tech-header">
-    <span><b>PORTFOLIO RISK REPORT</b> // TIER: DEEP // ID: Usample // RISK_ENGINE: MAC3</span>
+    <span><b>PORTFOLIO RISK REPORT</b> // TIER: BASE // ID: Usample // RISK_ENGINE: MAC3</span>
     <span class="ts">GENERATED 18.05.2026 04:17 UTC+5</span>
   </div>
 
@@ -1533,8 +1181,6 @@
         </g>
 
         
-        
-        
         <polygon points="140,38 147.01,138 132.99,138"
                  transform="rotate(21.6 140 138)"
                  fill="url(#needleGrad)" filter="url(#ndlShadow)"/>
@@ -1553,15 +1199,12 @@
   <div class="block-label" style="margin-top:24px;">Ключевые показатели риска</div>
   <div class="kpi-grid">
 
-    
-    
+    <!-- KPI 1 — CVaR 95% -->
     <div class="kpi st-normal">
       <div class="kpi-name">CVaR&nbsp;95%</div>
       <div class="kpi-value-row">
         <span class="kpi-value">-5.2%</span>
-        <span class="kpi-sub">
-          (95% CL · 1 день · ≈ $2,600 · CI CI: -7.0% … -4.5%)
-        </span>
+        <span class="kpi-sub">(95% CL · 1 день · ≈ $2,600 · CI CI: -7.0% … -4.5%)</span>
       </div>
       <div class="kpi-spark">
         <svg viewBox="0 0 240 36" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
@@ -1885,8 +1528,8 @@
 
   <!-- ТЕХ-ХЕДЕР -->
   <div class="tech-header">
-    <span><b>PORTFOLIO RISK REPORT</b> // TIER: DEEP // ID: Usample // RISK_ENGINE: MAC3</span>
-    <span class="ts">PAGE 2 OF 5</span>
+    <span><b>PORTFOLIO RISK REPORT</b> // TIER: BASE // ID: Usample // RISK_ENGINE: MAC3</span>
+    <span class="ts">PAGE 2 OF 4</span>
   </div>
 
   <!-- ЗАГОЛОВОК СЕКЦИИ -->
@@ -1913,12 +1556,6 @@
 
     
     
-    
-      
-    
-      
-    
-      
     
 
     
@@ -1965,7 +1602,7 @@
               <div class="stat-value">н/д</div></div>
             <div class="stat"><div class="stat-label">ATR — дневная волатильность</div>
               <div class="stat-value ">1.40%</div></div>
-            <div class="stat"><div class="stat-label">Altman-Z (банкротство)</div>
+            <div class="stat"><div class="stat-label">Altman-Z</div>
               <div class="stat-value">н/д</div></div>
           </div>
           <div class="h-detail-ai">
@@ -2021,7 +1658,7 @@
               <div class="stat-value">н/д</div></div>
             <div class="stat"><div class="stat-label">ATR — дневная волатильность</div>
               <div class="stat-value ">2.10%</div></div>
-            <div class="stat"><div class="stat-label">Altman-Z (банкротство)</div>
+            <div class="stat"><div class="stat-label">Altman-Z</div>
               <div class="stat-value">н/д</div></div>
           </div>
           <div class="h-detail-ai">
@@ -2077,7 +1714,7 @@
               <div class="stat-value">н/д</div></div>
             <div class="stat"><div class="stat-label">ATR — дневная волатильность</div>
               <div class="stat-value ">0.40%</div></div>
-            <div class="stat"><div class="stat-label">Altman-Z (банкротство)</div>
+            <div class="stat"><div class="stat-label">Altman-Z</div>
               <div class="stat-value">н/д</div></div>
           </div>
           <div class="h-detail-ai">
@@ -2108,7 +1745,6 @@
 
     <div class="sp-body">
     <div class="pie-wrap">
-      
       
       
         
@@ -2222,1283 +1858,603 @@
 
   <!-- ТЕХ-ХЕДЕР -->
   <div class="tech-header">
-    <span><b>PORTFOLIO RISK REPORT</b> // TIER: DEEP // ID: Usample // RISK_ENGINE: MAC3</span>
-    <span class="ts">PAGE 3 OF 5</span>
+    <span><b>PORTFOLIO RISK REPORT</b> // TIER: BASE // ID: Usample // RISK_ENGINE: MAC3</span>
+    <span class="ts">PAGE 3 OF 4</span>
   </div>
 
   <!-- ЗАГОЛОВОК СЕКЦИИ -->
   <div class="sec-head">
-    <div class="sec-title">Факторное разложение · 4-Pillar Scoring · стресс-сценарии</div>
-    <div class="sec-sub">детальный взгляд на источники риска и качество позиций · <b style="color:var(--tech-blue);">[DEEP]</b></div>
+    <div class="sec-title">Рост против рынка</div>
+    <div class="sec-sub">накопленная доходность портфеля в сравнении с S&amp;P 500 · 12 месяцев</div>
   </div>
 
-  <!-- ════ A. FACTOR β-RADAR ════ -->
-  <div class="d3-block">
-    <div class="d3-block-head">
-      <div class="panel-title">Факторное разложение (β) — скрытые концентрации</div>
-      <div class="d3-block-sub">Ridge β-регрессия (α=1.0) · EWMA-ковариация λ≈0.94 · окно 60 дней
-        <span class="src">[Quant Engine MAC3]</span></div>
+  
+  
+  <div class="gv-stats">
+    <div class="gv-stat">
+      <div class="gv-label">Доходность портфеля</div>
+      <div class="gv-value pos">+4.2%</div>
+      <div class="gv-note">за период</div>
     </div>
-
-    <div class="factor-layout">
-      <!-- Radar SVG -->
-      <div class="factor-radar-wrap">
-        <svg class="factor-radar-svg" viewBox="0 0 320 280" xmlns="http://www.w3.org/2000/svg"
-             role="img" aria-label="Факторный радар портфеля: 8 факторов">
-          <defs>
-            <linearGradient id="radarFill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%"   stop-color="#2F6FB3" stop-opacity="0.32"/>
-              <stop offset="100%" stop-color="#2F6FB3" stop-opacity="0.10"/>
-            </linearGradient>
-            <linearGradient id="radarStroke" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%"   stop-color="#23588F"/>
-              <stop offset="100%" stop-color="#3E83C9"/>
-            </linearGradient>
-            <filter id="radarShadow" x="-20%" y="-20%" width="140%" height="140%">
-              <feDropShadow dx="0" dy="1.2" stdDeviation="1.1" flood-opacity="0.20"/>
-            </filter>
-          </defs>
-
-          <!-- концентрические сетки 0.25 / 0.5 / 0.75 / 1.0 (8-gon) -->
-          <g fill="none" stroke="rgba(42,46,51,0.18)" stroke-width="0.5">
-            <polygon points="160,115 177.68,122.32 185,140 177.68,157.68 160,165 142.32,157.68 135,140 142.32,122.32"/>
-            <polygon points="160,90  195.36,104.64 210,140 195.36,175.36 160,190 124.64,175.36 110,140 124.64,104.64"/>
-            <polygon points="160,65  213.03,86.97 235,140 213.03,193.03 160,215 106.97,193.03 85,140 106.97,86.97"/>
-            <polygon points="160,40  230.71,69.29 260,140 230.71,210.71 160,240 89.29,210.71 60,140 89.29,69.29" stroke-opacity="0.32"/>
-          </g>
-          <!-- 8 радиальных осей (каждые 45°) -->
-          <g stroke="rgba(42,46,51,0.20)" stroke-width="0.5">
-            <line x1="160" y1="140" x2="160"    y2="40"/>
-            <line x1="160" y1="140" x2="230.71" y2="69.29"/>
-            <line x1="160" y1="140" x2="260"    y2="140"/>
-            <line x1="160" y1="140" x2="230.71" y2="210.71"/>
-            <line x1="160" y1="140" x2="160"    y2="240"/>
-            <line x1="160" y1="140" x2="89.29"  y2="210.71"/>
-            <line x1="160" y1="140" x2="60"     y2="140"/>
-            <line x1="160" y1="140" x2="89.29"  y2="69.29"/>
-          </g>
-
-          <!-- метки шкалы (вдоль оси Market) -->
-          <g font-family="IBM Plex Mono" font-size="8" fill="rgba(42,46,51,0.45)">
-            <text x="164" y="118" text-anchor="start">0.5</text>
-            <text x="164" y="78"  text-anchor="start">1.0</text>
-            <text x="164" y="44"  text-anchor="start">1.5</text>
-          </g>
-
-          <!-- 8 меток факторов на тиках -->
-          <g font-family="IBM Plex Mono" font-size="9" fill="rgba(42,46,51,0.85)" font-weight="600">
-            <text x="160"    y="28"  text-anchor="middle">MARKET</text>
-            <text x="241.32" y="60"  text-anchor="middle">VALUE</text>
-            <text x="277"    y="143" text-anchor="middle">QUALITY</text>
-            <text x="241.32" y="223" text-anchor="middle">COMMOD</text>
-            <text x="160"    y="258" text-anchor="middle">MOMENTUM</text>
-            <text x="78.68"  y="223" text-anchor="middle">RATES</text>
-            <text x="42"     y="143" text-anchor="middle">SIZE</text>
-            <text x="78.68"  y="60"  text-anchor="middle">VOLATIL</text>
-          </g>
-
-          <!-- бенчмарк (SPX-like): октагон 0.5 baseline, dashed -->
-          <polygon points="160,90 195.36,104.64 210,140 195.36,175.36 160,190 124.64,175.36 110,140 124.64,104.64"
-                   fill="rgba(42,46,51,0.06)" stroke="rgba(42,46,51,0.35)" stroke-width="0.6"
-                   stroke-dasharray="3 2"/>
-
-          <!-- портфель: 8-вершинный полигон с градиентом + тенью.            -->
-          <!-- β: MARKET 1.18 · VALUE 0.25 · QUALITY 0.62 · COMMOD 0.15 ·     -->
-          <!--    MOMENTUM 1.05 · RATES |−0.30|=0.30 · SIZE 0.42 · VOL 0.88   -->
-          <polygon points="160,61.33 171.79,128.21 201.33,140 167.07,147.07 160,210 145.86,154.14 132,140 118.51,98.51"
-                   fill="url(#radarFill)" stroke="url(#radarStroke)" stroke-width="1.8"
-                   stroke-linejoin="round" filter="url(#radarShadow)"/>
-
-          <!-- вершины данных -->
-          <g fill="#2F6FB3">
-            <circle cx="160"    cy="61.33"  r="3.0"/>
-            <circle cx="171.79" cy="128.21" r="3.0"/>
-            <circle cx="201.33" cy="140"    r="3.0"/>
-            <circle cx="167.07" cy="147.07" r="3.0"/>
-            <circle cx="160"    cy="210"    r="3.0"/>
-            <circle cx="145.86" cy="154.14" r="3.0"/>
-            <circle cx="132"    cy="140"    r="3.0"/>
-            <circle cx="118.51" cy="98.51"  r="3.0"/>
-          </g>
-          <g fill="#FBFAF7">
-            <circle cx="160"    cy="61.33"  r="1.3"/>
-            <circle cx="171.79" cy="128.21" r="1.3"/>
-            <circle cx="201.33" cy="140"    r="1.3"/>
-            <circle cx="167.07" cy="147.07" r="1.3"/>
-            <circle cx="160"    cy="210"    r="1.3"/>
-            <circle cx="145.86" cy="154.14" r="1.3"/>
-            <circle cx="132"    cy="140"    r="1.3"/>
-            <circle cx="118.51" cy="98.51"  r="1.3"/>
-          </g>
-
-          <!-- легенда внизу -->
-          <g font-family="IBM Plex Mono" font-size="8.5" fill="rgba(42,46,51,0.7)">
-            <rect x="60"  y="270" width="9" height="3" fill="url(#radarFill)" stroke="#2F6FB3" stroke-width="0.6"/>
-            <text x="73"  y="274">портфель</text>
-            <line x1="148" y1="271.5" x2="157" y2="271.5" stroke="rgba(42,46,51,0.5)" stroke-width="1" stroke-dasharray="3 2"/>
-            <text x="161" y="274">S&amp;P 500 (бенч.)</text>
-          </g>
-        </svg>
-      </div>
-
-      <!-- Factor table — 8 rows (EM_Equity / EM_Bond опущены: корреляция     -->
-      <!-- EM_Equity↔MARKET ≈ 0.85, EM_Bond↔RATES ≈ 0.50 — дублируют сигнал)  -->
-      <div class="factor-table-wrap">
-        <table class="factor-table">
-          <thead>
-            <tr><th>Фактор</th><th>β портф.</th><th>Бенч.</th><th>Δ</th></tr>
-          </thead>
-          <tbody>
-            
-            <tr>
-              <td>Market</td>
-              <td>1.18</td>
-              <td>1.00</td>
-              <td class="delta-pos">
-                +0.18
-              </td>
-            </tr>
-            
-            <tr>
-              <td>Momentum</td>
-              <td>1.05</td>
-              <td>0.00</td>
-              <td class="delta-pos">
-                +1.05
-              </td>
-            </tr>
-            
-            <tr>
-              <td>Value</td>
-              <td>0.25</td>
-              <td>0.00</td>
-              <td class="delta-pos">
-                +0.25
-              </td>
-            </tr>
-            
-            <tr>
-              <td>Quality</td>
-              <td>0.62</td>
-              <td>0.00</td>
-              <td class="delta-pos">
-                +0.62
-              </td>
-            </tr>
-            
-            <tr>
-              <td>Size</td>
-              <td>0.42</td>
-              <td>0.00</td>
-              <td class="delta-pos">
-                +0.42
-              </td>
-            </tr>
-            
-            <tr>
-              <td>Volatility</td>
-              <td>0.88</td>
-              <td>0.00</td>
-              <td class="delta-pos">
-                +0.88
-              </td>
-            </tr>
-            
-            <tr>
-              <td>Commodities</td>
-              <td>0.15</td>
-              <td>0.00</td>
-              <td class="delta-pos">
-                +0.15
-              </td>
-            </tr>
-            
-            <tr>
-              <td>Rates</td>
-              <td>-0.30</td>
-              <td>0.00</td>
-              <td class="delta-neg">
-                -0.30
-              </td>
-            </tr>
-            
-          </tbody>
-        </table>
-        <div style="margin-top:8px; font-size:9.5px; color:var(--ink-60); line-height:1.5;">
-          <b style="color:var(--ink);">Что показывает радар:</b> насколько портфель завязан на
-          глобальные факторы. Большая площадь — больше зависимости от рынка.
-          Совпадение направлений по нескольким факторам — скрытая общая ставка
-          (диверсификация ниже, чем кажется).
-        </div>
-      </div>
+    <div class="gv-stat">
+      <div class="gv-label">Рынок · S&amp;P 500</div>
+      <div class="gv-value neu">—</div>
+      <div class="gv-note">за тот же период</div>
     </div>
-
-    <div class="conc-ai" style="margin-top:14px;">
-      <div class="ai-head">[ 🤖 AI_ANALYSIS // HAIKU ]</div>
-      <div class="ai-body">
-        «Портфель сильно тянет <span class="flag">Momentum (β=1.05)</span> и
-        <span class="flag">Market (β=1.18)</span> — знакомый перевес в IT.
-        Quality 0.62 и Volatility 0.88 говорят, что бумаги дорогие/«разогретые»:
-        в коррекцию корректируются глубже. Низкий Value (0.25) — портфель не
-        выглядит «дешёвым» по фундаменталу. Отрицательная Rates β (−0.30) —
-        чувствительность к росту ставок (growth stocks страдают на hawkish surprise);
-        Commodities 0.15 — нет hedge против инфляции. Эти 5 факторов — главная
-        скрытая ставка, движутся синхронно вместе с PLTR · CRWD · NVDA.
-        <span class="src">[Quant Engine]</span>»
-      </div>
+    <div class="gv-stat accent">
+      <div class="gv-label">Опережение рынка</div>
+      <div class="gv-value blue">—</div>
+      <div class="gv-note">Information Ratio</div>
+    </div>
+    <div class="gv-stat">
+      <div class="gv-label">Волатильность портф. (год.)</div>
+      <div class="gv-value neu">14.2%</div>
+      <div class="gv-note">структурная Σ½</div>
     </div>
   </div>
 
-  <!-- ════ B. 4-PILLAR SCORING ════ -->
-  <div class="d3-block">
-    <div class="d3-block-head">
-      <div class="panel-title">4-Pillar Scoring — оценка позиций (F · V · T · C)</div>
-      <div class="d3-block-sub">Fundamental · Valuation · Technical · Credit ·
-        каждый −2…+2 · итог ∈ [−6, +6]
-        <span class="src">[Quant Engine + SEC EDGAR]</span></div>
+  <!-- ГРАФИК + ТАБЛИЦА ПЕРИОДОВ -->
+  <div class="gv-main">
+
+  <div class="chart-card">
+    <div class="chart-head">
+      <span class="chart-title">Накопленная доходность · 12 месяцев</span>
+      <div class="chart-legend">
+        <span class="cl-item"><span class="cl-line port"></span>Ваш портфель</span>
+        <span class="cl-item"><span class="cl-line mkt"></span>S&amp;P 500</span>
+      </div>
     </div>
+    <div class="chart-body">
+      <svg viewBox="0 0 820 180" role="img" aria-label="График накопленной доходности портфеля против S&amp;P 500">
+        <defs>
+          <!-- area: вертикальный градиент под линией портфеля -->
+          <linearGradient id="portArea" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%"   stop-color="#2F6FB3" stop-opacity="0.26"/>
+            <stop offset="100%" stop-color="#2F6FB3" stop-opacity="0"/>
+          </linearGradient>
+          <!-- линия: горизонтальный градиент тёмный→светлый -->
+          <linearGradient id="portLine" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%"   stop-color="#23588F"/>
+            <stop offset="100%" stop-color="#3E83C9"/>
+          </linearGradient>
+          <filter id="lineShadow" x="-2%" y="-15%" width="104%" height="130%">
+            <feDropShadow dx="0" dy="1.2" stdDeviation="1.0" flood-opacity="0.22"/>
+          </filter>
+        </defs>
 
-    <div class="score-grid">
+        <!-- горизонтальная сетка -->
+        <g stroke="rgba(42,46,51,0.10)" stroke-width="0.5">
+          <line x1="50" y1="14"  x2="720" y2="14" stroke-dasharray="2.5 3"/>
+          <line x1="50" y1="48"  x2="720" y2="48" stroke-dasharray="2.5 3"/>
+          <line x1="50" y1="82"  x2="720" y2="82" stroke-dasharray="2.5 3"/>
+          <line x1="50" y1="116" x2="720" y2="116" stroke-dasharray="2.5 3"/>
+          <line x1="50" y1="150" x2="720" y2="150" stroke="rgba(42,46,51,0.28)" stroke-width="0.6"/>
+        </g>
+        <!-- подписи оси Y -->
+        <g font-family="'IBM Plex Mono', monospace" font-size="9" fill="rgba(42,46,51,0.6)" text-anchor="end">
+          <text x="42" y="17">+16%</text>
+          <text x="42" y="51">+12%</text>
+          <text x="42" y="85">+8%</text>
+          <text x="42" y="119">+4%</text>
+          <text x="42" y="153">0%</text>
+        </g>
 
-      <!-- PLTR -->
-      <div class="score-card act-trim">
-        <div class="sc-head">
-          <span class="sc-ticker">PLTR</span>
-          <span class="sc-total pos">Итог: +2</span>
-        </div>
-        <div class="sc-pillars">
-          <div class="sc-pillar">
-            <span class="sc-pillar-name">F</span>
-            <span class="sc-pillar-bar"><span class="sc-pillar-fill pos" style="left:50%; width:50%;"></span></span>
-            <span class="sc-pillar-val pos">+2</span>
-          </div>
-          <div class="sc-pillar">
-            <span class="sc-pillar-name">V</span>
-            <span class="sc-pillar-bar"><span class="sc-pillar-fill neg" style="left:25%; width:25%;"></span></span>
-            <span class="sc-pillar-val neg">−1</span>
-          </div>
-          <div class="sc-pillar">
-            <span class="sc-pillar-name">T</span>
-            <span class="sc-pillar-bar"><span class="sc-pillar-fill pos" style="left:50%; width:50%;"></span></span>
-            <span class="sc-pillar-val pos">+2</span>
-          </div>
-          <div class="sc-pillar">
-            <span class="sc-pillar-name">C</span>
-            <span class="sc-pillar-bar"><span class="sc-pillar-fill pos" style="left:50%; width:12.5%;"></span></span>
-            <span class="sc-pillar-val">+0.5</span>
-          </div>
-        </div>
-        <div class="sc-foot">
-          <span class="sc-action act-trim">TRIM</span>
-          <span class="sc-reason">сильный моментум, но дорогая оценка → фиксировать часть</span>
-        </div>
-      </div>
+        <!-- область под линией портфеля -->
+        <path d="M50,150 L111,132.2 L172,138.1 L233,109.2 L294,97.3 L355,107.5 L415,79.5 L476,64.2 L537,71.8 L598,43.8 L659,49.7 L720,29.3 L720,150 L50,150 Z"
+              fill="url(#portArea)"/>
 
-      <!-- CRWD -->
-      <div class="score-card act-hold">
-        <div class="sc-head">
-          <span class="sc-ticker">CRWD</span>
-          <span class="sc-total pos">Итог: +1</span>
-        </div>
-        <div class="sc-pillars">
-          <div class="sc-pillar">
-            <span class="sc-pillar-name">F</span>
-            <span class="sc-pillar-bar"><span class="sc-pillar-fill pos" style="left:50%; width:37.5%;"></span></span>
-            <span class="sc-pillar-val pos">+1.5</span>
-          </div>
-          <div class="sc-pillar">
-            <span class="sc-pillar-name">V</span>
-            <span class="sc-pillar-bar"><span class="sc-pillar-fill neg" style="left:25%; width:25%;"></span></span>
-            <span class="sc-pillar-val neg">−1</span>
-          </div>
-          <div class="sc-pillar">
-            <span class="sc-pillar-name">T</span>
-            <span class="sc-pillar-bar"><span class="sc-pillar-fill pos" style="left:50%; width:37.5%;"></span></span>
-            <span class="sc-pillar-val pos">+1.5</span>
-          </div>
-          <div class="sc-pillar">
-            <span class="sc-pillar-name">C</span>
-            <span class="sc-pillar-bar"><span class="sc-pillar-fill pos" style="left:50%; width:12.5%;"></span></span>
-            <span class="sc-pillar-val">+0.5</span>
-          </div>
-        </div>
-        <div class="sc-foot">
-          <span class="sc-action act-hold">HOLD</span>
-          <span class="sc-reason">синхронна с PLTR — общая концентрация риска</span>
-        </div>
-      </div>
+        <!-- линия S&P 500 (пунктир) -->
+        <path d="M50,150 L111,137.3 L172,143.2 L233,125.4 L294,119.4 L355,123.7 L415,109.2 L476,99 L537,103.3 L598,88.8 L659,82 L720,72.7"
+              fill="none" stroke="rgba(42,46,51,0.50)" stroke-width="1.6"
+              stroke-dasharray="5 3" stroke-linejoin="round" stroke-linecap="round"/>
 
-      <!-- AAPL -->
-      <div class="score-card act-buy">
-        <div class="sc-head">
-          <span class="sc-ticker">AAPL</span>
-          <span class="sc-total pos">Итог: +3</span>
-        </div>
-        <div class="sc-pillars">
-          <div class="sc-pillar">
-            <span class="sc-pillar-name">F</span>
-            <span class="sc-pillar-bar"><span class="sc-pillar-fill pos" style="left:50%; width:50%;"></span></span>
-            <span class="sc-pillar-val pos">+2</span>
-          </div>
-          <div class="sc-pillar">
-            <span class="sc-pillar-name">V</span>
-            <span class="sc-pillar-bar"><span class="sc-pillar-fill" style="left:50%; width:0;"></span></span>
-            <span class="sc-pillar-val">0</span>
-          </div>
-          <div class="sc-pillar">
-            <span class="sc-pillar-name">T</span>
-            <span class="sc-pillar-bar"><span class="sc-pillar-fill pos" style="left:50%; width:25%;"></span></span>
-            <span class="sc-pillar-val pos">+1</span>
-          </div>
-          <div class="sc-pillar">
-            <span class="sc-pillar-name">C</span>
-            <span class="sc-pillar-bar"><span class="sc-pillar-fill pos" style="left:50%; width:25%;"></span></span>
-            <span class="sc-pillar-val pos">+1</span>
-          </div>
-        </div>
-        <div class="sc-foot">
-          <span class="sc-action act-buy">BUY</span>
-          <span class="sc-reason">маржа и кэш-флоу высокие, оценка справедливая</span>
-        </div>
-      </div>
+        <!-- линия портфеля: градиент + лёгкая тень -->
+        <path d="M50,150 L111,132.2 L172,138.1 L233,109.2 L294,97.3 L355,107.5 L415,79.5 L476,64.2 L537,71.8 L598,43.8 L659,49.7 L720,29.3"
+              fill="none" stroke="url(#portLine)" stroke-width="2.2"
+              stroke-linejoin="round" stroke-linecap="round" filter="url(#lineShadow)"/>
 
-      <!-- JNJ -->
-      <div class="score-card act-buy">
-        <div class="sc-head">
-          <span class="sc-ticker">JNJ</span>
-          <span class="sc-total pos">Итог: +5</span>
-        </div>
-        <div class="sc-pillars">
-          <div class="sc-pillar">
-            <span class="sc-pillar-name">F</span>
-            <span class="sc-pillar-bar"><span class="sc-pillar-fill pos" style="left:50%; width:50%;"></span></span>
-            <span class="sc-pillar-val pos">+2</span>
-          </div>
-          <div class="sc-pillar">
-            <span class="sc-pillar-name">V</span>
-            <span class="sc-pillar-bar"><span class="sc-pillar-fill pos" style="left:50%; width:37.5%;"></span></span>
-            <span class="sc-pillar-val pos">+1.5</span>
-          </div>
-          <div class="sc-pillar">
-            <span class="sc-pillar-name">T</span>
-            <span class="sc-pillar-bar"><span class="sc-pillar-fill pos" style="left:50%; width:12.5%;"></span></span>
-            <span class="sc-pillar-val">+0.5</span>
-          </div>
-          <div class="sc-pillar">
-            <span class="sc-pillar-name">C</span>
-            <span class="sc-pillar-bar"><span class="sc-pillar-fill pos" style="left:50%; width:25%;"></span></span>
-            <span class="sc-pillar-val pos">+1</span>
-          </div>
-        </div>
-        <div class="sc-foot">
-          <span class="sc-action act-buy">STRONG&nbsp;BUY</span>
-          <span class="sc-reason">защитный сектор, низкая бета, фундаментал крепкий</span>
-        </div>
-      </div>
+        <!-- маркер пика портфеля (декабрь): гало + точка -->
+        <circle cx="598" cy="43.8" r="5.6" fill="#2F6FB3" fill-opacity="0.16"/>
+        <circle cx="598" cy="43.8" r="2.6" fill="#2F6FB3"/>
 
-      <!-- KO -->
-      <div class="score-card act-hold">
-        <div class="sc-head">
-          <span class="sc-ticker">KO</span>
-          <span class="sc-total pos">Итог: +2</span>
-        </div>
-        <div class="sc-pillars">
-          <div class="sc-pillar">
-            <span class="sc-pillar-name">F</span>
-            <span class="sc-pillar-bar"><span class="sc-pillar-fill pos" style="left:50%; width:37.5%;"></span></span>
-            <span class="sc-pillar-val pos">+1.5</span>
-          </div>
-          <div class="sc-pillar">
-            <span class="sc-pillar-name">V</span>
-            <span class="sc-pillar-bar"><span class="sc-pillar-fill neg" style="left:37.5%; width:12.5%;"></span></span>
-            <span class="sc-pillar-val neg">−0.5</span>
-          </div>
-          <div class="sc-pillar">
-            <span class="sc-pillar-name">T</span>
-            <span class="sc-pillar-bar"><span class="sc-pillar-fill" style="left:50%; width:0;"></span></span>
-            <span class="sc-pillar-val">0</span>
-          </div>
-          <div class="sc-pillar">
-            <span class="sc-pillar-name">C</span>
-            <span class="sc-pillar-bar"><span class="sc-pillar-fill pos" style="left:50%; width:25%;"></span></span>
-            <span class="sc-pillar-val pos">+1</span>
-          </div>
-        </div>
-        <div class="sc-foot">
-          <span class="sc-action act-hold">HOLD</span>
-          <span class="sc-reason">«тихий» актив гасит общий риск, но оценка дороже среднего</span>
-        </div>
-      </div>
+        <!-- конечные точки: с гало -->
+        <circle cx="720" cy="72.7" r="4.4" fill="rgba(42,46,51,0.10)"/>
+        <circle cx="720" cy="72.7" r="2.8" fill="#FBFAF7" stroke="rgba(42,46,51,0.55)" stroke-width="1.2"/>
+        <circle cx="720" cy="29.3" r="5.2" fill="#2F6FB3" fill-opacity="0.18"/>
+        <circle cx="720" cy="29.3" r="3.2" fill="#FBFAF7" stroke="#2F6FB3" stroke-width="1.4"/>
 
-      <!-- XOM -->
-      <div class="score-card act-trim">
-        <div class="sc-head">
-          <span class="sc-ticker">XOM</span>
-          <span class="sc-total neg">Итог: −2</span>
-        </div>
-        <div class="sc-pillars">
-          <div class="sc-pillar">
-            <span class="sc-pillar-name">F</span>
-            <span class="sc-pillar-bar"><span class="sc-pillar-fill neg" style="left:25%; width:25%;"></span></span>
-            <span class="sc-pillar-val neg">−1</span>
-          </div>
-          <div class="sc-pillar">
-            <span class="sc-pillar-name">V</span>
-            <span class="sc-pillar-bar"><span class="sc-pillar-fill pos" style="left:50%; width:12.5%;"></span></span>
-            <span class="sc-pillar-val">+0.5</span>
-          </div>
-          <div class="sc-pillar">
-            <span class="sc-pillar-name">T</span>
-            <span class="sc-pillar-bar"><span class="sc-pillar-fill neg" style="left:25%; width:25%;"></span></span>
-            <span class="sc-pillar-val neg">−1</span>
-          </div>
-          <div class="sc-pillar">
-            <span class="sc-pillar-name">C</span>
-            <span class="sc-pillar-bar"><span class="sc-pillar-fill neg" style="left:37.5%; width:12.5%;"></span></span>
-            <span class="sc-pillar-val neg">−0.5</span>
-          </div>
-        </div>
-        <div class="sc-foot">
-          <span class="sc-action act-trim">TRIM</span>
-          <span class="sc-reason">выручка −6% г/г, тренд слабый</span>
-        </div>
-      </div>
-
-    </div>
-    <div style="margin-top:6px; font-size:9px; color:var(--ink-60);">
-      Показаны 6 из 9 позиций — остальные (MSFT, NVDA, BND) в HOLD-зоне без триггеров.
+        <!-- конечные подписи -->
+        <text x="729" y="32.3" font-family="'IBM Plex Mono', monospace" font-size="11"
+              font-weight="600" fill="#23588F">+14.2%</text>
+        <text x="729" y="76" font-family="'IBM Plex Mono', monospace" font-size="11"
+              fill="rgba(42,46,51,0.6)">+9.1%</text>
+        <!-- подписи оси X -->
+        <g font-family="'IBM Plex Mono', monospace" font-size="8" fill="rgba(42,46,51,0.5)" text-anchor="middle">
+          <text x="50"  y="167">Июн</text>
+          <text x="111" y="167">Июл</text>
+          <text x="172" y="167">Авг</text>
+          <text x="233" y="167">Сен</text>
+          <text x="294" y="167">Окт</text>
+          <text x="355" y="167">Ноя</text>
+          <text x="415" y="167">Дек</text>
+          <text x="476" y="167">Янв</text>
+          <text x="537" y="167">Фев</text>
+          <text x="598" y="167">Мар</text>
+          <text x="659" y="167">Апр</text>
+          <text x="720" y="167">Май</text>
+        </g>
+      </svg>
     </div>
   </div>
 
-  <!-- ════ C. STRESS SCENARIOS ════ -->
-  <div class="d3-block">
-    <div class="d3-block-head">
-      <div class="panel-title">Стресс-сценарии — реакция портфеля на гипотетические шоки</div>
-      <div class="d3-block-sub">Параметрические шоки факторов (ΔPnL = w′·B·shock) ·
-        горизонт 1 квартал · runtime из <code style="font-family:var(--font-mono);
-        font-size:9px; background:var(--tech-blue-08); color:var(--tech-blue);
-        padding:1px 4px; border-radius:2px;">data.stress_scenarios</code> [Step 2]
-        <span class="src">[Quant Engine]</span></div>
+  <div class="pr-card">
+    <div class="pr-row pr-head">
+      <span>Период</span>
+      <span class="num">Портфель</span>
+      <span class="num">S&amp;P 500</span>
+      <span class="num">Опережение</span>
     </div>
-
-    <table class="stress-table">
-      <thead>
-        <tr>
-          <th class="scenario-col">Сценарий</th>
-          <th>Δ Портфель, %</th>
-          <th>Δ Стоимость, $</th>
-          <th class="impact-col">Магнитуда</th>
-          <th>Drawdown, %</th>
-          <th>Восстановление</th>
-        </tr>
-      </thead>
-      <tbody>
-        
-        
-          
-          
-          
-          
-          
-          
-          
-        <tr>
-          <td class="scenario-col">Equity DM −20% · <span style="color:var(--ink-60); font-size:9px;">Tech sell-off</span></td>
-          <td><span class="impact-val neg">−15.8%</span></td>
-          <td><span class="impact-val neg">−$7 900</span></td>
-          <td class="impact-cell"><div class="impact-bar"><span class="impact-fill neg" style="right:50%; width:39.5%;"></span></div></td>
-          <td><span class="impact-val neg">−22.0%</span></td>
-          <td>6 мес</td>
-        </tr>
-        
-          
-          
-          
-          
-          
-          
-          
-        <tr>
-          <td class="scenario-col">Equity EM −25% · <span style="color:var(--ink-60); font-size:9px;">EM rout</span></td>
-          <td><span class="impact-val neg">−7.5%</span></td>
-          <td><span class="impact-val neg">−$3 750</span></td>
-          <td class="impact-cell"><div class="impact-bar"><span class="impact-fill neg" style="right:50%; width:18.8%;"></span></div></td>
-          <td><span class="impact-val neg">−11.0%</span></td>
-          <td>4 мес</td>
-        </tr>
-        
-          
-          
-          
-          
-          
-          
-          
-        <tr>
-          <td class="scenario-col">Rates +100 bp · <span style="color:var(--ink-60); font-size:9px;">Duration shock</span></td>
-          <td><span class="impact-val neg">−3.8%</span></td>
-          <td><span class="impact-val neg">−$1 900</span></td>
-          <td class="impact-cell"><div class="impact-bar"><span class="impact-fill neg" style="right:50%; width:9.5%;"></span></div></td>
-          <td><span class="impact-val neg">−6.2%</span></td>
-          <td>3 мес</td>
-        </tr>
-        
-          
-          
-          
-          
-          
-          
-          
-        <tr>
-          <td class="scenario-col">HY Credit +200bp · <span style="color:var(--ink-60); font-size:9px;">Credit widening</span></td>
-          <td><span class="impact-val neg">−2.8%</span></td>
-          <td><span class="impact-val neg">−$1 400</span></td>
-          <td class="impact-cell"><div class="impact-bar"><span class="impact-fill neg" style="right:50%; width:7.0%;"></span></div></td>
-          <td><span class="impact-val neg">−4.4%</span></td>
-          <td>3 мес</td>
-        </tr>
-        
-          
-          
-          
-          
-          
-          
-          
-        <tr>
-          <td class="scenario-col">USD +10% (proxy) · <span style="color:var(--ink-60); font-size:9px;">DXY rally</span></td>
-          <td><span class="impact-val pos">+1.2%</span></td>
-          <td><span class="impact-val pos">+$600</span></td>
-          <td class="impact-cell"><div class="impact-bar"><span class="impact-fill pos" style="left:50%; width:3.0%;"></span></div></td>
-          <td><span class="impact-val neg">−1.8%</span></td>
-          <td>2 мес</td>
-        </tr>
-        
-          
-          
-          
-          
-          
-          
-          
-        <tr>
-          <td class="scenario-col">Oil −30% · <span style="color:var(--ink-60); font-size:9px;">Energy drawdown</span></td>
-          <td><span class="impact-val neg">−1.4%</span></td>
-          <td><span class="impact-val neg">−$700</span></td>
-          <td class="impact-cell"><div class="impact-bar"><span class="impact-fill neg" style="right:50%; width:3.5%;"></span></div></td>
-          <td><span class="impact-val neg">−2.5%</span></td>
-          <td>2 мес</td>
-        </tr>
-        
-          
-          
-          
-          
-          
-          
-          
-        <tr>
-          <td class="scenario-col">CPI +1pp (proxy) · <span style="color:var(--ink-60); font-size:9px;">Inflation surprise</span></td>
-          <td><span class="impact-val neg">−2.2%</span></td>
-          <td><span class="impact-val neg">−$1 100</span></td>
-          <td class="impact-cell"><div class="impact-bar"><span class="impact-fill neg" style="right:50%; width:5.5%;"></span></div></td>
-          <td><span class="impact-val neg">−3.8%</span></td>
-          <td>3 мес</td>
-        </tr>
-        
-      </tbody>
-    </table>
-    <div style="margin-top:6px; font-size:9px; color:var(--ink-60);">
-      Магнитуда нормирована к ±20%. Drawdown — пиковая просадка внутри квартала
-      при реализации сценария.
+    <div class="pr-row">
+      <span class="pr-period">1 месяц</span>
+      <span class="num"><span class="pr-cell-label">Портфель</span><span class="pos">+2.0%</span></span>
+      <span class="num"><span class="pr-cell-label">S&amp;P 500</span>+1.4%</span>
+      <span class="num"><span class="pr-cell-label">Опереж.</span><span class="blue">+0.6 пп</span></span>
     </div>
+    <div class="pr-row">
+      <span class="pr-period">3 месяца</span>
+      <span class="num"><span class="pr-cell-label">Портфель</span><span class="pos">+5.5%</span></span>
+      <span class="num"><span class="pr-cell-label">S&amp;P 500</span>+3.6%</span>
+      <span class="num"><span class="pr-cell-label">Опереж.</span><span class="blue">+1.9 пп</span></span>
+    </div>
+    <div class="pr-row">
+      <span class="pr-period">YTD</span>
+      <span class="num"><span class="pr-cell-label">Портфель</span><span class="pos">+7.1%</span></span>
+      <span class="num"><span class="pr-cell-label">S&amp;P 500</span>+4.4%</span>
+      <span class="num"><span class="pr-cell-label">Опереж.</span><span class="blue">+2.7 пп</span></span>
+    </div>
+    <div class="pr-row">
+      <span class="pr-period">6 месяцев</span>
+      <span class="num"><span class="pr-cell-label">Портфель</span><span class="pos">+9.4%</span></span>
+      <span class="num"><span class="pr-cell-label">S&amp;P 500</span>+6.0%</span>
+      <span class="num"><span class="pr-cell-label">Опереж.</span><span class="blue">+3.4 пп</span></span>
+    </div>
+    <div class="pr-row">
+      <span class="pr-period">12 месяцев</span>
+      <span class="num"><span class="pr-cell-label">Портфель</span><span class="pos">+14.2%</span></span>
+      <span class="num"><span class="pr-cell-label">S&amp;P 500</span>+9.1%</span>
+      <span class="num"><span class="pr-cell-label">Опереж.</span><span class="blue">+5.1 пп</span></span>
+    </div>
+  </div><!-- /.pr-card -->
 
-    <div class="conc-ai" style="margin-top:12px;">
-      <div class="ai-head">[ 🤖 AI_ANALYSIS // HAIKU ]</div>
-      <div class="ai-body">
-        «Худшие сценарии для вас — <span class="flag">tech sell-off (−9.3%)</span> и
-        <span class="flag">геополитический риск-офф (−8.1%)</span>: оба бьют именно по
-        Momentum-перевесу. Хорошая новость — стресс не превышает реализованный
-        Max&nbsp;Drawdown (−12.8%): портфель остаётся в рамках вашего «болевого потолка».
-        Защита от Fed-сюрпризов слабая — стоит подумать о коротком DUR-хедже.
-        <span class="src">[Quant Engine]</span>»
-      </div>
+  </div><!-- /.gv-main -->
+
+  <!-- СВОДНЫЙ AI-БЛОК -->
+  <div class="sec-ai">
+    <div class="ai-head">[ 🤖 AI_ANALYSIS // HAIKU ]</div>
+    <div class="ai-body">
+      <p>«Простыми словами: за год портфель обошёл рынок на
+      <span class="flag-inline">+5.1 пункта</span> — и опережение есть на всех
+      отрезках, от месяца до года. Это хороший результат.</p>
+
+      <p>Но важно понимать, чем он куплен: рост дали в основном технологии —
+      PLTR, NVDA, MSFT. Те же бумаги делают портфель более «качающимся», чем
+      рынок (волатильность 14.8% против 11.2%). Goldman Sachs предупреждает: в
+      коррекцию перевес в IT так же быстро превращает опережение в отставание
+      <span class="src-inline">[RAG: GS_Q2_2026]</span>, а Morgan Stanley прямо
+      советует фиксировать часть прибыли в перегретых техах
+      <span class="src-inline">[RAG: MS_TechOutlook_2026]</span>. Идеи, что с
+      этим делать — на странице «Идеи ИИ».»</p>
+    </div>
+    <div class="ai-sources">
+      ИСТОЧНИКИ — ОТЧЁТЫ ИНВЕСТБАНКОВ:
+      <b>Goldman Sachs</b> «Q2 2026 Market Outlook» ·
+      <b>Morgan Stanley</b> «Technology Sector Outlook 2026»
     </div>
   </div>
 
 
 </div>
 
-<!-- ══════════════════════════ СТРАНИЦА 4 ══════════════════════════════ -->
 <div class="sheet">
 
   <!-- ТЕХ-ХЕДЕР -->
   <div class="tech-header">
-    <span><b>PORTFOLIO RISK REPORT</b> // TIER: DEEP // ID: Usample // RISK_ENGINE: MAC3</span>
-    <span class="ts">PAGE 4 OF 5</span>
+    <span><b>PORTFOLIO RISK REPORT</b> // TIER: BASE // ID: Usample // RISK_ENGINE: MAC3</span>
+    <span class="ts">PAGE 4 OF 4</span>
   </div>
 
   <!-- ЗАГОЛОВОК СЕКЦИИ -->
   <div class="sec-head">
-    <div class="sec-title">Action Plan · Ожидаемый эффект · CoVe</div>
-    <div class="sec-sub">конкретные шаги, изменения риск-показателей и проверка источников · <b style="color:var(--tech-blue);">[DEEP]</b></div>
+    <div class="sec-title">Идеи ИИ</div>
+    <div class="sec-sub">4 идеи на основе данных портфеля, отчётности SEC и обзоров инвестбанков · нажмите на карточку, чтобы раскрыть детали</div>
   </div>
 
-  <!-- ════ A. ACTION PLAN — уровни Buy / Sell / Stop ════ -->
-  <div class="d3-block">
-    <div class="d3-block-head">
-      <div class="panel-title">Action Plan — уровни Buy / Sell / Stop</div>
-      <div class="d3-block-sub">ATR (Wilder RMA) · SMA50/200 · RSI(14) · MACD(12,26,9) ·
-        без внешних таргет-прайсов
-        <span class="src">[Quant Engine]</span></div>
+  <!-- ВВОДНЫЙ AI-БЛОК -->
+  <div class="sec-ai">
+    <div class="ai-head">[ 🤖 AI_ANALYSIS // HAIKU ]</div>
+    <div class="ai-body">
+      «Главная мысль одной строкой: портфель зарабатывает, но риск собран в
+      одном углу — <span class="flag-inline">62% в технологиях</span>. Идеи ниже
+      — про то, как сохранить рост и при этом сделать портфель устойчивее к
+      просадке. Каждая идея отсортирована по приоритету и снабжена источником.»
     </div>
-
-    <table class="action-table">
-      <thead>
-        <tr>
-          <th class="l">Тикер</th>
-          <th class="l">Action</th>
-          <th>Цена</th>
-          <th>Buy zone</th>
-          <th>Sell target</th>
-          <th>Stop loss</th>
-          <th colspan="2" class="l">Причина</th>
-        </tr>
-      </thead>
-      <tbody>
-        
-        
-          
-          
-          
-          
-        <tr>
-          <td class="l"><span class="ticker">AAPL</span></td>
-          <td class="l"><span class="badge act-trim">SELL 25%</span></td>
-          <td>$197.40</td>
-          <td>$182–188</td>
-          <td class="level-pos">$215</td>
-          <td class="level-neg">$175</td>
-          <td colspan="2" class="l reason">HOTSPOT 24% риска; фиксируем часть прибыли (+25%)</td>
-        </tr>
-        
-          
-          
-          
-          
-        <tr>
-          <td class="l"><span class="ticker">KSPI</span></td>
-          <td class="l"><span class="badge act-trim">REDUCE 50%</span></td>
-          <td>₸123.50</td>
-          <td>₸115–119</td>
-          <td class="level-pos">₸140</td>
-          <td class="level-neg">₸108</td>
-          <td colspan="2" class="l reason">TRC 22% при просадке −16.7% — концентрация выше порога</td>
-        </tr>
-        
-          
-          
-          
-        <tr>
-          <td class="l"><span class="ticker">BND</span></td>
-          <td class="l"><span class="badge act-hold">HOLD</span></td>
-          <td>$72.18</td>
-          <td>$71–73</td>
-          <td class="level-pos">$76</td>
-          <td class="level-neg">$69</td>
-          <td colspan="2" class="l reason">Hedge против rate shock; держим вес 20%</td>
-        </tr>
-        
-      </tbody>
-    </table>
   </div>
 
-  <!-- ════ B. ОЖИДАЕМЫЙ ЭФФЕКТ НА РИСК-ПОКАЗАТЕЛИ ════ -->
-  <div class="d3-block">
-    <div class="d3-block-head">
-      <div class="panel-title">Ожидаемый эффект на риск-показатели портфеля</div>
-      <div class="d3-block-sub">оценка «до / после» при исполнении Action Plan ·
-        BL target weights · runtime из <code style="font-family:var(--font-mono);
-        font-size:9px; background:var(--tech-blue-08); color:var(--tech-blue);
-        padding:1px 4px; border-radius:2px;">data.expected_effect</code> [Step 3]
-        ·  горизонт 1 квартал
-        <span class="src">[Quant Engine]</span></div>
-    </div>
+  <!-- СЕТКА ИДЕЙ -->
+  <div class="ideas-grid">
 
-    
-    
-    
-    <div class="effect-grid">
-      <div class="effect-card">
-          <div class="ef-name">Индекс риска</div>
-          <div class="ef-row">
-            <span class="ef-before">62</span>
-            <span class="ef-arrow">→</span>
-            <span class="ef-after">54</span>
-          </div>
-          <div class="ef-delta pos">-8.0 пунктов</div>
+    <!-- ИДЕЯ 1 -->
+    <div class="idea-card risk">
+      <div class="idea-head" onclick="tgIdea(this)">
+        <div class="idea-top">
+          <span class="idea-cat">Снижение риска</span>
+          <span class="idea-prio high">Высокий приоритет</span>
         </div>
-      <div class="effect-card">
-          <div class="ef-name">CVaR 95%</div>
-          <div class="ef-row">
-            <span class="ef-before">-5.2%</span>
-            <span class="ef-arrow">→</span>
-            <span class="ef-after">-4.1%</span>
-          </div>
-          <div class="ef-delta pos">+1.1 пп</div>
+        <div class="idea-num">ИДЕЯ 01</div>
+        <div class="idea-title">Сократить долю PLTR с 18% до ~12%</div>
+        <div class="idea-why">
+          PLTR помечен <b>HOTSPOT</b> — одна бумага даёт 24% всего риска
+          портфеля. Morgan Stanley советует фиксировать прибыль в перегретых
+          техах, а позиция сейчас в плюсе <b>+32%</b> — есть что зафиксировать
+          без убытка.
         </div>
-      <div class="effect-card">
-          <div class="ef-name">Sharpe Ratio</div>
-          <div class="ef-row">
-            <span class="ef-before">1.18</span>
-            <span class="ef-arrow">→</span>
-            <span class="ef-after">1.32</span>
+        <div class="idea-swap">
+          <div class="swap-label">Идеи по замене — нет в портфеле</div>
+          <div class="swap-tickers">
+            <span class="tk-chip">TXN</span>
+            <span class="tk-chip">CSCO</span>
+            <span class="tk-chip">ACN</span>
           </div>
-          <div class="ef-delta pos">+0.1 пп</div>
-        </div>
-      <div class="effect-card">
-          <div class="ef-name">Max Drawdown (модель)</div>
-          <div class="ef-row">
-            <span class="ef-before">-12.8%</span>
-            <span class="ef-arrow">→</span>
-            <span class="ef-after">-10.4%</span>
+          <div class="swap-note">
+            Бумаги выше — не из вашего портфеля: ИИ подбирает их под смысл идеи,
+            с лучшим балансом риска и качества.
+            <span class="expand-hint">Разверните карточку — внутри разбор, почему выбран именно этот список.</span>
           </div>
-          <div class="ef-delta pos">+2.4 пп</div>
         </div>
-      <div class="effect-card">
-          <div class="ef-name">Волатильность (год.)</div>
-          <div class="ef-row">
-            <span class="ef-before">+14.8%</span>
-            <span class="ef-arrow">→</span>
-            <span class="ef-after">+12.6%</span>
-          </div>
-          <div class="ef-delta pos">-2.2 пп</div>
+        <div class="idea-toggle">
+          <span class="idea-caret">▸</span>
+          <span class="t-more">Развернуть детали идеи</span>
+          <span class="t-less">Свернуть детали</span>
         </div>
-      <div class="effect-card">
-          <div class="ef-name">Max TRC (одной позиции)</div>
-          <div class="ef-row">
-            <span class="ef-before">+24.4%</span>
-            <span class="ef-arrow">→</span>
-            <span class="ef-after">+16.8%</span>
-          </div>
-          <div class="ef-delta pos">-7.6 пп</div>
-        </div>
-      <div class="effect-card">
-          <div class="ef-name">Доля IT-сектора</div>
-          <div class="ef-row">
-            <span class="ef-before">+62.0%</span>
-            <span class="ef-arrow">→</span>
-            <span class="ef-after">+50.0%</span>
-          </div>
-          <div class="ef-delta pos">-12.0 пп</div>
-        </div>
-      <div class="effect-card">
-          <div class="ef-name">Ожид. доходность (год.)</div>
-          <div class="ef-row">
-            <span class="ef-before">+14.2%</span>
-            <span class="ef-arrow">→</span>
-            <span class="ef-after">+12.6%</span>
-          </div>
-          <div class="ef-delta neg">-1.6 пп</div>
-        </div>
-    </div>
-
-    <div class="conc-ai" style="margin-top:12px;">
-      <div class="ai-head">[ 🤖 AI_ANALYSIS // HAIKU ]</div>
-      <div class="ai-body">
-        «Чистый эффект — индекс риска уходит с 62 в середину «умеренной» зоны (54),
-        исчезает HOTSPOT-перегрев одной бумаги, Sharpe растёт до
-        <span class="flag">1.32</span> — портфель становится эффективнее. Плата за это —
-        ≈ 1.6 пп ожидаемой доходности, но это типичный «обмен» при ребалансировке
-        в late-cycle. Goldman&nbsp;Sachs и JPMorgan
-        <span class="src">[RAG: GS_Q2_2026 · JPM_Strategy_Q2_2026]</span> поддерживают
-        такую конфигурацию.»
       </div>
-    </div>
-  </div>
-
-  <!-- ════ C. CoVe — ВЕРИФИКАЦИЯ ИСТОЧНИКОВ ════ -->
-  <div class="d3-block">
-    <div class="d3-block-head">
-      <div class="panel-title">CoVe — Chain-of-Verification источников данных</div>
-      <div class="d3-block-sub">каждый показатель прослеживается до первичного источника
-        с указанием метода расчёта и QualityGate-статуса · список собирается
-        runtime из <code style="font-family:var(--font-mono); font-size:9px;
-        background:var(--tech-blue-08); color:var(--tech-blue);
-        padding:1px 4px; border-radius:2px;">data.cove_lineage</code> [Step 5]</div>
-    </div>
-
-    
-    <div class="cove-grid">
-      
-        
-        
-        
-        <div class="cove-item ">
-          <span class="cove-check">✓</span>
-          <span class="cove-body"><b>Vol · CVaR · TE · IR · Max DD</b><br>
-            <span class="cove-meta">
-              Quant Engine MAC3 · Wilder RMA · EWMA λ≈0.94 ⊕ Ledoit-Wolf 70/30 · Politis-Romano bootstrap CI
-            </span>
-          </span>
-        </div>
-      
-        
-        
-        
-        <div class="cove-item ">
-          <span class="cove-check">✓</span>
-          <span class="cove-body"><b>TRC (Euler decomposition) · MCTR · CVaR</b><br>
-            <span class="cove-meta">
-              Quant Engine MAC3 · MCTR = Σw/σ_p · ERC%_i = w_i·MCTR_i/σ_p
-            </span>
-          </span>
-        </div>
-      
-        
-        
-        
-        <div class="cove-item fail">
-          <span class="cove-check">✗</span>
-          <span class="cove-body"><b>Цены и история активов</b><br>
-            <span class="cove-meta">
-              Tradernet (Freedom Broker) · Daily CLOSE · 730d window · no price data loaded
-            </span>
-          </span>
-        </div>
-      
-        
-        
-        
-        <div class="cove-item ">
-          <span class="cove-check">✓</span>
-          <span class="cove-body"><b>Fundamental Z-scores</b><br>
-            <span class="cove-meta">
-              SEC EDGAR CompanyFacts · 10-K FY · sector-normalised MAD · Group B factors
-            </span>
-          </span>
-        </div>
-      
-        
-        
-        
-        <div class="cove-item ">
-          <span class="cove-check">✓</span>
-          <span class="cove-body"><b>Altman-Z · Piotroski-F · Interest Coverage</b><br>
-            <span class="cove-meta">
-              SEC EDGAR CompanyFacts · разностный расчёт по балансу и P&amp;L (annual filings)
-            </span>
-          </span>
-        </div>
-      
-        
-        
-        
-        <div class="cove-item fail">
-          <span class="cove-check">✗</span>
-          <span class="cove-body"><b>CDS spreads (credit signal)</b><br>
-            <span class="cove-meta">
-              FRED HY proxy + WGB sovereign · QualityGate: sanity 1–3000 bps · ≤ 3 trading days · no CDS summary attached
-            </span>
-          </span>
-        </div>
-      
-        
-        
-        
-        <div class="cove-item fail">
-          <span class="cove-check">✗</span>
-          <span class="cove-body"><b>Action levels (Buy / Sell / Stop)</b><br>
-            <span class="cove-meta">
-              Quant Engine · ATR Wilder RMA + SMA50/200 + RSI(14) + MACD(12,26,9) · action plan not computed for this run
-            </span>
-          </span>
-        </div>
-      
-        
-        
-        
-        <div class="cove-item fail">
-          <span class="cove-check">✗</span>
-          <span class="cove-body"><b>Black-Litterman target weights</b><br>
-            <span class="cove-meta">
-              Quant Engine · Reverse-optimisation prior + score-derived views · BL skipped (no scores / empty cov)
-            </span>
-          </span>
-        </div>
-      
-        
-        
-        
-        <div class="cove-item fail">
-          <span class="cove-check">✗</span>
-          <span class="cove-body"><b>Регим-классификатор</b><br>
-            <span class="cove-meta">
-              Quant Engine · Growth × Cycle factor returns · 60-day window
-            </span>
-          </span>
-        </div>
-      
-        
-        
-        
-        <div class="cove-item fail">
-          <span class="cove-check">✗</span>
-          <span class="cove-body"><b>Стресс-сценарии</b><br>
-            <span class="cove-meta">
-              Quant Engine · parametric factor shocks · per-asset β · linear PnL
-            </span>
-          </span>
-        </div>
-      
-        
-        
-        
-        <div class="cove-item fail">
-          <span class="cove-check">✗</span>
-          <span class="cove-body"><b>Макро-драйверы (FRED)</b><br>
-            <span class="cove-meta">
-              FRED St. Louis Fed · yield curve · HY spread · PMI · VIX · breakeven · FRED_API_KEY not set (see .env.template)
-            </span>
-          </span>
-        </div>
-      
-        
-        
-        
-        <div class="cove-item fail">
-          <span class="cove-check">✗</span>
-          <span class="cove-body"><b>Bank RAG (выдержки)</b><br>
-            <span class="cove-meta">
-              ChromaDB · GS / MS / JPM PDF reports · cosine similarity retrieval · RAG not requested / not available
-            </span>
-          </span>
-        </div>
-      
-        
-        
-        
-        <div class="cove-item ">
-          <span class="cove-check">✓</span>
-          <span class="cove-body"><b>AI verdict · bullets</b><br>
-            <span class="cove-meta">
-              Anthropic Claude  · advisory only; verdict + plain summary + bullets · не является ИИИ
-            </span>
-          </span>
-        </div>
-      
-    </div>
-    <div style="margin-top:10px; font-size:9px; color:var(--ink-60); line-height:1.5;">
-      <b style="color:var(--ink);">✓</b> — данные прошли QualityGate ·
-      <b style="color:var(--amber);">!</b> — частичное покрытие или fallback на устаревший кэш ·
-      <b style="color:var(--neg);">✗</b> — источник недоступен.
-      Документ не является ИИИ — только аналитическая рекомендация.
-    </div>
-  </div>
-
-
-</div>
-
-<!-- ══════════════════════════ СТРАНИЦА 5 ══════════════════════════════ -->
-<div class="sheet">
-
-  <!-- ТЕХ-ХЕДЕР -->
-  <div class="tech-header">
-    <span><b>PORTFOLIO RISK REPORT</b> // TIER: DEEP // ID: Usample // RISK_ENGINE: MAC3</span>
-    <span class="ts">PAGE 5 OF 5</span>
-  </div>
-
-  <!-- ЗАГОЛОВОК СЕКЦИИ -->
-  <div class="sec-head">
-    <div class="sec-title">Рыночный режим</div>
-    <div class="sec-sub">в какой фазе мы находимся, какие сигналы это подтверждают и что это значит для портфеля · <b style="color:var(--tech-blue);">[DEEP]</b></div>
-  </div>
-
-  <!-- ════ A. КВАДРАНТ РЕЖИМА + СВОДНАЯ ════ -->
-  <div class="d3-block">
-    <div class="d3-block-head">
-      <div class="panel-title">Текущий режим и его координаты</div>
-      <div class="d3-block-sub">Growth × Cycle факторные returns · окно 60 дней ·
-        квадранты Expansion / Recovery / Slowdown / Recession (см. <code style="font-family:var(--font-mono);
-        font-size:9px; background:var(--tech-blue-08); color:var(--tech-blue);
-        padding:1px 4px; border-radius:2px;">finance/regime.py</code>)
-        <span class="src">[Quant Engine]</span></div>
-    </div>
-
-    <div class="regime-layout">
-      <!-- Quadrant SVG -->
-      <div class="regime-quadrant">
-        <svg class="reg-quadrant-svg" viewBox="0 0 320 280" xmlns="http://www.w3.org/2000/svg"
-             role="img" aria-label="Квадрант рыночного режима: Growth × Cycle">
-          <defs>
-            <!-- Цветовая семантика:                                       -->
-            <!--   Expansion = синий  (здоровый рост — наша целевая фаза)  -->
-            <!--   Recovery  = зелёный (выход из дна, growth↑ cycle↓)      -->
-            <!--   Slowdown  = амбер  (охлаждение, growth↓ cycle↑)         -->
-            <!--   Recession = красный (двойное падение growth↓ cycle↓)    -->
-            <linearGradient id="qSlowdown" x1="0" y1="1" x2="1" y2="0">
-              <stop offset="0%"   stop-color="#D9A03B" stop-opacity="0.18"/>
-              <stop offset="100%" stop-color="#D9A03B" stop-opacity="0.04"/>
-            </linearGradient>
-            <linearGradient id="qExpansion" x1="0" y1="1" x2="1" y2="0">
-              <stop offset="0%"   stop-color="#3E83C9" stop-opacity="0.20"/>
-              <stop offset="100%" stop-color="#3E83C9" stop-opacity="0.04"/>
-            </linearGradient>
-            <linearGradient id="qRecession" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0%"   stop-color="#D85C42" stop-opacity="0.16"/>
-              <stop offset="100%" stop-color="#D85C42" stop-opacity="0.03"/>
-            </linearGradient>
-            <linearGradient id="qRecovery" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0%"   stop-color="#4FAA72" stop-opacity="0.18"/>
-              <stop offset="100%" stop-color="#4FAA72" stop-opacity="0.04"/>
-            </linearGradient>
-            <radialGradient id="regDot" cx="35%" cy="30%" r="80%">
-              <stop offset="0%"   stop-color="#FFFFFF"/>
-              <stop offset="55%"  stop-color="#3E83C9"/>
-              <stop offset="100%" stop-color="#23588F"/>
-            </radialGradient>
-            <filter id="regDotShadow" x="-50%" y="-50%" width="200%" height="200%">
-              <feDropShadow dx="0" dy="1.6" stdDeviation="1.4" flood-opacity="0.35"/>
-            </filter>
-          </defs>
-
-          <!-- 4 квадранта -->
-          <rect x="30"  y="30"  width="125" height="125" fill="url(#qRecovery)"/>
-          <rect x="155" y="30"  width="125" height="125" fill="url(#qExpansion)"/>
-          <rect x="30"  y="155" width="125" height="125" fill="url(#qRecession)"/>
-          <rect x="155" y="155" width="125" height="125" fill="url(#qSlowdown)"/>
-          <!-- внутренние подписи квадрантов (синхронизировано с finance/regime.py) -->
-          <!--   top-left  (Growth↑, Cycle↓): RECOVERY                              -->
-          <!--   top-right (Growth↑, Cycle↑): EXPANSION                             -->
-          <!--   bot-left  (Growth↓, Cycle↓): RECESSION                             -->
-          <!--   bot-right (Growth↓, Cycle↑): SLOWDOWN                              -->
-          <g font-family="IBM Plex Mono" font-size="9" fill="rgba(42,46,51,0.55)" font-weight="600" letter-spacing="0.05em">
-            <text x="92.5"  y="50">RECOVERY</text>
-            <text x="217.5" y="50">EXPANSION</text>
-            <text x="92.5"  y="275">RECESSION</text>
-            <text x="217.5" y="275">SLOWDOWN</text>
-          </g>
-
-          <!-- оси (центральный крест) -->
-          <line x1="155" y1="30"  x2="155" y2="280" stroke="rgba(42,46,51,0.35)" stroke-width="0.6"/>
-          <line x1="30"  y1="155" x2="280" y2="155" stroke="rgba(42,46,51,0.35)" stroke-width="0.6"/>
-
-          <!-- сетка -->
-          <g stroke="rgba(42,46,51,0.10)" stroke-width="0.5" stroke-dasharray="2 3">
-            <line x1="30"  y1="92.5"  x2="280" y2="92.5"/>
-            <line x1="30"  y1="217.5" x2="280" y2="217.5"/>
-            <line x1="92.5"  y1="30"  x2="92.5"  y2="280"/>
-            <line x1="217.5" y1="30"  x2="217.5" y2="280"/>
-          </g>
-
-          <!-- подписи осей -->
-          <g font-family="IBM Plex Mono" font-size="9.5" fill="rgba(42,46,51,0.70)" font-weight="600">
-            <text x="285" y="158">→ Cycle ↑</text>
-            <text x="155" y="22"  text-anchor="middle">↑ Growth</text>
-          </g>
-          <g font-family="IBM Plex Mono" font-size="8" fill="rgba(42,46,51,0.45)">
-            <text x="160" y="45">+0.2</text>
-            <text x="160" y="270">−0.2</text>
-            <text x="40"  y="158">−0.2</text>
-            <text x="255" y="158">+0.2</text>
-            <text x="158" y="165" text-anchor="start">0</text>
-          </g>
-
-          <!-- траектория последних 6 точек (90 дней) — путь через Recession → -->
-          <!-- Recovery → Expansion.  Координаты согласованы с шкалой:         -->
-          <!--   100 px ≈ 0.2 (см. метки +0.2 / −0.2 выше)                     -->
-          <polyline points="118,210 138,192 152,170 162,148 170,128 177,110"
-                    fill="none" stroke="rgba(42,46,51,0.30)" stroke-width="1"
-                    stroke-dasharray="3 2" stroke-linecap="round"/>
-          <g fill="rgba(42,46,51,0.45)">
-            <circle cx="118" cy="210" r="1.6"/>
-            <circle cx="138" cy="192" r="1.6"/>
-            <circle cx="152" cy="170" r="1.6"/>
-            <circle cx="162" cy="148" r="1.6"/>
-            <circle cx="170" cy="128" r="1.6"/>
-          </g>
-          <!-- актуальная точка: большая капля.  Координаты (177, 110) =        -->
-          <!-- Growth +0.08 (40 px выше центра), Cycle +0.04 (22 px правее).    -->
-          <circle cx="177" cy="110" r="14" fill="#3E83C9" fill-opacity="0.18"/>
-          <circle cx="177" cy="110" r="8"  fill="url(#regDot)" filter="url(#regDotShadow)"/>
-          <text x="193" y="106" font-family="IBM Plex Mono" font-size="9.5"
-                font-weight="600" fill="#23588F">сейчас</text>
-          <text x="193" y="118" font-family="IBM Plex Mono" font-size="8.5"
-                fill="rgba(42,46,51,0.6)">Growth +0.08 · Cycle +0.04</text>
-        </svg>
-      </div>
-
-      <!-- Сводная по режиму -->
-      
-      
-      <div class="regime-summary">
-        <div class="block-label" style="font-size:9px; margin-bottom:6px;">Текущий режим</div>
-        <div class="reg-name">Expansion (late)</div>
-        <div class="reg-conf">Уверенность модели <b>72%</b> · 3 подтверждающ. сигнал(ов)</div>
-
-        <div class="reg-factors">
-          
-          
-          <div class="reg-f">
-            <span class="reg-f-name">Growth-фактор</span>
-            <span class="reg-f-val pos">+0.08</span>
-            <span class="reg-f-note">здоровый рост</span>
+      <div class="idea-detail">
+        <div class="idea-pipeline">
+          <div class="pl-label">Конвейер отбора · Factor → Regime → RAG</div>
+          <div class="pl-flow">
+            <div class="pl-stage">
+              <div class="pl-stage-name">FACTOR</div>
+              <div class="pl-stage-text">PLTR даёт 24% риска, HOTSPOT</div>
+            </div>
+            <div class="pl-sep">→</div>
+            <div class="pl-stage">
+              <div class="pl-stage-name">REGIME</div>
+              <div class="pl-stage-text">ждём роста волатильности в IT</div>
+            </div>
+            <div class="pl-sep">→</div>
+            <div class="pl-stage">
+              <div class="pl-stage-name">RAG</div>
+              <div class="pl-stage-text">Morgan Stanley: фиксировать прибыль</div>
+            </div>
           </div>
-          <div class="reg-f">
-            <span class="reg-f-name">Cycle-фактор</span>
-            <span class="reg-f-val pos">+0.04</span>
-            <span class="reg-f-note">слабая экспансия</span>
-          </div>
-          
-            
-          <div class="reg-f">
-            <span class="reg-f-name">Сигнал</span>
-            <span class="reg-f-val neut" style="font-size:9px; font-weight:500;">RAG</span>
-            <span class="reg-f-note">SPY обгоняет IEF на +4.1% за 60 дней (рост vs облигации)</span>
-          </div>
-            
-          <div class="reg-f">
-            <span class="reg-f-name">Discretionary &gt; Staples</span>
-            <span class="reg-f-val neut" style="font-size:9px; font-weight:500;">RAG</span>
-            <span class="reg-f-note">+2.8% за 60д (цикличные on)</span>
-          </div>
-            
-          
         </div>
-
-        
-        <div class="reg-signals">
-          <div class="reg-signals-label">Сигналы-драйверы ·
-            <span style="text-transform:none; font-weight:500; color:var(--tech-blue);">data.macro_drivers</span>
-             · as_of 2026-05-14</div>
-          
-          
-            
-            
-            
-            
-          <div class="reg-signal-row">
-            <span class="reg-signal-name">Yield curve 10Y−2Y · <span style="color:var(--ink-60); font-weight:400; font-size:8.5px;">положительный наклон — рецессия не сигналит</span></span>
-            <span class="reg-signal-val pos">+0.18 pp</span>
-            <span class="reg-signal-state bull">актуально</span>
+        <div class="cand-list">
+          <div class="cand-label">Почему именно эти бумаги — нет в портфеле</div>
+          <div class="cand">
+            <span class="cand-tk">TXN</span>
+            <span class="cand-body"><span class="cand-name">Texas Instruments</span> — стабильный производитель чипов, волатильность вдвое ниже PLTR.<br />
+              <span class="cand-scn">сценарий: спрос на качество в IT</span></span>
           </div>
-          
-            
-            
-            
-            
-          <div class="reg-signal-row">
-            <span class="reg-signal-name">HY OAS (ICE BofA) · <span style="color:var(--ink-60); font-weight:400; font-size:8.5px;">спреды узкие — рынок не закладывает кредитный риск</span></span>
-            <span class="reg-signal-val pos">312 bp</span>
-            <span class="reg-signal-state bull">актуально</span>
+          <div class="cand">
+            <span class="cand-tk">CSCO</span>
+            <span class="cand-body"><span class="cand-name">Cisco</span> — зрелый тех с дивидендом и низкой бетой.<br />
+              <span class="cand-scn">сценарий: ротация в защитный тех</span></span>
           </div>
-          
-            
-            
-            
-            
-          <div class="reg-signal-row">
-            <span class="reg-signal-name">ISM Manufacturing PMI · <span style="color:var(--ink-60); font-weight:400; font-size:8.5px;">чуть выше 50 — производство расширяется</span></span>
-            <span class="reg-signal-val pos">51.4</span>
-            <span class="reg-signal-state bull">актуально</span>
+          <div class="cand">
+            <span class="cand-tk">ACN</span>
+            <span class="cand-body"><span class="cand-name">Accenture</span> — IT-консалтинг с устойчивой выручкой, мягче в просадке.<br />
+              <span class="cand-scn">сценарий: замедление без рецессии</span></span>
           </div>
-          
-            
-            
-            
-            
-          <div class="reg-signal-row">
-            <span class="reg-signal-name">CBOE VIX · <span style="color:var(--ink-60); font-weight:400; font-size:8.5px;">низкая ожидаемая волатильность — комфортная зона</span></span>
-            <span class="reg-signal-val pos">14.2</span>
-            <span class="reg-signal-state bull">актуально</span>
+        </div>
+        <div class="idea-effect">
+          <div class="idea-effect-label">Ожидаемый эффект</div>
+          <div class="idea-effect-val">
+            Вклад PLTR в риск: 24.4% <span class="arrow">→</span> ~16%<br />
+            Доля IT-сектора: 62% <span class="arrow">→</span> ~56%
           </div>
-          
-            
-            
-            
-            
-          <div class="reg-signal-row">
-            <span class="reg-signal-name">10Y Breakeven Inflation · <span style="color:var(--ink-60); font-weight:400; font-size:8.5px;">инфляционные ожидания у цели ФРС 2%</span></span>
-            <span class="reg-signal-val pos">2.34%</span>
-            <span class="reg-signal-state bull">актуально</span>
-          </div>
-          
+        </div>
+        <div class="idea-src">
+          <span class="src-chip data">[Quant Engine]</span>
+          <span class="src-chip data">[SEC EDGAR]</span>
+          <span class="src-chip">[RAG: MS_TechOutlook_2026]</span>
         </div>
       </div>
     </div>
 
-    <div class="conc-ai" style="margin-top:14px;">
-      <div class="ai-head">[ 🤖 AI_ANALYSIS // HAIKU ]</div>
-      <div class="ai-body">
-        «Точка портфеля на квадранте — <span class="flag">правый верхний (Expansion),
-        но близко к границе со Slowdown</span>: Growth ещё положительный (+0.08),
-        Cycle слабый (+0.04), и earnings revisions уже остывают (0.92).
-        Типичная late-Expansion конфигурация: рост ещё есть, но защитные сектора
-        стоит наращивать заранее. Это объясняет TRIM PLTR и BUY JNJ/MSFT
-        в Action Plan на стр. 4.
-        <span class="src">[Quant Engine]</span>»
+    <!-- ИДЕЯ 2 -->
+    <div class="idea-card diversify">
+      <div class="idea-head" onclick="tgIdea(this)">
+        <div class="idea-top">
+          <span class="idea-cat">Диверсификация</span>
+          <span class="idea-prio high">Высокий приоритет</span>
+        </div>
+        <div class="idea-num">ИДЕЯ 02</div>
+        <div class="idea-title">Усилить защитные сектора — здравоохранение и товары</div>
+        <div class="idea-why">
+          6 из 9 бумаг — технологии. JPMorgan называет здравоохранение и
+          потребительские товары <b>«островками стабильности»</b> на случай
+          коррекции. У вас уже есть JNJ и KO с низкой бетой — их логично
+          нарастить за счёт высвобождаемого капитала.
+        </div>
+        <div class="idea-swap">
+          <div class="swap-label">Идеи по замене — нет в портфеле</div>
+          <div class="swap-tickers">
+            <span class="tk-chip">PG</span>
+            <span class="tk-chip">MRK</span>
+            <span class="tk-chip">PEP</span>
+          </div>
+          <div class="swap-note">
+            Бумаги выше — не из вашего портфеля: ИИ подбирает их под смысл идеи,
+            с лучшим балансом риска и качества.
+            <span class="expand-hint">Разверните карточку — внутри разбор, почему выбран именно этот список.</span>
+          </div>
+        </div>
+        <div class="idea-toggle">
+          <span class="idea-caret">▸</span>
+          <span class="t-more">Развернуть детали идеи</span>
+          <span class="t-less">Свернуть детали</span>
+        </div>
+      </div>
+      <div class="idea-detail">
+        <div class="idea-pipeline">
+          <div class="pl-label">Конвейер отбора · Factor → Regime → RAG</div>
+          <div class="pl-flow">
+            <div class="pl-stage">
+              <div class="pl-stage-name">FACTOR</div>
+              <div class="pl-stage-text">6 из 9 бумаг в IT, бета 1.18</div>
+            </div>
+            <div class="pl-sep">→</div>
+            <div class="pl-stage">
+              <div class="pl-stage-name">REGIME</div>
+              <div class="pl-stage-text">поздний цикл — спрос на защиту</div>
+            </div>
+            <div class="pl-sep">→</div>
+            <div class="pl-stage">
+              <div class="pl-stage-name">RAG</div>
+              <div class="pl-stage-text">JPMorgan: healthcare и staples устойчивы</div>
+            </div>
+          </div>
+        </div>
+        <div class="cand-list">
+          <div class="cand-label">Почему именно эти бумаги — нет в портфеле</div>
+          <div class="cand">
+            <span class="cand-tk">PG</span>
+            <span class="cand-body"><span class="cand-name">Procter &amp; Gamble</span> — потребтовары, очень низкая бета, стабильный денежный поток.<br />
+              <span class="cand-scn">сценарий: коррекция рынка</span></span>
+          </div>
+          <div class="cand">
+            <span class="cand-tk">MRK</span>
+            <span class="cand-body"><span class="cand-name">Merck</span> — крупная фарма, защитный сектор, недорогие мультипликаторы.<br />
+              <span class="cand-scn">сценарий: ротация в защиту</span></span>
+          </div>
+          <div class="cand">
+            <span class="cand-tk">PEP</span>
+            <span class="cand-body"><span class="cand-name">PepsiCo</span> — staples с дивидендом, слабая связь с IT.<br />
+              <span class="cand-scn">сценарий: рост волатильности</span></span>
+          </div>
+        </div>
+        <div class="idea-effect">
+          <div class="idea-effect-label">Ожидаемый эффект</div>
+          <div class="idea-effect-val">
+            Доля IT-сектора: 62% <span class="arrow">→</span> ~50%<br />
+            Бета портфеля: 1.18 <span class="arrow">→</span> ~1.05
+          </div>
+        </div>
+        <div class="idea-src">
+          <span class="src-chip data">[Quant Engine]</span>
+          <span class="src-chip">[RAG: JPM_Strategy_Q2_2026]</span>
+        </div>
       </div>
     </div>
+
+    <!-- ИДЕЯ 3 -->
+    <div class="idea-card rebalance">
+      <div class="idea-head" onclick="tgIdea(this)">
+        <div class="idea-top">
+          <span class="idea-cat">Ребалансировка</span>
+          <span class="idea-prio mid">Средний приоритет</span>
+        </div>
+        <div class="idea-num">ИДЕЯ 03</div>
+        <div class="idea-title">Сократить или закрыть позицию XOM</div>
+        <div class="idea-why">
+          Выручка Exxon снижается (<b>−6% г/г</b> по данным SEC), риск-движок
+          дал сигнал <b>Trim</b>, банки осторожны по энергетике при текущих
+          ценах на нефть. Позиция небольшая (6%) и сейчас в минусе — закрытие
+          почти не затронет доходность.
+        </div>
+        <div class="idea-swap">
+          <div class="swap-label">Идеи по замене — нет в портфеле</div>
+          <div class="swap-tickers">
+            <span class="tk-chip">NEE</span>
+            <span class="tk-chip">DUK</span>
+            <span class="tk-chip">SO</span>
+          </div>
+          <div class="swap-note">
+            Бумаги выше — не из вашего портфеля: ИИ подбирает их под смысл идеи,
+            с лучшим балансом риска и качества.
+            <span class="expand-hint">Разверните карточку — внутри разбор, почему выбран именно этот список.</span>
+          </div>
+        </div>
+        <div class="idea-toggle">
+          <span class="idea-caret">▸</span>
+          <span class="t-more">Развернуть детали идеи</span>
+          <span class="t-less">Свернуть детали</span>
+        </div>
+      </div>
+      <div class="idea-detail">
+        <div class="idea-pipeline">
+          <div class="pl-label">Конвейер отбора · Factor → Regime → RAG</div>
+          <div class="pl-flow">
+            <div class="pl-stage">
+              <div class="pl-stage-name">FACTOR</div>
+              <div class="pl-stage-text">выручка XOM −6% г/г, сигнал Trim</div>
+            </div>
+            <div class="pl-sep">→</div>
+            <div class="pl-stage">
+              <div class="pl-stage-name">REGIME</div>
+              <div class="pl-stage-text">слабый цикл в энергетике</div>
+            </div>
+            <div class="pl-sep">→</div>
+            <div class="pl-stage">
+              <div class="pl-stage-name">RAG</div>
+              <div class="pl-stage-text">банки осторожны по ценам на нефть</div>
+            </div>
+          </div>
+        </div>
+        <div class="cand-list">
+          <div class="cand-label">Почему именно эти бумаги — нет в портфеле</div>
+          <div class="cand">
+            <span class="cand-tk">NEE</span>
+            <span class="cand-body"><span class="cand-name">NextEra Energy</span> — коммунальщик и ВИЭ, стабильный спрос вместо цикличной нефти.<br />
+              <span class="cand-scn">сценарий: слабый цикл в энергетике</span></span>
+          </div>
+          <div class="cand">
+            <span class="cand-tk">DUK</span>
+            <span class="cand-body"><span class="cand-name">Duke Energy</span> — регулируемая коммуналка, предсказуемый доход.<br />
+              <span class="cand-scn">сценарий: уход от сырьевого риска</span></span>
+          </div>
+          <div class="cand">
+            <span class="cand-tk">SO</span>
+            <span class="cand-body"><span class="cand-name">Southern Company</span> — высокий дивиденд, низкая бета.<br />
+              <span class="cand-scn">сценарий: спрос на доходные защитные бумаги</span></span>
+          </div>
+        </div>
+        <div class="idea-effect">
+          <div class="idea-effect-label">Ожидаемый эффект</div>
+          <div class="idea-effect-val">
+            Высвобождает ~6% капитала<br />
+            под защитный блок (идея 02)
+          </div>
+        </div>
+        <div class="idea-src">
+          <span class="src-chip data">[SEC EDGAR]</span>
+          <span class="src-chip data">[Quant Engine]</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ИДЕЯ 4 -->
+    <div class="idea-card grow">
+      <div class="idea-head" onclick="tgIdea(this)">
+        <div class="idea-top">
+          <span class="idea-cat">Увеличение риска</span>
+          <span class="idea-prio mid">Средний приоритет</span>
+        </div>
+        <div class="idea-num">ИДЕЯ 04</div>
+        <div class="idea-title">Увеличить риск качественно — 3 бумаги вне портфеля</div>
+        <div class="idea-why">
+          Защитный блок в норме — есть запас, чтобы аккуратно добавить
+          доходности. Но наращивать риск стоит <b>через качество и новые
+          сектора</b>, а не через ещё больше того же IT. Кандидаты отобраны
+          конвейером Factor → Regime → RAG.
+        </div>
+        <div class="idea-swap">
+          <div class="swap-label">Идеи по замене — нет в портфеле</div>
+          <div class="swap-tickers">
+            <span class="tk-chip">GOOGL</span>
+            <span class="tk-chip">LLY</span>
+            <span class="tk-chip">V</span>
+          </div>
+          <div class="swap-note">
+            Бумаги выше — не из вашего портфеля: ИИ подбирает их под смысл идеи,
+            с лучшим балансом риска и качества.
+            <span class="expand-hint">Разверните карточку — внутри разбор, почему выбран именно этот список.</span>
+          </div>
+        </div>
+        <div class="idea-toggle">
+          <span class="idea-caret">▸</span>
+          <span class="t-more">Развернуть детали идеи</span>
+          <span class="t-less">Свернуть детали</span>
+        </div>
+      </div>
+      <div class="idea-detail">
+        <div class="idea-pipeline">
+          <div class="pl-label">Конвейер отбора · Factor → Regime → RAG</div>
+          <div class="pl-flow">
+            <div class="pl-stage">
+              <div class="pl-stage-name">FACTOR</div>
+              <div class="pl-stage-text">фильтр качества: ROE↑, долг↓, маржа</div>
+            </div>
+            <div class="pl-sep">→</div>
+            <div class="pl-stage">
+              <div class="pl-stage-name">REGIME</div>
+              <div class="pl-stage-text">поздний цикл → качество и не-IT</div>
+            </div>
+            <div class="pl-sep">→</div>
+            <div class="pl-stage">
+              <div class="pl-stage-name">RAG</div>
+              <div class="pl-stage-text">сверка с Goldman Sachs и JPMorgan</div>
+            </div>
+          </div>
+        </div>
+        <div class="cand-list">
+          <div class="cand-label">Почему именно эти бумаги — нет в портфеле</div>
+          <div class="cand">
+            <span class="cand-tk">GOOGL</span>
+            <span class="cand-body"><span class="cand-name">Alphabet</span> — качество и ИИ-экспозиция дешевле по мультипликаторам, чем PLTR.<br />
+              <span class="cand-scn">сценарий: ИИ-цикл продолжается</span></span>
+          </div>
+          <div class="cand">
+            <span class="cand-tk">LLY</span>
+            <span class="cand-body"><span class="cand-name">Eli Lilly</span> — структурный рост в здравоохранении, слабая связь с вашим IT-ядром.<br />
+              <span class="cand-scn">сценарий: ротация в защитный рост</span></span>
+          </div>
+          <div class="cand">
+            <span class="cand-tk">V</span>
+            <span class="cand-body"><span class="cand-name">Visa</span> — компаундер высокого качества, добавляет сектор финансов.<br />
+              <span class="cand-scn">сценарий: мягкая посадка экономики</span></span>
+          </div>
+        </div>
+        <div class="idea-effect">
+          <div class="idea-effect-label">Ожидаемый эффект</div>
+          <div class="idea-effect-val">
+            Потенциал доходности: <span class="arrow">↑</span> при контролируемом риске<br />
+            Сектора: +финансы, +здравоохранение · корреляция с IT-ядром: <span class="arrow">↓</span>
+          </div>
+        </div>
+        <div class="idea-src">
+          <span class="src-chip data">[Factor Engine]</span>
+          <span class="src-chip data">[Regime Model]</span>
+          <span class="src-chip">[RAG: GS_Q2_2026]</span>
+          <span class="src-chip">[RAG: JPM_Strategy_Q2_2026]</span>
+        </div>
+      </div>
+    </div>
+
   </div>
 
-  <!-- ════ B. BANK RAG — ПОДТВЕРЖДЕНИЕ РЕЖИМА ════ -->
-  <div class="d3-block">
-    <div class="d3-block-head">
-      <div class="panel-title">Bank RAG — что говорят инвестбанки о текущем режиме</div>
-      <div class="d3-block-sub">выдержки из публичных стратегических обзоров ·
-        retrieval cosine similarity ≥ 0.72
-        <span class="src">[ChromaDB · Bank PDF reports]</span></div>
-    </div>
-
-    <div class="rag-quotes">
-      <div class="rag-quote">
-        <div class="rag-bank">Goldman Sachs</div>
-        <div class="rag-doc">«Q2 2026 Market Outlook» · стр. 7</div>
-        <div class="rag-text">«We expect a late-cycle plateau in the US through mid-2026,
-          with elevated dispersion across Tech. Maintain quality bias and trim crowded
-          momentum names.»</div>
-        <span class="rag-tag">late-cycle · momentum-risk</span>
-      </div>
-      <div class="rag-quote">
-        <div class="rag-bank">Morgan Stanley</div>
-        <div class="rag-doc">«Technology Sector Outlook 2026» · стр. 12</div>
-        <div class="rag-text">«Hyper-growth Tech valuations sit at 92nd percentile.
-          We recommend taking profits in select names and rotating into
-          defensive Tech (mature large-cap with cash flow).»</div>
-        <span class="rag-tag">tech-rotation · take-profit</span>
-      </div>
-      <div class="rag-quote">
-        <div class="rag-bank">JPMorgan</div>
-        <div class="rag-doc">«Q2 2026 Strategy &amp; Allocation» · стр. 4</div>
-        <div class="rag-text">«Healthcare and consumer staples remain «islands of
-          stability» as growth decelerates. Adding 5–10 pp to defensives is
-          consistent with an Expansion-to-Slowdown transition.»</div>
-        <span class="rag-tag">defensive-tilt · staples · healthcare</span>
-      </div>
-    </div>
-
-    <div style="margin-top:10px; font-size:9.5px; color:var(--ink-60); line-height:1.55;">
-      <b style="color:var(--ink);">Совпадение с моделью режима:</b> все три источника
-      описывают late-Expansion → Slowdown переход и рекомендуют trim в техах
-      и наращивание защитных секторов. Это <b style="color:var(--tech-blue);">точно
-      воспроизводит</b> рекомендации Action Plan на стр. 4.
-    </div>
+  <!-- ДИСКЛЕЙМЕР -->
+  <div class="disclaimer">
+    <span class="dc-icon">⚠</span>
+    <span><b>Это аналитические идеи, а не инвестиционная рекомендация.</b>
+      Расчёты основаны на исторических данных и публичной отчётности; они не
+      учитывают вашу налоговую ситуацию, горизонт и цели. Окончательное решение —
+      за вами или вашим финансовым консультантом.</span>
   </div>
 
   <!-- ПОЛОСА ИСТОЧНИКОВ -->
-  <div class="section-sources" style="margin-top:14px;">
+  <div class="section-sources">
     ИСТОЧНИКИ:
-    <b>Quant Engine MAC3</b> — расчёт режима по факторам Growth/Cycle ·
-    <b>FRED</b> — макро-индикаторы (yield curve, HY spread, PMI) ·
-    <b>SEC EDGAR</b> — earnings revisions ratio ·
-    <b>Tradernet</b> — рыночные цены/тех-индикаторы ·
-    <b>ChromaDB · Bank PDF reports</b> — публичные обзоры GS / MS / JPM
+    <b>SEC EDGAR</b> — публичная отчётность эмитентов ·
+    <b>Quant Engine MAC3</b> — расчёт риска и сигналов ·
+    <b>Factor Engine</b> — фактор-скрининг качества ·
+    <b>Regime Model</b> — определение режима рынка ·
+    <b>Goldman Sachs</b> «Q2 2026 Market Outlook» ·
+    <b>Morgan Stanley</b> «Technology Sector Outlook 2026» ·
+    <b>JPMorgan</b> «Q2 2026 Strategy &amp; Allocation»
   </div>
 
 
 </div>
-
 
 <script>
   /* — разворот строки holdings — */

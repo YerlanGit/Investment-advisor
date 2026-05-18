@@ -218,7 +218,8 @@ def _mock_payload(tier: str = "base") -> dict:
 MOCK_DATA: dict = {}   # lazily filled by the CLI / smoke entry-point below.
 
 
-DEEP_VERSION = os.getenv("REPORT_DEEP_VERSION", "v2").lower()
+DEEP_VERSION  = os.getenv("REPORT_DEEP_VERSION",  "v3").lower()
+BASIC_VERSION = os.getenv("REPORT_BASIC_VERSION", "v3").lower()
 
 
 def _select_template(tier: str) -> str:
@@ -226,13 +227,20 @@ def _select_template(tier: str) -> str:
     Pick the template name based on tier and feature flag.
 
     Feature flag layering:
-      REPORT_VERSION     v1 → legacy dark theme (single file)
-                          v2 → default light theme (basic + deep light)
-      REPORT_DEEP_VERSION v2 → legacy hybrid (snapshot-bar + q-blocks)
-                          v3 → prototype-grade banker design (cream theme,
-                                5 pages, 8-axis radar, banker-grade KPI
-                                cards).  In development — flip via env
-                                when the v3 port is feature-complete.
+      REPORT_VERSION       v1 → legacy dark theme (single file)
+                            v2 → light theme hybrid (snapshot-bar + q-blocks)
+      REPORT_DEEP_VERSION  v3 → prototype-grade banker design (DEFAULT)
+                                  cream theme, 5 pages, 8-axis radar,
+                                  banker-grade KPI cards, full data-driven
+                                  stress / effect / macro / regime panels
+                            v2 → legacy hybrid (fallback)
+      REPORT_BASIC_VERSION v3 → prototype-grade banker design (DEFAULT)
+                                  cream theme, 4 pages
+                            v2 → legacy hybrid (fallback)
+
+    Both v3 templates render against the same payload schema as v2 — no
+    payload changes needed for the switch.  Set REPORT_*_VERSION=v2 in
+    env to roll back without redeploying code.
     """
     if REPORT_VERSION == "v1":
         return "report.html"
@@ -240,6 +248,9 @@ def _select_template(tier: str) -> str:
         if DEEP_VERSION == "v3":
             return "report_deep_v3.html"
         return "report_deep.html"
+    # BASE tier
+    if BASIC_VERSION == "v3":
+        return "report_basic_v3.html"
     return "report_basic.html"
 
 
