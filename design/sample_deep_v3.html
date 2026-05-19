@@ -1430,6 +1430,188 @@
     padding: 1.5px 5px; border-radius: 2px;
     display: inline-block;
   }
+
+/* ─── AI Ideas grid (DEEP v3 — 4-stage pipeline, 3-metric effect) ──────── */
+.ideas-grid {
+  margin-top: 12px;
+  display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+  align-items: start;
+}
+.idea-card {
+  border: 0.5pt solid var(--hairline); border-radius: 2px;
+  background: var(--panel);
+  border-left: 2px solid var(--ink-40);
+  padding: 11px 13px 12px;
+}
+.idea-card.risk      { border-left-color: var(--amber); }
+.idea-card.diversify { border-left-color: var(--tech-blue); }
+.idea-card.grow      { border-left-color: var(--green); }
+.idea-card.hedge     { border-left-color: var(--ink-60); }
+
+.idea-head { cursor: pointer; }
+.idea-top {
+  display: flex; justify-content: space-between; align-items: center;
+  gap: 8px; margin-bottom: 8px;
+}
+.idea-cat {
+  font-family: var(--font-mono); font-size: 9px; font-weight: 600;
+  letter-spacing: 0.03em; text-transform: uppercase;
+  padding: 2px 7px; border-radius: 2px; border: 0.5pt solid currentColor;
+}
+.idea-card.risk      .idea-cat { color: var(--amber); }
+.idea-card.diversify .idea-cat { color: var(--tech-blue); }
+.idea-card.grow      .idea-cat { color: var(--green); }
+.idea-card.hedge     .idea-cat { color: var(--ink-60); }
+
+.idea-prio {
+  font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.02em;
+  display: flex; align-items: center; gap: 5px;
+}
+.idea-prio::before {
+  content: ''; width: 6px; height: 6px; border-radius: 50%;
+  background: currentColor; display: inline-block;
+}
+.idea-prio.high { color: var(--amber); }
+.idea-prio.medium, .idea-prio.mid { color: var(--ink-40); }
+.idea-prio.low  { color: var(--ink-60); }
+
+.idea-num {
+  font-family: var(--font-mono); font-size: 9px; color: var(--ink-40);
+  margin-bottom: 3px;
+}
+.idea-title {
+  font-size: 13px; font-weight: 600; line-height: 1.35;
+  letter-spacing: -0.01em;
+}
+.idea-why {
+  font-size: 11px; color: var(--ink); line-height: 1.54;
+  margin-top: 6px;
+}
+.idea-why b { font-weight: 600; }
+
+/* Candidates (mini ticker chips — visible when collapsed) */
+.idea-swap { margin-top: 9px; }
+.swap-label {
+  font-family: var(--font-mono); font-size: 8px; font-weight: 600;
+  letter-spacing: 0.04em; color: var(--ink-60); text-transform: uppercase;
+  margin-bottom: 5px;
+}
+.swap-tickers { display: flex; flex-wrap: wrap; gap: 5px; }
+.tk-chip {
+  font-family: var(--font-mono); font-size: 9.5px; font-weight: 600;
+  color: var(--tech-blue); background: var(--tech-blue-08);
+  border: 0.5pt solid rgba(47,111,179,0.22);
+  padding: 1.5px 6px; border-radius: 2px;
+}
+.swap-note {
+  margin-top: 7px;
+  font-size: 10px; line-height: 1.5; color: var(--ink-60);
+  font-style: italic;
+}
+.swap-note .expand-hint { color: var(--tech-blue); font-style: normal; }
+
+.idea-toggle {
+  margin-top: 11px;
+  display: flex; align-items: center; justify-content: center; gap: 7px;
+  padding: 8px 10px; border-radius: 3px;
+  background: var(--tech-blue);
+  font-family: var(--font-mono); font-size: 9.5px; font-weight: 600;
+  color: #fff; letter-spacing: 0.03em;
+  transition: background 0.12s;
+}
+.idea-head:hover .idea-toggle { background: #25557F; }
+.idea-caret {
+  display: inline-flex; color: #fff; font-size: 10px;
+  transition: transform 0.15s;
+}
+.idea-card.open .idea-caret { transform: rotate(90deg); }
+.idea-toggle .t-less { display: none; }
+.idea-card.open .idea-toggle .t-more { display: none; }
+.idea-card.open .idea-toggle .t-less { display: inline; }
+
+/* Expanded details */
+.idea-detail { display: none; }
+.idea-card.open .idea-detail { display: block; }
+
+/* Pipeline (DEEP: 4 stages instead of BASE's 3 — tighter columns) */
+.idea-pipeline {
+  margin-top: 10px; padding: 8px 10px;
+  background: var(--tech-blue-08); border-radius: 2px;
+}
+.pl-label {
+  font-family: var(--font-mono); font-size: 8px; font-weight: 600;
+  letter-spacing: 0.04em; color: var(--tech-blue); text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.pl-flow { display: flex; align-items: stretch; gap: 4px; }
+.pl-stage { flex: 1; min-width: 0; }
+.pl-stage-name {
+  font-family: var(--font-mono); font-size: 8px; font-weight: 600;
+  letter-spacing: 0.03em; color: var(--tech-blue); margin-bottom: 3px;
+}
+.pl-stage-text { font-size: 9px; line-height: 1.36; color: var(--ink); }
+.pl-sep { color: var(--tech-blue); font-size: 10px; align-self: center; padding: 0 2px; }
+
+/* Candidate list (DEEP: shows beta + sector chips per candidate) */
+.cand-list { margin-top: 10px; }
+.cand-label {
+  font-family: var(--font-mono); font-size: 8px; font-weight: 600;
+  letter-spacing: 0.05em; color: var(--ink-60); text-transform: uppercase;
+  margin-bottom: 4px;
+}
+.cand { display: flex; gap: 8px; padding: 6px 0; align-items: flex-start; }
+.cand + .cand { border-top: 0.5pt solid var(--hairline-2); }
+.cand-tk {
+  font-family: var(--font-mono); font-size: 11px; font-weight: 600;
+  color: var(--ink); width: 52px; flex-shrink: 0;
+}
+.cand-body { font-size: 10px; line-height: 1.45; color: var(--ink); flex: 1; }
+.cand-name { font-weight: 600; }
+.cand-meta {
+  display: inline-flex; gap: 4px; margin-top: 2px;
+  font-family: var(--font-mono); font-size: 8.5px;
+}
+.cand-meta .meta-beta {
+  color: var(--tech-blue); background: var(--tech-blue-08);
+  padding: 0 4px; border-radius: 2px;
+}
+.cand-meta .meta-sec {
+  color: var(--ink-60); background: rgba(42,46,51,0.05);
+  padding: 0 4px; border-radius: 2px;
+}
+.cand-scn { display: block; color: var(--ink-60); margin-top: 2px; font-size: 9px; }
+
+/* Expected effect (DEEP: 3 rows instead of BASE's 2) */
+.idea-effect {
+  margin-top: 10px; padding: 7px 9px;
+  background: rgba(42,46,51,0.035); border-radius: 2px;
+  border: 0.5pt solid var(--hairline-2);
+}
+.idea-effect-label {
+  font-family: var(--font-mono); font-size: 8px; font-weight: 600;
+  letter-spacing: 0.05em; color: var(--ink-60); text-transform: uppercase;
+  margin-bottom: 3px;
+}
+.idea-effect-val {
+  font-family: var(--font-mono); font-size: 10.5px; color: var(--ink);
+  line-height: 1.55;
+}
+.idea-effect-val .arrow { color: var(--tech-blue); }
+
+/* Source chips (DEEP: 4 chips incl. stress reference) */
+.idea-src {
+  margin-top: 10px; padding-top: 10px;
+  border-top: 0.5pt solid var(--hairline-2);
+  display: flex; flex-wrap: wrap; gap: 5px;
+}
+.src-chip {
+  font-family: var(--font-mono); font-size: 8.5px;
+  color: var(--tech-blue); background: var(--tech-blue-08);
+  padding: 1.5px 5px; border-radius: 2px;
+}
+.src-chip.data { color: var(--ink-60); background: rgba(42,46,51,0.05); }
+.src-chip.stress { color: var(--amber); background: var(--amber-08); }
+
 </style>
 </head>
 <body>
@@ -1439,7 +1621,7 @@
   
   <div class="tech-header">
     <span><b>PORTFOLIO RISK REPORT</b> // TIER: DEEP // ID: Usample // RISK_ENGINE: MAC3</span>
-    <span class="ts">GENERATED 18.05.2026 09:48 UTC+5</span>
+    <span class="ts">GENERATED 19.05.2026 11:48 UTC+5</span>
   </div>
 
   <!-- ═══ COVER ═══ -->
@@ -1922,7 +2104,7 @@
   <!-- ТЕХ-ХЕДЕР -->
   <div class="tech-header">
     <span><b>PORTFOLIO RISK REPORT</b> // TIER: DEEP // ID: Usample // RISK_ENGINE: MAC3</span>
-    <span class="ts">PAGE 2 OF 5</span>
+    <span class="ts">PAGE 2 OF 6</span>
   </div>
 
   <!-- ЗАГОЛОВОК СЕКЦИИ -->
@@ -2261,7 +2443,7 @@
   <!-- ТЕХ-ХЕДЕР -->
   <div class="tech-header">
     <span><b>PORTFOLIO RISK REPORT</b> // TIER: DEEP // ID: Usample // RISK_ENGINE: MAC3</span>
-    <span class="ts">PAGE 3 OF 5</span>
+    <span class="ts">PAGE 3 OF 6</span>
   </div>
 
   <!-- ЗАГОЛОВОК СЕКЦИИ -->
@@ -2794,386 +2976,16 @@
   <!-- ТЕХ-ХЕДЕР -->
   <div class="tech-header">
     <span><b>PORTFOLIO RISK REPORT</b> // TIER: DEEP // ID: Usample // RISK_ENGINE: MAC3</span>
-    <span class="ts">PAGE 4 OF 5</span>
+    <span class="ts">PAGE 4 OF 6</span>
   </div>
 
   <!-- ЗАГОЛОВОК СЕКЦИИ -->
   <div class="sec-head">
-    <div class="sec-title">Action Plan · Ожидаемый эффект · CoVe</div>
-    <div class="sec-sub">конкретные шаги, изменения риск-показателей и проверка источников · <b style="color:var(--tech-blue);">[DEEP]</b></div>
-  </div>
-
-  <!-- ════ A. ACTION PLAN — уровни Buy / Sell / Stop ════ -->
-  <div class="d3-block">
-    <div class="d3-block-head">
-      <div class="panel-title">Action Plan — уровни Buy / Sell / Stop</div>
-      <div class="d3-block-sub">ATR (Wilder RMA) · SMA50/200 · RSI(14) · MACD(12,26,9) ·
-        без внешних таргет-прайсов
-        <span class="src">[Quant Engine]</span></div>
-    </div>
-
-    <table class="action-table">
-      <thead>
-        <tr>
-          <th class="l">Тикер</th>
-          <th class="l">Action</th>
-          <th>Цена</th>
-          <th>Buy zone</th>
-          <th>Sell target</th>
-          <th>Stop loss</th>
-          <th colspan="2" class="l">Причина</th>
-        </tr>
-      </thead>
-      <tbody>
-        
-        
-          
-          
-          
-          
-        <tr>
-          <td class="l"><span class="ticker">AAPL</span></td>
-          <td class="l"><span class="badge act-trim">SELL 25%</span></td>
-          <td>$197.40</td>
-          <td>$182–188</td>
-          <td class="level-pos">$215</td>
-          <td class="level-neg">$175</td>
-          <td colspan="2" class="l reason">HOTSPOT 24% риска; фиксируем часть прибыли (+25%)</td>
-        </tr>
-        
-          
-          
-          
-          
-        <tr>
-          <td class="l"><span class="ticker">KSPI</span></td>
-          <td class="l"><span class="badge act-trim">REDUCE 50%</span></td>
-          <td>₸123.50</td>
-          <td>₸115–119</td>
-          <td class="level-pos">₸140</td>
-          <td class="level-neg">₸108</td>
-          <td colspan="2" class="l reason">TRC 22% при просадке −16.7% — концентрация выше порога</td>
-        </tr>
-        
-          
-          
-          
-        <tr>
-          <td class="l"><span class="ticker">BND</span></td>
-          <td class="l"><span class="badge act-hold">HOLD</span></td>
-          <td>$72.18</td>
-          <td>$71–73</td>
-          <td class="level-pos">$76</td>
-          <td class="level-neg">$69</td>
-          <td colspan="2" class="l reason">Hedge против rate shock; держим вес 20%</td>
-        </tr>
-        
-      </tbody>
-    </table>
-  </div>
-
-  <!-- ════ B. ОЖИДАЕМЫЙ ЭФФЕКТ НА РИСК-ПОКАЗАТЕЛИ ════ -->
-  <div class="d3-block">
-    <div class="d3-block-head">
-      <div class="panel-title">Ожидаемый эффект на риск-показатели портфеля</div>
-      <div class="d3-block-sub">оценка «до / после» при исполнении Action Plan ·
-        BL target weights · runtime из <code style="font-family:var(--font-mono);
-        font-size:9px; background:var(--tech-blue-08); color:var(--tech-blue);
-        padding:1px 4px; border-radius:2px;">data.expected_effect</code> [Step 3]
-        ·  горизонт 1 квартал
-        <span class="src">[Quant Engine]</span></div>
-    </div>
-
-    
-    
-    
-    <div class="effect-grid">
-      <div class="effect-card">
-          <div class="ef-name">Индекс риска</div>
-          <div class="ef-row">
-            <span class="ef-before">62</span>
-            <span class="ef-arrow">→</span>
-            <span class="ef-after">54</span>
-          </div>
-          <div class="ef-delta pos">-8.0 пунктов</div>
-        </div>
-      <div class="effect-card">
-          <div class="ef-name">CVaR 95%</div>
-          <div class="ef-row">
-            <span class="ef-before">-5.2%</span>
-            <span class="ef-arrow">→</span>
-            <span class="ef-after">-4.1%</span>
-          </div>
-          <div class="ef-delta pos">+1.1 пп</div>
-        </div>
-      <div class="effect-card">
-          <div class="ef-name">Sharpe Ratio</div>
-          <div class="ef-row">
-            <span class="ef-before">1.18</span>
-            <span class="ef-arrow">→</span>
-            <span class="ef-after">1.32</span>
-          </div>
-          <div class="ef-delta pos">+0.1 пп</div>
-        </div>
-      <div class="effect-card">
-          <div class="ef-name">Max Drawdown (модель)</div>
-          <div class="ef-row">
-            <span class="ef-before">-12.8%</span>
-            <span class="ef-arrow">→</span>
-            <span class="ef-after">-10.4%</span>
-          </div>
-          <div class="ef-delta pos">+2.4 пп</div>
-        </div>
-      <div class="effect-card">
-          <div class="ef-name">Волатильность (год.)</div>
-          <div class="ef-row">
-            <span class="ef-before">+14.8%</span>
-            <span class="ef-arrow">→</span>
-            <span class="ef-after">+12.6%</span>
-          </div>
-          <div class="ef-delta pos">-2.2 пп</div>
-        </div>
-      <div class="effect-card">
-          <div class="ef-name">Max TRC (одной позиции)</div>
-          <div class="ef-row">
-            <span class="ef-before">+24.4%</span>
-            <span class="ef-arrow">→</span>
-            <span class="ef-after">+16.8%</span>
-          </div>
-          <div class="ef-delta pos">-7.6 пп</div>
-        </div>
-      <div class="effect-card">
-          <div class="ef-name">Доля IT-сектора</div>
-          <div class="ef-row">
-            <span class="ef-before">+62.0%</span>
-            <span class="ef-arrow">→</span>
-            <span class="ef-after">+50.0%</span>
-          </div>
-          <div class="ef-delta pos">-12.0 пп</div>
-        </div>
-      <div class="effect-card">
-          <div class="ef-name">Ожид. доходность (год.)</div>
-          <div class="ef-row">
-            <span class="ef-before">+14.2%</span>
-            <span class="ef-arrow">→</span>
-            <span class="ef-after">+12.6%</span>
-          </div>
-          <div class="ef-delta neg">-1.6 пп</div>
-        </div>
-    </div>
-
-    <div class="conc-ai" style="margin-top:12px;">
-      <div class="ai-head">[ 🤖 AI_ANALYSIS // CLAUDE SONNET 4.6 ]</div>
-      <div class="ai-body">
-        «Чистый эффект — индекс риска уходит с 62 в середину «умеренной» зоны (54),
-        исчезает HOTSPOT-перегрев одной бумаги, Sharpe растёт до
-        <span class="flag">1.32</span> — портфель становится эффективнее. Плата за это —
-        ≈ 1.6 пп ожидаемой доходности, но это типичный «обмен» при ребалансировке
-        в late-cycle. Goldman&nbsp;Sachs и JPMorgan
-        <span class="src">[RAG: GS_Q2_2026 · JPM_Strategy_Q2_2026]</span> поддерживают
-        такую конфигурацию.»
-      </div>
-    </div>
-  </div>
-
-  <!-- ════ C. CoVe — ВЕРИФИКАЦИЯ ИСТОЧНИКОВ ════ -->
-  <div class="d3-block">
-    <div class="d3-block-head">
-      <div class="panel-title">CoVe — Chain-of-Verification источников данных</div>
-      <div class="d3-block-sub">каждый показатель прослеживается до первичного источника
-        с указанием метода расчёта и QualityGate-статуса · список собирается
-        runtime из <code style="font-family:var(--font-mono); font-size:9px;
-        background:var(--tech-blue-08); color:var(--tech-blue);
-        padding:1px 4px; border-radius:2px;">data.cove_lineage</code> [Step 5]</div>
-    </div>
-
-    
-    <div class="cove-grid">
-      
-        
-        
-        
-        <div class="cove-item ">
-          <span class="cove-check">✓</span>
-          <span class="cove-body"><b>Vol · CVaR · TE · IR · Max DD</b><br>
-            <span class="cove-meta">
-              Quant Engine MAC3 · Wilder RMA · EWMA λ≈0.94 ⊕ Ledoit-Wolf 70/30 · Politis-Romano bootstrap CI
-            </span>
-          </span>
-        </div>
-      
-        
-        
-        
-        <div class="cove-item ">
-          <span class="cove-check">✓</span>
-          <span class="cove-body"><b>TRC (Euler decomposition) · MCTR · CVaR</b><br>
-            <span class="cove-meta">
-              Quant Engine MAC3 · MCTR = Σw/σ_p · ERC%_i = w_i·MCTR_i/σ_p
-            </span>
-          </span>
-        </div>
-      
-        
-        
-        
-        <div class="cove-item fail">
-          <span class="cove-check">✗</span>
-          <span class="cove-body"><b>Цены и история активов</b><br>
-            <span class="cove-meta">
-              Tradernet (Freedom Broker) · Daily CLOSE · 730d window · no price data loaded
-            </span>
-          </span>
-        </div>
-      
-        
-        
-        
-        <div class="cove-item ">
-          <span class="cove-check">✓</span>
-          <span class="cove-body"><b>Fundamental Z-scores</b><br>
-            <span class="cove-meta">
-              SEC EDGAR CompanyFacts · 10-K FY · sector-normalised MAD · Group B factors
-            </span>
-          </span>
-        </div>
-      
-        
-        
-        
-        <div class="cove-item ">
-          <span class="cove-check">✓</span>
-          <span class="cove-body"><b>Altman-Z · Piotroski-F · Interest Coverage</b><br>
-            <span class="cove-meta">
-              SEC EDGAR CompanyFacts · разностный расчёт по балансу и P&amp;L (annual filings)
-            </span>
-          </span>
-        </div>
-      
-        
-        
-        
-        <div class="cove-item fail">
-          <span class="cove-check">✗</span>
-          <span class="cove-body"><b>CDS spreads (credit signal)</b><br>
-            <span class="cove-meta">
-              FRED HY proxy + WGB sovereign · QualityGate: sanity 1–3000 bps · ≤ 3 trading days · no CDS summary attached
-            </span>
-          </span>
-        </div>
-      
-        
-        
-        
-        <div class="cove-item fail">
-          <span class="cove-check">✗</span>
-          <span class="cove-body"><b>Action levels (Buy / Sell / Stop)</b><br>
-            <span class="cove-meta">
-              Quant Engine · ATR Wilder RMA + SMA50/200 + RSI(14) + MACD(12,26,9) · action plan not computed for this run
-            </span>
-          </span>
-        </div>
-      
-        
-        
-        
-        <div class="cove-item fail">
-          <span class="cove-check">✗</span>
-          <span class="cove-body"><b>Black-Litterman target weights</b><br>
-            <span class="cove-meta">
-              Quant Engine · Reverse-optimisation prior + score-derived views · BL skipped (no scores / empty cov)
-            </span>
-          </span>
-        </div>
-      
-        
-        
-        
-        <div class="cove-item fail">
-          <span class="cove-check">✗</span>
-          <span class="cove-body"><b>Регим-классификатор</b><br>
-            <span class="cove-meta">
-              Quant Engine · Growth × Cycle factor returns · 60-day window
-            </span>
-          </span>
-        </div>
-      
-        
-        
-        
-        <div class="cove-item fail">
-          <span class="cove-check">✗</span>
-          <span class="cove-body"><b>Стресс-сценарии</b><br>
-            <span class="cove-meta">
-              Quant Engine · parametric factor shocks · per-asset β · linear PnL
-            </span>
-          </span>
-        </div>
-      
-        
-        
-        
-        <div class="cove-item fail">
-          <span class="cove-check">✗</span>
-          <span class="cove-body"><b>Макро-драйверы (FRED)</b><br>
-            <span class="cove-meta">
-              FRED St. Louis Fed · yield curve · HY spread · PMI · VIX · breakeven · FRED_API_KEY not set (see .env.template)
-            </span>
-          </span>
-        </div>
-      
-        
-        
-        
-        <div class="cove-item fail">
-          <span class="cove-check">✗</span>
-          <span class="cove-body"><b>Bank RAG (выдержки)</b><br>
-            <span class="cove-meta">
-              ChromaDB · GS / MS / JPM PDF reports · cosine similarity retrieval · RAG not requested / not available
-            </span>
-          </span>
-        </div>
-      
-        
-        
-        
-        <div class="cove-item ">
-          <span class="cove-check">✓</span>
-          <span class="cove-body"><b>AI verdict · bullets</b><br>
-            <span class="cove-meta">
-              Anthropic Claude claude-sonnet-4-6 · advisory only; verdict + plain summary + bullets · не является ИИИ
-            </span>
-          </span>
-        </div>
-      
-    </div>
-    <div style="margin-top:10px; font-size:9px; color:var(--ink-60); line-height:1.5;">
-      <b style="color:var(--ink);">✓</b> — данные прошли QualityGate ·
-      <b style="color:var(--amber);">!</b> — частичное покрытие или fallback на устаревший кэш ·
-      <b style="color:var(--neg);">✗</b> — источник недоступен.
-      Документ не является ИИИ — только аналитическая рекомендация.
-    </div>
-  </div>
-
-
-</div>
-
-<!-- ══════════════════════════ СТРАНИЦА 5 ══════════════════════════════ -->
-<div class="sheet">
-
-  <!-- ТЕХ-ХЕДЕР -->
-  <div class="tech-header">
-    <span><b>PORTFOLIO RISK REPORT</b> // TIER: DEEP // ID: Usample // RISK_ENGINE: MAC3</span>
-    <span class="ts">PAGE 5 OF 5</span>
-  </div>
-
-  <!-- ЗАГОЛОВОК СЕКЦИИ -->
-  <div class="sec-head">
-    <div class="sec-title">Рыночный режим</div>
+    <div class="sec-title">Рыночный режим и макро-контекст</div>
     <div class="sec-sub">в какой фазе мы находимся, какие сигналы это подтверждают и что это значит для портфеля · <b style="color:var(--tech-blue);">[DEEP]</b></div>
   </div>
 
-  <!-- ════ A. КВАДРАНТ РЕЖИМА + СВОДНАЯ ════ -->
+<!-- ════ A. КВАДРАНТ РЕЖИМА + СВОДНАЯ ════ -->
   <div class="d3-block">
     <div class="d3-block-head">
       <div class="panel-title">Текущий режим и его координаты</div>
@@ -3454,6 +3266,963 @@
     <b>ChromaDB · Bank PDF reports</b> — публичные обзоры GS / MS / JPM
   </div>
 
+
+</div>
+
+<!-- ══════════════════════════ СТРАНИЦА 5 ══════════════════════════════ -->
+<div class="sheet">
+
+  <!-- ТЕХ-ХЕДЕР -->
+  <div class="tech-header">
+    <span><b>PORTFOLIO RISK REPORT</b> // TIER: DEEP // ID: Usample // RISK_ENGINE: MAC3</span>
+    <span class="ts">PAGE 5 OF 6</span>
+  </div>
+
+  <!-- ЗАГОЛОВОК СЕКЦИИ -->
+  <div class="sec-head">
+    <div class="sec-title">AI Ideas · Action Plan · Ожидаемый эффект</div>
+    <div class="sec-sub">от стратегических идей к конкретным уровням Buy / Sell / Stop · оценка эффекта до/после · <b style="color:var(--tech-blue);">[DEEP]</b></div>
+  </div>
+
+  <!-- ════ A. AI IDEAS — 4 категории, 4-stage pipeline (DEEP) ════ -->
+  <div class="d3-block">
+    <div class="d3-block-head">
+      <div class="panel-title">AI Ideas — стратегические рекомендации</div>
+      <div class="d3-block-sub">4 идеи в 4 категориях: снижение риска · диверсификация · качественный рост · хедж.  Каждая идея пропущена через
+        <b style="color:var(--tech-blue);">FACTOR → REGIME → STRESS → RAG</b> — pipeline доказывает, почему AI выбрал именно эти кандидаты.  Тикеры не из вашего портфеля — рассмотрите как замену / дополнение.
+        <span class="src">[Claude Sonnet 4.6]</span></div>
+    </div>
+
+    
+    
+    
+    
+    
+      
+        
+      
+    
+      
+        
+      
+    
+      
+        
+      
+    
+      
+        
+      
+    
+    
+      
+    
+      
+    
+      
+    
+      
+    
+
+    
+    <div class="ideas-grid">
+      
+        
+        
+        
+        
+      <div class="idea-card risk">
+        <div class="idea-head" onclick="tgIdea(this)">
+          <div class="idea-top">
+            <span class="idea-cat">Снижение риска</span>
+            <span class="idea-prio high">Высокий приоритет</span>
+          </div>
+          <div class="idea-num">ИДЕЯ 01</div>
+          <div class="idea-title">Сократить долю AAPL с 50% до ~30%</div>
+          <div class="idea-why">AAPL помечен HOTSPOT — 18% всего риска портфеля при доходности +25% (есть что фиксировать без убытка).  В late-cycle режиме при коррекции IT перевес 50% становится критичным.</div>
+          
+          <div class="idea-swap">
+            <div class="swap-label">3 кандидата (не в портфеле)</div>
+            <div class="swap-tickers">
+              <span class="tk-chip">TXN</span><span class="tk-chip">CSCO</span><span class="tk-chip">ACN</span>
+            </div>
+            <div class="swap-note">
+              <span class="expand-hint">Разверните карточку</span> — внутри Factor → Regime → Stress → RAG pipeline + miniinfo (β, sector) по каждому кандидату.
+            </div>
+          </div>
+          
+          <div class="idea-toggle">
+            <span class="idea-caret">▸</span>
+            <span class="t-more">Развернуть детали идеи</span>
+            <span class="t-less">Свернуть</span>
+          </div>
+        </div>
+        <div class="idea-detail">
+          
+          <div class="idea-pipeline">
+            <div class="pl-label">Конвейер отбора · Factor → Regime → Stress → RAG (4-stage)</div>
+            <div class="pl-flow">
+              
+                <div class="pl-stage">
+                  <div class="pl-stage-name">FACTOR</div>
+                  <div class="pl-stage-text">AAPL даёт 18% риска, HOTSPOT (TRC &gt; 20% порога)</div>
+                </div>
+                <div class="pl-sep">→</div>
+              
+                <div class="pl-stage">
+                  <div class="pl-stage-name">REGIME</div>
+                  <div class="pl-stage-text">late-cycle Expansion, рост vol ожидается в IT</div>
+                </div>
+                <div class="pl-sep">→</div>
+              
+                <div class="pl-stage">
+                  <div class="pl-stage-name">STRESS</div>
+                  <div class="pl-stage-text">под Equity DM −20%: −15.8% vs −9.5% после rebalance</div>
+                </div>
+                <div class="pl-sep">→</div>
+              
+                <div class="pl-stage">
+                  <div class="pl-stage-name">RAG</div>
+                  <div class="pl-stage-text">Morgan Stanley: фиксировать прибыль в перегретых техах</div>
+                </div>
+                
+              
+            </div>
+          </div>
+          
+          
+          <div class="cand-list">
+            <div class="cand-label">Кандидаты: бета · сектор · сценарий</div>
+            
+            <div class="cand">
+              <span class="cand-tk">TXN</span>
+              <span class="cand-body">
+                <span class="cand-name">Texas Instruments</span>
+                <span class="cand-meta">
+                  <span class="meta-beta">β 0.85</span>
+                  <span class="meta-sec">Technology</span>
+                </span>
+                <span class="cand-scn">стабильный чип-производитель, vol/2 vs AAPL</span>
+              </span>
+            </div>
+            
+            <div class="cand">
+              <span class="cand-tk">CSCO</span>
+              <span class="cand-body">
+                <span class="cand-name">Cisco</span>
+                <span class="cand-meta">
+                  <span class="meta-beta">β 0.72</span>
+                  <span class="meta-sec">Technology</span>
+                </span>
+                <span class="cand-scn">зрелый тех с дивидендом и низкой бетой</span>
+              </span>
+            </div>
+            
+            <div class="cand">
+              <span class="cand-tk">ACN</span>
+              <span class="cand-body">
+                <span class="cand-name">Accenture</span>
+                <span class="cand-meta">
+                  <span class="meta-beta">β 1.05</span>
+                  <span class="meta-sec">Technology</span>
+                </span>
+                <span class="cand-scn">IT-консалтинг с устойчивой выручкой</span>
+              </span>
+            </div>
+            
+          </div>
+          
+          
+          <div class="idea-effect">
+            <div class="idea-effect-label">Ожидаемый эффект (3 метрики · привязка к expected_effect 8-card)</div>
+            <div class="idea-effect-val">
+              
+                Вклад AAPL в риск: 18.4% <span class="arrow">→</span> ~12%<br />
+              
+                Доля IT-сектора: 50% <span class="arrow">→</span> ~38%<br />
+              
+                Sharpe Ratio: 1.18 <span class="arrow">→</span> 1.24
+              
+            </div>
+          </div>
+          
+          
+          <div class="idea-src">
+            <span class="src-chip data">[Quant Engine]</span>
+            <span class="src-chip data">[SEC EDGAR]</span>
+            <span class="src-chip stress">[Stress: Equity DM −20%]</span>
+            <span class="src-chip">[RAG: MS_TechOutlook_2026]</span>
+            
+          </div>
+          
+        </div>
+      </div>
+      
+        
+        
+        
+        
+      <div class="idea-card diversify">
+        <div class="idea-head" onclick="tgIdea(this)">
+          <div class="idea-top">
+            <span class="idea-cat">Диверсификация</span>
+            <span class="idea-prio medium">Средний приоритет</span>
+          </div>
+          <div class="idea-num">ИДЕЯ 02</div>
+          <div class="idea-title">Добавить healthcare 10–15%</div>
+          <div class="idea-why">Текущая структура: 50% IT + 30% KSPI EM = 80% в двух высоко-β секторах.  Healthcare исторически некоррелирован с IT, стабилизирует портфель в late-cycle transitions.</div>
+          
+          <div class="idea-swap">
+            <div class="swap-label">3 кандидата (не в портфеле)</div>
+            <div class="swap-tickers">
+              <span class="tk-chip">JNJ</span><span class="tk-chip">UNH</span><span class="tk-chip">PFE</span>
+            </div>
+            <div class="swap-note">
+              <span class="expand-hint">Разверните карточку</span> — внутри Factor → Regime → Stress → RAG pipeline + miniinfo (β, sector) по каждому кандидату.
+            </div>
+          </div>
+          
+          <div class="idea-toggle">
+            <span class="idea-caret">▸</span>
+            <span class="t-more">Развернуть детали идеи</span>
+            <span class="t-less">Свернуть</span>
+          </div>
+        </div>
+        <div class="idea-detail">
+          
+          <div class="idea-pipeline">
+            <div class="pl-label">Конвейер отбора · Factor → Regime → Stress → RAG (4-stage)</div>
+            <div class="pl-flow">
+              
+                <div class="pl-stage">
+                  <div class="pl-stage-name">FACTOR</div>
+                  <div class="pl-stage-text">Concentration HHI = 3520 → &#39;concentrated&#39; band</div>
+                </div>
+                <div class="pl-sep">→</div>
+              
+                <div class="pl-stage">
+                  <div class="pl-stage-name">REGIME</div>
+                  <div class="pl-stage-text">late-cycle: защитные сектора начинают opt</div>
+                </div>
+                <div class="pl-sep">→</div>
+              
+                <div class="pl-stage">
+                  <div class="pl-stage-name">STRESS</div>
+                  <div class="pl-stage-text">под Equity DM −20%: текущ. −15.8%, с healthcare −11.2%</div>
+                </div>
+                <div class="pl-sep">→</div>
+              
+                <div class="pl-stage">
+                  <div class="pl-stage-name">RAG</div>
+                  <div class="pl-stage-text">JPMorgan: &#39;islands of stability&#39; в healthcare/staples</div>
+                </div>
+                
+              
+            </div>
+          </div>
+          
+          
+          <div class="cand-list">
+            <div class="cand-label">Кандидаты: бета · сектор · сценарий</div>
+            
+            <div class="cand">
+              <span class="cand-tk">JNJ</span>
+              <span class="cand-body">
+                <span class="cand-name">Johnson &amp; Johnson</span>
+                <span class="cand-meta">
+                  <span class="meta-beta">β 0.74</span>
+                  <span class="meta-sec">Healthcare</span>
+                </span>
+                <span class="cand-scn">healthcare hedge, β 0.74</span>
+              </span>
+            </div>
+            
+            <div class="cand">
+              <span class="cand-tk">UNH</span>
+              <span class="cand-body">
+                <span class="cand-name">UnitedHealth</span>
+                <span class="cand-meta">
+                  <span class="meta-beta">β 0.68</span>
+                  <span class="meta-sec">Healthcare</span>
+                </span>
+                <span class="cand-scn">managed care, defensive growth</span>
+              </span>
+            </div>
+            
+            <div class="cand">
+              <span class="cand-tk">PFE</span>
+              <span class="cand-body">
+                <span class="cand-name">Pfizer</span>
+                <span class="cand-meta">
+                  <span class="meta-beta">β 0.65</span>
+                  <span class="meta-sec">Healthcare</span>
+                </span>
+                <span class="cand-scn">large-cap pharma с дивидендом</span>
+              </span>
+            </div>
+            
+          </div>
+          
+          
+          <div class="idea-effect">
+            <div class="idea-effect-label">Ожидаемый эффект (3 метрики · привязка к expected_effect 8-card)</div>
+            <div class="idea-effect-val">
+              
+                Concentration HHI: 3520 <span class="arrow">→</span> ~2300<br />
+              
+                Beta к рынку: 1.18 <span class="arrow">→</span> ~0.98<br />
+              
+                Max Drawdown (модель): −12.8% <span class="arrow">→</span> ~−10.2%
+              
+            </div>
+          </div>
+          
+          
+          <div class="idea-src">
+            <span class="src-chip data">[Quant Engine]</span>
+            <span class="src-chip stress">[Stress: Equity DM −20%]</span>
+            <span class="src-chip">[RAG: JPM_Strategy_Q2_2026]</span>
+            
+          </div>
+          
+        </div>
+      </div>
+      
+        
+        
+        
+        
+      <div class="idea-card grow">
+        <div class="idea-head" onclick="tgIdea(this)">
+          <div class="idea-top">
+            <span class="idea-cat">Рост качества</span>
+            <span class="idea-prio medium">Средний приоритет</span>
+          </div>
+          <div class="idea-num">ИДЕЯ 03</div>
+          <div class="idea-title">Усилить позицию в MSFT при откатах</div>
+          <div class="idea-why">MSFT даёт качественный экспозиш в IT без HOTSPOT: вес 8%, TRC только 9%.  4-Pillar Total +3.5 (sky-high). Buy zone $402-408 (SMA50 − 1·ATR).</div>
+          
+          <div class="idea-swap">
+            <div class="swap-label">3 кандидата (не в портфеле)</div>
+            <div class="swap-tickers">
+              <span class="tk-chip">MSFT</span><span class="tk-chip">GOOGL</span><span class="tk-chip">V</span>
+            </div>
+            <div class="swap-note">
+              <span class="expand-hint">Разверните карточку</span> — внутри Factor → Regime → Stress → RAG pipeline + miniinfo (β, sector) по каждому кандидату.
+            </div>
+          </div>
+          
+          <div class="idea-toggle">
+            <span class="idea-caret">▸</span>
+            <span class="t-more">Развернуть детали идеи</span>
+            <span class="t-less">Свернуть</span>
+          </div>
+        </div>
+        <div class="idea-detail">
+          
+          <div class="idea-pipeline">
+            <div class="pl-label">Конвейер отбора · Factor → Regime → Stress → RAG (4-stage)</div>
+            <div class="pl-flow">
+              
+                <div class="pl-stage">
+                  <div class="pl-stage-name">FACTOR</div>
+                  <div class="pl-stage-text">MSFT score F+1 V+1 T+1 C+0.5 (Total +3.5)</div>
+                </div>
+                <div class="pl-sep">→</div>
+              
+                <div class="pl-stage">
+                  <div class="pl-stage-name">REGIME</div>
+                  <div class="pl-stage-text">late-cycle: high-quality holds value лучше</div>
+                </div>
+                <div class="pl-sep">→</div>
+              
+                <div class="pl-stage">
+                  <div class="pl-stage-name">STRESS</div>
+                  <div class="pl-stage-text">под все 7 сценариев: −7% медиана (лучше портфеля)</div>
+                </div>
+                <div class="pl-sep">→</div>
+              
+                <div class="pl-stage">
+                  <div class="pl-stage-name">RAG</div>
+                  <div class="pl-stage-text">Goldman: maintain quality bias in tech</div>
+                </div>
+                
+              
+            </div>
+          </div>
+          
+          
+          <div class="cand-list">
+            <div class="cand-label">Кандидаты: бета · сектор · сценарий</div>
+            
+            <div class="cand">
+              <span class="cand-tk">MSFT</span>
+              <span class="cand-body">
+                <span class="cand-name">Microsoft</span>
+                <span class="cand-meta">
+                  <span class="meta-beta">β 0.98</span>
+                  <span class="meta-sec">Technology</span>
+                </span>
+                <span class="cand-scn">core add — quality at scale</span>
+              </span>
+            </div>
+            
+            <div class="cand">
+              <span class="cand-tk">GOOGL</span>
+              <span class="cand-body">
+                <span class="cand-name">Alphabet</span>
+                <span class="cand-meta">
+                  <span class="meta-beta">β 1.05</span>
+                  <span class="meta-sec">Communication Services</span>
+                </span>
+                <span class="cand-scn">diversified ad+cloud экспозиш</span>
+              </span>
+            </div>
+            
+            <div class="cand">
+              <span class="cand-tk">V</span>
+              <span class="cand-body">
+                <span class="cand-name">Visa</span>
+                <span class="cand-meta">
+                  <span class="meta-beta">β 0.92</span>
+                  <span class="meta-sec">Financial Services</span>
+                </span>
+                <span class="cand-scn">payments — высокий ROE, низкий β</span>
+              </span>
+            </div>
+            
+          </div>
+          
+          
+          <div class="idea-effect">
+            <div class="idea-effect-label">Ожидаемый эффект (3 метрики · привязка к expected_effect 8-card)</div>
+            <div class="idea-effect-val">
+              
+                MSFT weight: 8% <span class="arrow">→</span> 12%<br />
+              
+                Quality score (port): +1.8 <span class="arrow">→</span> +2.4<br />
+              
+                Sharpe Ratio: 1.18 <span class="arrow">→</span> 1.21
+              
+            </div>
+          </div>
+          
+          
+          <div class="idea-src">
+            <span class="src-chip data">[Quant Engine]</span>
+            <span class="src-chip data">[SEC EDGAR]</span>
+            <span class="src-chip stress">[Stress: 7-scenario median]</span>
+            <span class="src-chip">[RAG: GS_Q2_2026]</span>
+            
+          </div>
+          
+        </div>
+      </div>
+      
+        
+        
+        
+        
+      <div class="idea-card hedge">
+        <div class="idea-head" onclick="tgIdea(this)">
+          <div class="idea-top">
+            <span class="idea-cat">Хедж rate-shock</span>
+            <span class="idea-prio low">Низкий приоритет</span>
+          </div>
+          <div class="idea-num">ИДЕЯ 04</div>
+          <div class="idea-title">Купить TLT/IEF на 5% при росте 10Y &gt; 5%</div>
+          <div class="idea-why">Портфель β-Rates = −0.30 (умеренная rate-sensitivity).  При hawkish surprise Fed +50bp портфель просядет на −4.2%.  TLT (20Y bonds) на 5% сглаживает duration shock.</div>
+          
+          <div class="idea-swap">
+            <div class="swap-label">3 кандидата (не в портфеле)</div>
+            <div class="swap-tickers">
+              <span class="tk-chip">TLT</span><span class="tk-chip">IEF</span><span class="tk-chip">AGG</span>
+            </div>
+            <div class="swap-note">
+              <span class="expand-hint">Разверните карточку</span> — внутри Factor → Regime → Stress → RAG pipeline + miniinfo (β, sector) по каждому кандидату.
+            </div>
+          </div>
+          
+          <div class="idea-toggle">
+            <span class="idea-caret">▸</span>
+            <span class="t-more">Развернуть детали идеи</span>
+            <span class="t-less">Свернуть</span>
+          </div>
+        </div>
+        <div class="idea-detail">
+          
+          <div class="idea-pipeline">
+            <div class="pl-label">Конвейер отбора · Factor → Regime → Stress → RAG (4-stage)</div>
+            <div class="pl-flow">
+              
+                <div class="pl-stage">
+                  <div class="pl-stage-name">FACTOR</div>
+                  <div class="pl-stage-text">β-Rates портфеля = −0.30 (rate-sensitive)</div>
+                </div>
+                <div class="pl-sep">→</div>
+              
+                <div class="pl-stage">
+                  <div class="pl-stage-name">REGIME</div>
+                  <div class="pl-stage-text">late-cycle: Fed surprises возможны</div>
+                </div>
+                <div class="pl-sep">→</div>
+              
+                <div class="pl-stage">
+                  <div class="pl-stage-name">STRESS</div>
+                  <div class="pl-stage-text">под Rates +100bp: −3.8% портфеля, с TLT 5% → −2.6%</div>
+                </div>
+                <div class="pl-sep">→</div>
+              
+                <div class="pl-stage">
+                  <div class="pl-stage-name">RAG</div>
+                  <div class="pl-stage-text">Bank consensus: 10Y range 4.2-5.0% Q3 2026</div>
+                </div>
+                
+              
+            </div>
+          </div>
+          
+          
+          <div class="cand-list">
+            <div class="cand-label">Кандидаты: бета · сектор · сценарий</div>
+            
+            <div class="cand">
+              <span class="cand-tk">TLT</span>
+              <span class="cand-body">
+                <span class="cand-name">iShares 20Y T-Bond ETF</span>
+                <span class="cand-meta">
+                  <span class="meta-beta">β -0.35</span>
+                  <span class="meta-sec">Fixed Income</span>
+                </span>
+                <span class="cand-scn">duration hedge, β-Rates +0.85</span>
+              </span>
+            </div>
+            
+            <div class="cand">
+              <span class="cand-tk">IEF</span>
+              <span class="cand-body">
+                <span class="cand-name">iShares 7-10Y T-Bond</span>
+                <span class="cand-meta">
+                  <span class="meta-beta">β -0.20</span>
+                  <span class="meta-sec">Fixed Income</span>
+                </span>
+                <span class="cand-scn">мягче duration vs TLT</span>
+              </span>
+            </div>
+            
+            <div class="cand">
+              <span class="cand-tk">AGG</span>
+              <span class="cand-body">
+                <span class="cand-name">iShares Core US Bond</span>
+                <span class="cand-meta">
+                  <span class="meta-beta">β -0.15</span>
+                  <span class="meta-sec">Fixed Income</span>
+                </span>
+                <span class="cand-scn">broad-market bond exposure</span>
+              </span>
+            </div>
+            
+          </div>
+          
+          
+          <div class="idea-effect">
+            <div class="idea-effect-label">Ожидаемый эффект (3 метрики · привязка к expected_effect 8-card)</div>
+            <div class="idea-effect-val">
+              
+                β-Rates: −0.30 <span class="arrow">→</span> −0.18<br />
+              
+                Stress Rates+100bp: −3.8% <span class="arrow">→</span> −2.6%<br />
+              
+                Vol (год.): 14.8% <span class="arrow">→</span> 13.9%
+              
+            </div>
+          </div>
+          
+          
+          <div class="idea-src">
+            <span class="src-chip data">[Quant Engine]</span>
+            <span class="src-chip data">[FRED: T10Y2Y]</span>
+            <span class="src-chip stress">[Stress: Rates +100bp]</span>
+            <span class="src-chip">[RAG: Bank consensus]</span>
+            
+          </div>
+          
+        </div>
+      </div>
+      
+    </div>
+    
+  </div>
+
+  <!-- ════ B. ACTION PLAN — уровни Buy / Sell / Stop ════ -->
+  <div class="d3-block">
+    <div class="d3-block-head">
+      <div class="panel-title">Action Plan — уровни Buy / Sell / Stop</div>
+      <div class="d3-block-sub">ATR (Wilder RMA) · SMA50/200 · RSI(14) · MACD(12,26,9) ·
+        без внешних таргет-прайсов
+        <span class="src">[Quant Engine]</span></div>
+    </div>
+
+    <table class="action-table">
+      <thead>
+        <tr>
+          <th class="l">Тикер</th>
+          <th class="l">Action</th>
+          <th>Цена</th>
+          <th>Buy zone</th>
+          <th>Sell target</th>
+          <th>Stop loss</th>
+          <th colspan="2" class="l">Причина</th>
+        </tr>
+      </thead>
+      <tbody>
+        
+        
+          
+          
+          
+          
+        <tr>
+          <td class="l"><span class="ticker">AAPL</span></td>
+          <td class="l"><span class="badge act-trim">SELL 25%</span></td>
+          <td>$197.40</td>
+          <td>$182–188</td>
+          <td class="level-pos">$215</td>
+          <td class="level-neg">$175</td>
+          <td colspan="2" class="l reason">HOTSPOT 24% риска; фиксируем часть прибыли (+25%)</td>
+        </tr>
+        
+          
+          
+          
+          
+        <tr>
+          <td class="l"><span class="ticker">KSPI</span></td>
+          <td class="l"><span class="badge act-trim">REDUCE 50%</span></td>
+          <td>₸123.50</td>
+          <td>₸115–119</td>
+          <td class="level-pos">₸140</td>
+          <td class="level-neg">₸108</td>
+          <td colspan="2" class="l reason">TRC 22% при просадке −16.7% — концентрация выше порога</td>
+        </tr>
+        
+          
+          
+          
+        <tr>
+          <td class="l"><span class="ticker">BND</span></td>
+          <td class="l"><span class="badge act-hold">HOLD</span></td>
+          <td>$72.18</td>
+          <td>$71–73</td>
+          <td class="level-pos">$76</td>
+          <td class="level-neg">$69</td>
+          <td colspan="2" class="l reason">Hedge против rate shock; держим вес 20%</td>
+        </tr>
+        
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ════ C. ОЖИДАЕМЫЙ ЭФФЕКТ НА РИСК-ПОКАЗАТЕЛИ ════ -->
+  <div class="d3-block">
+    <div class="d3-block-head">
+      <div class="panel-title">Ожидаемый эффект на риск-показатели портфеля</div>
+      <div class="d3-block-sub">оценка «до / после» при исполнении Action Plan ·
+        BL target weights · runtime из <code style="font-family:var(--font-mono);
+        font-size:9px; background:var(--tech-blue-08); color:var(--tech-blue);
+        padding:1px 4px; border-radius:2px;">data.expected_effect</code> [Step 3]
+        ·  горизонт 1 квартал
+        <span class="src">[Quant Engine]</span></div>
+    </div>
+
+    
+    
+    
+    <div class="effect-grid">
+      <div class="effect-card">
+          <div class="ef-name">Индекс риска</div>
+          <div class="ef-row">
+            <span class="ef-before">62</span>
+            <span class="ef-arrow">→</span>
+            <span class="ef-after">54</span>
+          </div>
+          <div class="ef-delta pos">-8.0 пунктов</div>
+        </div>
+      <div class="effect-card">
+          <div class="ef-name">CVaR 95%</div>
+          <div class="ef-row">
+            <span class="ef-before">-5.2%</span>
+            <span class="ef-arrow">→</span>
+            <span class="ef-after">-4.1%</span>
+          </div>
+          <div class="ef-delta pos">+1.1 пп</div>
+        </div>
+      <div class="effect-card">
+          <div class="ef-name">Sharpe Ratio</div>
+          <div class="ef-row">
+            <span class="ef-before">1.18</span>
+            <span class="ef-arrow">→</span>
+            <span class="ef-after">1.32</span>
+          </div>
+          <div class="ef-delta pos">+0.1 пп</div>
+        </div>
+      <div class="effect-card">
+          <div class="ef-name">Max Drawdown (модель)</div>
+          <div class="ef-row">
+            <span class="ef-before">-12.8%</span>
+            <span class="ef-arrow">→</span>
+            <span class="ef-after">-10.4%</span>
+          </div>
+          <div class="ef-delta pos">+2.4 пп</div>
+        </div>
+      <div class="effect-card">
+          <div class="ef-name">Волатильность (год.)</div>
+          <div class="ef-row">
+            <span class="ef-before">+14.8%</span>
+            <span class="ef-arrow">→</span>
+            <span class="ef-after">+12.6%</span>
+          </div>
+          <div class="ef-delta pos">-2.2 пп</div>
+        </div>
+      <div class="effect-card">
+          <div class="ef-name">Max TRC (одной позиции)</div>
+          <div class="ef-row">
+            <span class="ef-before">+24.4%</span>
+            <span class="ef-arrow">→</span>
+            <span class="ef-after">+16.8%</span>
+          </div>
+          <div class="ef-delta pos">-7.6 пп</div>
+        </div>
+      <div class="effect-card">
+          <div class="ef-name">Доля IT-сектора</div>
+          <div class="ef-row">
+            <span class="ef-before">+62.0%</span>
+            <span class="ef-arrow">→</span>
+            <span class="ef-after">+50.0%</span>
+          </div>
+          <div class="ef-delta pos">-12.0 пп</div>
+        </div>
+      <div class="effect-card">
+          <div class="ef-name">Ожид. доходность (год.)</div>
+          <div class="ef-row">
+            <span class="ef-before">+14.2%</span>
+            <span class="ef-arrow">→</span>
+            <span class="ef-after">+12.6%</span>
+          </div>
+          <div class="ef-delta neg">-1.6 пп</div>
+        </div>
+    </div>
+
+    <div class="conc-ai" style="margin-top:12px;">
+      <div class="ai-head">[ 🤖 AI_ANALYSIS // CLAUDE SONNET 4.6 ]</div>
+      <div class="ai-body">
+        «Чистый эффект — индекс риска уходит с 62 в середину «умеренной» зоны (54),
+        исчезает HOTSPOT-перегрев одной бумаги, Sharpe растёт до
+        <span class="flag">1.32</span> — портфель становится эффективнее. Плата за это —
+        ≈ 1.6 пп ожидаемой доходности, но это типичный «обмен» при ребалансировке
+        в late-cycle. Goldman&nbsp;Sachs и JPMorgan
+        <span class="src">[RAG: GS_Q2_2026 · JPM_Strategy_Q2_2026]</span> поддерживают
+        такую конфигурацию.»
+      </div>
+    </div>
+  </div>
+
+
+</div>
+
+<!-- ══════════════════════════ СТРАНИЦА 6 ══════════════════════════════ -->
+<div class="sheet">
+
+  <!-- ТЕХ-ХЕДЕР -->
+  <div class="tech-header">
+    <span><b>PORTFOLIO RISK REPORT</b> // TIER: DEEP // ID: Usample // RISK_ENGINE: MAC3</span>
+    <span class="ts">PAGE 6 OF 6</span>
+  </div>
+
+  <!-- ЗАГОЛОВОК СЕКЦИИ -->
+  <div class="sec-head">
+    <div class="sec-title">CoVe — верификация источников данных</div>
+    <div class="sec-sub">runtime provenance каждого источника · QualityGate freshness statuses · <b style="color:var(--tech-blue);">[DEEP]</b></div>
+  </div>
+
+  <!-- ════ A. CoVe — ВЕРИФИКАЦИЯ ИСТОЧНИКОВ ════ -->
+  <div class="d3-block">
+    <div class="d3-block-head">
+      <div class="panel-title">CoVe — Chain-of-Verification источников данных</div>
+      <div class="d3-block-sub">каждый показатель прослеживается до первичного источника
+        с указанием метода расчёта и QualityGate-статуса · список собирается
+        runtime из <code style="font-family:var(--font-mono); font-size:9px;
+        background:var(--tech-blue-08); color:var(--tech-blue);
+        padding:1px 4px; border-radius:2px;">data.cove_lineage</code> [Step 5]</div>
+    </div>
+
+    
+    <div class="cove-grid">
+      
+        
+        
+        
+        <div class="cove-item ">
+          <span class="cove-check">✓</span>
+          <span class="cove-body"><b>Vol · CVaR · TE · IR · Max DD</b><br>
+            <span class="cove-meta">
+              Quant Engine MAC3 · Wilder RMA · EWMA λ≈0.94 ⊕ Ledoit-Wolf 70/30 · Politis-Romano bootstrap CI
+            </span>
+          </span>
+        </div>
+      
+        
+        
+        
+        <div class="cove-item ">
+          <span class="cove-check">✓</span>
+          <span class="cove-body"><b>TRC (Euler decomposition) · MCTR · CVaR</b><br>
+            <span class="cove-meta">
+              Quant Engine MAC3 · MCTR = Σw/σ_p · ERC%_i = w_i·MCTR_i/σ_p
+            </span>
+          </span>
+        </div>
+      
+        
+        
+        
+        <div class="cove-item fail">
+          <span class="cove-check">✗</span>
+          <span class="cove-body"><b>Цены и история активов</b><br>
+            <span class="cove-meta">
+              Tradernet (Freedom Broker) · Daily CLOSE · 730d window · no price data loaded
+            </span>
+          </span>
+        </div>
+      
+        
+        
+        
+        <div class="cove-item ">
+          <span class="cove-check">✓</span>
+          <span class="cove-body"><b>Fundamental Z-scores</b><br>
+            <span class="cove-meta">
+              SEC EDGAR CompanyFacts · 10-K FY · sector-normalised MAD · Group B factors
+            </span>
+          </span>
+        </div>
+      
+        
+        
+        
+        <div class="cove-item ">
+          <span class="cove-check">✓</span>
+          <span class="cove-body"><b>Altman-Z · Piotroski-F · Interest Coverage</b><br>
+            <span class="cove-meta">
+              SEC EDGAR CompanyFacts · разностный расчёт по балансу и P&amp;L (annual filings)
+            </span>
+          </span>
+        </div>
+      
+        
+        
+        
+        <div class="cove-item fail">
+          <span class="cove-check">✗</span>
+          <span class="cove-body"><b>CDS spreads (credit signal)</b><br>
+            <span class="cove-meta">
+              FRED HY proxy + WGB sovereign · QualityGate: sanity 1–3000 bps · ≤ 3 trading days · no CDS summary attached
+            </span>
+          </span>
+        </div>
+      
+        
+        
+        
+        <div class="cove-item fail">
+          <span class="cove-check">✗</span>
+          <span class="cove-body"><b>Action levels (Buy / Sell / Stop)</b><br>
+            <span class="cove-meta">
+              Quant Engine · ATR Wilder RMA + SMA50/200 + RSI(14) + MACD(12,26,9) · action plan not computed for this run
+            </span>
+          </span>
+        </div>
+      
+        
+        
+        
+        <div class="cove-item fail">
+          <span class="cove-check">✗</span>
+          <span class="cove-body"><b>Black-Litterman target weights</b><br>
+            <span class="cove-meta">
+              Quant Engine · Reverse-optimisation prior + score-derived views · BL skipped (no scores / empty cov)
+            </span>
+          </span>
+        </div>
+      
+        
+        
+        
+        <div class="cove-item fail">
+          <span class="cove-check">✗</span>
+          <span class="cove-body"><b>Регим-классификатор</b><br>
+            <span class="cove-meta">
+              Quant Engine · Growth × Cycle factor returns · 60-day window
+            </span>
+          </span>
+        </div>
+      
+        
+        
+        
+        <div class="cove-item fail">
+          <span class="cove-check">✗</span>
+          <span class="cove-body"><b>Стресс-сценарии</b><br>
+            <span class="cove-meta">
+              Quant Engine · parametric factor shocks · per-asset β · linear PnL
+            </span>
+          </span>
+        </div>
+      
+        
+        
+        
+        <div class="cove-item fail">
+          <span class="cove-check">✗</span>
+          <span class="cove-body"><b>Макро-драйверы (FRED)</b><br>
+            <span class="cove-meta">
+              FRED St. Louis Fed · yield curve · HY spread · PMI · VIX · breakeven · FRED_API_KEY not set (see .env.template)
+            </span>
+          </span>
+        </div>
+      
+        
+        
+        
+        <div class="cove-item fail">
+          <span class="cove-check">✗</span>
+          <span class="cove-body"><b>Bank RAG (выдержки)</b><br>
+            <span class="cove-meta">
+              ChromaDB · GS / MS / JPM PDF reports · cosine similarity retrieval · RAG not requested / not available
+            </span>
+          </span>
+        </div>
+      
+        
+        
+        
+        <div class="cove-item ">
+          <span class="cove-check">✓</span>
+          <span class="cove-body"><b>AI verdict · bullets</b><br>
+            <span class="cove-meta">
+              Anthropic Claude claude-sonnet-4-6 · advisory only; verdict + plain summary + bullets · не является ИИИ
+            </span>
+          </span>
+        </div>
+      
+    </div>
+    <div style="margin-top:10px; font-size:9px; color:var(--ink-60); line-height:1.5;">
+      <b style="color:var(--ink);">✓</b> — данные прошли QualityGate ·
+      <b style="color:var(--amber);">!</b> — частичное покрытие или fallback на устаревший кэш ·
+      <b style="color:var(--neg);">✗</b> — источник недоступен.
+      Документ не является ИИИ — только аналитическая рекомендация.
+    </div>
+  </div>
 
 </div>
 
