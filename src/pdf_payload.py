@@ -186,6 +186,15 @@ def build_payload(results: dict, tier: str,
     mdd_str     = f"{mdd_raw * 100:.1f}%"
     vol_str     = f"{vol_raw * 100:.1f}%"
 
+    # Risk-free rate the engine used to compute Sharpe / Sortino.
+    # Surfaced in the payload so the report's KPI commentary shows the
+    # actual RFR (auditable), not a hardcoded template fallback.
+    # Source: results.portfolio_metrics.risk_free_rate (echoed by engine
+    # at investment_logic.py:1238 from env KZ_RFR_ANNUAL, default 0.14).
+    rfr_raw = _safe_float(metrics.get("risk_free_rate"),
+                           _safe_float(results.get("risk_free_rate"), 0.14))
+    rfr_str = f"{rfr_raw * 100:.0f}%"
+
     # ── Aggregate P/L since position entry ─────────────────────────────────
     total_pnl  = 0.0
     total_cost = 0.0
@@ -413,6 +422,7 @@ def build_payload(results: dict, tier: str,
         "var_95_daily":      var_str,
         "max_drawdown":      mdd_str,
         "volatility":        vol_str,
+        "risk_free_rate":    rfr_str,
         "risk_pct":          composite,
         "risk_label":        _risk_score_label(composite),
         "kpi_extremes":      kpi_extremes,

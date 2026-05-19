@@ -343,52 +343,124 @@ _MOCK_PERIOD_RETURNS = {
     },
 }
 
-# AI stock picks — Haiku output shape (verdict + buckets of ideas with
-# rationale + candidate tickers).  Engine populates from
-# AdvisorBot.generate_stock_picks().
+# AI stock picks — Haiku/Sonnet output shape.  DEEP-specific schema:
+#   • 4 ideas across 4 buckets (risk_reduction · diversification · growth · hedge)
+#   • 4-stage pipeline (FACTOR → REGIME → STRESS → RAG) — adds STRESS vs BASE's 3-stage
+#   • candidates carry mini-info (beta, sector) — DEEP enrichment
+#   • expected_effect lists 3 metrics — DEEP enrichment (BASE shows 2)
+#   • sources include a stress reference chip — DEEP enrichment
+# Engine populates via AdvisorBot.generate_stock_picks(tier='deep').
 _MOCK_AI_STOCK_PICKS = {
     "risk_reduction": [
         {"idea_num":"01", "category":"Снижение риска", "priority":"high",
          "title":"Сократить долю AAPL с 50% до ~30%",
-         "rationale":"Позиция помечена HOTSPOT — даёт 18% всего риска портфеля.  "
-                     "Положение в плюсе +25% — есть что зафиксировать без убытка.",
+         "rationale":"AAPL помечен HOTSPOT — 18% всего риска портфеля при доходности "
+                     "+25% (есть что фиксировать без убытка).  В late-cycle режиме при "
+                     "коррекции IT перевес 50% становится критичным.",
          "candidates":[
-            {"ticker":"TXN","name":"Texas Instruments","scenario":"спрос на качество в IT"},
-            {"ticker":"CSCO","name":"Cisco","scenario":"ротация в защитный тех"},
-            {"ticker":"ACN","name":"Accenture","scenario":"замедление без рецессии"},
+            {"ticker":"TXN",  "name":"Texas Instruments", "scenario":"стабильный чип-производитель, vol/2 vs AAPL",
+             "beta":0.85, "sector":"Technology"},
+            {"ticker":"CSCO", "name":"Cisco",             "scenario":"зрелый тех с дивидендом и низкой бетой",
+             "beta":0.72, "sector":"Technology"},
+            {"ticker":"ACN",  "name":"Accenture",         "scenario":"IT-консалтинг с устойчивой выручкой",
+             "beta":1.05, "sector":"Technology"},
          ],
          "pipeline":[
-            ("FACTOR","AAPL даёт 18% риска, HOTSPOT"),
-            ("REGIME","ждём роста волатильности в IT"),
-            ("RAG","Morgan Stanley: фиксировать прибыль"),
+            ("FACTOR", "AAPL даёт 18% риска, HOTSPOT (TRC > 20% порога)"),
+            ("REGIME", "late-cycle Expansion, рост vol ожидается в IT"),
+            ("STRESS", "под Equity DM −20%: −15.8% vs −9.5% после rebalance"),
+            ("RAG",    "Morgan Stanley: фиксировать прибыль в перегретых техах"),
          ],
          "expected_effect":[
-            ("Вклад AAPL в риск","18.4%","~12%"),
-            ("Доля IT-сектора","50%","~38%"),
+            ("Вклад AAPL в риск", "18.4%", "~12%"),
+            ("Доля IT-сектора",   "50%",   "~38%"),
+            ("Sharpe Ratio",      "1.18",  "1.24"),
          ],
-         "sources":["Quant Engine","SEC EDGAR","RAG: MS_TechOutlook_2026"],
+         "sources":["Quant Engine", "SEC EDGAR", "Stress: Equity DM −20%", "RAG: MS_TechOutlook_2026"],
         },
     ],
     "diversification": [
         {"idea_num":"02", "category":"Диверсификация", "priority":"medium",
-         "title":"Добавить защитные сектора 10–15%",
-         "rationale":"Текущая структура перевешена в IT (50%) + KSPI (30% EM).  "
-                     "Healthcare / Consumer Staples сглаживают просадки в late-cycle.",
+         "title":"Добавить healthcare 10–15%",
+         "rationale":"Текущая структура: 50% IT + 30% KSPI EM = 80% в двух высоко-β "
+                     "секторах.  Healthcare исторически некоррелирован с IT, "
+                     "стабилизирует портфель в late-cycle transitions.",
          "candidates":[
-            {"ticker":"JNJ","name":"Johnson & Johnson","scenario":"healthcare hedge"},
-            {"ticker":"KO","name":"Coca-Cola","scenario":"defensive staples"},
-            {"ticker":"PG","name":"Procter & Gamble","scenario":"low-beta yielder"},
+            {"ticker":"JNJ", "name":"Johnson & Johnson",  "scenario":"healthcare hedge, β 0.74",
+             "beta":0.74, "sector":"Healthcare"},
+            {"ticker":"UNH", "name":"UnitedHealth",       "scenario":"managed care, defensive growth",
+             "beta":0.68, "sector":"Healthcare"},
+            {"ticker":"PFE", "name":"Pfizer",             "scenario":"large-cap pharma с дивидендом",
+             "beta":0.65, "sector":"Healthcare"},
          ],
          "pipeline":[
-            ("FACTOR","TRC concentration HHI > 3500"),
-            ("REGIME","late-cycle transition: защитные растут"),
-            ("RAG","JPMorgan: 'islands of stability'"),
+            ("FACTOR", "Concentration HHI = 3520 → 'concentrated' band"),
+            ("REGIME", "late-cycle: защитные сектора начинают opt"),
+            ("STRESS", "под Equity DM −20%: текущ. −15.8%, с healthcare −11.2%"),
+            ("RAG",    "JPMorgan: 'islands of stability' в healthcare/staples"),
          ],
          "expected_effect":[
-            ("Concentration HHI","3520","~2200"),
-            ("Beta к рынку","1.18","~0.95"),
+            ("Concentration HHI",     "3520",  "~2300"),
+            ("Beta к рынку",          "1.18",  "~0.98"),
+            ("Max Drawdown (модель)", "−12.8%","~−10.2%"),
          ],
-         "sources":["Quant Engine","RAG: JPM_Strategy_Q2_2026"],
+         "sources":["Quant Engine", "Stress: Equity DM −20%", "RAG: JPM_Strategy_Q2_2026"],
+        },
+    ],
+    "growth": [
+        {"idea_num":"03", "category":"Рост качества", "priority":"medium",
+         "title":"Усилить позицию в MSFT при откатах",
+         "rationale":"MSFT даёт качественный экспозиш в IT без HOTSPOT: вес 8%, "
+                     "TRC только 9%.  4-Pillar Total +3.5 (sky-high). "
+                     "Buy zone $402-408 (SMA50 − 1·ATR).",
+         "candidates":[
+            {"ticker":"MSFT", "name":"Microsoft",        "scenario":"core add — quality at scale",
+             "beta":0.98, "sector":"Technology"},
+            {"ticker":"GOOGL","name":"Alphabet",         "scenario":"diversified ad+cloud экспозиш",
+             "beta":1.05, "sector":"Communication Services"},
+            {"ticker":"V",    "name":"Visa",             "scenario":"payments — высокий ROE, низкий β",
+             "beta":0.92, "sector":"Financial Services"},
+         ],
+         "pipeline":[
+            ("FACTOR", "MSFT score F+1 V+1 T+1 C+0.5 (Total +3.5)"),
+            ("REGIME", "late-cycle: high-quality holds value лучше"),
+            ("STRESS", "под все 7 сценариев: −7% медиана (лучше портфеля)"),
+            ("RAG",    "Goldman: maintain quality bias in tech"),
+         ],
+         "expected_effect":[
+            ("MSFT weight",           "8%",   "12%"),
+            ("Quality score (port)",  "+1.8", "+2.4"),
+            ("Sharpe Ratio",          "1.18", "1.21"),
+         ],
+         "sources":["Quant Engine", "SEC EDGAR", "Stress: 7-scenario median", "RAG: GS_Q2_2026"],
+        },
+    ],
+    "hedge": [
+        {"idea_num":"04", "category":"Хедж rate-shock", "priority":"low",
+         "title":"Купить TLT/IEF на 5% при росте 10Y > 5%",
+         "rationale":"Портфель β-Rates = −0.30 (умеренная rate-sensitivity).  При "
+                     "hawkish surprise Fed +50bp портфель просядет на −4.2%.  TLT "
+                     "(20Y bonds) на 5% сглаживает duration shock.",
+         "candidates":[
+            {"ticker":"TLT", "name":"iShares 20Y T-Bond ETF", "scenario":"duration hedge, β-Rates +0.85",
+             "beta":-0.35, "sector":"Fixed Income"},
+            {"ticker":"IEF", "name":"iShares 7-10Y T-Bond",   "scenario":"мягче duration vs TLT",
+             "beta":-0.20, "sector":"Fixed Income"},
+            {"ticker":"AGG", "name":"iShares Core US Bond",   "scenario":"broad-market bond exposure",
+             "beta":-0.15, "sector":"Fixed Income"},
+         ],
+         "pipeline":[
+            ("FACTOR", "β-Rates портфеля = −0.30 (rate-sensitive)"),
+            ("REGIME", "late-cycle: Fed surprises возможны"),
+            ("STRESS", "под Rates +100bp: −3.8% портфеля, с TLT 5% → −2.6%"),
+            ("RAG",    "Bank consensus: 10Y range 4.2-5.0% Q3 2026"),
+         ],
+         "expected_effect":[
+            ("β-Rates",          "−0.30", "−0.18"),
+            ("Stress Rates+100bp","−3.8%", "−2.6%"),
+            ("Vol (год.)",        "14.8%", "13.9%"),
+         ],
+         "sources":["Quant Engine", "FRED: T10Y2Y", "Stress: Rates +100bp", "RAG: Bank consensus"],
         },
     ],
 }

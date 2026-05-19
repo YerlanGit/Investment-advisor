@@ -1430,6 +1430,188 @@
     padding: 1.5px 5px; border-radius: 2px;
     display: inline-block;
   }
+
+/* ─── AI Ideas grid (DEEP v3 — 4-stage pipeline, 3-metric effect) ──────── */
+.ideas-grid {
+  margin-top: 12px;
+  display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+  align-items: start;
+}
+.idea-card {
+  border: 0.5pt solid var(--hairline); border-radius: 2px;
+  background: var(--panel);
+  border-left: 2px solid var(--ink-40);
+  padding: 11px 13px 12px;
+}
+.idea-card.risk      { border-left-color: var(--amber); }
+.idea-card.diversify { border-left-color: var(--tech-blue); }
+.idea-card.grow      { border-left-color: var(--green); }
+.idea-card.hedge     { border-left-color: var(--ink-60); }
+
+.idea-head { cursor: pointer; }
+.idea-top {
+  display: flex; justify-content: space-between; align-items: center;
+  gap: 8px; margin-bottom: 8px;
+}
+.idea-cat {
+  font-family: var(--font-mono); font-size: 9px; font-weight: 600;
+  letter-spacing: 0.03em; text-transform: uppercase;
+  padding: 2px 7px; border-radius: 2px; border: 0.5pt solid currentColor;
+}
+.idea-card.risk      .idea-cat { color: var(--amber); }
+.idea-card.diversify .idea-cat { color: var(--tech-blue); }
+.idea-card.grow      .idea-cat { color: var(--green); }
+.idea-card.hedge     .idea-cat { color: var(--ink-60); }
+
+.idea-prio {
+  font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.02em;
+  display: flex; align-items: center; gap: 5px;
+}
+.idea-prio::before {
+  content: ''; width: 6px; height: 6px; border-radius: 50%;
+  background: currentColor; display: inline-block;
+}
+.idea-prio.high { color: var(--amber); }
+.idea-prio.medium, .idea-prio.mid { color: var(--ink-40); }
+.idea-prio.low  { color: var(--ink-60); }
+
+.idea-num {
+  font-family: var(--font-mono); font-size: 9px; color: var(--ink-40);
+  margin-bottom: 3px;
+}
+.idea-title {
+  font-size: 13px; font-weight: 600; line-height: 1.35;
+  letter-spacing: -0.01em;
+}
+.idea-why {
+  font-size: 11px; color: var(--ink); line-height: 1.54;
+  margin-top: 6px;
+}
+.idea-why b { font-weight: 600; }
+
+/* Candidates (mini ticker chips — visible when collapsed) */
+.idea-swap { margin-top: 9px; }
+.swap-label {
+  font-family: var(--font-mono); font-size: 8px; font-weight: 600;
+  letter-spacing: 0.04em; color: var(--ink-60); text-transform: uppercase;
+  margin-bottom: 5px;
+}
+.swap-tickers { display: flex; flex-wrap: wrap; gap: 5px; }
+.tk-chip {
+  font-family: var(--font-mono); font-size: 9.5px; font-weight: 600;
+  color: var(--tech-blue); background: var(--tech-blue-08);
+  border: 0.5pt solid rgba(47,111,179,0.22);
+  padding: 1.5px 6px; border-radius: 2px;
+}
+.swap-note {
+  margin-top: 7px;
+  font-size: 10px; line-height: 1.5; color: var(--ink-60);
+  font-style: italic;
+}
+.swap-note .expand-hint { color: var(--tech-blue); font-style: normal; }
+
+.idea-toggle {
+  margin-top: 11px;
+  display: flex; align-items: center; justify-content: center; gap: 7px;
+  padding: 8px 10px; border-radius: 3px;
+  background: var(--tech-blue);
+  font-family: var(--font-mono); font-size: 9.5px; font-weight: 600;
+  color: #fff; letter-spacing: 0.03em;
+  transition: background 0.12s;
+}
+.idea-head:hover .idea-toggle { background: #25557F; }
+.idea-caret {
+  display: inline-flex; color: #fff; font-size: 10px;
+  transition: transform 0.15s;
+}
+.idea-card.open .idea-caret { transform: rotate(90deg); }
+.idea-toggle .t-less { display: none; }
+.idea-card.open .idea-toggle .t-more { display: none; }
+.idea-card.open .idea-toggle .t-less { display: inline; }
+
+/* Expanded details */
+.idea-detail { display: none; }
+.idea-card.open .idea-detail { display: block; }
+
+/* Pipeline (DEEP: 4 stages instead of BASE's 3 — tighter columns) */
+.idea-pipeline {
+  margin-top: 10px; padding: 8px 10px;
+  background: var(--tech-blue-08); border-radius: 2px;
+}
+.pl-label {
+  font-family: var(--font-mono); font-size: 8px; font-weight: 600;
+  letter-spacing: 0.04em; color: var(--tech-blue); text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.pl-flow { display: flex; align-items: stretch; gap: 4px; }
+.pl-stage { flex: 1; min-width: 0; }
+.pl-stage-name {
+  font-family: var(--font-mono); font-size: 8px; font-weight: 600;
+  letter-spacing: 0.03em; color: var(--tech-blue); margin-bottom: 3px;
+}
+.pl-stage-text { font-size: 9px; line-height: 1.36; color: var(--ink); }
+.pl-sep { color: var(--tech-blue); font-size: 10px; align-self: center; padding: 0 2px; }
+
+/* Candidate list (DEEP: shows beta + sector chips per candidate) */
+.cand-list { margin-top: 10px; }
+.cand-label {
+  font-family: var(--font-mono); font-size: 8px; font-weight: 600;
+  letter-spacing: 0.05em; color: var(--ink-60); text-transform: uppercase;
+  margin-bottom: 4px;
+}
+.cand { display: flex; gap: 8px; padding: 6px 0; align-items: flex-start; }
+.cand + .cand { border-top: 0.5pt solid var(--hairline-2); }
+.cand-tk {
+  font-family: var(--font-mono); font-size: 11px; font-weight: 600;
+  color: var(--ink); width: 52px; flex-shrink: 0;
+}
+.cand-body { font-size: 10px; line-height: 1.45; color: var(--ink); flex: 1; }
+.cand-name { font-weight: 600; }
+.cand-meta {
+  display: inline-flex; gap: 4px; margin-top: 2px;
+  font-family: var(--font-mono); font-size: 8.5px;
+}
+.cand-meta .meta-beta {
+  color: var(--tech-blue); background: var(--tech-blue-08);
+  padding: 0 4px; border-radius: 2px;
+}
+.cand-meta .meta-sec {
+  color: var(--ink-60); background: rgba(42,46,51,0.05);
+  padding: 0 4px; border-radius: 2px;
+}
+.cand-scn { display: block; color: var(--ink-60); margin-top: 2px; font-size: 9px; }
+
+/* Expected effect (DEEP: 3 rows instead of BASE's 2) */
+.idea-effect {
+  margin-top: 10px; padding: 7px 9px;
+  background: rgba(42,46,51,0.035); border-radius: 2px;
+  border: 0.5pt solid var(--hairline-2);
+}
+.idea-effect-label {
+  font-family: var(--font-mono); font-size: 8px; font-weight: 600;
+  letter-spacing: 0.05em; color: var(--ink-60); text-transform: uppercase;
+  margin-bottom: 3px;
+}
+.idea-effect-val {
+  font-family: var(--font-mono); font-size: 10.5px; color: var(--ink);
+  line-height: 1.55;
+}
+.idea-effect-val .arrow { color: var(--tech-blue); }
+
+/* Source chips (DEEP: 4 chips incl. stress reference) */
+.idea-src {
+  margin-top: 10px; padding-top: 10px;
+  border-top: 0.5pt solid var(--hairline-2);
+  display: flex; flex-wrap: wrap; gap: 5px;
+}
+.src-chip {
+  font-family: var(--font-mono); font-size: 8.5px;
+  color: var(--tech-blue); background: var(--tech-blue-08);
+  padding: 1.5px 5px; border-radius: 2px;
+}
+.src-chip.data { color: var(--ink-60); background: rgba(42,46,51,0.05); }
+.src-chip.stress { color: var(--amber); background: var(--amber-08); }
+
 </style>
 </head>
 <body>
@@ -1937,7 +2119,7 @@
   <!-- ТЕХ-ХЕДЕР -->
   <div class="tech-header">
     <span><b>PORTFOLIO RISK REPORT</b> // TIER: {{ (data.tier or 'DEEP') | upper }} // ID: U{{ user_id }} // RISK_ENGINE: MAC3</span>
-    <span class="ts">PAGE 2 OF 5</span>
+    <span class="ts">PAGE 2 OF 6</span>
   </div>
 
   <!-- ЗАГОЛОВОК СЕКЦИИ -->
@@ -2193,7 +2375,7 @@
   <!-- ТЕХ-ХЕДЕР -->
   <div class="tech-header">
     <span><b>PORTFOLIO RISK REPORT</b> // TIER: {{ (data.tier or 'DEEP') | upper }} // ID: U{{ user_id }} // RISK_ENGINE: MAC3</span>
-    <span class="ts">PAGE 3 OF 5</span>
+    <span class="ts">PAGE 3 OF 6</span>
   </div>
 
   <!-- ЗАГОЛОВОК СЕКЦИИ -->
@@ -2523,205 +2705,16 @@
   <!-- ТЕХ-ХЕДЕР -->
   <div class="tech-header">
     <span><b>PORTFOLIO RISK REPORT</b> // TIER: {{ (data.tier or 'DEEP') | upper }} // ID: U{{ user_id }} // RISK_ENGINE: MAC3</span>
-    <span class="ts">PAGE 4 OF 5</span>
+    <span class="ts">PAGE 4 OF 6</span>
   </div>
 
   <!-- ЗАГОЛОВОК СЕКЦИИ -->
   <div class="sec-head">
-    <div class="sec-title">Action Plan · Ожидаемый эффект · CoVe</div>
-    <div class="sec-sub">конкретные шаги, изменения риск-показателей и проверка источников · <b style="color:var(--tech-blue);">[DEEP]</b></div>
-  </div>
-
-  <!-- ════ A. ACTION PLAN — уровни Buy / Sell / Stop ════ -->
-  <div class="d3-block">
-    <div class="d3-block-head">
-      <div class="panel-title">Action Plan — уровни Buy / Sell / Stop</div>
-      <div class="d3-block-sub">ATR (Wilder RMA) · SMA50/200 · RSI(14) · MACD(12,26,9) ·
-        без внешних таргет-прайсов
-        <span class="src">[Quant Engine]</span></div>
-    </div>
-
-    <table class="action-table">
-      <thead>
-        <tr>
-          <th class="l">Тикер</th>
-          <th class="l">Action</th>
-          <th>Цена</th>
-          <th>Buy zone</th>
-          <th>Sell target</th>
-          <th>Stop loss</th>
-          <th colspan="2" class="l">Причина</th>
-        </tr>
-      </thead>
-      <tbody>
-        {# data.action_plan — list of {ticker, action, reason, price, buy_zone,
-           sell_target, stop_loss}.  Engine source: investment_logic.action_levels
-           via pdf_payload._action_plan.  Action verb → badge class:
-             BUY/Buy   → act-buy ·  HOLD → act-hold ·  SELL/Trim/Reduce → act-trim. #}
-        {% for r in (data.action_plan or []) %}
-          {% set act_raw = (r.action or 'HOLD') | string %}
-          {% set act_up  = act_raw | upper %}
-          {% if 'BUY' in act_up %}{% set badge = 'act-buy' %}
-          {% elif 'SELL' in act_up or 'TRIM' in act_up or 'REDUCE' in act_up %}{% set badge = 'act-trim' %}
-          {% else %}{% set badge = 'act-hold' %}{% endif %}
-        <tr>
-          <td class="l"><span class="ticker">{{ r.ticker }}</span></td>
-          <td class="l"><span class="badge {{ badge }}">{{ act_up }}</span></td>
-          <td>{{ r.price or '—' }}</td>
-          <td>{{ r.buy_zone or '—' }}</td>
-          <td class="level-pos">{{ r.sell_target or '—' }}</td>
-          <td class="level-neg">{{ r.stop_loss or '—' }}</td>
-          <td colspan="2" class="l reason">{{ r.reason or '—' }}</td>
-        </tr>
-        {% else %}
-        <tr>
-          <td colspan="8" class="l reason" style="opacity:0.6; text-align:center; padding:18px;">
-            Action plan не сформирован — нет позиций или engine не отдал уровни.
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-
-  <!-- ════ B. ОЖИДАЕМЫЙ ЭФФЕКТ НА РИСК-ПОКАЗАТЕЛИ ════ -->
-  <div class="d3-block">
-    <div class="d3-block-head">
-      <div class="panel-title">Ожидаемый эффект на риск-показатели портфеля</div>
-      <div class="d3-block-sub">оценка «до / после» при исполнении Action Plan ·
-        BL target weights · runtime из <code style="font-family:var(--font-mono);
-        font-size:9px; background:var(--tech-blue-08); color:var(--tech-blue);
-        padding:1px 4px; border-radius:2px;">data.expected_effect</code> [Step 3]
-        ·  горизонт 1 квартал
-        <span class="src">[Quant Engine]</span></div>
-    </div>
-
-    {# ─── Expected effect — data-driven 8-card grid ─────────────────────────
-         Each card pulls before / after / delta_pp / favourable from
-         data.expected_effect (dict of metric → {before, after, delta_pp,
-         favourable}).  Formatters depend on metric type:
-           · risk_index, max_erc_pct, it_share          → integer/% as-is
-           · cvar_95, sharpe, max_drawdown, vol         → 2 dp with %/raw
-           · expected_return                            → +X.X% with sign
-         "favourable" flag toggles green (good) / red (bad) on the delta. #}
-    {% set _ee = data.expected_effect or {} %}
-    {% macro _ef_card(key, label, fmt='pct', unit_lbl='пп') -%}
-      {%- set m = _ee.get(key) -%}
-      {%- if m -%}
-        {%- set b = m.before -%}
-        {%- set a = m.after -%}
-        {%- set d = m.delta_pp -%}
-        {%- set fav = m.favourable -%}
-        <div class="effect-card">
-          <div class="ef-name">{{ label }}</div>
-          <div class="ef-row">
-            <span class="ef-before">
-              {%- if fmt == 'pct'   -%}{{ '%+.1f' % (b * 100) if (b is number and b is not none) else '—' }}%
-              {%- elif fmt == 'int' -%}{{ b | round | int if (b is not none) else '—' }}
-              {%- elif fmt == 'raw' -%}{{ '%.2f' % b if (b is number and b is not none) else '—' }}
-              {%- endif -%}
-            </span>
-            <span class="ef-arrow">→</span>
-            <span class="ef-after">
-              {%- if fmt == 'pct'   -%}{{ '%+.1f' % (a * 100) if (a is number and a is not none) else '—' }}%
-              {%- elif fmt == 'int' -%}{{ a | round | int if (a is not none) else '—' }}
-              {%- elif fmt == 'raw' -%}{{ '%.2f' % a if (a is number and a is not none) else '—' }}
-              {%- endif -%}
-            </span>
-          </div>
-          <div class="ef-delta {% if fav %}pos{% else %}neg{% endif %}">
-            {%- if d is not none -%}{{ '%+.1f' % d }} {{ unit_lbl }}{% else %}—{% endif -%}
-          </div>
-        </div>
-      {%- endif -%}
-    {%- endmacro %}
-    <div class="effect-grid">
-      {{ _ef_card('risk_index',     'Индекс риска',                fmt='int', unit_lbl='пунктов') }}
-      {{ _ef_card('cvar_95',        'CVaR 95%',                   fmt='pct') }}
-      {{ _ef_card('sharpe',         'Sharpe Ratio',                fmt='raw') }}
-      {{ _ef_card('max_drawdown',   'Max Drawdown (модель)',       fmt='pct') }}
-      {{ _ef_card('vol',            'Волатильность (год.)',        fmt='pct') }}
-      {{ _ef_card('max_erc_pct',    'Max TRC (одной позиции)',     fmt='pct') }}
-      {{ _ef_card('it_share',       'Доля IT-сектора',             fmt='pct') }}
-      {{ _ef_card('expected_return','Ожид. доходность (год.)',     fmt='pct') }}
-    </div>
-
-    <div class="conc-ai" style="margin-top:12px;">
-      <div class="ai-head">[ 🤖 AI_ANALYSIS // {{ (data.ai_model_used or 'SONNET') | upper }} ]</div>
-      <div class="ai-body">
-        «Чистый эффект — индекс риска уходит с 62 в середину «умеренной» зоны (54),
-        исчезает HOTSPOT-перегрев одной бумаги, Sharpe растёт до
-        <span class="flag">1.32</span> — портфель становится эффективнее. Плата за это —
-        ≈ 1.6 пп ожидаемой доходности, но это типичный «обмен» при ребалансировке
-        в late-cycle. Goldman&nbsp;Sachs и JPMorgan
-        <span class="src">[RAG: GS_Q2_2026 · JPM_Strategy_Q2_2026]</span> поддерживают
-        такую конфигурацию.»
-      </div>
-    </div>
-  </div>
-
-  <!-- ════ C. CoVe — ВЕРИФИКАЦИЯ ИСТОЧНИКОВ ════ -->
-  <div class="d3-block">
-    <div class="d3-block-head">
-      <div class="panel-title">CoVe — Chain-of-Verification источников данных</div>
-      <div class="d3-block-sub">каждый показатель прослеживается до первичного источника
-        с указанием метода расчёта и QualityGate-статуса · список собирается
-        runtime из <code style="font-family:var(--font-mono); font-size:9px;
-        background:var(--tech-blue-08); color:var(--tech-blue);
-        padding:1px 4px; border-radius:2px;">data.cove_lineage</code> [Step 5]</div>
-    </div>
-
-    {# CoVe rows — fully data-driven from data.cove_lineage (engine output).
-       Engine status vocab → visual icon:  ok=v · warn/stale=! · error/missing=x #}
-    <div class="cove-grid">
-      {% for row in (data.cove_lineage or []) %}
-        {% set status = row.status or 'ok' %}
-        {% set klass  = 'warn' if status in ('warn', 'stale') else ('fail' if status in ('error', 'missing') else '') %}
-        {% set icon   = '!' if status in ('warn', 'stale') else ('✗' if status in ('error', 'missing') else '✓') %}
-        <div class="cove-item {{ klass }}">
-          <span class="cove-check">{{ icon }}</span>
-          <span class="cove-body"><b>{{ row.name }}</b><br>
-            <span class="cove-meta">
-              {{ row.source }}{% if row.method %} · {{ row.method }}{% endif %}{% if row.as_of %} · as_of {{ row.as_of }}{% endif %}{% if row.note %} · {{ row.note }}{% endif %}
-            </span>
-          </span>
-        </div>
-      {% else %}
-        <div class="cove-item">
-          <span class="cove-check">!</span>
-          <span class="cove-body"><b>Lineage недоступен</b><br>
-            <span class="cove-meta">engine не пробросил список источников — повторите запуск отчёта</span>
-          </span>
-        </div>
-      {% endfor %}
-    </div>
-    <div style="margin-top:10px; font-size:9px; color:var(--ink-60); line-height:1.5;">
-      <b style="color:var(--ink);">✓</b> — данные прошли QualityGate ·
-      <b style="color:var(--amber);">!</b> — частичное покрытие или fallback на устаревший кэш ·
-      <b style="color:var(--neg);">✗</b> — источник недоступен.
-      Документ не является ИИИ — только аналитическая рекомендация.
-    </div>
-  </div>
-
-
-</div>
-
-<!-- ══════════════════════════ СТРАНИЦА 5 ══════════════════════════════ -->
-<div class="sheet">
-
-  <!-- ТЕХ-ХЕДЕР -->
-  <div class="tech-header">
-    <span><b>PORTFOLIO RISK REPORT</b> // TIER: {{ (data.tier or 'DEEP') | upper }} // ID: U{{ user_id }} // RISK_ENGINE: MAC3</span>
-    <span class="ts">PAGE 5 OF 5</span>
-  </div>
-
-  <!-- ЗАГОЛОВОК СЕКЦИИ -->
-  <div class="sec-head">
-    <div class="sec-title">Рыночный режим</div>
+    <div class="sec-title">Рыночный режим и макро-контекст</div>
     <div class="sec-sub">в какой фазе мы находимся, какие сигналы это подтверждают и что это значит для портфеля · <b style="color:var(--tech-blue);">[DEEP]</b></div>
   </div>
 
-  <!-- ════ A. КВАДРАНТ РЕЖИМА + СВОДНАЯ ════ -->
+<!-- ════ A. КВАДРАНТ РЕЖИМА + СВОДНАЯ ════ -->
   <div class="d3-block">
     <div class="d3-block-head">
       <div class="panel-title">Текущий режим и его координаты</div>
@@ -2969,6 +2962,346 @@
     <b>ChromaDB · Bank PDF reports</b> — публичные обзоры GS / MS / JPM
   </div>
 
+
+</div>
+
+<!-- ══════════════════════════ СТРАНИЦА 5 ══════════════════════════════ -->
+<div class="sheet">
+
+  <!-- ТЕХ-ХЕДЕР -->
+  <div class="tech-header">
+    <span><b>PORTFOLIO RISK REPORT</b> // TIER: {{ (data.tier or 'DEEP') | upper }} // ID: U{{ user_id }} // RISK_ENGINE: MAC3</span>
+    <span class="ts">PAGE 5 OF 6</span>
+  </div>
+
+  <!-- ЗАГОЛОВОК СЕКЦИИ -->
+  <div class="sec-head">
+    <div class="sec-title">AI Ideas · Action Plan · Ожидаемый эффект</div>
+    <div class="sec-sub">от стратегических идей к конкретным уровням Buy / Sell / Stop · оценка эффекта до/после · <b style="color:var(--tech-blue);">[DEEP]</b></div>
+  </div>
+
+  <!-- ════ A. AI IDEAS — 4 категории, 4-stage pipeline (DEEP) ════ -->
+  <div class="d3-block">
+    <div class="d3-block-head">
+      <div class="panel-title">AI Ideas — стратегические рекомендации</div>
+      <div class="d3-block-sub">4 идеи в 4 категориях: снижение риска · диверсификация · качественный рост · хедж.  Каждая идея пропущена через
+        <b style="color:var(--tech-blue);">FACTOR → REGIME → STRESS → RAG</b> — pipeline доказывает, почему AI выбрал именно эти кандидаты.  Тикеры не из вашего портфеля — рассмотрите как замену / дополнение.
+        <span class="src">[{{ data.ai_model_used or 'Claude Sonnet 4.6' }}]</span></div>
+    </div>
+
+    {# DEEP-specific Ideas rendering — flatten 4 buckets in canonical order. #}
+    {% set _picks = data.ai_stock_picks or {} %}
+    {% set _bucket_order = ['risk_reduction', 'diversification', 'growth', 'hedge'] %}
+    {% set ns_ideas = namespace(flat=[]) %}
+    {% for bucket in _bucket_order %}
+      {% for idea in (_picks.get(bucket) or []) %}
+        {% if ns_ideas.flat.append(idea) %}{% endif %}
+      {% endfor %}
+    {% endfor %}
+    {% for bucket_key, bucket_val in _picks.items() %}
+      {% if bucket_key not in _bucket_order %}
+        {% for idea in bucket_val %}{% if ns_ideas.flat.append(idea) %}{% endif %}{% endfor %}
+      {% endif %}
+    {% endfor %}
+
+    {% if ns_ideas.flat %}
+    <div class="ideas-grid">
+      {% for idea in ns_ideas.flat %}
+        {% set prio_cls = idea.priority or 'medium' %}
+        {% set cat_low  = (idea.category or '') | lower %}
+        {% if 'риск' in cat_low %}{% set card_cls = 'risk' %}
+        {% elif 'диверс' in cat_low %}{% set card_cls = 'diversify' %}
+        {% elif 'рост' in cat_low %}{% set card_cls = 'grow' %}
+        {% elif 'хедж' in cat_low or 'hedge' in cat_low %}{% set card_cls = 'hedge' %}
+        {% else %}{% set card_cls = '' %}{% endif %}
+      <div class="idea-card {{ card_cls }}">
+        <div class="idea-head" onclick="tgIdea(this)">
+          <div class="idea-top">
+            <span class="idea-cat">{{ idea.category or 'Идея' }}</span>
+            <span class="idea-prio {{ prio_cls }}">{% if prio_cls == 'high' %}Высокий приоритет{% elif prio_cls == 'low' %}Низкий приоритет{% else %}Средний приоритет{% endif %}</span>
+          </div>
+          <div class="idea-num">ИДЕЯ {{ idea.idea_num or loop.index }}</div>
+          <div class="idea-title">{{ idea.title or '—' }}</div>
+          <div class="idea-why">{{ idea.rationale or '' }}</div>
+          {% if idea.candidates %}
+          <div class="idea-swap">
+            <div class="swap-label">3 кандидата (не в портфеле)</div>
+            <div class="swap-tickers">
+              {% for c in idea.candidates %}<span class="tk-chip">{{ c.ticker }}</span>{% endfor %}
+            </div>
+            <div class="swap-note">
+              <span class="expand-hint">Разверните карточку</span> — внутри Factor → Regime → Stress → RAG pipeline + miniinfo (β, sector) по каждому кандидату.
+            </div>
+          </div>
+          {% endif %}
+          <div class="idea-toggle">
+            <span class="idea-caret">▸</span>
+            <span class="t-more">Развернуть детали идеи</span>
+            <span class="t-less">Свернуть</span>
+          </div>
+        </div>
+        <div class="idea-detail">
+          {% if idea.pipeline %}
+          <div class="idea-pipeline">
+            <div class="pl-label">Конвейер отбора · Factor → Regime → Stress → RAG (4-stage)</div>
+            <div class="pl-flow">
+              {% for stage in idea.pipeline %}
+                <div class="pl-stage">
+                  <div class="pl-stage-name">{{ stage[0] }}</div>
+                  <div class="pl-stage-text">{{ stage[1] }}</div>
+                </div>
+                {% if not loop.last %}<div class="pl-sep">→</div>{% endif %}
+              {% endfor %}
+            </div>
+          </div>
+          {% endif %}
+          {% if idea.candidates %}
+          <div class="cand-list">
+            <div class="cand-label">Кандидаты: бета · сектор · сценарий</div>
+            {% for c in idea.candidates %}
+            <div class="cand">
+              <span class="cand-tk">{{ c.ticker }}</span>
+              <span class="cand-body">
+                <span class="cand-name">{{ c.name }}</span>
+                <span class="cand-meta">
+                  {% if c.beta is defined and c.beta is not none %}<span class="meta-beta">β {{ '%.2f' % c.beta }}</span>{% endif %}
+                  {% if c.sector %}<span class="meta-sec">{{ c.sector }}</span>{% endif %}
+                </span>
+                {% if c.scenario %}<span class="cand-scn">{{ c.scenario }}</span>{% endif %}
+              </span>
+            </div>
+            {% endfor %}
+          </div>
+          {% endif %}
+          {% if idea.expected_effect %}
+          <div class="idea-effect">
+            <div class="idea-effect-label">Ожидаемый эффект (3 метрики · привязка к expected_effect 8-card)</div>
+            <div class="idea-effect-val">
+              {% for ef in idea.expected_effect %}
+                {{ ef[0] }}: {{ ef[1] }} <span class="arrow">→</span> {{ ef[2] }}{% if not loop.last %}<br />{% endif %}
+              {% endfor %}
+            </div>
+          </div>
+          {% endif %}
+          {% if idea.sources %}
+          <div class="idea-src">
+            {% for s in idea.sources %}
+              {%- if 'Stress' in s -%}
+                <span class="src-chip stress">[{{ s }}]</span>
+              {%- elif 'RAG' in s -%}
+                <span class="src-chip">[{{ s }}]</span>
+              {%- else -%}
+                <span class="src-chip data">[{{ s }}]</span>
+              {%- endif %}
+            {% endfor %}
+          </div>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="ideas-empty" style="background:var(--panel); border:1px dashed var(--hairline); border-radius:8px; padding:24px; text-align:center;">
+      <div style="font-size:11px; color:var(--ink-60); margin-bottom:4px;">[ AI-IDEAS PIPELINE ]</div>
+      <div style="font-size:13px; color:var(--ink); font-weight:500;">
+        Идеи появятся после генерации AI-рекомендаций.
+      </div>
+      <div style="font-size:10px; color:var(--ink-60); margin-top:6px; max-width:480px; margin-left:auto; margin-right:auto;">
+        DEEP-tier Ideas пропускаются через 4-stage pipeline
+        <b style="color:var(--tech-blue);">FACTOR → REGIME → STRESS → RAG</b> с привязкой к рассчитанным stress-сценариям и регим-классификатору.
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- ════ B. ACTION PLAN — уровни Buy / Sell / Stop ════ -->
+  <div class="d3-block">
+    <div class="d3-block-head">
+      <div class="panel-title">Action Plan — уровни Buy / Sell / Stop</div>
+      <div class="d3-block-sub">ATR (Wilder RMA) · SMA50/200 · RSI(14) · MACD(12,26,9) ·
+        без внешних таргет-прайсов
+        <span class="src">[Quant Engine]</span></div>
+    </div>
+
+    <table class="action-table">
+      <thead>
+        <tr>
+          <th class="l">Тикер</th>
+          <th class="l">Action</th>
+          <th>Цена</th>
+          <th>Buy zone</th>
+          <th>Sell target</th>
+          <th>Stop loss</th>
+          <th colspan="2" class="l">Причина</th>
+        </tr>
+      </thead>
+      <tbody>
+        {# data.action_plan — list of {ticker, action, reason, price, buy_zone,
+           sell_target, stop_loss}.  Engine source: investment_logic.action_levels
+           via pdf_payload._action_plan.  Action verb → badge class:
+             BUY/Buy   → act-buy ·  HOLD → act-hold ·  SELL/Trim/Reduce → act-trim. #}
+        {% for r in (data.action_plan or []) %}
+          {% set act_raw = (r.action or 'HOLD') | string %}
+          {% set act_up  = act_raw | upper %}
+          {% if 'BUY' in act_up %}{% set badge = 'act-buy' %}
+          {% elif 'SELL' in act_up or 'TRIM' in act_up or 'REDUCE' in act_up %}{% set badge = 'act-trim' %}
+          {% else %}{% set badge = 'act-hold' %}{% endif %}
+        <tr>
+          <td class="l"><span class="ticker">{{ r.ticker }}</span></td>
+          <td class="l"><span class="badge {{ badge }}">{{ act_up }}</span></td>
+          <td>{{ r.price or '—' }}</td>
+          <td>{{ r.buy_zone or '—' }}</td>
+          <td class="level-pos">{{ r.sell_target or '—' }}</td>
+          <td class="level-neg">{{ r.stop_loss or '—' }}</td>
+          <td colspan="2" class="l reason">{{ r.reason or '—' }}</td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="8" class="l reason" style="opacity:0.6; text-align:center; padding:18px;">
+            Action plan не сформирован — нет позиций или engine не отдал уровни.
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ════ C. ОЖИДАЕМЫЙ ЭФФЕКТ НА РИСК-ПОКАЗАТЕЛИ ════ -->
+  <div class="d3-block">
+    <div class="d3-block-head">
+      <div class="panel-title">Ожидаемый эффект на риск-показатели портфеля</div>
+      <div class="d3-block-sub">оценка «до / после» при исполнении Action Plan ·
+        BL target weights · runtime из <code style="font-family:var(--font-mono);
+        font-size:9px; background:var(--tech-blue-08); color:var(--tech-blue);
+        padding:1px 4px; border-radius:2px;">data.expected_effect</code> [Step 3]
+        ·  горизонт 1 квартал
+        <span class="src">[Quant Engine]</span></div>
+    </div>
+
+    {# ─── Expected effect — data-driven 8-card grid ─────────────────────────
+         Each card pulls before / after / delta_pp / favourable from
+         data.expected_effect (dict of metric → {before, after, delta_pp,
+         favourable}).  Formatters depend on metric type:
+           · risk_index, max_erc_pct, it_share          → integer/% as-is
+           · cvar_95, sharpe, max_drawdown, vol         → 2 dp with %/raw
+           · expected_return                            → +X.X% with sign
+         "favourable" flag toggles green (good) / red (bad) on the delta. #}
+    {% set _ee = data.expected_effect or {} %}
+    {% macro _ef_card(key, label, fmt='pct', unit_lbl='пп') -%}
+      {%- set m = _ee.get(key) -%}
+      {%- if m -%}
+        {%- set b = m.before -%}
+        {%- set a = m.after -%}
+        {%- set d = m.delta_pp -%}
+        {%- set fav = m.favourable -%}
+        <div class="effect-card">
+          <div class="ef-name">{{ label }}</div>
+          <div class="ef-row">
+            <span class="ef-before">
+              {%- if fmt == 'pct'   -%}{{ '%+.1f' % (b * 100) if (b is number and b is not none) else '—' }}%
+              {%- elif fmt == 'int' -%}{{ b | round | int if (b is not none) else '—' }}
+              {%- elif fmt == 'raw' -%}{{ '%.2f' % b if (b is number and b is not none) else '—' }}
+              {%- endif -%}
+            </span>
+            <span class="ef-arrow">→</span>
+            <span class="ef-after">
+              {%- if fmt == 'pct'   -%}{{ '%+.1f' % (a * 100) if (a is number and a is not none) else '—' }}%
+              {%- elif fmt == 'int' -%}{{ a | round | int if (a is not none) else '—' }}
+              {%- elif fmt == 'raw' -%}{{ '%.2f' % a if (a is number and a is not none) else '—' }}
+              {%- endif -%}
+            </span>
+          </div>
+          <div class="ef-delta {% if fav %}pos{% else %}neg{% endif %}">
+            {%- if d is not none -%}{{ '%+.1f' % d }} {{ unit_lbl }}{% else %}—{% endif -%}
+          </div>
+        </div>
+      {%- endif -%}
+    {%- endmacro %}
+    <div class="effect-grid">
+      {{ _ef_card('risk_index',     'Индекс риска',                fmt='int', unit_lbl='пунктов') }}
+      {{ _ef_card('cvar_95',        'CVaR 95%',                   fmt='pct') }}
+      {{ _ef_card('sharpe',         'Sharpe Ratio',                fmt='raw') }}
+      {{ _ef_card('max_drawdown',   'Max Drawdown (модель)',       fmt='pct') }}
+      {{ _ef_card('vol',            'Волатильность (год.)',        fmt='pct') }}
+      {{ _ef_card('max_erc_pct',    'Max TRC (одной позиции)',     fmt='pct') }}
+      {{ _ef_card('it_share',       'Доля IT-сектора',             fmt='pct') }}
+      {{ _ef_card('expected_return','Ожид. доходность (год.)',     fmt='pct') }}
+    </div>
+
+    <div class="conc-ai" style="margin-top:12px;">
+      <div class="ai-head">[ 🤖 AI_ANALYSIS // {{ (data.ai_model_used or 'SONNET') | upper }} ]</div>
+      <div class="ai-body">
+        «Чистый эффект — индекс риска уходит с 62 в середину «умеренной» зоны (54),
+        исчезает HOTSPOT-перегрев одной бумаги, Sharpe растёт до
+        <span class="flag">1.32</span> — портфель становится эффективнее. Плата за это —
+        ≈ 1.6 пп ожидаемой доходности, но это типичный «обмен» при ребалансировке
+        в late-cycle. Goldman&nbsp;Sachs и JPMorgan
+        <span class="src">[RAG: GS_Q2_2026 · JPM_Strategy_Q2_2026]</span> поддерживают
+        такую конфигурацию.»
+      </div>
+    </div>
+  </div>
+
+
+</div>
+
+<!-- ══════════════════════════ СТРАНИЦА 6 ══════════════════════════════ -->
+<div class="sheet">
+
+  <!-- ТЕХ-ХЕДЕР -->
+  <div class="tech-header">
+    <span><b>PORTFOLIO RISK REPORT</b> // TIER: {{ (data.tier or 'DEEP') | upper }} // ID: U{{ user_id }} // RISK_ENGINE: MAC3</span>
+    <span class="ts">PAGE 6 OF 6</span>
+  </div>
+
+  <!-- ЗАГОЛОВОК СЕКЦИИ -->
+  <div class="sec-head">
+    <div class="sec-title">CoVe — верификация источников данных</div>
+    <div class="sec-sub">runtime provenance каждого источника · QualityGate freshness statuses · <b style="color:var(--tech-blue);">[DEEP]</b></div>
+  </div>
+
+  <!-- ════ A. CoVe — ВЕРИФИКАЦИЯ ИСТОЧНИКОВ ════ -->
+  <div class="d3-block">
+    <div class="d3-block-head">
+      <div class="panel-title">CoVe — Chain-of-Verification источников данных</div>
+      <div class="d3-block-sub">каждый показатель прослеживается до первичного источника
+        с указанием метода расчёта и QualityGate-статуса · список собирается
+        runtime из <code style="font-family:var(--font-mono); font-size:9px;
+        background:var(--tech-blue-08); color:var(--tech-blue);
+        padding:1px 4px; border-radius:2px;">data.cove_lineage</code> [Step 5]</div>
+    </div>
+
+    {# CoVe rows — fully data-driven from data.cove_lineage (engine output).
+       Engine status vocab → visual icon:  ok=v · warn/stale=! · error/missing=x #}
+    <div class="cove-grid">
+      {% for row in (data.cove_lineage or []) %}
+        {% set status = row.status or 'ok' %}
+        {% set klass  = 'warn' if status in ('warn', 'stale') else ('fail' if status in ('error', 'missing') else '') %}
+        {% set icon   = '!' if status in ('warn', 'stale') else ('✗' if status in ('error', 'missing') else '✓') %}
+        <div class="cove-item {{ klass }}">
+          <span class="cove-check">{{ icon }}</span>
+          <span class="cove-body"><b>{{ row.name }}</b><br>
+            <span class="cove-meta">
+              {{ row.source }}{% if row.method %} · {{ row.method }}{% endif %}{% if row.as_of %} · as_of {{ row.as_of }}{% endif %}{% if row.note %} · {{ row.note }}{% endif %}
+            </span>
+          </span>
+        </div>
+      {% else %}
+        <div class="cove-item">
+          <span class="cove-check">!</span>
+          <span class="cove-body"><b>Lineage недоступен</b><br>
+            <span class="cove-meta">engine не пробросил список источников — повторите запуск отчёта</span>
+          </span>
+        </div>
+      {% endfor %}
+    </div>
+    <div style="margin-top:10px; font-size:9px; color:var(--ink-60); line-height:1.5;">
+      <b style="color:var(--ink);">✓</b> — данные прошли QualityGate ·
+      <b style="color:var(--amber);">!</b> — частичное покрытие или fallback на устаревший кэш ·
+      <b style="color:var(--neg);">✗</b> — источник недоступен.
+      Документ не является ИИИ — только аналитическая рекомендация.
+    </div>
+  </div>
 
 </div>
 
