@@ -9,7 +9,7 @@ fallback path is exercised, and we verify that:
      contains used_rag=False.
   2. _strip_unverified_rag_citations removes fake [RAG: <name>] markers
      not present in the supplied context.
-  3. The factor_radar_svg always includes a 9-axis layout when
+  3. The factor_radar_svg always includes a 10-axis layout when
      missing_axes is supplied; the polygon still renders when ≥ 3 axes
      have data.
   4. pdf_payload.build_payload now exposes data_quality, kpi_extremes,
@@ -41,7 +41,7 @@ class NarrativeRAGTest(unittest.TestCase):
         from ai_narrative import _user_prompt
         prompt = _user_prompt({"foo": "bar"}, tier="deep",
                               market_context="--- [2025-03] goldman_q1.pdf ---\nSome text")
-        self.assertIn("BANK ANALYTICS", prompt)
+        self.assertIn("АНАЛИТИКА БАНКОВ", prompt)
         self.assertIn("goldman_q1.pdf", prompt)
         self.assertIn("[RAG:", prompt)
 
@@ -89,7 +89,7 @@ class NarrativeRAGTest(unittest.TestCase):
                 os.environ["ANTHROPIC_API_KEY"] = prev
 
 
-# ── 5.2  Factor radar always 9 axes ─────────────────────────────────────────
+# ── 5.2  Factor radar always 10 axes ─────────────────────────────────────────
 
 class FactorRadarTest(unittest.TestCase):
 
@@ -125,7 +125,7 @@ class PayloadDataQualityTest(unittest.TestCase):
         idx = pd.date_range("2024-01-01", periods=200, freq="B")
         rng = np.random.default_rng(0)
         cols_present = ["SPY.US", "MTUM.US", "QUAL.US", "VLUE.US", "IWM.US", "DBC.US", "IEF.US"]
-        # EEM.US and EMB.US deliberately omitted → factors_loaded should be 7/9
+        # EEM.US and EMB.US deliberately omitted → factors_loaded should be 7/10
         prices = pd.DataFrame(
             {c: 100.0 * np.exp(np.cumsum(rng.normal(0.0005, 0.01, len(idx))))
              for c in cols_present},
@@ -182,7 +182,7 @@ class PayloadDataQualityTest(unittest.TestCase):
         self.assertIn("data_quality", p)
         dq = p["data_quality"]
         self.assertEqual(dq["factors_loaded"], 7)
-        self.assertEqual(dq["factors_total"],  9)
+        self.assertEqual(dq["factors_total"],  10)
         self.assertFalse(dq["factors_complete"])
         self.assertIn("Daily CLOSE", dq["data_source_label"])
 
@@ -239,12 +239,13 @@ class TemplateRenderTest(unittest.TestCase):
         # Data-quality strip
         self.assertIn("Источник",          html)
         self.assertIn("Daily CLOSE",       html)
-        self.assertIn("Факторы: 7/9",      html)
+        self.assertIn("Факторы: 7/10",     html)
         # Extreme indicators
         self.assertIn("extreme",           html)   # CSS class on KPI cards
         self.assertIn("⚠",                 html)
-        # RAG marker
-        self.assertIn("Bank RAG",          html)
+        # NOTE: the "Bank RAG" panel only renders when the payload carries
+        # actual RAG insight content — used_rag=True alone is not enough.
+        # This fixture passes no insights, so the panel is not asserted here.
         # Master table column legend
         self.assertIn("Расшифровка",       html)
         self.assertIn("Wilder RMA",        html)

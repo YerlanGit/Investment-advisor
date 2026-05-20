@@ -14,9 +14,11 @@ ANTHROPIC_API_KEY.env
 data/chroma_db/
 data/reports/
 data/user_reports/
+data/cache/
 data/portfolio.csv
 users_vault.db
 *.db
+*.sqlite
 
 # Python
 *.py[cod]
