@@ -134,6 +134,87 @@ def _build_ai_ideas(stock_picks: dict) -> dict:
     return ideas
 
 
+def _build_expected_effect(raw: Optional[dict]) -> dict:
+    """
+    Adapt simulate_after_plan() output to the deep template's 8-card schema.
+
+    The engine returns {metrics: {<engine_name>: {before, after, delta,
+    improved, delta_pp?}}}; the template's `_ef_card` reads a FLAT dict keyed
+    by its OWN card names, each value {before, after, delta_pp, favourable}.
+    Without this remap every `_ee.get(card_key)` is None, every card hits the
+    falsy guard, and the "Ожидаемый эффект" grid renders empty.
+
+    Key differences bridged here:
+      • nesting        — engine wraps metrics under `.metrics`
+      • card-name skew — template `vol`/`max_erc_pct` vs engine
+                          `volatility_ann`/`max_trc`
+      • field name     — engine `improved` vs template `favourable`
+      • delta_pp       — engine only sets it for as_pp metrics; for the
+                          others (risk_index points, sharpe) fall back to the
+                          raw delta, and scale max_trc's fraction to pp.
+    """
+    metrics = (raw or {}).get("metrics") or {}
+    # template card key -> engine metric key
+    _KEYMAP = (
+        ("risk_index",      "risk_index"),
+        ("cvar_95",         "cvar_95"),
+        ("sharpe",          "sharpe"),
+        ("max_drawdown",    "max_drawdown"),
+        ("vol",             "volatility_ann"),
+        ("max_erc_pct",     "max_trc"),
+        ("it_share",        "it_share"),
+        ("expected_return", "expected_return"),
+    )
+    out: dict = {}
+    for tpl_key, eng_key in _KEYMAP:
+        cell = metrics.get(eng_key)
+        if not isinstance(cell, dict):
+            continue
+        delta_pp = cell.get("delta_pp")
+        if delta_pp is None:
+            d = cell.get("delta")
+            # max_trc is a fraction with no as_pp flag — scale to points;
+            # risk_index/sharpe deltas are already in their display unit.
+            delta_pp = (d * 100) if (tpl_key == "max_erc_pct" and d is not None) else d
+        out[tpl_key] = {
+            "before":     cell.get("before"),
+            "after":      cell.get("after"),
+            "delta_pp":   delta_pp,
+            "favourable": cell.get("improved"),
+        }
+    return out
+
+
+def _adapt_period_returns(raw: Optional[dict]) -> dict:
+    """
+    Adapt compute_period_returns_table() output to the template row schema.
+
+    Engine row: {period, n_days, port_pct, bm_pct, excess_pp} — period is a
+    lowercase code ("1m".."12m"/"YTD"), the three returns are decimal floats
+    or None.  Template row: {label, portfolio, benchmark, excess} — all
+    pre-formatted strings (the renderer does no transform, so the period
+    table rendered 6 blank rows from the key/type mismatch).
+    """
+    _LABELS = {"1m": "1М", "3m": "3М", "6m": "6М", "12m": "12М", "YTD": "YTD"}
+    out: dict = {}
+    for bm_name, block in (raw or {}).items():
+        rows = []
+        for r in (block or {}).get("periods", []):
+            port, bm, exc = r.get("port_pct"), r.get("bm_pct"), r.get("excess_pp")
+            rows.append({
+                "label":     _LABELS.get(r.get("period"), r.get("period") or "—"),
+                "portfolio": _format_pnl_pct(port) if port is not None else "—",
+                "benchmark": _format_pnl_pct(bm)   if bm   is not None else "—",
+                "excess":    f"{exc*100:+.1f} пп"  if exc  is not None else "—",
+            })
+        out[bm_name] = {
+            "periods":      rows,
+            "window_start": (block or {}).get("window_start"),
+            "window_end":   (block or {}).get("window_end"),
+        }
+    return out
+
+
 # ── Extreme-value thresholds ────────────────────────────────────────────────
 # Used to flag rows that warrant a red icon + AI tooltip.
 EXTREME = {
@@ -373,13 +454,13 @@ def build_payload(results: dict, tier: str,
     )
 
     # ── Multi-period performance (1м / 3м / 6м / 12м / YTD) ────────────────
-    period_returns_table = results.get("period_returns_table") or {}
+    period_returns_table = _adapt_period_returns(results.get("period_returns_table"))
 
     # ── Stress scenarios (parametric factor shocks, 7-row default catalog) ─
     stress_scenarios = results.get("stress_scenarios") or []
 
     # ── Expected effect — before/after simulation under BL target weights ──
-    expected_effect = results.get("expected_effect")
+    expected_effect = _build_expected_effect(results.get("expected_effect"))
 
     # ── Macro drivers from FRED (5-series pack for DEEP P5) ────────────────
     macro_drivers = results.get("macro_drivers") or {}
@@ -482,6 +563,28 @@ def build_payload(results: dict, tier: str,
     ai_ideas    = _build_ai_ideas((ai_summary or {}).get("stock_picks") or {})
     ideas_count = sum(len(v) for v in ai_ideas.values())
 
+    # ── Fundamental layer — SEC-derived columns from the perf table ────────
+    # Built for BOTH tiers: the base report's holdings-detail panel also
+    # reads data.fundamental_layer — gating it to deep-only left every base
+    # asset showing "н/д".  analyze_all populates SEC_* columns tier-agnostic.
+    fundamental_rows: list[dict] = []
+    if perf_df is not None and not perf_df.empty:
+        for _, row in perf_df.iterrows():
+            if str(row.get("Fundamental_Sector") or "default") in ("default", "EM_Proxy"):
+                continue
+            fundamental_rows.append({
+                "ticker":      str(row.get("Ticker", "—")),
+                "roe":         _fmt_pct(row.get("SEC_ROE")),
+                "op_m":        _fmt_pct(row.get("SEC_Op_Margin")),
+                "dta":         _fmt_pct(row.get("SEC_Debt_to_Assets")),
+                "rev_g":       _fmt_pct(row.get("SEC_Revenue_Growth_YoY")),
+                "fcf_m":       _fmt_pct(row.get("SEC_FCF_Margin")),
+                "altman_z":    _fmt_num(row.get("SEC_Altman_Z"), digits=2),
+                "altman_zone": row.get("SEC_Altman_Zone") or "—",
+                "piotroski":   _fmt_int(row.get("SEC_Piotroski_F")),
+                "int_cov":     _fmt_num(row.get("SEC_Interest_Coverage"), digits=1),
+            })
+
     # ── Common payload (always rendered) ───────────────────────────────────
     payload: dict = {
         # KPIs
@@ -517,6 +620,8 @@ def build_payload(results: dict, tier: str,
         "holdings_count":    len(assets),
         "hotspots":          hotspots,
         "sectors":           sectors,
+        # SEC fundamentals — both tiers render a holdings-detail panel.
+        "fundamental_layer": fundamental_rows,
         # Concentration & waterfall (new — data ready for next-gen template)
         "sector_concentration": sector_concentration,
         "sector_warnings":      sector_warnings,
@@ -635,27 +740,6 @@ def build_payload(results: dict, tier: str,
                 "reason":      r.get("reason", ""),
             })
         payload["action_plan"] = plan_rows
-
-        # Fundamental layer — SEC-derived columns from perf table
-        fundamental_rows = []
-        if perf_df is not None and not perf_df.empty:
-            for _, row in perf_df.iterrows():
-                ticker = str(row.get("Ticker", "—"))
-                if str(row.get("Fundamental_Sector") or "default") in ("default", "EM_Proxy"):
-                    continue
-                fundamental_rows.append({
-                    "ticker":   ticker,
-                    "roe":      _fmt_pct(row.get("SEC_ROE")),
-                    "op_m":     _fmt_pct(row.get("SEC_Op_Margin")),
-                    "dta":      _fmt_pct(row.get("SEC_Debt_to_Assets")),
-                    "rev_g":    _fmt_pct(row.get("SEC_Revenue_Growth_YoY")),
-                    "fcf_m":    _fmt_pct(row.get("SEC_FCF_Margin")),
-                    "altman_z": _fmt_num(row.get("SEC_Altman_Z"), digits=2),
-                    "altman_zone": row.get("SEC_Altman_Zone") or "—",
-                    "piotroski": _fmt_int(row.get("SEC_Piotroski_F")),
-                    "int_cov":  _fmt_num(row.get("SEC_Interest_Coverage"), digits=1),
-                })
-        payload["fundamental_layer"] = fundamental_rows
 
         # Black-Litterman target-weight summary
         bl_records = results.get("black_litterman") or []
