@@ -1100,7 +1100,6 @@
       </h1>
 
       <div class="ai-box">
-        <div class="ai-head">[ 🤖 AI_ANALYSIS{% if data.ai_model_used %} // {{ data.ai_model_used | upper }}{% endif %} ]</div>
         <div class="ai-body">
           {% if data.ai_plain_summary %}
             {{ data.ai_plain_summary }}
@@ -1325,7 +1324,7 @@
           <tr>
             <td>{{ a.ticker }}</td>
             <td>{{ a.weight | replace('%','') }}</td>
-            <td>—</td>
+            <td>{{ a.beta or '—' }}</td>
             <td class="hl-col">{{ a.euler_risk | replace('%','') }}</td>
             <td><span class="pill {% if is_hot %}watch{% else %}normal{% endif %}">{% if is_hot %}HOTSPOT{% else %}NORMAL{% endif %}</span></td>
           </tr>
@@ -1552,18 +1551,13 @@
     </div>
 
     <!-- связующий AI-комментарий -->
+    {% if data.ai_risk_comment %}
     <div class="conc-ai">
-      <div class="ai-head">[ 🤖 AI_ANALYSIS // {{ (data.ai_model_used or 'HAIKU') | upper }} ]</div>
       <div class="ai-body">
-        «Простыми словами: если бы вы держали каждую бумагу <span class="flag">по
-        отдельности, их риски сложились бы в 18.4%</span> годовых колебаний. Но
-        бумаги не падают одновременно — этот «эффект диверсификации» снижает риск
-        на 4.2 пункта, и реальный риск портфеля — 14.2%. В таблице слева видно,
-        кто вносит больше всего: те же PLTR и CRWD. Диверсификация уже работает
-        на вас, но усилить её можно, добавив активы из других секторов.
-        <span class="src">[Quant Engine]</span>»
+        {{ data.ai_risk_comment }}
       </div>
     </div>
+    {% endif %}
 
   </div>
 
@@ -1581,7 +1575,7 @@
   <!-- ЗАГОЛОВОК СЕКЦИИ -->
   <div class="sec-head">
     <div class="sec-title">Что вы держите</div>
-    <div class="sec-sub">9 позиций · нажмите на строку, чтобы увидеть фундаментал бумаги</div>
+    <div class="sec-sub">{{ data.holdings_count }} позиций · нажмите на строку, чтобы увидеть фундаментал бумаги</div>
   </div>
 
   <!-- ТАБЛИЦА + ПАНЕЛЬ СЕКТОРОВ -->
@@ -1635,7 +1629,7 @@
                 ${{ pnl_abs_raw }}
               {%- endif %}</span>
         </div>
-        <div class="h-cell action"><span class="badge {{ action_class }}">{{ (asset.action or 'HOLD') | upper }}</span></div>
+        <div class="h-cell action">{% if asset.is_cash %}<span class="badge hold">Кэш</span>{% else %}<span class="badge {{ action_class }}">{{ (asset.action or 'HOLD') | upper }}</span>{% endif %}</div>
         <div class="h-cell caret-cell">
           <span class="h-toggle">
             <span class="t-more">Детали</span>
@@ -1766,7 +1760,7 @@
       {% for w in data.sector_warnings %}
       <div class="sp-warn">
         <span>⚠</span>
-        <span>{{ w }}</span>
+        <span>{{ w.text }}</span>
       </div>
       {% endfor %}
     {% endif %}
@@ -1775,34 +1769,14 @@
   </div><!-- /.holdings-layout -->
 
   <!-- СВОДНЫЙ AI-БЛОК -->
+  {% if data.ai_holdings_comment or data.ai_sector_comment %}
   <div class="sec-ai">
-    <div class="ai-head">[ 🤖 AI_ANALYSIS // {{ (data.ai_model_used or 'HAIKU') | upper }} ]</div>
     <div class="ai-body">
-      <p>«Простыми словами: портфель двигают две бумаги — <span class="flag-inline">PLTR
-      и CRWD</span>. Они приносят лучшую доходность, но именно они помечены
-      HOTSPOT — на них вместе приходится почти половина риска. С другого края —
-      JNJ, KO и BND: спокойные позиции с низкой бетой, которые этот риск гасят.</p>
-
-      <p>По секторам портфель сильно перевешен в технологиях —
-      <span class="flag-inline">62% против ~30% у рынка</span>. Goldman Sachs
-      ждёт повышенной волатильности в IT в этом квартале
-      <span class="src-inline">[RAG: GS_Q2_2026]</span>, а Morgan Stanley в обзоре
-      сектора понижает прогноз роста на 2026 и советует фиксировать часть прибыли
-      в перегретых именах <span class="src-inline">[RAG: MS_TechOutlook_2026]</span> —
-      это прямо про ваши PLTR, CRWD и NVDA. Зато ваши защитные сектора —
-      здравоохранение (14%) и потребительские товары (16%) — JPMorgan называет
-      «островками стабильности» на случай коррекции
-      <span class="src-inline">[RAG: JPM_Strategy_Q2_2026]</span>. По энергетике
-      (6%) банки осторожны при текущих ценах на нефть — и XOM у вас уже помечен на
-      сокращение. Подробности концентрации — на странице «Где сосредоточен риск».»</p>
-    </div>
-    <div class="ai-sources">
-      ИСТОЧНИКИ — ОТЧЁТЫ ИНВЕСТБАНКОВ:
-      <b>Goldman Sachs</b> «Q2 2026 Market Outlook» ·
-      <b>Morgan Stanley</b> «Technology Sector Outlook 2026» ·
-      <b>JPMorgan</b> «Q2 2026 Strategy &amp; Allocation»
+      {% if data.ai_holdings_comment %}<p>{{ data.ai_holdings_comment }}</p>{% endif %}
+      {% if data.ai_sector_comment %}<p>{{ data.ai_sector_comment }}</p>{% endif %}
     </div>
   </div>
+  {% endif %}
 
 
 </div>
@@ -1984,28 +1958,13 @@
   </div><!-- /.gv-main -->
 
   <!-- СВОДНЫЙ AI-БЛОК -->
+  {% if data.ai_benchmark_comment %}
   <div class="sec-ai">
-    <div class="ai-head">[ 🤖 AI_ANALYSIS // {{ (data.ai_model_used or 'HAIKU') | upper }} ]</div>
     <div class="ai-body">
-      <p>«Простыми словами: за год портфель обошёл рынок на
-      <span class="flag-inline">+5.1 пункта</span> — и опережение есть на всех
-      отрезках, от месяца до года. Это хороший результат.</p>
-
-      <p>Но важно понимать, чем он куплен: рост дали в основном технологии —
-      PLTR, NVDA, MSFT. Те же бумаги делают портфель более «качающимся», чем
-      рынок (волатильность 14.8% против 11.2%). Goldman Sachs предупреждает: в
-      коррекцию перевес в IT так же быстро превращает опережение в отставание
-      <span class="src-inline">[RAG: GS_Q2_2026]</span>, а Morgan Stanley прямо
-      советует фиксировать часть прибыли в перегретых техах
-      <span class="src-inline">[RAG: MS_TechOutlook_2026]</span>. Идеи, что с
-      этим делать — на странице «Идеи ИИ».»</p>
-    </div>
-    <div class="ai-sources">
-      ИСТОЧНИКИ — ОТЧЁТЫ ИНВЕСТБАНКОВ:
-      <b>Goldman Sachs</b> «Q2 2026 Market Outlook» ·
-      <b>Morgan Stanley</b> «Technology Sector Outlook 2026»
+      <p>{{ data.ai_benchmark_comment }}</p>
     </div>
   </div>
+  {% endif %}
 
 
 </div>
@@ -2021,19 +1980,17 @@
   <!-- ЗАГОЛОВОК СЕКЦИИ -->
   <div class="sec-head">
     <div class="sec-title">Идеи ИИ</div>
-    <div class="sec-sub">4 идеи на основе данных портфеля, отчётности SEC и обзоров инвестбанков · нажмите на карточку, чтобы раскрыть детали</div>
+    <div class="sec-sub">{{ data.ideas_count }} идей на основе данных портфеля, отчётности SEC и обзоров инвестбанков · нажмите на карточку, чтобы раскрыть детали</div>
   </div>
 
   <!-- ВВОДНЫЙ AI-БЛОК -->
+  {% if data.ai_holdings_comment %}
   <div class="sec-ai">
-    <div class="ai-head">[ 🤖 AI_ANALYSIS // {{ (data.ai_model_used or 'HAIKU') | upper }} ]</div>
     <div class="ai-body">
-      «Главная мысль одной строкой: портфель зарабатывает, но риск собран в
-      одном углу — <span class="flag-inline">62% в технологиях</span>. Идеи ниже
-      — про то, как сохранить рост и при этом сделать портфель устойчивее к
-      просадке. Каждая идея отсортирована по приоритету и снабжена источником.»
+      {{ data.ai_holdings_comment }}
     </div>
   </div>
+  {% endif %}
 
   {# ─── AI Ideas grid — data-driven from data.ai_stock_picks ─────────────
        Engine populates ai_stock_picks via AdvisorBot.generate_stock_picks().
@@ -2047,7 +2004,7 @@
        When ai_stock_picks is empty (AI hasn't run yet) we show a friendly
        placeholder rather than fake ideas. #}
   <!-- СЕТКА ИДЕЙ -->
-  {% set _picks    = data.ai_stock_picks or {} %}
+  {% set _picks    = data.ai_ideas or {} %}
   {% set _bucket_order = ['risk_reduction', 'diversification', 'growth', 'rotation', 'quality', 'hedge'] %}
   {% set ns_ideas = namespace(flat=[]) %}
   {% for bucket in _bucket_order %}

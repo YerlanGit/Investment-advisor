@@ -553,7 +553,7 @@ _RADAR_FACTOR_AXES = [
 
 def _build_factor_radar_svg(results: dict) -> str:
     """Inline factor-radar SVG with all 9 axes (missing factors flagged)."""
-    betas, missing = _compute_factor_betas(results)
+    betas, missing, _coverage = _compute_factor_betas(results)
     try:
         return factor_radar_svg(betas, missing_axes=missing)
     except Exception as exc:
@@ -567,40 +567,55 @@ _BENCH_FACTOR_BETAS = {axis: (1.0 if axis == "Market" else 0.0)
                         for axis in _RADAR_FACTOR_AXES}
 
 
-def _compute_factor_betas(results: dict) -> tuple[dict[str, float], list[str]]:
+def _compute_factor_betas(results: dict) -> tuple[dict[str, float], list[str], float]:
     """
     Extract weighted-average factor β for each axis from the perf table.
 
-    Returns (betas_dict, missing_axes_list).  When an axis has no
-    Beta_<axis> column in the perf frame the engine never loaded that
-    factor ETF — keep the axis in betas at 0.0 and report it as missing
-    so downstream visualisations can render a dashed/grey spoke.
+    Returns (betas_dict, missing_axes_list, coverage_pct).
+
+    Coverage matters: only assets that went through the Ridge factor
+    regression carry Beta_<axis> values; cash, broker-priced KZ instruments
+    and assets with too little overlapping history come back NaN.  The old
+    code did `.fillna(0)` then a full-portfolio weighted average, so those
+    NaN→0 assets silently dragged every β toward zero (a 62%-tech portfolio
+    showing Market β ≈ 0.05).  We instead renormalise each axis over the
+    weight of assets that actually got a fit, and report what share of the
+    portfolio the factor model covers.
     """
     try:
         perf = results.get("performance_table")
         if perf is None or perf.empty:
-            return {}, list(_RADAR_FACTOR_AXES)
+            return {}, list(_RADAR_FACTOR_AXES), 0.0
         total_val = float(results.get("total_value") or 1.0)
         weights   = (perf["Current_Value"].fillna(0).astype(float) / total_val).values
 
         betas:   dict[str, float] = {}
         missing: list[str]        = []
+        coverage_w = 0.0
         for axis in _RADAR_FACTOR_AXES:
             col = f"Beta_{axis}"
-            if col in perf.columns:
-                vals       = perf[col].fillna(0).astype(float).values
-                betas[axis] = float((vals * weights).sum())
-            else:
-                betas[axis]  = 0.0
+            if col not in perf.columns:
+                betas[axis] = 0.0
                 missing.append(axis)
+                continue
+            raw   = perf[col].astype(float)
+            mask  = raw.notna().values
+            cov_w = float(abs(weights[mask]).sum())
+            if cov_w > 1e-9:
+                betas[axis] = float((raw.values[mask] * weights[mask]).sum() / cov_w)
+                coverage_w  = max(coverage_w, cov_w)
+            else:
+                betas[axis] = 0.0
+                missing.append(axis)
+        coverage_pct = round(min(coverage_w, 1.0) * 100, 1)
         if missing:
             logger.info("Factor radar: %d/%d axes loaded; missing: %s",
                          len(_RADAR_FACTOR_AXES) - len(missing),
                          len(_RADAR_FACTOR_AXES), ", ".join(missing))
-        return betas, missing
+        return betas, missing, coverage_pct
     except Exception as exc:
         logger.warning("factor beta extraction failed: %s", exc)
-        return {}, list(_RADAR_FACTOR_AXES)
+        return {}, list(_RADAR_FACTOR_AXES), 0.0
 
 
 def _build_factor_betas_table(results: dict) -> list[dict]:
@@ -612,7 +627,7 @@ def _build_factor_betas_table(results: dict) -> list[dict]:
     to 2 dp.  Missing axes get beta=0.0 + missing=True so the template
     can render them as muted "n/a" rows instead of dropping them silently.
     """
-    betas, missing = _compute_factor_betas(results)
+    betas, missing, _coverage = _compute_factor_betas(results)
     if not betas:
         return []
     missing_set = set(missing)
@@ -732,10 +747,11 @@ def _build_pdf_payload(results: dict, tier: str,
             regime_rag_confirm=regime_rag_confirm,
         )
         if tier == TIER_DEEP:
-            payload["equity_curve_svg"] = _build_equity_curve_svg(results)
-            payload["factor_radar_svg"] = _build_factor_radar_svg(results)
-            payload["factor_betas"]     = _build_factor_betas_table(results)
-            payload["used_rag"]         = bool(market_context)
+            payload["equity_curve_svg"]    = _build_equity_curve_svg(results)
+            payload["factor_radar_svg"]    = _build_factor_radar_svg(results)
+            payload["factor_betas"]        = _build_factor_betas_table(results)
+            payload["factor_coverage_pct"] = _compute_factor_betas(results)[2]
+            payload["used_rag"]            = bool(market_context)
         # KPI sparklines — wired for BOTH tiers (both templates surface them
         # in the cover KPI strip).  None when history < 90 daily obs;
         # template gating then hides the chart cells.
