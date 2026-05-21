@@ -168,10 +168,13 @@ class RegimeClassifier:
         else:
             regime = "Slowdown"
 
-        # Confidence: euclidean magnitude scaled so that |score|≈0.05 → ≈1.0.
-        # 5% spread is 'meaningful' on a 60-day window; cap at 1.0.
+        # Confidence: euclidean distance from origin scaled to [0,1].
+        # Threshold 0.10 (10% 60-day spread) maps to 1.0; at |score|=0.05
+        # confidence ≈ 0.5 — matching empirical uncertainty at the quadrant
+        # boundary.  Old threshold (0.05) caused the typical production signal
+        # (magnitude ~0.06) to round up to 100%, which was misleading.
         magnitude  = float(np.hypot(growth_score, cycle_score))
-        confidence = float(min(1.0, magnitude / 0.05))
+        confidence = float(min(1.0, magnitude / 0.10))
 
         return RegimeReading(
             regime       = regime,

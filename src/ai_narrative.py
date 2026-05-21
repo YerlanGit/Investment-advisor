@@ -559,6 +559,8 @@ def generate_narrative(results: dict, tier: str = "base",
 
         # Normalise stock_picks structure.
         stock_picks = _normalise_stock_picks(stock_picks, tier, market_context)
+        # Remove picks that already exist in the portfolio (they are not "new ideas").
+        stock_picks = _remove_held_picks(stock_picks, results)
         # Post-generation contradiction check: remove Sell/Trim tickers from buy picks.
         stock_picks = _check_pick_contradictions(stock_picks, results)
         total_picks = sum(len(s.get("picks", [])) for s in stock_picks.values())
@@ -623,6 +625,37 @@ def _normalise_stock_picks(raw: dict, tier: str, market_context: str) -> dict:
             "picks": clean_picks,
         }
     return result
+
+
+def _remove_held_picks(stock_picks: dict, results: dict) -> dict:
+    """
+    Remove tickers already in the live portfolio from AI idea picks.
+
+    Recommending GOOGL (16.7% held) as a "new idea" is a logical contradiction
+    that undermines trust in the report.  boost_alpha / rebalance / protect_capital
+    scenarios are all cleaned — the AI should only suggest additions, not echo
+    current holdings.
+    """
+    perf = results.get("performance_table")
+    if perf is None or getattr(perf, "empty", True):
+        return stock_picks
+    held: set[str] = {
+        str(t).upper().split(".")[0]
+        for t in perf.get("Ticker", perf.index if perf.index.name == "Ticker" else [])
+    }
+    if not held:
+        return stock_picks
+    for scenario in stock_picks.values():
+        if not isinstance(scenario, dict):
+            continue
+        original = scenario.get("picks", [])
+        filtered = [p for p in original
+                    if p.get("ticker", "").upper().split(".")[0] not in held]
+        if len(filtered) < len(original):
+            removed = [p["ticker"] for p in original if p not in filtered]
+            logger.info("Held-pick filter: removed %s (already in portfolio)", removed)
+        scenario["picks"] = filtered
+    return stock_picks
 
 
 def _check_pick_contradictions(stock_picks: dict, results: dict) -> dict:

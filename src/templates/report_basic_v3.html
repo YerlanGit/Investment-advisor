@@ -2125,12 +2125,28 @@
   </div>
 
   <!-- ПОЛОСА ИСТОЧНИКОВ -->
+  {% if data.integrity_checks %}
+  <div style="margin-top:16px; padding:10px 14px; background:rgba(0,0,0,0.03); border-radius:6px; border-left:3px solid #4a90d9;">
+    <div style="font-size:9px; font-weight:700; color:#555; letter-spacing:.05em; margin-bottom:6px;">КОНТРОЛЬ КАЧЕСТВА ДАННЫХ</div>
+    <div style="display:flex; flex-wrap:wrap; gap:6px;">
+    {% for c in data.integrity_checks %}
+      <span style="font-size:8.5px; padding:2px 7px; border-radius:10px; white-space:nowrap;
+             background:{% if c.status == '✓' %}#e8f5e9{% elif c.status == '⚠' %}#fff8e1{% else %}#f5f5f5{% endif %};
+             color:{% if c.status == '✓' %}#2e7d32{% elif c.status == '⚠' %}#e65100{% else %}#777{% endif %};">
+        {{ c.status }} <b>{{ c.label }}</b>: {{ c.detail }}
+      </span>
+    {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
   <div class="section-sources">
     ИСТОЧНИКИ:
     <b>SEC EDGAR</b> — публичная отчётность эмитентов ·
     <b>Quant Engine MAC3</b> — расчёт риска и сигналов ·
     <b>Factor Engine</b> — фактор-скрининг качества ·
     <b>Regime Model</b> — определение режима рынка ·
+    {% if data.ai_model_used %}<b>AI</b>: {{ data.ai_model_used }} · {% endif %}
     <b>Goldman Sachs</b> «Q2 2026 Market Outlook» ·
     <b>Morgan Stanley</b> «Technology Sector Outlook 2026» ·
     <b>JPMorgan</b> «Q2 2026 Strategy &amp; Allocation»

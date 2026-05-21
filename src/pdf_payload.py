@@ -453,6 +453,9 @@ def build_payload(results: dict, tier: str,
         total_vol_ann  = vol_raw,
     )
 
+    # ── Return series coverage (sparse-history exclusions) ───────────────────
+    return_series_coverage = results.get("return_series_coverage") or {}
+
     # ── Multi-period performance (1м / 3м / 6м / 12м / YTD) ────────────────
     period_returns_table = _adapt_period_returns(results.get("period_returns_table"))
 
@@ -642,6 +645,12 @@ def build_payload(results: dict, tier: str,
         "regime_rag_confirm": regime_rag_confirm or [],
         # Data quality
         "data_quality":      data_quality,
+        # Return series coverage (from sparse-history exclusions)
+        "return_series_coverage": return_series_coverage,
+        # Integrity checks panel — compact ✓/⚠/— list for both BASE and DEEP
+        "integrity_checks":  _build_integrity_checks(
+            results, ai_summary or {}, data_quality, return_series_coverage
+        ),
         # AI Narrative — placeholder unless caller passed one in
         "ai_verdict":            (ai_summary or {}).get("verdict", ""),
         "ai_plain_summary":      (ai_summary or {}).get("plain_summary", ""),
@@ -955,6 +964,100 @@ def _build_risk_waterfall(risk_matrix: Optional[pd.DataFrame],
         "method": ("σᵢ = √Σᵢᵢ (annualised) · standalone = wᵢ·σᵢ · "
                    "diversified = √(w'Σw) · benefit = Σstandalone − diversified"),
     }
+
+
+def _build_integrity_checks(results: dict,
+                             ai_summary: dict,
+                             data_quality: dict,
+                             return_series_coverage: dict) -> list[dict]:
+    """
+    Compact integrity panel — list[{status, label, detail}].
+
+    Status symbols:
+      ✓  data loaded, math computed, within freshness window
+      ⚠  partial / degraded (sparse drop, partial factor load, stale cache)
+      —  source not used / not applicable for this run
+    """
+    checks: list[dict] = []
+
+    # 1. Market price data
+    history = results.get("history_result")
+    hist_data = getattr(history, "data", None) if history is not None else None
+    if hist_data is not None and len(hist_data) > 0:
+        n_days = len(hist_data)
+        checks.append({"status": "✓", "label": "Рыночные данные",
+                        "detail": f"Tradernet · {n_days} дней · daily CLOSE"})
+    else:
+        checks.append({"status": "⚠", "label": "Рыночные данные",
+                        "detail": "нет ценовой истории"})
+
+    # 2. Return series coverage (sparse-history exclusions)
+    dropped = return_series_coverage.get("dropped", [])
+    cov_w   = return_series_coverage.get("covered_weight", 1.0)
+    n_ser   = return_series_coverage.get("n_days", 0)
+    if dropped:
+        checks.append({"status": "⚠", "label": "Серия доходностей",
+                        "detail": (f"{cov_w*100:.0f}% портфеля покрыто · "
+                                   f"исключены: {', '.join(dropped)}")})
+    elif n_ser > 0:
+        checks.append({"status": "✓", "label": "Серия доходностей",
+                        "detail": f"100% покрытие · {n_ser} торговых дней"})
+    else:
+        checks.append({"status": "⚠", "label": "Серия доходностей",
+                        "detail": "ряд не построен"})
+
+    # 3. Factor model coverage
+    f_loaded = data_quality.get("factors_loaded", 0)
+    f_total  = data_quality.get("factors_total", 1)
+    f_pct    = round(f_loaded / f_total * 100) if f_total else 0
+    checks.append({
+        "status": "✓" if f_pct >= 80 else "⚠",
+        "label":  "Факторная модель",
+        "detail": f"Ridge β · {f_loaded}/{f_total} факторов · {f_pct}% покрытие",
+    })
+
+    # 4. Math: Euler decomposition presence
+    perf = results.get("performance_table")
+    has_euler = (perf is not None and not getattr(perf, "empty", True) and
+                 "Euler_Risk_Contribution_Pct" in perf.columns)
+    checks.append({
+        "status": "✓" if has_euler else "⚠",
+        "label":  "Euler-декомпозиция",
+        "detail": "TRC = w·MCTR/σ_p (Ledoit-Wolf 70/30 blended)" if has_euler
+                  else "недоступна",
+    })
+
+    # 5. CVaR bootstrap
+    metrics = results.get("portfolio_metrics") or {}
+    boot    = metrics.get("CVaR_95_Bootstrap") or {}
+    has_ci  = boot.get("lo95") is not None
+    checks.append({
+        "status": "✓" if has_ci else "⚠",
+        "label":  "CVaR Bootstrap",
+        "detail": ("Politis-Romano · 2000 блоков · 95% CI"
+                   if has_ci else "точечная оценка (мало данных)"),
+    })
+
+    # 6. RAG (bank research retrieval)
+    rag_used    = bool((ai_summary or {}).get("used_rag"))
+    rag_context = (ai_summary or {}).get("rag_context") or ""
+    snippets    = len(rag_context.split("---")) if rag_context else 0
+    checks.append({
+        "status": "✓" if rag_used else "—",
+        "label":  "RAG: банк. отчёты",
+        "detail": (f"ChromaDB · cosine ≥0.72 · ~{snippets} отрывков"
+                   if rag_used else "не использован"),
+    })
+
+    # 7. AI model attribution
+    model = _model_display_name((ai_summary or {}).get("model_used", ""))
+    checks.append({
+        "status": "✓" if model else "—",
+        "label":  "AI-модель",
+        "detail": model if model else "не задействована",
+    })
+
+    return checks
 
 
 __all__ = ["build_payload", "TIER_BASE", "TIER_DEEP"]
