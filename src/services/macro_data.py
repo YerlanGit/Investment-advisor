@@ -1,15 +1,18 @@
 """
 FRED macro data feed for the regime / drivers panel.
 
-Pulls 5 macro time series from the St. Louis Fed (FRED) — all public-domain
+Pulls 4 macro time series from the St. Louis Fed (FRED) — all public-domain
 and free.  Used to enrich the DEEP P5 "Рыночный режим" page with hard
 macro signals beyond the ETF-based regime classifier:
 
   • T10Y2Y         10Y-2Y Treasury spread     (yield curve · growth axis)
   • BAMLH0A0HYM2   ICE BofA US HY OAS         (credit stress)
-  • NAPMPI         ISM Manufacturing PMI      (cycle expansion / contraction)
   • VIXCLS         CBOE VIX                   (volatility regime)
   • T10YIE         10Y Breakeven Inflation    (inflation impulse)
+
+Note: the ISM Manufacturing PMI series (`NAPM`) was discontinued by FRED
+(ISM licensing) and is no longer fetched — it returned HTTP 400 on every
+run.  The regime classifier does not depend on it.
 
 Design constraints
 ──────────────────
@@ -49,7 +52,6 @@ Per series, the public method ``get_regime_drivers()`` returns:
           "history_30d":    [{"date": "...", "value": ...}, ...],
       },
       "hy_credit_spread":   {...},
-      "pmi_manufacturing":  {...},
       "vix":                {...},
       "breakeven_inflation":{...},
     }
@@ -114,15 +116,6 @@ MACRO_SERIES_CATALOG: list[SeriesSpec] = [
         freshness_calendar_days = 5,
         sanity_range            = (0.5, 30.0),         # 50 bps … 3000 bps
         publish_cadence         = "daily",
-    ),
-    SeriesSpec(
-        key                     = "pmi_manufacturing",
-        series_id               = "NAPM",              # FRED key for ISM PMI
-        label                   = "ISM Manufacturing PMI",
-        unit                    = "index",
-        freshness_calendar_days = 45,                  # monthly + lag
-        sanity_range            = (25.0, 80.0),
-        publish_cadence         = "monthly",
     ),
     SeriesSpec(
         key                     = "vix",

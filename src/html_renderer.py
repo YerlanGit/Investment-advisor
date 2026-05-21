@@ -275,8 +275,6 @@ _MOCK_MACRO_DRIVERS = {
          "comment":"положительный наклон — рецессия не сигналит"},
         {"id":"BAMLH0A0HYM2","name":"HY OAS (ICE BofA)","value":"312 bp","as_of":"2026-05-14","status":"ok",
          "comment":"спреды узкие — рынок не закладывает кредитный риск"},
-        {"id":"NAPM","name":"ISM Manufacturing PMI","value":"51.4","as_of":"2026-04-01","status":"ok",
-         "comment":"чуть выше 50 — производство расширяется"},
         {"id":"VIXCLS","name":"CBOE VIX","value":"14.2","as_of":"2026-05-14","status":"ok",
          "comment":"низкая ожидаемая волатильность — комфортная зона"},
         {"id":"T10YIE","name":"10Y Breakeven Inflation","value":"2.34%","as_of":"2026-05-14","status":"ok",

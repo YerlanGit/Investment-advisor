@@ -423,6 +423,95 @@ class PeriodReturnsHelperTest(unittest.TestCase):
 
 # ── 4.1.d  Stress engine (Step 2 — parametric factor shocks) ────────────────
 
+class SparseHistoryRobustnessTest(unittest.TestCase):
+    """
+    build_portfolio_log_returns / compute_benchmark_stats — a thinly-traded
+    constituent with short history must NOT collapse the portfolio's overlap
+    window (the FFSPC6.1028.AIX-class failure).
+    """
+
+    def _panel(self, n_full: int = 300, n_sparse: int = 30) -> "pd.DataFrame":
+        rng = np.random.default_rng(42)
+        idx = pd.date_range("2024-01-01", periods=n_full, freq="B")
+        full1 = 100 * np.cumprod(1 + rng.normal(0, 0.01, n_full))
+        full2 = 100 * np.cumprod(1 + rng.normal(0, 0.01, n_full))
+        sparse = ([np.nan] * (n_full - n_sparse)
+                  + list(100 * np.cumprod(1 + rng.normal(0, 0.01, n_sparse))))
+        return pd.DataFrame({"AAPL.US": full1, "MSFT.US": full2,
+                             "FFSPC6.1028.AIX": sparse}, index=idx)
+
+    def test_sparse_constituent_dropped_window_preserved(self) -> None:
+        from finance.period_returns import build_portfolio_log_returns
+        df = self._panel(n_full=300, n_sparse=30)   # 30 < MIN_OVERLAP_TDAYS
+        w = {"AAPL.US": 0.5, "MSFT.US": 0.3, "FFSPC6.1028.AIX": 0.2}
+        series, info = build_portfolio_log_returns(df, w)
+        self.assertEqual(info["dropped"], ["FFSPC6.1028.AIX"])
+        self.assertIsNotNone(series)
+        # Without the drop, dropna() would shrink the window to ~30 rows.
+        self.assertGreater(len(series), 250)
+
+    def test_surviving_weights_renormalised(self) -> None:
+        from finance.period_returns import build_portfolio_log_returns
+        df = self._panel()
+        w = {"AAPL.US": 0.5, "MSFT.US": 0.3, "FFSPC6.1028.AIX": 0.2}
+        series, info = build_portfolio_log_returns(df, w)
+        # covered_weight is the pre-renormalisation sum of the kept names.
+        self.assertAlmostEqual(info["covered_weight"], 0.8, places=6)
+        self.assertEqual(set(info["kept"]), {"AAPL.US", "MSFT.US"})
+
+    def test_min_obs_boundary_kept(self) -> None:
+        from finance.period_returns import build_portfolio_log_returns, MIN_OVERLAP_TDAYS
+        # Exactly MIN_OVERLAP_TDAYS observations → kept (>= threshold).
+        df = self._panel(n_full=300, n_sparse=MIN_OVERLAP_TDAYS)
+        series, info = build_portfolio_log_returns(
+            df, {"AAPL.US": 0.5, "MSFT.US": 0.3, "FFSPC6.1028.AIX": 0.2})
+        self.assertEqual(info["dropped"], [])
+
+    def test_all_sparse_returns_none(self) -> None:
+        from finance.period_returns import build_portfolio_log_returns
+        df = self._panel(n_full=300, n_sparse=10)[["FFSPC6.1028.AIX"]]
+        series, info = build_portfolio_log_returns(df, {"FFSPC6.1028.AIX": 1.0})
+        self.assertIsNone(series)
+        self.assertEqual(info["dropped"], ["FFSPC6.1028.AIX"])
+
+    def test_edge_empty_and_zero_weight(self) -> None:
+        from finance.period_returns import build_portfolio_log_returns
+        self.assertEqual(build_portfolio_log_returns(None, {})[0], None)
+        df = self._panel()
+        # All weights zero → nothing to invest → None, no ZeroDivisionError.
+        series, _ = build_portfolio_log_returns(df, {"AAPL.US": 0.0, "MSFT.US": 0.0})
+        self.assertIsNone(series)
+
+    def test_benchmark_stats_per_pair_inner_join(self) -> None:
+        from finance.period_returns import (build_portfolio_log_returns,
+                                            compute_benchmark_stats)
+        df = self._panel()
+        series, _ = build_portfolio_log_returns(
+            df, {"AAPL.US": 0.6, "MSFT.US": 0.4})
+        bm = pd.Series(np.log(1 + np.random.default_rng(1).normal(0, 0.009, 300)),
+                       index=df.index, name="bm")
+        st = compute_benchmark_stats(series, bm, trading_days=252)
+        self.assertIsNotNone(st)
+        self.assertGreater(st["tracking_error"], 0)
+        # IR is scale-consistent: excess / TE on the same window.
+        self.assertAlmostEqual(st["information_ratio"],
+                               st["excess_ann"] / st["tracking_error"], places=6)
+
+    def test_benchmark_stats_insufficient_overlap(self) -> None:
+        from finance.period_returns import compute_benchmark_stats
+        idx = pd.date_range("2024-01-01", periods=5, freq="B")
+        port = pd.Series([0.01] * 5, index=idx)
+        # Benchmark overlaps on a single day → < 2 aligned points → None.
+        bm = pd.Series([0.01], index=idx[-1:])
+        self.assertIsNone(compute_benchmark_stats(port, bm))
+
+    def test_benchmark_stats_none_inputs(self) -> None:
+        from finance.period_returns import compute_benchmark_stats
+        idx = pd.date_range("2024-01-01", periods=3, freq="B")
+        self.assertIsNone(compute_benchmark_stats(None, pd.Series([1, 2, 3], index=idx)))
+        self.assertIsNone(compute_benchmark_stats(pd.Series([1, 2, 3], index=idx), None))
+
+
 class StressEngineTest(unittest.TestCase):
     """
     Hand-checked tests for src/finance/stress.py.
@@ -1170,8 +1259,8 @@ class MacroFeedTest(unittest.TestCase):
                           http_get=boom, now=self._now)
         out = feed.get_regime_drivers()
         self.assertEqual(calls["n"], 0)
-        # All 5 series present, all with missing status.
-        self.assertEqual(len(out), 5)
+        # All 4 series present, all with missing status.
+        self.assertEqual(len(out), 4)
         for k, row in out.items():
             self.assertEqual(row["status"], "missing", f"{k} status")
             self.assertIsNone(row["value"])
@@ -1189,7 +1278,6 @@ class MacroFeedTest(unittest.TestCase):
                                                        ("2026-05-14", 0.20)]),
             "BAMLH0A0HYM2": _fake_fred_observations([("2026-05-13", 3.12),
                                                        ("2026-05-14", 3.05)]),
-            "NAPM":         _fake_fred_observations([("2026-04-01", 51.4)]),
             "VIXCLS":       _fake_fred_observations([("2026-05-14", 14.2)]),
             "T10YIE":       _fake_fred_observations([("2026-05-14", 2.32)]),
         }
@@ -1203,14 +1291,13 @@ class MacroFeedTest(unittest.TestCase):
                           http_get=fake_get, now=self._now)
         out = feed.get_regime_drivers()
 
-        # All 5 series fetched.
+        # All 4 series fetched.
         self.assertEqual(sorted(calls),
-                          sorted(["T10Y2Y", "BAMLH0A0HYM2", "NAPM",
+                          sorted(["T10Y2Y", "BAMLH0A0HYM2",
                                    "VIXCLS", "T10YIE"]))
         # Values flow through correctly.
         self.assertAlmostEqual(out["yield_curve_10y2y"]["value"],   0.20, places=4)
         self.assertAlmostEqual(out["hy_credit_spread"]["value"],    3.05, places=4)
-        self.assertAlmostEqual(out["pmi_manufacturing"]["value"],   51.4, places=2)
         self.assertAlmostEqual(out["vix"]["value"],                 14.2, places=2)
         self.assertAlmostEqual(out["breakeven_inflation"]["value"], 2.32, places=2)
         # Status ok everywhere; freshness within window.
@@ -1349,11 +1436,12 @@ class MacroFeedTest(unittest.TestCase):
 
     # ─── catalog completeness ──────────────────────────────────────────
 
-    def test_default_catalog_covers_all_5_drivers(self) -> None:
+    def test_default_catalog_covers_all_4_drivers(self) -> None:
         from services.macro_data import MACRO_SERIES_CATALOG
         keys = {s.key for s in MACRO_SERIES_CATALOG}
+        # NAPM (ISM PMI) removed — discontinued by FRED, returned HTTP 400.
         self.assertEqual(keys, {"yield_curve_10y2y", "hy_credit_spread",
-                                  "pmi_manufacturing", "vix", "breakeven_inflation"})
+                                  "vix", "breakeven_inflation"})
 
     # ─── payload passthrough ───────────────────────────────────────────
 
