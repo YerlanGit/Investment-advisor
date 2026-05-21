@@ -145,6 +145,17 @@ class MAC3RiskEngine:
         'BAST':  'EM_Kazakhstan',
         'HRGL':  'EM_Kazakhstan',
         'KZAP':  'EM_Kazakhstan',
+        # US Bond ETFs
+        'TLT':   'Bonds',
+        'AGG':   'Bonds',
+        'BND':   'Bonds',
+        'LQD':   'Bonds',
+        'HYG':   'Bonds',
+        'IEF':   'Bonds',
+        'BIL':   'Bonds',
+        'EMB':   'Bonds',
+        'SHY':   'Bonds',
+        'VCIT':  'Bonds',
     }
 
     # Benchmark / catalogue ETFs fetched alongside factor ETFs.
