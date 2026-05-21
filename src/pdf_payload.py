@@ -85,6 +85,55 @@ def _model_display_name(model_id: str) -> str:
     return model_id
 
 
+def _build_ai_ideas(stock_picks: dict) -> dict:
+    """
+    Reshape the AI narrative's stock-picks into the idea-card schema the v3
+    templates render.
+
+    Input  (ai_narrative.generate_narrative → stock_picks):
+        {boost_alpha|rebalance|protect_capital:
+            {label, desc, picks: [{ticker, name, why, type}]}}
+    Output (template ideas grid — buckets flattened in canonical order):
+        {risk_reduction|diversification|growth|hedge:
+            [{idea_num, category, priority, title, rationale,
+              candidates: [{ticker, name, scenario}]}]}
+
+    One idea card per non-empty bucket; the bucket's picks become the
+    candidate chips.  Optional pipeline/expected_effect/sources are left
+    unset on purpose — the template hides those sub-blocks when absent, so
+    the report never shows fabricated pipeline/effect data.
+    """
+    _MAP = [
+        ("boost_alpha",     "growth",          "Рост доходности", "high"),
+        ("rebalance",       "diversification", "Ребалансировка",  "medium"),
+        ("protect_capital", "hedge",           "Защита капитала", "low"),
+    ]
+    ideas: dict = {"risk_reduction": [], "diversification": [],
+                   "growth": [], "hedge": []}
+    num = 0
+    for src_key, bucket, category, priority in _MAP:
+        scenario = (stock_picks or {}).get(src_key) or {}
+        picks    = scenario.get("picks") or []
+        if not picks:
+            continue
+        num += 1
+        candidates = [
+            {"ticker":   str(p.get("ticker", "")),
+             "name":     str(p.get("name", "")),
+             "scenario": str(p.get("why", ""))}
+            for p in picks
+        ]
+        ideas[bucket].append({
+            "idea_num":   f"{num:02d}",
+            "category":   category,
+            "priority":   priority,
+            "title":      str(scenario.get("label") or category),
+            "rationale":  str(scenario.get("desc") or ""),
+            "candidates": candidates,
+        })
+    return ideas
+
+
 # ── Extreme-value thresholds ────────────────────────────────────────────────
 # Used to flag rows that warrant a red icon + AI tooltip.
 EXTREME = {
@@ -179,7 +228,9 @@ def build_payload(results: dict, tier: str,
     cvar_hi     = cvar_boot.get("hi95")
     cvar_ci_str = ""
     if cvar_lo is not None and cvar_hi is not None:
-        cvar_ci_str = f"CI: {cvar_lo*100:.1f}% … {cvar_hi*100:.1f}%"
+        # Bare range only — the templates supply their own "CI"/"интервал"
+        # label, so prefixing here produced a doubled "CI CI:" in the report.
+        cvar_ci_str = f"{cvar_lo*100:.1f}% … {cvar_hi*100:.1f}%"
     sharpe_str  = f"{sharpe_raw:.2f}" if not math.isnan(sharpe_raw) else "—"
     sortino_str = f"{sortino_raw:.2f}" if not math.isnan(sortino_raw) else "—"
     var_str     = f"{var_raw * 100:.1f}%"
@@ -227,10 +278,20 @@ def build_payload(results: dict, tier: str,
             pnl_abs    = _safe_float(row.get("PnL"),        0.0)
             ret_pct    = _safe_float(row.get("Return_Pct"), 0.0)
 
+            asset_class = _classify_asset(ticker)
+            is_cash     = asset_class == "Ден. средства"
+
+            # Cash is not a tradable risk asset — never carries a 4-pillar
+            # score, an action recommendation or a hotspot flag.
             sc = asset_scores.get(ticker, {})
-            total_score   = sc.get("total")
-            action        = sc.get("action") or "Hold"
-            hotspot       = bool(sc.get("hotspot"))
+            total_score   = None if is_cash else sc.get("total")
+            action        = "—"  if is_cash else (sc.get("action") or "Hold")
+            hotspot       = False if is_cash else bool(sc.get("hotspot"))
+
+            beta_mkt = row.get("Beta_Market")
+            beta_mkt = (None if beta_mkt is None
+                        or (isinstance(beta_mkt, float) and math.isnan(beta_mkt))
+                        else float(beta_mkt))
 
             if ret_pct > best_pct:
                 best_pct, best_abs, best_t = ret_pct, pnl_abs, ticker
@@ -250,9 +311,11 @@ def build_payload(results: dict, tier: str,
                 "weight":        f"{weight_pct:.1f}%",
                 "weight_pct_num": float(weight_pct),  # raw % for concentration math
                 "weight_extreme":_flag(weight_pct, kind="weight"),
-                "asset_class":   _classify_asset(ticker),
+                "asset_class":   asset_class,
+                "is_cash":       is_cash,
                 "euler_risk":    f"{euler:.1f}%",
                 "euler_extreme": _flag(euler, kind="trc_pct"),
+                "beta":          f"{beta_mkt:.2f}" if beta_mkt is not None else "—",
                 "atr_pct":       f"{atr_pct:.2f}%" if atr_pct is not None else "—",
                 "atr_extreme":   _flag(atr_pct, kind="atr_pct"),
                 "mvar_bps":      f"{mvar*10000:.0f}" if mvar is not None else "—",
@@ -284,13 +347,16 @@ def build_payload(results: dict, tier: str,
 
     # ── Sector exposure for the bars chart ─────────────────────────────────
     sector_exposure = results.get("sector_exposure") or {}
+    # Drop non-positive buckets: a short/margin cash balance can surface as a
+    # negative-weight pseudo-sector ("Other -1%") and corrupt the cumulative
+    # conic-gradient pie in the template.
     sectors = [
         {"name": s, "weight_pct": float(w) * 100, "weight_str": f"{float(w)*100:.0f}%"}
-        for s, w in sector_exposure.items()
+        for s, w in sector_exposure.items() if float(w) > 0
     ]
 
     # ── Concentration metrics (sectors and individual assets) ──────────────
-    sector_pairs = [(s, float(w)) for s, w in sector_exposure.items()]
+    sector_pairs = [(s, float(w)) for s, w in sector_exposure.items() if float(w) > 0]
     sector_concentration = _build_concentration(sector_pairs)
     sector_warnings      = _build_sector_warnings(sector_pairs, cap_pct=SECTOR_CAP_PCT)
 
@@ -412,6 +478,10 @@ def build_payload(results: dict, tier: str,
         priority_action = (f"{ap.get('action','Hold')} {ap.get('ticker','')}: "
                            f"{ap.get('reason','')}"[:120])
 
+    # ── AI ideas: reshape stock-picks into the template idea-card schema ───
+    ai_ideas    = _build_ai_ideas((ai_summary or {}).get("stock_picks") or {})
+    ideas_count = sum(len(v) for v in ai_ideas.values())
+
     # ── Common payload (always rendered) ───────────────────────────────────
     payload: dict = {
         # KPIs
@@ -444,6 +514,7 @@ def build_payload(results: dict, tier: str,
         "pnl_worst":         worst,
         # Holdings + risk
         "assets":            assets,
+        "holdings_count":    len(assets),
         "hotspots":          hotspots,
         "sectors":           sectors,
         # Concentration & waterfall (new — data ready for next-gen template)
@@ -470,16 +541,24 @@ def build_payload(results: dict, tier: str,
         "ai_verdict":            (ai_summary or {}).get("verdict", ""),
         "ai_plain_summary":      (ai_summary or {}).get("plain_summary", ""),
         "ai_bullets":            (ai_summary or {}).get("bullets", []),
+        # Raw scenario buckets — kept for the legacy v2 templates.
         "ai_stock_picks":        (ai_summary or {}).get("stock_picks", {}),
+        # Idea-card schema consumed by the v3 templates.
+        "ai_ideas":              ai_ideas,
+        "ideas_count":           ideas_count,
         "used_rag":              bool((ai_summary or {}).get("used_rag")),
         "ai_model_used":         _model_display_name((ai_summary or {}).get("model_used", "")),
         "ai_action_impact":      (ai_summary or {}).get("ai_action_impact", ""),
-        # Per-section AI commentary (populated by Claude, empty if fallback)
+        # Per-section AI commentary (populated by Claude, empty if fallback —
+        # the templates hide each block when its comment is empty).
         "ai_risk_comment":       (ai_summary or {}).get("ai_risk_comment", ""),
         "ai_benchmark_comment":  (ai_summary or {}).get("ai_benchmark_comment", ""),
         "ai_regime_comment":     (ai_summary or {}).get("ai_regime_comment", ""),
         "ai_holdings_comment":   (ai_summary or {}).get("ai_holdings_comment", ""),
         "ai_sector_comment":     (ai_summary or {}).get("ai_sector_comment", ""),
+        "ai_factor_comment":     (ai_summary or {}).get("ai_factor_comment", ""),
+        "ai_stress_comment":     (ai_summary or {}).get("ai_stress_comment", ""),
+        "ai_effect_comment":     (ai_summary or {}).get("ai_effect_comment", ""),
         # Tier metadata
         "tier":              tier,
     }
@@ -514,9 +593,13 @@ def build_payload(results: dict, tier: str,
             })
         payload["scenarios"] = scenarios
 
-        # Score breakdown table — pillar contributions per asset
+        # Score breakdown table — pillar contributions per asset.
+        # Cash positions are excluded: they carry no fundamentals/technicals
+        # and would otherwise show a meaningless zero/negative score row.
         score_breakdown = []
         for ticker, sc in (asset_scores or {}).items():
+            if _classify_asset(str(ticker)) == "Ден. средства":
+                continue
             score_breakdown.append({
                 "ticker":       ticker,
                 "fundamentals": f"{sc.get('fundamentals', 0):+.1f}",
@@ -533,6 +616,8 @@ def build_payload(results: dict, tier: str,
         action_plan = results.get("action_plan") or []
         plan_rows = []
         for r in action_plan:
+            if _classify_asset(str(r.get("ticker") or "")) == "Ден. средства":
+                continue   # cash carries no Buy/Sell/Stop levels
             buy_zone   = r.get("buy_zone")
             sell_zone  = r.get("sell_zone")
             tgt        = r.get("take_target")
@@ -693,6 +778,11 @@ def _build_sector_warnings(weight_pairs: list[tuple[str, float]],
                 "weight_pct": round(w_pct, 1),
                 "cap_pct":    cap_pct,
                 "overage_pp": round(w_pct - cap_pct, 1),
+                # Pre-formatted human string — the template renders this
+                # directly (rendering the dict itself leaked a raw repr).
+                "text":       (f"{sector}: {w_pct:.0f}% портфеля — превышен "
+                               f"мягкий лимит {cap_pct:.0f}% на "
+                               f"{w_pct - cap_pct:.0f} п.п."),
             })
     # Sort by overage descending so the worst is first.
     warnings.sort(key=lambda d: d["overage_pp"], reverse=True)

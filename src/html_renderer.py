@@ -111,6 +111,23 @@ def _mock_payload(tier: str = "base") -> dict:
             "stock_picks":    {},
             "used_rag":       False,
             "model_used":     _mock_model,
+            # Per-section AI commentary — mock values so the smoke render
+            # exercises the data-bound AI blocks in both templates.
+            "ai_risk_comment":      "CVaR −5.2% (≈$2.6K) в пределах мандата, но "
+                                    "MaxDD −12.8% близко к лимиту.",
+            "ai_holdings_comment":  "Два hotspot: AAPL и KSPI дают 40% риска при "
+                                    "50% веса — концентрация выше порога.",
+            "ai_sector_comment":    "Технологии 50% — перевес против бенчмарка; "
+                                    "облигации 20% сглаживают.",
+            "ai_benchmark_comment": "Портфель обгоняет S&P 500: IR 0.61 при TE 8.4%.",
+            "ai_regime_comment":    "Поздняя экспансия — циклические сектора пока "
+                                    "лидируют, но запас хода ограничен.",
+            "ai_factor_comment":    "Доминируют Market и Momentum — типичный "
+                                    "IT-перевес; Rates-бета отрицательна.",
+            "ai_stress_comment":    "Худший сценарий — Equity DM −20%: портфель "
+                                    "−15.8%, восстановление ≈6 мес.",
+            "ai_effect_comment":    "Ребалансировка снижает индекс риска 62→54 и "
+                                    "поднимает Sharpe 1.18→1.32.",
         },
     )
     if tier == "deep":
@@ -161,8 +178,10 @@ def _mock_payload(tier: str = "base") -> dict:
         payload["period_returns_table"] = _MOCK_PERIOD_RETURNS
     if not payload.get("risk_waterfall") and tier == "base":
         payload["risk_waterfall"] = _MOCK_RISK_WATERFALL
-    if not payload.get("ai_stock_picks"):
-        payload["ai_stock_picks"] = _MOCK_AI_STOCK_PICKS
+    # ai_ideas is the v3 idea-card schema; populate the mock when empty so the
+    # smoke render exercises the ideas grid.
+    if not any((payload.get("ai_ideas") or {}).values()):
+        payload["ai_ideas"] = _MOCK_AI_STOCK_PICKS
     if not payload.get("kpi_sparklines"):
         payload["kpi_sparklines"] = _build_mock_sparklines()
     return payload

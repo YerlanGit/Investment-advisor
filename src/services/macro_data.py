@@ -67,6 +67,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -147,6 +148,19 @@ MACRO_SERIES_CATALOG: list[SeriesSpec] = [
 FRED_API_ROOT     = "https://api.stlouisfed.org/fred/series/observations"
 DEFAULT_TTL_HOURS = 12
 DEFAULT_CACHE_DIR = Path("/tmp/macro_cache")
+
+# FRED echoes the api_key inside HTTP error URLs (e.g. requests' HTTPError
+# message).  That string is surfaced in the CoVe data-lineage panel of the
+# report, so it must never carry the secret.  Redact any api_key=... token
+# before an error message is stored or logged.
+_SECRET_RE = re.compile(r"(api_key=)[^&\s\"']+", re.IGNORECASE)
+
+
+def _sanitize_secret(text: object) -> str:
+    """Strip FRED api_key values out of an arbitrary message/URL string."""
+    return _SECRET_RE.sub(r"\1***", str(text))
+
+
 HISTORY_KEEP_DAYS = 90        # local cache trims to this window
 HTTP_TIMEOUT_SEC  = 8.0
 
@@ -297,13 +311,15 @@ class MacroFeed:
             return self._format_from_cache(spec, payload, status_override=None)
         except Exception as exc:
             # Network or parse error — fall back to whatever cache we have.
+            safe_exc = _sanitize_secret(exc)
             if cached:
                 logger.warning("MacroFeed: refresh failed for %s (%s); serving stale cache.",
-                                spec.series_id, exc)
+                                spec.series_id, safe_exc)
                 return self._format_from_cache(spec, cached, status_override="stale",
-                                                 note=f"refresh failed: {exc}")
-            logger.warning("MacroFeed: first-ever fetch failed for %s: %s", spec.series_id, exc)
-            return self._empty_result(spec, status="error", note=str(exc))
+                                                 note=f"refresh failed: {safe_exc}")
+            logger.warning("MacroFeed: first-ever fetch failed for %s: %s",
+                            spec.series_id, safe_exc)
+            return self._empty_result(spec, status="error", note=safe_exc)
 
     def _cache_fresh(self, cached: dict) -> bool:
         ts = cached.get("fetched_at")

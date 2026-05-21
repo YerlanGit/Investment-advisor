@@ -234,6 +234,8 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
             '  "bullets": ["3 пункта ≤120 знаков каждый с [Источник]"],\n'
             '  "ai_risk_comment": "≤150 знаков — комментарий к риск-метрикам (CVaR, Vol, MaxDD)",\n'
             '  "ai_regime_comment": "≤120 знаков — комментарий к рыночному режиму",\n'
+            '  "ai_holdings_comment": "≤150 знаков — ключевые позиции, hotspots, перевесы",\n'
+            '  "ai_benchmark_comment": "≤150 знаков — обгоняет ли портфель рынок и почему",\n'
             '  "stock_picks": {\n'
             '    "boost_alpha": {"label": "Повышение доходности", "desc": "≤80 знаков", '
             '"picks": [{"ticker": "...", "name": "...", "why": "≤100 знаков [источник]", "type": "Stock"}]},\n'
@@ -292,6 +294,12 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
         '  "ai_holdings_comment": "≤200 знаков — ключевые hotspots, перевесы, '
         'какие позиции увеличивают хвостовой риск.",\n'
         '  "ai_sector_comment": "≤150 знаков — секторные перевесы/недовесы vs бенчмарк.",\n'
+        '  "ai_factor_comment": "≤200 знаков — факторное разложение: какие style/macro '
+        'факторы (Market, Momentum, Quality, Rates...) доминируют и что это значит для риска.",\n'
+        '  "ai_stress_comment": "≤200 знаков — стресс-сценарии: худший сценарий для портфеля, '
+        'размер просадки и насколько портфель к нему устойчив.",\n'
+        '  "ai_effect_comment": "≤200 знаков — ожидаемый эффект ребалансировки: '
+        'как меняются риск/доходность/Sharpe до→после.",\n'
         f'{picks_spec},\n'
         '  "action_plan_text": "≤800 знаков — приоритетные действия (Trim/Sell сначала)",\n'
         '  "ai_action_impact": "≤300 знаков — как изменятся CVaR/Vol/TE при реализации"\n'
@@ -558,12 +566,11 @@ def generate_narrative(results: dict, tier: str = "base",
         logger.info("AI narrative: SUCCESS model=%s verdict=%d chars bullets=%d picks=%d",
                     model, len(verdict), len(bullets), total_picks)
 
-        # Extract per-section AI comments (deep tier)
-        ai_risk_comment      = str(parsed.get("ai_risk_comment", "")).strip()[:250]
-        ai_benchmark_comment = str(parsed.get("ai_benchmark_comment", "")).strip()[:250]
-        ai_regime_comment    = str(parsed.get("ai_regime_comment", "")).strip()[:250]
-        ai_holdings_comment  = str(parsed.get("ai_holdings_comment", "")).strip()[:250]
-        ai_sector_comment    = str(parsed.get("ai_sector_comment", "")).strip()[:200]
+        # Extract per-section AI comments.  Strip unverified RAG citations so
+        # a comment never references a bank report that wasn't retrieved.
+        def _comment(key: str, limit: int = 250) -> str:
+            txt = str(parsed.get(key, "")).strip()
+            return _strip_unverified_rag_citations(txt, market_context)[:limit]
 
         return {
             "verdict":              verdict[:300],
@@ -574,11 +581,14 @@ def generate_narrative(results: dict, tier: str = "base",
             "stock_picks":          stock_picks,
             "used_rag":             used_rag,
             "model_used":           model,
-            "ai_risk_comment":      ai_risk_comment,
-            "ai_benchmark_comment": ai_benchmark_comment,
-            "ai_regime_comment":    ai_regime_comment,
-            "ai_holdings_comment":  ai_holdings_comment,
-            "ai_sector_comment":    ai_sector_comment,
+            "ai_risk_comment":      _comment("ai_risk_comment"),
+            "ai_benchmark_comment": _comment("ai_benchmark_comment"),
+            "ai_regime_comment":    _comment("ai_regime_comment"),
+            "ai_holdings_comment":  _comment("ai_holdings_comment"),
+            "ai_sector_comment":    _comment("ai_sector_comment", 200),
+            "ai_factor_comment":    _comment("ai_factor_comment"),
+            "ai_stress_comment":    _comment("ai_stress_comment"),
+            "ai_effect_comment":    _comment("ai_effect_comment"),
         }
     except Exception as exc:
         logger.warning("AI narrative FAILED (%s) — используется fallback. Модель: %s",

@@ -1634,7 +1634,6 @@
       </h1>
 
       <div class="ai-box">
-        <div class="ai-head">[ 🤖 AI_ANALYSIS{% if data.ai_model_used %} // {{ data.ai_model_used | upper }}{% endif %} ]</div>
         <div class="ai-body">
           {% if data.ai_plain_summary %}
             {{ data.ai_plain_summary }}
@@ -1867,7 +1866,7 @@
           <tr>
             <td>{{ a.ticker }}</td>
             <td>{{ a.weight | replace('%','') }}</td>
-            <td>—</td>
+            <td>{{ a.beta or '—' }}</td>
             <td class="hl-col">{{ a.euler_risk | replace('%','') }}</td>
             <td><span class="pill {% if is_hot %}watch{% else %}normal{% endif %}">{% if is_hot %}HOTSPOT{% else %}NORMAL{% endif %}</span></td>
           </tr>
@@ -2096,18 +2095,13 @@
     </div>
 
     <!-- связующий AI-комментарий -->
+    {% if data.ai_risk_comment %}
     <div class="conc-ai">
-      <div class="ai-head">[ 🤖 AI_ANALYSIS // {{ (data.ai_model_used or 'SONNET') | upper }} ]</div>
       <div class="ai-body">
-        «Простыми словами: если бы вы держали каждую бумагу <span class="flag">по
-        отдельности, их риски сложились бы в 18.4%</span> годовых колебаний. Но
-        бумаги не падают одновременно — этот «эффект диверсификации» снижает риск
-        на 4.2 пункта, и реальный риск портфеля — 14.2%. В таблице слева видно,
-        кто вносит больше всего: те же PLTR и CRWD. Диверсификация уже работает
-        на вас, но усилить её можно, добавив активы из других секторов.
-        <span class="src">[Quant Engine]</span>»
+        {{ data.ai_risk_comment }}
       </div>
     </div>
+    {% endif %}
 
   </div>
 
@@ -2125,7 +2119,7 @@
   <!-- ЗАГОЛОВОК СЕКЦИИ -->
   <div class="sec-head">
     <div class="sec-title">Что вы держите</div>
-    <div class="sec-sub">9 позиций · нажмите на строку, чтобы увидеть фундаментал бумаги</div>
+    <div class="sec-sub">{{ data.holdings_count }} позиций · нажмите на строку, чтобы увидеть фундаментал бумаги</div>
   </div>
 
   <!-- ТАБЛИЦА + ПАНЕЛЬ СЕКТОРОВ -->
@@ -2184,7 +2178,7 @@
                 ${{ pnl_abs_raw }}
               {%- endif %}</span>
         </div>
-        <div class="h-cell action"><span class="badge {{ action_class }}">{{ (asset.action or 'HOLD') | upper }}</span></div>
+        <div class="h-cell action">{% if asset.is_cash %}<span class="badge hold">Кэш</span>{% else %}<span class="badge {{ action_class }}">{{ (asset.action or 'HOLD') | upper }}</span>{% endif %}</div>
         <div class="h-cell caret-cell">
           <span class="h-toggle">
             <span class="t-more">Детали</span>
@@ -2231,7 +2225,7 @@
                 {%- elif asset.atr_extreme -%}
                   Повышенная внутридневная волатильность (<b>ATR {{ asset.atr_pct }}</b>) —
                   бумага «дёргается» сильнее среднего по портфелю.
-                  {%- if asset.asset_class -%} {{ asset.asset_class }} в режиме высокой
+                  {% if asset.asset_class %}{{ asset.asset_class }} в режиме высокой
                   чувствительности к рыночным новостям.{%- endif -%}
                 {%- elif asset.pnl_color == 'neg' -%}
                   В минусе ({{ asset.pnl_pct }}); вклад в риск {{ asset.euler_risk }}.
@@ -2338,34 +2332,18 @@
   </div><!-- /.holdings-layout -->
 
   <!-- СВОДНЫЙ AI-БЛОК -->
+  {% if data.ai_holdings_comment or data.ai_sector_comment %}
   <div class="sec-ai">
-    <div class="ai-head">[ 🤖 AI_ANALYSIS // {{ (data.ai_model_used or 'SONNET') | upper }} ]</div>
     <div class="ai-body">
-      <p>«Простыми словами: портфель двигают две бумаги — <span class="flag-inline">PLTR
-      и CRWD</span>. Они приносят лучшую доходность, но именно они помечены
-      HOTSPOT — на них вместе приходится почти половина риска. С другого края —
-      JNJ, KO и BND: спокойные позиции с низкой бетой, которые этот риск гасят.</p>
-
-      <p>По секторам портфель сильно перевешен в технологиях —
-      <span class="flag-inline">62% против ~30% у рынка</span>. Goldman Sachs
-      ждёт повышенной волатильности в IT в этом квартале
-      <span class="src-inline">[RAG: GS_Q2_2026]</span>, а Morgan Stanley в обзоре
-      сектора понижает прогноз роста на 2026 и советует фиксировать часть прибыли
-      в перегретых именах <span class="src-inline">[RAG: MS_TechOutlook_2026]</span> —
-      это прямо про ваши PLTR, CRWD и NVDA. Зато ваши защитные сектора —
-      здравоохранение (14%) и потребительские товары (16%) — JPMorgan называет
-      «островками стабильности» на случай коррекции
-      <span class="src-inline">[RAG: JPM_Strategy_Q2_2026]</span>. По энергетике
-      (6%) банки осторожны при текущих ценах на нефть — и XOM у вас уже помечен на
-      сокращение. Подробности концентрации — на странице «Где сосредоточен риск».»</p>
-    </div>
-    <div class="ai-sources">
-      ИСТОЧНИКИ — ОТЧЁТЫ ИНВЕСТБАНКОВ:
-      <b>Goldman Sachs</b> «Q2 2026 Market Outlook» ·
-      <b>Morgan Stanley</b> «Technology Sector Outlook 2026» ·
-      <b>JPMorgan</b> «Q2 2026 Strategy &amp; Allocation»
+      {% if data.ai_holdings_comment %}
+      <p>{{ data.ai_holdings_comment }}</p>
+      {% endif %}
+      {% if data.ai_sector_comment %}
+      <p>{{ data.ai_sector_comment }}</p>
+      {% endif %}
     </div>
   </div>
+  {% endif %}
 
 
 </div>
@@ -2395,102 +2373,7 @@
     <div class="factor-layout">
       <!-- Radar SVG -->
       <div class="factor-radar-wrap">
-        <svg class="factor-radar-svg" viewBox="0 0 320 280" xmlns="http://www.w3.org/2000/svg"
-             role="img" aria-label="Факторный радар портфеля: 8 факторов">
-          <defs>
-            <linearGradient id="radarFill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%"   stop-color="#2F6FB3" stop-opacity="0.32"/>
-              <stop offset="100%" stop-color="#2F6FB3" stop-opacity="0.10"/>
-            </linearGradient>
-            <linearGradient id="radarStroke" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%"   stop-color="#23588F"/>
-              <stop offset="100%" stop-color="#3E83C9"/>
-            </linearGradient>
-            <filter id="radarShadow" x="-20%" y="-20%" width="140%" height="140%">
-              <feDropShadow dx="0" dy="1.2" stdDeviation="1.1" flood-opacity="0.20"/>
-            </filter>
-          </defs>
-
-          <!-- концентрические сетки 0.25 / 0.5 / 0.75 / 1.0 (8-gon) -->
-          <g fill="none" stroke="rgba(42,46,51,0.18)" stroke-width="0.5">
-            <polygon points="160,115 177.68,122.32 185,140 177.68,157.68 160,165 142.32,157.68 135,140 142.32,122.32"/>
-            <polygon points="160,90  195.36,104.64 210,140 195.36,175.36 160,190 124.64,175.36 110,140 124.64,104.64"/>
-            <polygon points="160,65  213.03,86.97 235,140 213.03,193.03 160,215 106.97,193.03 85,140 106.97,86.97"/>
-            <polygon points="160,40  230.71,69.29 260,140 230.71,210.71 160,240 89.29,210.71 60,140 89.29,69.29" stroke-opacity="0.32"/>
-          </g>
-          <!-- 8 радиальных осей (каждые 45°) -->
-          <g stroke="rgba(42,46,51,0.20)" stroke-width="0.5">
-            <line x1="160" y1="140" x2="160"    y2="40"/>
-            <line x1="160" y1="140" x2="230.71" y2="69.29"/>
-            <line x1="160" y1="140" x2="260"    y2="140"/>
-            <line x1="160" y1="140" x2="230.71" y2="210.71"/>
-            <line x1="160" y1="140" x2="160"    y2="240"/>
-            <line x1="160" y1="140" x2="89.29"  y2="210.71"/>
-            <line x1="160" y1="140" x2="60"     y2="140"/>
-            <line x1="160" y1="140" x2="89.29"  y2="69.29"/>
-          </g>
-
-          <!-- метки шкалы (вдоль оси Market) -->
-          <g font-family="IBM Plex Mono" font-size="8" fill="rgba(42,46,51,0.45)">
-            <text x="164" y="118" text-anchor="start">0.5</text>
-            <text x="164" y="78"  text-anchor="start">1.0</text>
-            <text x="164" y="44"  text-anchor="start">1.5</text>
-          </g>
-
-          <!-- 8 меток факторов на тиках -->
-          <g font-family="IBM Plex Mono" font-size="9" fill="rgba(42,46,51,0.85)" font-weight="600">
-            <text x="160"    y="28"  text-anchor="middle">MARKET</text>
-            <text x="241.32" y="60"  text-anchor="middle">VALUE</text>
-            <text x="277"    y="143" text-anchor="middle">QUALITY</text>
-            <text x="241.32" y="223" text-anchor="middle">COMMOD</text>
-            <text x="160"    y="258" text-anchor="middle">MOMENTUM</text>
-            <text x="78.68"  y="223" text-anchor="middle">RATES</text>
-            <text x="42"     y="143" text-anchor="middle">SIZE</text>
-            <text x="78.68"  y="60"  text-anchor="middle">VOLATIL</text>
-          </g>
-
-          <!-- бенчмарк (SPX-like): октагон 0.5 baseline, dashed -->
-          <polygon points="160,90 195.36,104.64 210,140 195.36,175.36 160,190 124.64,175.36 110,140 124.64,104.64"
-                   fill="rgba(42,46,51,0.06)" stroke="rgba(42,46,51,0.35)" stroke-width="0.6"
-                   stroke-dasharray="3 2"/>
-
-          <!-- портфель: 8-вершинный полигон с градиентом + тенью.            -->
-          <!-- β: MARKET 1.18 · VALUE 0.25 · QUALITY 0.62 · COMMOD 0.15 ·     -->
-          <!--    MOMENTUM 1.05 · RATES |−0.30|=0.30 · SIZE 0.42 · VOL 0.88   -->
-          <polygon points="160,61.33 171.79,128.21 201.33,140 167.07,147.07 160,210 145.86,154.14 132,140 118.51,98.51"
-                   fill="url(#radarFill)" stroke="url(#radarStroke)" stroke-width="1.8"
-                   stroke-linejoin="round" filter="url(#radarShadow)"/>
-
-          <!-- вершины данных -->
-          <g fill="#2F6FB3">
-            <circle cx="160"    cy="61.33"  r="3.0"/>
-            <circle cx="171.79" cy="128.21" r="3.0"/>
-            <circle cx="201.33" cy="140"    r="3.0"/>
-            <circle cx="167.07" cy="147.07" r="3.0"/>
-            <circle cx="160"    cy="210"    r="3.0"/>
-            <circle cx="145.86" cy="154.14" r="3.0"/>
-            <circle cx="132"    cy="140"    r="3.0"/>
-            <circle cx="118.51" cy="98.51"  r="3.0"/>
-          </g>
-          <g fill="#FBFAF7">
-            <circle cx="160"    cy="61.33"  r="1.3"/>
-            <circle cx="171.79" cy="128.21" r="1.3"/>
-            <circle cx="201.33" cy="140"    r="1.3"/>
-            <circle cx="167.07" cy="147.07" r="1.3"/>
-            <circle cx="160"    cy="210"    r="1.3"/>
-            <circle cx="145.86" cy="154.14" r="1.3"/>
-            <circle cx="132"    cy="140"    r="1.3"/>
-            <circle cx="118.51" cy="98.51"  r="1.3"/>
-          </g>
-
-          <!-- легенда внизу -->
-          <g font-family="IBM Plex Mono" font-size="8.5" fill="rgba(42,46,51,0.7)">
-            <rect x="60"  y="270" width="9" height="3" fill="url(#radarFill)" stroke="#2F6FB3" stroke-width="0.6"/>
-            <text x="73"  y="274">портфель</text>
-            <line x1="148" y1="271.5" x2="157" y2="271.5" stroke="rgba(42,46,51,0.5)" stroke-width="1" stroke-dasharray="3 2"/>
-            <text x="161" y="274">S&amp;P 500 (бенч.)</text>
-          </g>
-        </svg>
+        {{ data.factor_radar_svg | safe }}
       </div>
 
       <!-- Factor table — 8 rows (EM_Equity / EM_Bond опущены: корреляция     -->
@@ -2519,23 +2402,19 @@
           Совпадение направлений по нескольким факторам — скрытая общая ставка
           (диверсификация ниже, чем кажется).
         </div>
+        {% if data.factor_coverage_pct %}
+        <div style="margin-top:6px; font-size:9px; color:var(--ink-60);">Факторная модель покрывает {{ data.factor_coverage_pct }}% портфеля</div>
+        {% endif %}
       </div>
     </div>
 
+    {% if data.ai_factor_comment %}
     <div class="conc-ai" style="margin-top:14px;">
-      <div class="ai-head">[ 🤖 AI_ANALYSIS // {{ (data.ai_model_used or 'SONNET') | upper }} ]</div>
       <div class="ai-body">
-        «Портфель сильно тянет <span class="flag">Momentum (β=1.05)</span> и
-        <span class="flag">Market (β=1.18)</span> — знакомый перевес в IT.
-        Quality 0.62 и Volatility 0.88 говорят, что бумаги дорогие/«разогретые»:
-        в коррекцию корректируются глубже. Низкий Value (0.25) — портфель не
-        выглядит «дешёвым» по фундаменталу. Отрицательная Rates β (−0.30) —
-        чувствительность к росту ставок (growth stocks страдают на hawkish surprise);
-        Commodities 0.15 — нет hedge против инфляции. Эти 5 факторов — главная
-        скрытая ставка, движутся синхронно вместе с PLTR · CRWD · NVDA.
-        <span class="src">[Quant Engine]</span>»
+        {{ data.ai_factor_comment }}
       </div>
     </div>
+    {% endif %}
   </div>
 
   <!-- ════ B. 4-PILLAR SCORING ════ -->
@@ -2683,17 +2562,13 @@
       при реализации сценария.
     </div>
 
+    {% if data.ai_stress_comment %}
     <div class="conc-ai" style="margin-top:12px;">
-      <div class="ai-head">[ 🤖 AI_ANALYSIS // {{ (data.ai_model_used or 'SONNET') | upper }} ]</div>
       <div class="ai-body">
-        «Худшие сценарии для вас — <span class="flag">tech sell-off (−9.3%)</span> и
-        <span class="flag">геополитический риск-офф (−8.1%)</span>: оба бьют именно по
-        Momentum-перевесу. Хорошая новость — стресс не превышает реализованный
-        Max&nbsp;Drawdown (−12.8%): портфель остаётся в рамках вашего «болевого потолка».
-        Защита от Fed-сюрпризов слабая — стоит подумать о коротком DUR-хедже.
-        <span class="src">[Quant Engine]</span>»
+        {{ data.ai_stress_comment }}
       </div>
     </div>
+    {% endif %}
   </div>
 
 
@@ -2894,62 +2769,13 @@
       </div>
     </div>
 
+    {% if data.ai_regime_comment %}
     <div class="conc-ai" style="margin-top:14px;">
-      <div class="ai-head">[ 🤖 AI_ANALYSIS // {{ (data.ai_model_used or 'SONNET') | upper }} ]</div>
       <div class="ai-body">
-        «Точка портфеля на квадранте — <span class="flag">правый верхний (Expansion),
-        но близко к границе со Slowdown</span>: Growth ещё положительный (+0.08),
-        Cycle слабый (+0.04), и earnings revisions уже остывают (0.92).
-        Типичная late-Expansion конфигурация: рост ещё есть, но защитные сектора
-        стоит наращивать заранее. Это объясняет TRIM PLTR и BUY JNJ/MSFT
-        в Action Plan на стр. 4.
-        <span class="src">[Quant Engine]</span>»
+        {{ data.ai_regime_comment }}
       </div>
     </div>
-  </div>
-
-  <!-- ════ B. BANK RAG — ПОДТВЕРЖДЕНИЕ РЕЖИМА ════ -->
-  <div class="d3-block">
-    <div class="d3-block-head">
-      <div class="panel-title">Bank RAG — что говорят инвестбанки о текущем режиме</div>
-      <div class="d3-block-sub">выдержки из публичных стратегических обзоров ·
-        retrieval cosine similarity ≥ 0.72
-        <span class="src">[ChromaDB · Bank PDF reports]</span></div>
-    </div>
-
-    <div class="rag-quotes">
-      <div class="rag-quote">
-        <div class="rag-bank">Goldman Sachs</div>
-        <div class="rag-doc">«Q2 2026 Market Outlook» · стр. 7</div>
-        <div class="rag-text">«We expect a late-cycle plateau in the US through mid-2026,
-          with elevated dispersion across Tech. Maintain quality bias and trim crowded
-          momentum names.»</div>
-        <span class="rag-tag">late-cycle · momentum-risk</span>
-      </div>
-      <div class="rag-quote">
-        <div class="rag-bank">Morgan Stanley</div>
-        <div class="rag-doc">«Technology Sector Outlook 2026» · стр. 12</div>
-        <div class="rag-text">«Hyper-growth Tech valuations sit at 92nd percentile.
-          We recommend taking profits in select names and rotating into
-          defensive Tech (mature large-cap with cash flow).»</div>
-        <span class="rag-tag">tech-rotation · take-profit</span>
-      </div>
-      <div class="rag-quote">
-        <div class="rag-bank">JPMorgan</div>
-        <div class="rag-doc">«Q2 2026 Strategy &amp; Allocation» · стр. 4</div>
-        <div class="rag-text">«Healthcare and consumer staples remain «islands of
-          stability» as growth decelerates. Adding 5–10 pp to defensives is
-          consistent with an Expansion-to-Slowdown transition.»</div>
-        <span class="rag-tag">defensive-tilt · staples · healthcare</span>
-      </div>
-    </div>
-
-    <div style="margin-top:10px; font-size:9.5px; color:var(--ink-60); line-height:1.55;">
-      <b style="color:var(--ink);">Совпадение с моделью режима:</b> все три источника
-      описывают late-Expansion → Slowdown переход и рекомендуют trim в техах
-      и наращивание защитных секторов. Это <b style="color:var(--tech-blue);">точно
-      воспроизводит</b> рекомендации Action Plan на стр. 4.
-    </div>
+    {% endif %}
   </div>
 
   <!-- ПОЛОСА ИСТОЧНИКОВ -->
@@ -2984,13 +2810,13 @@
   <div class="d3-block">
     <div class="d3-block-head">
       <div class="panel-title">AI Ideas — стратегические рекомендации</div>
-      <div class="d3-block-sub">4 идеи в 4 категориях: снижение риска · диверсификация · качественный рост · хедж.  Каждая идея пропущена через
+      <div class="d3-block-sub">{{ data.ideas_count }} идей: снижение риска · диверсификация · качественный рост · хедж.  Каждая идея пропущена через
         <b style="color:var(--tech-blue);">FACTOR → REGIME → STRESS → RAG</b> — pipeline доказывает, почему AI выбрал именно эти кандидаты.  Тикеры не из вашего портфеля — рассмотрите как замену / дополнение.
         <span class="src">[{{ data.ai_model_used or 'Claude Sonnet 4.6' }}]</span></div>
     </div>
 
     {# DEEP-specific Ideas rendering — flatten 4 buckets in canonical order. #}
-    {% set _picks = data.ai_stock_picks or {} %}
+    {% set _picks = data.ai_ideas or {} %}
     {% set _bucket_order = ['risk_reduction', 'diversification', 'growth', 'hedge'] %}
     {% set ns_ideas = namespace(flat=[]) %}
     {% for bucket in _bucket_order %}
@@ -3228,18 +3054,13 @@
       {{ _ef_card('expected_return','Ожид. доходность (год.)',     fmt='pct') }}
     </div>
 
+    {% if data.ai_effect_comment %}
     <div class="conc-ai" style="margin-top:12px;">
-      <div class="ai-head">[ 🤖 AI_ANALYSIS // {{ (data.ai_model_used or 'SONNET') | upper }} ]</div>
       <div class="ai-body">
-        «Чистый эффект — индекс риска уходит с 62 в середину «умеренной» зоны (54),
-        исчезает HOTSPOT-перегрев одной бумаги, Sharpe растёт до
-        <span class="flag">1.32</span> — портфель становится эффективнее. Плата за это —
-        ≈ 1.6 пп ожидаемой доходности, но это типичный «обмен» при ребалансировке
-        в late-cycle. Goldman&nbsp;Sachs и JPMorgan
-        <span class="src">[RAG: GS_Q2_2026 · JPM_Strategy_Q2_2026]</span> поддерживают
-        такую конфигурацию.»
+        {{ data.ai_effect_comment }}
       </div>
     </div>
+    {% endif %}
   </div>
 
 
