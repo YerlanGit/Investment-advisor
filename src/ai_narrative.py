@@ -22,8 +22,8 @@ from typing import Optional
 
 logger = logging.getLogger("AINarrative")
 
-MAX_TOKENS_BASE = 2_500
-MAX_TOKENS_DEEP = 6_000
+MAX_TOKENS_BASE = 3_500
+MAX_TOKENS_DEEP = 7_000
 
 MODEL_BASE = os.getenv("ANTHROPIC_MODEL_BASE", "claude-haiku-4-5-20251001")
 MODEL_DEEP = os.getenv("ANTHROPIC_MODEL_DEEP", "claude-sonnet-4-6")
@@ -223,93 +223,113 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
             "Это противоречит сигналам Quant Engine.\n"
         )
 
-    # ── Base tier: compact prompt, 1 pick per scenario, 3 bullets ──
+    # ── Base tier: compact prompt, 1 pick per scenario, 4 scenarios ──
     if tier != "deep":
         return (
-            "Проанализируй портфель. Верни СТРОГО JSON (без текста вне JSON).\n"
-            "ВСЕ ТЕКСТЫ НА РУССКОМ.\n\n"
+            "Проанализируй портфель как Senior Financial Analyst. Верни СТРОГО JSON (без текста вне JSON).\n"
+            "ВСЕ ТЕКСТЫ НА РУССКОМ. Используй 3-step reasoning: взаимосвязи → риски → рекомендации.\n\n"
             '{\n'
-            '  "verdict": "≤150 знаков — вердикт",\n'
-            '  "plain_summary": "≤250 знаков простым языком",\n'
-            '  "bullets": ["3 пункта ≤120 знаков каждый с [Источник]"],\n'
-            '  "ai_risk_comment": "≤150 знаков — комментарий к риск-метрикам (CVaR, Vol, MaxDD)",\n'
-            '  "ai_regime_comment": "≤120 знаков — комментарий к рыночному режиму",\n'
-            '  "ai_holdings_comment": "≤150 знаков — ключевые позиции, hotspots, перевесы",\n'
-            '  "ai_benchmark_comment": "≤150 знаков — обгоняет ли портфель рынок и почему",\n'
+            '  "verdict": "≤150 знаков — вердикт с причинно-следственной связью",\n'
+            '  "plain_summary": "≤250 знаков — Executive Summary: риски + позиция + действие",\n'
+            '  "bullets": ["4 пункта ≤120 знаков каждый с [Источник] — взаимосвязи, риски, рекомендации"],\n'
+            '  "ai_risk_comment": "≤150 знаков — CVaR/Vol/MaxDD: причины + Dollar impact + как снизить",\n'
+            '  "ai_regime_comment": "≤130 знаков — макро-режим: как влияет на текущие позиции",\n'
+            '  "ai_holdings_comment": "≤160 знаков — ключевые hotspots, скрытая концентрация по факторам",\n'
+            '  "ai_sector_comment": "≤130 знаков — секторные перевесы/недовесы, риск ротации",\n'
+            '  "ai_benchmark_comment": "≤150 знаков — IR vs рынок: почему отстаёт/опережает, драйверы",\n'
+            '  "ai_performance_comment": "≤150 знаков — анализ доходности по периодам: тренд, причины",\n'
             '  "stock_picks": {\n'
             '    "boost_alpha": {"label": "Повышение доходности", "desc": "≤80 знаков", '
-            '"picks": [{"ticker": "...", "name": "...", "why": "≤100 знаков [источник]", "type": "Stock"}]},\n'
+            '"picks": [{"ticker": "...", "name": "...", "why": "≤110 знаков ROE/beta/маржа [источник]", "type": "Stock"}]},\n'
             '    "rebalance": {"label": "Ребалансировка", "desc": "≤80 знаков", '
-            '"picks": [{"ticker": "...", "name": "...", "why": "≤100 знаков", "type": "Stock"}]},\n'
+            '"picks": [{"ticker": "...", "name": "...", "why": "≤110 знаков качество/стабильность [источник]", "type": "Stock"}]},\n'
             '    "protect_capital": {"label": "Защита капитала", "desc": "≤80 знаков", '
-            '"picks": [{"ticker": "...", "name": "...", "why": "≤100 знаков", "type": "Stock"}]}\n'
+            '"picks": [{"ticker": "...", "name": "...", "why": "≤110 знаков хедж/дивиденды [источник]", "type": "Stock"}]},\n'
+            '    "regime_play": {"label": "Режимная ставка", "desc": "≤80 знаков — позиционирование под текущий режим", '
+            '"picks": [{"ticker": "...", "name": "...", "why": "≤110 знаков с [Regime] + цифрами", "type": "Stock|ETF"}]}\n'
             '  }\n'
             '}\n\n'
             "ПРАВИЛА: русский язык. Без «RAMP». Каждое число — [Quant Engine]/[SEC EDGAR]/[Regime]/[RAG].\n"
             f"Риск-профиль: {user_profile}. Режим: {regime_label}.\n"
-            "Stock picks: РЕАЛЬНЫЕ АКЦИИ (PLTR, JNJ, KO и т.п.), не только ETF. "
-            "why ≤100 знаков с цифрами.\n"
+            "Stock picks: РЕАЛЬНЫЕ АКЦИИ (PLTR, JNJ, KO, CRWD и т.п.), не только ETF. "
+            "why обязательно с конкретными цифрами (ROE, маржа, Beta).\n"
             f"{contradiction_rule}"
             f"{rag_rule}\n"
             f"=== ДАННЫЕ ===\n{json.dumps(summary, ensure_ascii=False)[:7000]}"
             f"{rag_block}"
         )
 
-    # ── Deep tier: full prompt with per-section comments ──
+    # ── Deep tier: full prompt with per-section comments, 4 scenarios ──
     picks_spec = f"""
 "stock_picks": {{
   "boost_alpha": {{
-    "label": "Повышение доходности", "desc": "≤100 знаков. Режим: {regime_label}.",
-    "picks": [  // 2 идеи: реальные акции роста
-      {{"ticker": "...", "name": "...", "why": "≤180 знаков с [источник]", "type": "Stock|ETF"}}
+    "label": "Повышение доходности — активный риск", "desc": "≤100 знаков. Режим: {regime_label}.",
+    "picks": [  // 2 реальные акции роста НЕ из портфеля
+      {{"ticker": "...", "name": "...", "why": "≤200 знаков: ROE/маржа/beta/momentum + [источник]", "type": "Stock"}}
     ]
   }},
   "rebalance": {{
-    "label": "Ребалансировка", "desc": "≤100 знаков.",
-    "picks": [  // 2 quality-акции
-      {{"ticker": "...", "name": "...", "why": "≤180 знаков", "type": "Stock|ETF"}}
+    "label": "Качественная ребалансировка", "desc": "≤100 знаков.",
+    "picks": [  // 2 quality-акции (4-Pillar F+V > 0)
+      {{"ticker": "...", "name": "...", "why": "≤200 знаков с SEC-цифрами [SEC EDGAR]", "type": "Stock"}}
     ]
   }},
   "protect_capital": {{
-    "label": "Защита капитала", "desc": "≤100 знаков.",
-    "picks": [  // 1 защитный инструмент
-      {{"ticker": "...", "name": "...", "why": "≤180 знаков", "type": "Stock|ETF|Bond"}}
+    "label": "Защита капитала", "desc": "≤100 знаков. CVaR/tail-risk hedge.",
+    "picks": [  // 1-2 защитных инструмента
+      {{"ticker": "...", "name": "...", "why": "≤200 знаков: Beta/корреляция/дивиденд [источник]", "type": "Stock|ETF|Bond"}}
+    ]
+  }},
+  "regime_play": {{
+    "label": "Режимная ставка — {regime_label}", "desc": "≤100 знаков. Тактическая ставка под текущий режим.",
+    "picks": [  // 1-2 идеи специфичные для режима {regime_label}
+      {{"ticker": "...", "name": "...", "why": "≤200 знаков: почему этот режим даёт преимущество [Regime]", "type": "Stock|ETF"}}
     ]
   }}
 }}"""
 
     return (
-        "Проанализируй портфель и верни СТРОГО JSON (без текста вне JSON, без markdown).\n"
-        "ВСЕ ТЕКСТЫ ТОЛЬКО НА РУССКОМ ЯЗЫКЕ.\n\n"
+        "Проанализируй портфель как Senior Financial Analyst. Верни СТРОГО JSON (без текста вне JSON, без markdown).\n"
+        "ВСЕ ТЕКСТЫ ТОЛЬКО НА РУССКОМ ЯЗЫКЕ.\n"
+        "Используй 3-step reasoning: (1) взаимосвязи между метриками, (2) скрытые риски, (3) стратегические рекомендации с числами.\n\n"
         '{\n'
-        '  "verdict": "≤180 знаков — общий вердикт",\n'
-        '  "plain_summary": "≤300 знаков простым языком",\n'
-        '  "bullets": ["5–7 пунктов ≤180 знаков каждый с [Источник]"],\n'
-        '  "ai_risk_comment": "≤200 знаков — вывод по риск-метрикам: CVaR, Vol, MaxDD, Sharpe. '
-        'Сопоставь с лимитами мандата. Упомяни $ потерь.",\n'
-        '  "ai_benchmark_comment": "≤200 знаков — обгоняет ли портфель бенчмарк? '
-        'Tracking Error vs Volatility — почему разные. IR интерпретация.",\n'
-        '  "ai_regime_comment": "≤200 знаков — режим рынка, как он влияет на портфель, '
-        'подтверждается ли банковскими отчётами (если есть RAG).",\n'
-        '  "ai_holdings_comment": "≤200 знаков — ключевые hotspots, перевесы, '
-        'какие позиции увеличивают хвостовой риск.",\n'
-        '  "ai_sector_comment": "≤150 знаков — секторные перевесы/недовесы vs бенчмарк.",\n'
-        '  "ai_factor_comment": "≤200 знаков — факторное разложение: какие style/macro '
-        'факторы (Market, Momentum, Quality, Rates...) доминируют и что это значит для риска.",\n'
-        '  "ai_stress_comment": "≤200 знаков — стресс-сценарии: худший сценарий для портфеля, '
-        'размер просадки и насколько портфель к нему устойчив.",\n'
-        '  "ai_effect_comment": "≤200 знаков — ожидаемый эффект ребалансировки: '
-        'как меняются риск/доходность/Sharpe до→после.",\n'
+        '  "verdict": "≤200 знаков — причинно-следственный вердикт: что СЕЙЧАС и ПОЧЕМУ",\n'
+        '  "plain_summary": "≤300 знаков — Executive Summary: позиция + главный риск + приоритет",\n'
+        '  "bullets": ["5–7 пунктов ≤200 знаков каждый с [Источник] — взаимосвязи → риски → рекомендации"],\n'
+        '  "ai_risk_comment": "≤220 знаков — CVaR/Vol/MaxDD/Sharpe: взаимосвязь метрик, $ потерь, '
+        'нарушение лимитов мандата, способ снижения риска [Quant Engine]",\n'
+        '  "ai_benchmark_comment": "≤200 знаков — IR vs бенчмарк: причины отставания/опережения, '
+        'Tracking Error vs Volatility, что делать [Quant Engine]",\n'
+        '  "ai_performance_comment": "≤180 знаков — анализ доходности по периодам 1М/3М/12М/YTD: '
+        'тренды, причины, сравнение с рынком [Quant Engine]",\n'
+        '  "ai_regime_comment": "≤220 знаков — макро-режим: Growth/Cycle оси, влияние на факторы, '
+        'подтверждение из банковских отчётов (если RAG), тактика",\n'
+        '  "ai_holdings_comment": "≤200 знаков — hotspots, скрытая факторная концентрация, '
+        'какие позиции увеличивают хвостовой риск [Quant Engine]",\n'
+        '  "ai_sector_comment": "≤160 знаков — секторные перевесы/недовесы vs бенчмарк, '
+        'риск ротации при смене режима",\n'
+        '  "ai_factor_comment": "≤220 знаков — факторное разложение: Market/Momentum/Quality/Rates '
+        'доминируют — почему и что это значит для риска [Quant Engine]",\n'
+        '  "ai_4pillar_comment": "≤200 знаков — 4-Pillar Scoring: F/V/T/C паттерны, '
+        'позиции с расходящимися сигналами, почему V=0 (если нет данных SEC) [SEC EDGAR]",\n'
+        '  "ai_stress_comment": "≤220 знаков — стресс-сценарии: худший сценарий, размер просадки, '
+        'какие позиции наиболее уязвимы и почему [Quant Engine]",\n'
+        '  "ai_action_comment": "≤200 знаков — Action Plan: логика приоритизации Trim/Sell → Buy, '
+        'ATR-уровни как инструмент, ожидаемый эффект на TRC [Quant Engine]",\n'
+        '  "ai_effect_comment": "≤220 знаков — ожидаемый эффект ребалансировки: '
+        'CVaR/Vol/Sharpe до→после, причинно-следственная связь [Quant Engine]",\n'
         f'{picks_spec},\n'
-        '  "action_plan_text": "≤800 знаков — приоритетные действия (Trim/Sell сначала)",\n'
-        '  "ai_action_impact": "≤300 знаков — как изменятся CVaR/Vol/TE при реализации"\n'
+        '  "action_plan_text": "≤800 знаков — приоритетные действия: Trim/Sell сначала, '
+        'конкретные уровни, cumulative |Δw| ≤ 25% NAV",\n'
+        '  "ai_action_impact": "≤300 знаков — количественный прогноз: CVaR/Vol/TE/Sharpe после плана"\n'
         '}\n\n'
         "ПРАВИЛА:\n"
         "- ВСЕ тексты на РУССКОМ. Без «RAMP».\n"
+        "- 3-step reasoning: взаимосвязи → риски → рекомендации с числами.\n"
         "- Каждое число — [Quant Engine], [SEC EDGAR], [Regime] или [RAG: файл].\n"
-        f"- Риск-профиль: {user_profile}.\n"
-        "- РЕАЛЬНЫЕ АКЦИИ: PLTR, CRWD, JNJ, COST, KO и т.п. — не только ETF.\n"
-        "- why: конкретные цифры (ROE, маржа, Beta, P/E) с [источник].\n"
+        f"- Риск-профиль: {user_profile}. Режим: {regime_label}.\n"
+        "- РЕАЛЬНЫЕ АКЦИИ: PLTR, CRWD, JNJ, COST, KO, ANET, PANW и т.п. — не только ETF.\n"
+        "- why: конкретные цифры (ROE, маржа, Beta, P/E, momentum) с тегом [источник].\n"
         f"{contradiction_rule}"
         f"{rag_rule}"
         f"\n=== ДАННЫЕ ПОРТФЕЛЯ ===\n{json.dumps(summary, ensure_ascii=False)[:9000]}"
@@ -386,14 +406,25 @@ def _fallback_narrative(results: dict, tier: str) -> dict:
         )
 
     return {
-        "verdict":          verdict,
-        "plain_summary":    plain_summary[:300],
-        "bullets":          bullets[:7 if tier == "deep" else 4],
-        "action_plan_text": action_plan_text,
-        "ai_action_impact": ai_action_impact,
-        "stock_picks":      stock_picks,
-        "used_rag":         False,
-        "model_used":       "fallback",
+        "verdict":                  verdict,
+        "plain_summary":            plain_summary[:300],
+        "bullets":                  bullets[:7 if tier == "deep" else 4],
+        "action_plan_text":         action_plan_text,
+        "ai_action_impact":         ai_action_impact,
+        "stock_picks":              stock_picks,
+        "used_rag":                 False,
+        "model_used":               "fallback",
+        "ai_risk_comment":          "",
+        "ai_benchmark_comment":     "",
+        "ai_performance_comment":   "",
+        "ai_regime_comment":        "",
+        "ai_holdings_comment":      "",
+        "ai_sector_comment":        "",
+        "ai_factor_comment":        "",
+        "ai_4pillar_comment":       "",
+        "ai_stress_comment":        "",
+        "ai_action_comment":        "",
+        "ai_effect_comment":        "",
     }
 
 
@@ -452,6 +483,15 @@ def _fallback_stock_picks(regime_label: str, tier: str) -> dict:
              "type": "Stock"}
         )
 
+    # regime_play: a basic regime-aligned pick
+    picks_regime = [
+        {"ticker": "DBC" if not expansion else "MTUM",
+         "name":   "Invesco DB Commodity Index ETF" if not expansion else "iShares MSCI USA Momentum ETF",
+         "why":    ("Товарная экспозиция защищает при Slowdown-режиме [Regime]"
+                    if not expansion else
+                    "Momentum-фактор лидирует в Expansion-режиме [Regime] [Quant Engine]"),
+         "type":   "ETF"},
+    ]
     return {
         "boost_alpha":     {"label": "Повышение доходности — повышенный риск",
                             "desc":  "Увеличение потенциальной доходности за счёт акций роста и momentum.",
@@ -462,6 +502,9 @@ def _fallback_stock_picks(regime_label: str, tier: str) -> dict:
         "protect_capital": {"label": "Защита капитала — снижение риска",
                             "desc":  "Защитное позиционирование при макроэкономической неопределённости.",
                             "picks": picks_protect},
+        "regime_play":     {"label": f"Режимная ставка — {'Expansion' if expansion else 'Slowdown'}",
+                            "desc":  "Тактическое позиционирование под текущий макро-режим.",
+                            "picks": picks_regime},
     }
 
 
@@ -575,22 +618,25 @@ def generate_narrative(results: dict, tier: str = "base",
             return _strip_unverified_rag_citations(txt, market_context)[:limit]
 
         return {
-            "verdict":              verdict[:300],
-            "plain_summary":        plain_summary[:400],
-            "bullets":              bullets[:7 if tier == "deep" else 4],
-            "action_plan_text":     plan_txt[:1000] if tier == "deep" else "",
-            "ai_action_impact":     impact_txt[:400] if tier == "deep" else "",
-            "stock_picks":          stock_picks,
-            "used_rag":             used_rag,
-            "model_used":           model,
-            "ai_risk_comment":      _comment("ai_risk_comment"),
-            "ai_benchmark_comment": _comment("ai_benchmark_comment"),
-            "ai_regime_comment":    _comment("ai_regime_comment"),
-            "ai_holdings_comment":  _comment("ai_holdings_comment"),
-            "ai_sector_comment":    _comment("ai_sector_comment", 200),
-            "ai_factor_comment":    _comment("ai_factor_comment"),
-            "ai_stress_comment":    _comment("ai_stress_comment"),
-            "ai_effect_comment":    _comment("ai_effect_comment"),
+            "verdict":                  verdict[:300],
+            "plain_summary":            plain_summary[:400],
+            "bullets":                  bullets[:7 if tier == "deep" else 4],
+            "action_plan_text":         plan_txt[:1000] if tier == "deep" else "",
+            "ai_action_impact":         impact_txt[:400] if tier == "deep" else "",
+            "stock_picks":              stock_picks,
+            "used_rag":                 used_rag,
+            "model_used":               model,
+            "ai_risk_comment":          _comment("ai_risk_comment"),
+            "ai_benchmark_comment":     _comment("ai_benchmark_comment"),
+            "ai_performance_comment":   _comment("ai_performance_comment"),
+            "ai_regime_comment":        _comment("ai_regime_comment"),
+            "ai_holdings_comment":      _comment("ai_holdings_comment"),
+            "ai_sector_comment":        _comment("ai_sector_comment", 200),
+            "ai_factor_comment":        _comment("ai_factor_comment"),
+            "ai_4pillar_comment":       _comment("ai_4pillar_comment"),
+            "ai_stress_comment":        _comment("ai_stress_comment"),
+            "ai_action_comment":        _comment("ai_action_comment"),
+            "ai_effect_comment":        _comment("ai_effect_comment"),
         }
     except Exception as exc:
         logger.warning("AI narrative FAILED (%s) — используется fallback. Модель: %s",
@@ -603,11 +649,11 @@ def generate_narrative(results: dict, tier: str = "base",
 
 def _normalise_stock_picks(raw: dict, tier: str, market_context: str) -> dict:
     """
-    Ensure stock_picks has exactly the three scenario keys.
+    Ensure stock_picks has the four scenario keys.
     Strips unverified RAG citations from pick rationale.
     """
     result: dict = {}
-    for key in ("boost_alpha", "rebalance", "protect_capital"):
+    for key in ("boost_alpha", "rebalance", "protect_capital", "regime_play"):
         scenario = raw.get(key) or {}
         picks    = scenario.get("picks") or []
         clean_picks = []
