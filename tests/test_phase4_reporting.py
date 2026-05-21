@@ -311,10 +311,12 @@ class ConcentrationAndWaterfallTest(unittest.TestCase):
 
     # — Period returns passthrough ————————————————————————————————————
 
-    def test_period_returns_passthrough(self) -> None:
+    def test_period_returns_adapted_to_template_schema(self) -> None:
         """
-        Engine produces period_returns_table → payload passes it through
-        unmodified so the report template can read it directly.
+        Engine produces period_returns_table with decimal floats; payload
+        adapts each row to the template's pre-formatted-string schema
+        ({label, portfolio, benchmark, excess}) — the renderer does no
+        transform, so an un-adapted table rendered as blank cells.
         """
         from pdf_payload import build_payload
         r = self._base_results()
@@ -332,7 +334,9 @@ class ConcentrationAndWaterfallTest(unittest.TestCase):
         self.assertIn("S&P 500", p["period_returns_table"])
         rows = p["period_returns_table"]["S&P 500"]["periods"]
         self.assertEqual(len(rows), 2)
-        self.assertAlmostEqual(rows[-1]["excess_pp"], 0.051, places=4)
+        self.assertEqual(rows[0]["label"], "1М")
+        self.assertEqual(rows[-1]["portfolio"], "+14.2%")
+        self.assertEqual(rows[-1]["excess"], "+5.1 пп")
 
 
 # ── 4.1.c  Engine-side period returns math (pure unit tests) ────────────────
@@ -418,6 +422,95 @@ class PeriodReturnsHelperTest(unittest.TestCase):
 
 
 # ── 4.1.d  Stress engine (Step 2 — parametric factor shocks) ────────────────
+
+class SparseHistoryRobustnessTest(unittest.TestCase):
+    """
+    build_portfolio_log_returns / compute_benchmark_stats — a thinly-traded
+    constituent with short history must NOT collapse the portfolio's overlap
+    window (the FFSPC6.1028.AIX-class failure).
+    """
+
+    def _panel(self, n_full: int = 300, n_sparse: int = 30) -> "pd.DataFrame":
+        rng = np.random.default_rng(42)
+        idx = pd.date_range("2024-01-01", periods=n_full, freq="B")
+        full1 = 100 * np.cumprod(1 + rng.normal(0, 0.01, n_full))
+        full2 = 100 * np.cumprod(1 + rng.normal(0, 0.01, n_full))
+        sparse = ([np.nan] * (n_full - n_sparse)
+                  + list(100 * np.cumprod(1 + rng.normal(0, 0.01, n_sparse))))
+        return pd.DataFrame({"AAPL.US": full1, "MSFT.US": full2,
+                             "FFSPC6.1028.AIX": sparse}, index=idx)
+
+    def test_sparse_constituent_dropped_window_preserved(self) -> None:
+        from finance.period_returns import build_portfolio_log_returns
+        df = self._panel(n_full=300, n_sparse=30)   # 30 < MIN_OVERLAP_TDAYS
+        w = {"AAPL.US": 0.5, "MSFT.US": 0.3, "FFSPC6.1028.AIX": 0.2}
+        series, info = build_portfolio_log_returns(df, w)
+        self.assertEqual(info["dropped"], ["FFSPC6.1028.AIX"])
+        self.assertIsNotNone(series)
+        # Without the drop, dropna() would shrink the window to ~30 rows.
+        self.assertGreater(len(series), 250)
+
+    def test_surviving_weights_renormalised(self) -> None:
+        from finance.period_returns import build_portfolio_log_returns
+        df = self._panel()
+        w = {"AAPL.US": 0.5, "MSFT.US": 0.3, "FFSPC6.1028.AIX": 0.2}
+        series, info = build_portfolio_log_returns(df, w)
+        # covered_weight is the pre-renormalisation sum of the kept names.
+        self.assertAlmostEqual(info["covered_weight"], 0.8, places=6)
+        self.assertEqual(set(info["kept"]), {"AAPL.US", "MSFT.US"})
+
+    def test_min_obs_boundary_kept(self) -> None:
+        from finance.period_returns import build_portfolio_log_returns, MIN_OVERLAP_TDAYS
+        # Exactly MIN_OVERLAP_TDAYS observations → kept (>= threshold).
+        df = self._panel(n_full=300, n_sparse=MIN_OVERLAP_TDAYS)
+        series, info = build_portfolio_log_returns(
+            df, {"AAPL.US": 0.5, "MSFT.US": 0.3, "FFSPC6.1028.AIX": 0.2})
+        self.assertEqual(info["dropped"], [])
+
+    def test_all_sparse_returns_none(self) -> None:
+        from finance.period_returns import build_portfolio_log_returns
+        df = self._panel(n_full=300, n_sparse=10)[["FFSPC6.1028.AIX"]]
+        series, info = build_portfolio_log_returns(df, {"FFSPC6.1028.AIX": 1.0})
+        self.assertIsNone(series)
+        self.assertEqual(info["dropped"], ["FFSPC6.1028.AIX"])
+
+    def test_edge_empty_and_zero_weight(self) -> None:
+        from finance.period_returns import build_portfolio_log_returns
+        self.assertEqual(build_portfolio_log_returns(None, {})[0], None)
+        df = self._panel()
+        # All weights zero → nothing to invest → None, no ZeroDivisionError.
+        series, _ = build_portfolio_log_returns(df, {"AAPL.US": 0.0, "MSFT.US": 0.0})
+        self.assertIsNone(series)
+
+    def test_benchmark_stats_per_pair_inner_join(self) -> None:
+        from finance.period_returns import (build_portfolio_log_returns,
+                                            compute_benchmark_stats)
+        df = self._panel()
+        series, _ = build_portfolio_log_returns(
+            df, {"AAPL.US": 0.6, "MSFT.US": 0.4})
+        bm = pd.Series(np.log(1 + np.random.default_rng(1).normal(0, 0.009, 300)),
+                       index=df.index, name="bm")
+        st = compute_benchmark_stats(series, bm, trading_days=252)
+        self.assertIsNotNone(st)
+        self.assertGreater(st["tracking_error"], 0)
+        # IR is scale-consistent: excess / TE on the same window.
+        self.assertAlmostEqual(st["information_ratio"],
+                               st["excess_ann"] / st["tracking_error"], places=6)
+
+    def test_benchmark_stats_insufficient_overlap(self) -> None:
+        from finance.period_returns import compute_benchmark_stats
+        idx = pd.date_range("2024-01-01", periods=5, freq="B")
+        port = pd.Series([0.01] * 5, index=idx)
+        # Benchmark overlaps on a single day → < 2 aligned points → None.
+        bm = pd.Series([0.01], index=idx[-1:])
+        self.assertIsNone(compute_benchmark_stats(port, bm))
+
+    def test_benchmark_stats_none_inputs(self) -> None:
+        from finance.period_returns import compute_benchmark_stats
+        idx = pd.date_range("2024-01-01", periods=3, freq="B")
+        self.assertIsNone(compute_benchmark_stats(None, pd.Series([1, 2, 3], index=idx)))
+        self.assertIsNone(compute_benchmark_stats(pd.Series([1, 2, 3], index=idx), None))
+
 
 class StressEngineTest(unittest.TestCase):
     """
@@ -1082,10 +1175,15 @@ class SimulatorTest(unittest.TestCase):
             cell = out["metrics"][name]
             self.assertAlmostEqual(cell["delta"], 0.0, places=6)
 
-    # ─── Payload passthrough ───────────────────────────────────────────
+    # ─── Payload adapts engine expected_effect to the template schema ──────
 
-    def test_payload_passes_through_expected_effect(self) -> None:
-        """results["expected_effect"] flows into payload unmodified."""
+    def test_payload_adapts_expected_effect_to_card_schema(self) -> None:
+        """
+        results["expected_effect"] is the nested simulate_after_plan() dict;
+        build_payload flattens it to the template's 8-card schema (engine
+        `volatility_ann` → card `vol`, `improved` → `favourable`).  Leaving
+        it nested left the "Ожидаемый эффект" grid empty.
+        """
         from pdf_payload import build_payload
         from pdf_payload import TIER_BASE, TIER_DEEP
         results = ConcentrationAndWaterfallTest()._base_results()
@@ -1100,11 +1198,12 @@ class SimulatorTest(unittest.TestCase):
         }
         for tier in (TIER_BASE, TIER_DEEP):
             p = build_payload(results, tier)
-            self.assertIsNotNone(p["expected_effect"])
-            self.assertTrue(p["expected_effect"]["uses_bl_returns"])
-            self.assertAlmostEqual(
-                p["expected_effect"]["metrics"]["volatility_ann"]["before"],
-                0.142, places=4)
+            ee = p["expected_effect"]
+            self.assertNotIn("metrics", ee)        # flattened, not nested
+            self.assertIn("vol", ee)               # volatility_ann → vol
+            self.assertAlmostEqual(ee["vol"]["before"], 0.142, places=4)
+            self.assertAlmostEqual(ee["vol"]["delta_pp"], -1.3, places=4)
+            self.assertIs(ee["vol"]["favourable"], True)
 
 
 # ── 4.1.f  MacroFeed (Step 4 — FRED-backed macro drivers for DEEP P5) ───────
@@ -1160,8 +1259,8 @@ class MacroFeedTest(unittest.TestCase):
                           http_get=boom, now=self._now)
         out = feed.get_regime_drivers()
         self.assertEqual(calls["n"], 0)
-        # All 5 series present, all with missing status.
-        self.assertEqual(len(out), 5)
+        # All 4 series present, all with missing status.
+        self.assertEqual(len(out), 4)
         for k, row in out.items():
             self.assertEqual(row["status"], "missing", f"{k} status")
             self.assertIsNone(row["value"])
@@ -1179,7 +1278,6 @@ class MacroFeedTest(unittest.TestCase):
                                                        ("2026-05-14", 0.20)]),
             "BAMLH0A0HYM2": _fake_fred_observations([("2026-05-13", 3.12),
                                                        ("2026-05-14", 3.05)]),
-            "NAPM":         _fake_fred_observations([("2026-04-01", 51.4)]),
             "VIXCLS":       _fake_fred_observations([("2026-05-14", 14.2)]),
             "T10YIE":       _fake_fred_observations([("2026-05-14", 2.32)]),
         }
@@ -1193,14 +1291,13 @@ class MacroFeedTest(unittest.TestCase):
                           http_get=fake_get, now=self._now)
         out = feed.get_regime_drivers()
 
-        # All 5 series fetched.
+        # All 4 series fetched.
         self.assertEqual(sorted(calls),
-                          sorted(["T10Y2Y", "BAMLH0A0HYM2", "NAPM",
+                          sorted(["T10Y2Y", "BAMLH0A0HYM2",
                                    "VIXCLS", "T10YIE"]))
         # Values flow through correctly.
         self.assertAlmostEqual(out["yield_curve_10y2y"]["value"],   0.20, places=4)
         self.assertAlmostEqual(out["hy_credit_spread"]["value"],    3.05, places=4)
-        self.assertAlmostEqual(out["pmi_manufacturing"]["value"],   51.4, places=2)
         self.assertAlmostEqual(out["vix"]["value"],                 14.2, places=2)
         self.assertAlmostEqual(out["breakeven_inflation"]["value"], 2.32, places=2)
         # Status ok everywhere; freshness within window.
@@ -1339,11 +1436,12 @@ class MacroFeedTest(unittest.TestCase):
 
     # ─── catalog completeness ──────────────────────────────────────────
 
-    def test_default_catalog_covers_all_5_drivers(self) -> None:
+    def test_default_catalog_covers_all_4_drivers(self) -> None:
         from services.macro_data import MACRO_SERIES_CATALOG
         keys = {s.key for s in MACRO_SERIES_CATALOG}
+        # NAPM (ISM PMI) removed — discontinued by FRED, returned HTTP 400.
         self.assertEqual(keys, {"yield_curve_10y2y", "hy_credit_spread",
-                                  "pmi_manufacturing", "vix", "breakeven_inflation"})
+                                  "vix", "breakeven_inflation"})
 
     # ─── payload passthrough ───────────────────────────────────────────
 
@@ -1773,6 +1871,173 @@ class JinjaRenderTest(unittest.TestCase):
         self.assertIn("Action Plan",             html)
         self.assertIn("4-Pillar Scoring",        html)
         self.assertIn("CoVe",                    html)
+
+
+class ExpectedEffectRemapTest(unittest.TestCase):
+    """simulate_after_plan() output → deep template's 8-card schema."""
+
+    def _engine_ee(self) -> dict:
+        """Engine-shaped expected_effect: nested under .metrics, engine keys."""
+        def cell(before, after, delta, improved, delta_pp=None):
+            d = {"before": before, "after": after, "delta": delta,
+                 "improved": improved}
+            if delta_pp is not None:
+                d["delta_pp"] = delta_pp
+            return d
+        return {"metrics": {
+            "risk_index":      cell(62, 54, -8.0, True),                 # int, no delta_pp
+            "cvar_95":         cell(-0.052, -0.041, 0.011, True, 1.1),
+            "sharpe":          cell(1.18, 1.32, 0.14, True),             # raw, no delta_pp
+            "max_drawdown":    cell(-0.128, -0.104, 0.024, True, 2.4),
+            "volatility_ann":  cell(0.148, 0.126, -0.022, True, -2.2),
+            "max_trc":         cell(0.244, 0.168, -0.076, True),         # fraction, no delta_pp
+            "it_share":        cell(0.62, 0.50, -0.12, True, -12.0),
+            "expected_return": cell(0.142, 0.126, -0.016, False, -1.6),
+        }, "weight_changes": []}
+
+    def test_remap_produces_eight_template_keys(self) -> None:
+        from pdf_payload import _build_expected_effect
+        ee = _build_expected_effect(self._engine_ee())
+        self.assertEqual(set(ee), {
+            "risk_index", "cvar_95", "sharpe", "max_drawdown",
+            "vol", "max_erc_pct", "it_share", "expected_return"})
+
+    def test_card_name_skew_bridged(self) -> None:
+        """Template `vol`/`max_erc_pct` map to engine `volatility_ann`/`max_trc`."""
+        from pdf_payload import _build_expected_effect
+        ee = _build_expected_effect(self._engine_ee())
+        self.assertEqual(ee["vol"]["before"], 0.148)
+        self.assertEqual(ee["vol"]["delta_pp"], -2.2)
+        self.assertEqual(ee["max_erc_pct"]["before"], 0.244)
+
+    def test_improved_maps_to_favourable(self) -> None:
+        from pdf_payload import _build_expected_effect
+        ee = _build_expected_effect(self._engine_ee())
+        self.assertIs(ee["risk_index"]["favourable"], True)
+        self.assertIs(ee["expected_return"]["favourable"], False)
+
+    def test_delta_pp_fallback_for_non_as_pp_metrics(self) -> None:
+        """risk_index/sharpe get raw delta; max_trc fraction scaled to pp."""
+        from pdf_payload import _build_expected_effect
+        ee = _build_expected_effect(self._engine_ee())
+        self.assertEqual(ee["risk_index"]["delta_pp"], -8.0)   # raw points
+        self.assertAlmostEqual(ee["sharpe"]["delta_pp"], 0.14)  # raw
+        self.assertAlmostEqual(ee["max_erc_pct"]["delta_pp"], -7.6)  # -0.076*100
+
+    def test_edge_empty_inputs(self) -> None:
+        from pdf_payload import _build_expected_effect
+        self.assertEqual(_build_expected_effect(None), {})
+        self.assertEqual(_build_expected_effect({}), {})
+        self.assertEqual(_build_expected_effect({"metrics": {}}), {})
+
+    def test_edge_insufficient_data_cell_kept_with_none(self) -> None:
+        """A metric the engine couldn't compute still yields a card cell."""
+        from pdf_payload import _build_expected_effect
+        raw = {"metrics": {"sharpe": {"before": None, "after": None,
+                                      "delta": None, "improved": None}}}
+        ee = _build_expected_effect(raw)
+        self.assertIn("sharpe", ee)
+        self.assertIsNone(ee["sharpe"]["before"])
+        self.assertIsNone(ee["sharpe"]["delta_pp"])
+
+    def test_edge_non_dict_cell_skipped(self) -> None:
+        from pdf_payload import _build_expected_effect
+        ee = _build_expected_effect({"metrics": {"risk_index": "garbage"}})
+        self.assertNotIn("risk_index", ee)
+
+
+class PeriodReturnsAdaptTest(unittest.TestCase):
+    """compute_period_returns_table() output → template row schema."""
+
+    def _engine_pr(self) -> dict:
+        return {"S&P 500": {"periods": [
+            {"period": "1m",  "n_days": 21,  "port_pct": 0.020,
+             "bm_pct": 0.014, "excess_pp": 0.006},
+            {"period": "12m", "n_days": 252, "port_pct": None,
+             "bm_pct": None,  "excess_pp": None},
+            {"period": "YTD", "n_days": 90,  "port_pct": 0.071,
+             "bm_pct": 0.044, "excess_pp": 0.027},
+        ], "window_start": "2025-05-15", "window_end": "2026-05-14",
+            "n_days_total": 252}}
+
+    def test_rows_become_formatted_strings(self) -> None:
+        from pdf_payload import _adapt_period_returns
+        rows = _adapt_period_returns(self._engine_pr())["S&P 500"]["periods"]
+        self.assertEqual(rows[0], {"label": "1М", "portfolio": "+2.0%",
+                                   "benchmark": "+1.4%", "excess": "+0.6 пп"})
+        self.assertEqual(rows[2]["label"], "YTD")
+        self.assertEqual(rows[2]["portfolio"], "+7.1%")
+
+    def test_none_period_renders_dash_not_zero(self) -> None:
+        """A period with too little history must show '—', never a fake 0%."""
+        from pdf_payload import _adapt_period_returns
+        rows = _adapt_period_returns(self._engine_pr())["S&P 500"]["periods"]
+        self.assertEqual(rows[1], {"label": "12М", "portfolio": "—",
+                                   "benchmark": "—", "excess": "—"})
+
+    def test_window_metadata_preserved(self) -> None:
+        from pdf_payload import _adapt_period_returns
+        block = _adapt_period_returns(self._engine_pr())["S&P 500"]
+        self.assertEqual(block["window_start"], "2025-05-15")
+        self.assertEqual(block["window_end"], "2026-05-14")
+
+    def test_edge_empty_inputs(self) -> None:
+        from pdf_payload import _adapt_period_returns
+        self.assertEqual(_adapt_period_returns(None), {})
+        self.assertEqual(_adapt_period_returns({}), {})
+
+    def test_edge_unknown_period_label_passthrough(self) -> None:
+        from pdf_payload import _adapt_period_returns
+        out = _adapt_period_returns({"BM": {"periods": [
+            {"period": "5y", "port_pct": 0.1, "bm_pct": 0.05, "excess_pp": 0.05}]}})
+        self.assertEqual(out["BM"]["periods"][0]["label"], "5y")
+
+
+class FundamentalLayerTierTest(unittest.TestCase):
+    """Regression: fundamental_layer must reach the BASE payload too."""
+
+    def test_base_payload_includes_fundamental_layer(self) -> None:
+        from pdf_payload import build_payload
+        results = PayloadBuildTest()._results()
+        p = build_payload(results, "base",
+                          ai_summary={"verdict": "v", "bullets": ["a", "b"]})
+        self.assertIn("fundamental_layer", p)
+        rows = {r["ticker"]: r for r in p["fundamental_layer"]}
+        # AAPL carries SEC fields in the fixture — must surface, not "н/д".
+        self.assertIn("AAPL", rows)
+        self.assertEqual(rows["AAPL"]["roe"], "30.0%")
+
+    def test_base_and_deep_fundamental_layer_match(self) -> None:
+        from pdf_payload import build_payload
+        results = PayloadBuildTest()._results()
+        base = build_payload(results, "base",
+                             ai_summary={"verdict": "v", "bullets": ["a"]})
+        deep = build_payload(results, "deep",
+                             ai_summary={"verdict": "v", "bullets": ["a"]})
+        self.assertEqual(base["fundamental_layer"], deep["fundamental_layer"])
+
+
+class PayloadAdapterIntegrationTest(unittest.TestCase):
+    """build_payload wires the engine-shaped inputs through the adapters."""
+
+    def test_expected_effect_adapted_in_payload(self) -> None:
+        from pdf_payload import build_payload
+        results = PayloadBuildTest()._results()
+        results["expected_effect"] = ExpectedEffectRemapTest()._engine_ee()
+        p = build_payload(results, "deep",
+                          ai_summary={"verdict": "v", "bullets": ["a"]})
+        # Payload must already be the flat 8-card schema, not the nested dict.
+        self.assertIn("vol", p["expected_effect"])
+        self.assertNotIn("metrics", p["expected_effect"])
+
+    def test_period_returns_adapted_in_payload(self) -> None:
+        from pdf_payload import build_payload
+        results = PayloadBuildTest()._results()
+        results["period_returns_table"] = PeriodReturnsAdaptTest()._engine_pr()
+        p = build_payload(results, "base",
+                          ai_summary={"verdict": "v", "bullets": ["a"]})
+        row0 = p["period_returns_table"]["S&P 500"]["periods"][0]
+        self.assertEqual(row0["portfolio"], "+2.0%")
 
 
 if __name__ == "__main__":

@@ -128,8 +128,123 @@ def compute_period_returns_table(port_log: pd.Series,
     return out
 
 
+# ── Sparse-history-robust portfolio / benchmark return series ───────────────
+#
+# Root problem this section solves:
+#   Building a *weighted portfolio* return series needs every constituent to
+#   have a price on the same day.  The naive `prices.dropna()` drops a row if
+#   ANY column is NaN — so a single thinly-traded instrument with short or
+#   gappy history (e.g. a local exchange listing like `FFSPC6.1028.AIX`)
+#   collapses the whole overlap window and silently nulls Tracking-Error /
+#   Information-Ratio / multi-period returns for the ENTIRE portfolio.
+#
+# Policy — degrade per-asset, never globally:
+#   • an instrument needs >= MIN_OVERLAP_TDAYS price points to enter the
+#     cross-asset return panel; sparse names are dropped and reported, not
+#     allowed to shrink everyone else's window;
+#   • the surviving weights are renormalised so the series still represents
+#     a fully-invested book;
+#   • every benchmark is aligned by a PER-PAIR inner-join, so one benchmark's
+#     own short history can't null the others.
+
+MIN_OVERLAP_TDAYS = 60   # ≈ 3 trading months — floor for a usable return series
+
+
+def build_portfolio_log_returns(price_df: "pd.DataFrame | None",
+                                 weights: dict,
+                                 *,
+                                 min_obs: int = MIN_OVERLAP_TDAYS) -> tuple:
+    """
+    Weighted portfolio daily log-return series, robust to sparse constituents.
+
+    Args:
+        price_df : close-price DataFrame, columns = resolved tickers.
+        weights  : {column_name: weight_decimal}.
+        min_obs  : minimum non-NaN price points for a column to be kept.
+
+    Returns:
+        (port_log_series, info) where info = {
+            "dropped":        [tickers excluded for short history],
+            "covered_weight": Σ weight of the kept names BEFORE renormalising
+                              (1.0 == the series represents the whole book),
+            "n_days":         length of the resulting return series,
+            "kept":           [tickers used],
+        }.  port_log_series is None when nothing usable remains.
+    """
+    info = {"dropped": [], "covered_weight": 0.0, "n_days": 0, "kept": []}
+    if price_df is None or getattr(price_df, "empty", True):
+        return None, info
+
+    keep_cols: list[str] = []
+    for col in price_df.columns:
+        if int(price_df[col].notna().sum()) >= min_obs:
+            keep_cols.append(col)
+        else:
+            info["dropped"].append(str(col))
+    if not keep_cols:
+        return None, info
+
+    raw_w   = {c: float(weights.get(c, 0.0)) for c in keep_cols}
+    total_w = sum(raw_w.values())
+    if total_w <= 1e-9:
+        return None, info
+    norm_w = np.array([raw_w[c] / total_w for c in keep_cols], dtype=float)
+
+    panel   = price_df[keep_cols]
+    log_ret = np.log(panel / panel.shift(1)).dropna()
+    if len(log_ret) < 2:
+        info["covered_weight"] = round(total_w, 4)
+        return None, info
+
+    port_log = pd.Series(log_ret.values @ norm_w, index=log_ret.index,
+                         name="port_log")
+    info.update(kept=keep_cols, covered_weight=round(total_w, 4),
+                n_days=int(len(port_log)))
+    return port_log, info
+
+
+def compute_benchmark_stats(port_log: "pd.Series | None",
+                            bm_log: "pd.Series | None",
+                            *,
+                            trading_days: int = 252) -> "dict | None":
+    """
+    Tracking Error / Information Ratio / annualised excess from a PER-PAIR
+    inner-join of the portfolio and benchmark log-return series.
+
+    Aligning per benchmark (rather than against one global pre-cleaned
+    matrix) means a benchmark's own short history only shortens ITS row.
+    Numerator (excess) and denominator (TE) are computed on the SAME aligned
+    window, so the Information Ratio is scale-consistent.
+
+    Returns a stats dict, or None when the overlap is < 2 trading days.
+    """
+    if port_log is None or getattr(port_log, "empty", True) or \
+       bm_log is None or getattr(bm_log, "empty", True):
+        return None
+    aligned = pd.concat([port_log, bm_log], axis=1, join="inner").dropna()
+    if len(aligned) < 2:
+        return None
+    p = aligned.iloc[:, 0].values
+    b = aligned.iloc[:, 1].values
+    te         = float(np.std(p - b, ddof=1) * np.sqrt(trading_days))
+    port_ann   = float(np.exp(float(np.mean(p)) * trading_days) - 1.0)
+    bm_ann     = float(np.exp(float(np.mean(b)) * trading_days) - 1.0)
+    excess_ann = port_ann - bm_ann
+    return {
+        "tracking_error":    te,
+        "information_ratio": (excess_ann / te) if te > 1e-12 else 0.0,
+        "excess_ann":        excess_ann,
+        "port_ann_return":   port_ann,
+        "bm_ann_return":     bm_ann,
+        "n_days":            int(len(aligned)),
+    }
+
+
 __all__ = [
     "PERIOD_WINDOWS_TDAYS",
+    "MIN_OVERLAP_TDAYS",
     "_cum_simple_from_log",
     "compute_period_returns_table",
+    "build_portfolio_log_returns",
+    "compute_benchmark_stats",
 ]

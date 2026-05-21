@@ -14,7 +14,11 @@ logger = logging.getLogger("Antigravity_RiskEngine")
 
 # Multi-period (1м / 3м / 6м / 12м / YTD) returns live in a separate module
 # so they can be unit-tested without pulling in sklearn / engine dependencies.
-from finance.period_returns import compute_period_returns_table as _compute_period_returns_table
+from finance.period_returns import (
+    compute_period_returns_table as _compute_period_returns_table,
+    build_portfolio_log_returns as _build_portfolio_log_returns,
+    compute_benchmark_stats as _compute_benchmark_stats,
+)
 # Stress engine (parametric factor shocks) — also sklearn-free.
 from finance.stress import run_stress_scenarios as _run_stress_scenarios
 # Simulator (Black-Litterman "after-plan" portfolio metrics) — sklearn-free.
@@ -862,107 +866,72 @@ class UniversalPortfolioManager:
             'MSCI EM':      'EEM.US',   # Emerging Markets equity index — EM/KASE сравнение
             'EM Bonds':     'EMB.US',   # JP Morgan EM Bond index — для KZ bond holders
         })
-        benchmark_results = {}
-        
+        # ── Weighted portfolio log-return series — built ONCE, robustly ────
+        # Sparse-history constituents (thinly-traded local listings) are
+        # dropped from the panel and the surviving weights renormalised, so
+        # one bad name can no longer collapse the overlap window for the
+        # whole book.  See period_returns.build_portfolio_log_returns.
+        port_resolved = self.engine.resolve_tickers(actual_risky)
+        col_weights: dict[str, float] = {}
+        for orig, res in zip(actual_risky, port_resolved):
+            if res in all_data.columns:
+                col_weights[res] = col_weights.get(res, 0.0) + float(weights_dict.get(orig, 0.0))
+        port_log_series, return_coverage = _build_portfolio_log_returns(
+            all_data[list(col_weights)] if col_weights else None, col_weights
+        )
+        if return_coverage["dropped"]:
+            logger.info("Return series: dropped %d sparse-history name(s): %s "
+                        "(covered weight %.1f%%)",
+                        len(return_coverage["dropped"]),
+                        ", ".join(return_coverage["dropped"]),
+                        return_coverage["covered_weight"] * 100)
+
+        # Benchmark log-returns — one Series per benchmark (per-pair join).
+        bm_logs: dict[str, pd.Series] = {}
         for bm_name, bm_ticker in benchmarks.items():
             if bm_ticker in all_data.columns:
                 bm_prices = all_data[bm_ticker].dropna()
-                if len(bm_prices) > 1:
-                    # Доходность бенчмарка за весь период
-                    bm_return = (bm_prices.iloc[-1] / bm_prices.iloc[0]) - 1
-                    
-                    # Портфельная доходность (взвешенная)
-                    port_return = df['Return_Pct'].fillna(0).values @ np.array(
-                        [weights_dict.get(t, 0) for t in df.index]
-                    )
-                    
-                    # Tracking Error (дневная разница портфель - бенчмарк)
-                    bm_daily = np.log(bm_prices / bm_prices.shift(1)).dropna()
-                    
-                    # Дневные доходности портфеля
-                    port_resolved = self.engine.resolve_tickers(actual_risky)
-                    port_daily_cols = [r for r in port_resolved if r in all_data.columns]
-                    if port_daily_cols:
-                        port_daily_returns = np.log(all_data[port_daily_cols] / all_data[port_daily_cols].shift(1)).dropna()
-                        risky_weights = np.array([weights_dict.get(t, 0) for t in actual_risky 
-                                                  if self.engine.resolve_tickers([t])[0] in all_data.columns])
-                        if len(risky_weights) == port_daily_returns.shape[1]:
-                            port_daily = port_daily_returns.values @ risky_weights
+                if len(bm_prices) >= 2:
+                    bm_logs[bm_name] = np.log(bm_prices / bm_prices.shift(1)).dropna()
 
-                            # Align lengths
-                            min_len            = min(len(port_daily), len(bm_daily))
-                            port_daily_aligned = port_daily[-min_len:]
-                            bm_daily_aligned   = bm_daily.values[-min_len:]
-                            tracking_diff      = port_daily_aligned - bm_daily_aligned
-                            tracking_error     = np.std(tracking_diff, ddof=1) * np.sqrt(self.engine.trading_days)
-
-                            # Geometric-annualised returns on the SAME aligned window.
-                            # Previously: excess_ann = (port_return - bm_return) which
-                            # mixed period-return (~2y) with annualised TE → IR scale bug.
-                            # Now both numerator and denominator are annualised consistently.
-                            port_ann_return = float(np.exp(np.mean(port_daily_aligned) * self.engine.trading_days) - 1)
-                            bm_ann_return   = float(np.exp(np.mean(bm_daily_aligned)   * self.engine.trading_days) - 1)
-                            excess_ann      = port_ann_return - bm_ann_return
-                            info_ratio      = excess_ann / tracking_error if tracking_error > 0 else 0
-                        else:
-                            tracking_error  = None
-                            info_ratio      = None
-                            excess_ann      = None
-                            port_ann_return = None
-                            bm_ann_return   = None
-                    else:
-                        tracking_error  = None
-                        info_ratio      = None
-                        excess_ann      = None
-                        port_ann_return = None
-                        bm_ann_return   = None
-
-                    benchmark_results[bm_name] = {
-                        "Benchmark_Return":     bm_return,                    # period total (display)
-                        "Portfolio_Return":     port_return,                  # period total (display)
-                        "Excess_Return":        port_return - bm_return,      # period total (display)
-                        "Portfolio_Ann_Return": port_ann_return,              # NEW: annualised, aligned w/ TE
-                        "Benchmark_Ann_Return": bm_ann_return,                # NEW
-                        "Excess_Return_Ann":    excess_ann,                   # NEW: annualised excess (for IR)
-                        "Tracking_Error":       tracking_error,
-                        "Information_Ratio":    info_ratio,
-                        "Beating_Benchmark":    port_return > bm_return,
-                    }
+        # ═══════════════ BENCHMARK COMPARISON ═══════════════
+        # TE / IR / annualised excess are computed per benchmark on a PAIR
+        # inner-join (compute_benchmark_stats) — a benchmark's own short
+        # history can no longer null the comparison, and numerator and
+        # denominator share one aligned window (no IR scale bug).
+        benchmark_results: dict[str, dict] = {}
+        port_return = float(df['Return_Pct'].fillna(0).values @ np.array(
+            [weights_dict.get(t, 0) for t in df.index]))
+        for bm_name, bm_ticker in benchmarks.items():
+            if bm_ticker not in all_data.columns:
+                continue
+            bm_prices = all_data[bm_ticker].dropna()
+            if len(bm_prices) <= 1:
+                continue
+            bm_return = float(bm_prices.iloc[-1] / bm_prices.iloc[0]) - 1.0
+            stats = _compute_benchmark_stats(port_log_series, bm_logs.get(bm_name),
+                                             trading_days=self.engine.trading_days)
+            benchmark_results[bm_name] = {
+                "Benchmark_Return":     bm_return,                  # period total (display)
+                "Portfolio_Return":     port_return,                # period total (display)
+                "Excess_Return":        port_return - bm_return,    # period total (display)
+                "Portfolio_Ann_Return": stats["port_ann_return"]   if stats else None,
+                "Benchmark_Ann_Return": stats["bm_ann_return"]     if stats else None,
+                "Excess_Return_Ann":    stats["excess_ann"]        if stats else None,
+                "Tracking_Error":       stats["tracking_error"]    if stats else None,
+                "Information_Ratio":    stats["information_ratio"] if stats else None,
+                "Beating_Benchmark":    port_return > bm_return,
+            }
 
         # ═══════════════ MULTI-PERIOD RETURNS TABLE ═══════════════
-        # Builds the 1м / 3м / 6м / 12м / YTD table for the v2 report's
-        # "Рост против рынка" section.  We rebuild port_daily once here from
-        # the same source frame the benchmark loop used, so the windows are
-        # always sliced against the SAME aligned series — no risk that the
-        # 12m row uses a different cleaning policy than Tracking-Error above.
+        # Reuses the SAME robust port_log_series + per-benchmark bm_logs, so
+        # every period row shares one aligned window with the TE/IR figures.
         period_returns_table: dict[str, dict] = {}
         try:
-            port_resolved = self.engine.resolve_tickers(actual_risky)
-            port_cols_idx = [(orig, res) for orig, res in zip(actual_risky, port_resolved)
-                              if res in all_data.columns]
-            if port_cols_idx:
-                port_cols   = [res for _, res in port_cols_idx]
-                port_origs  = [orig for orig, _ in port_cols_idx]
-                w_for_cols  = np.array([weights_dict.get(t, 0.0) for t in port_origs], dtype=float)
-                port_prices = all_data[port_cols].dropna()
-                if len(port_prices) >= 2 and w_for_cols.size:
-                    port_log_df = np.log(port_prices / port_prices.shift(1)).dropna()
-                    port_log_series = pd.Series(
-                        port_log_df.values @ w_for_cols,
-                        index=port_log_df.index,
-                        name="port_log",
-                    )
-                    bm_logs: dict[str, pd.Series] = {}
-                    for bm_name, bm_ticker in benchmarks.items():
-                        if bm_ticker in all_data.columns:
-                            bm_prices = all_data[bm_ticker].dropna()
-                            if len(bm_prices) >= 2:
-                                bm_logs[bm_name] = (
-                                    np.log(bm_prices / bm_prices.shift(1)).dropna()
-                                )
-                    period_returns_table = _compute_period_returns_table(
-                        port_log_series, bm_logs
-                    )
+            if port_log_series is not None and bm_logs:
+                period_returns_table = _compute_period_returns_table(
+                    port_log_series, bm_logs
+                )
         except Exception as exc:  # never block the rest of the pipeline
             logger.warning("period_returns_table build failed: %s", exc)
             period_returns_table = {}
@@ -1238,6 +1207,7 @@ class UniversalPortfolioManager:
             "risk_free_rate": self.engine.current_rfr_annual,
             "benchmark_comparison": benchmark_results,
             "period_returns_table": period_returns_table,
+            "return_series_coverage": return_coverage,
             "stress_scenarios": stress_scenarios,
             "expected_effect": expected_effect,
             "cds_summary":     cds_summary,
