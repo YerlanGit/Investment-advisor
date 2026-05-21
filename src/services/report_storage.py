@@ -55,6 +55,43 @@ def _object_path(user_id: int | str, tier: str, today: Optional[str] = None) -> 
     return f"r/{user_id}/{today}/{tier}.html"
 
 
+def _signed_url(blob, credentials, ttl_hours: int) -> str:
+    """
+    Produce a v4 signed GET URL for ``blob``.
+
+    Two signing paths:
+      • Service-account key files carry a private key and can sign the
+        URL locally with no network call.
+      • Cloud Run / GCE supply token-only credentials
+        (compute_engine.Credentials) that have NO private key.  Signing
+        those locally raises "you need a private key to sign
+        credentials" — so we sign via the IAM Credentials signBlob API
+        by handing generate_signed_url the service-account email and a
+        fresh access token.  This requires the runtime service account
+        to hold roles/iam.serviceAccountTokenCreator on itself.
+    """
+    import google.auth.transport.requests   # type: ignore[import-not-found]
+
+    expiration = timedelta(hours=ttl_hours)
+    try:
+        return blob.generate_signed_url(
+            version    = "v4",
+            expiration = expiration,
+            method     = "GET",
+        )
+    except Exception as exc:
+        logger.info("Local URL signing unavailable (%s); using IAM signBlob", exc)
+        auth_request = google.auth.transport.requests.Request()
+        credentials.refresh(auth_request)
+        return blob.generate_signed_url(
+            version               = "v4",
+            expiration            = expiration,
+            method                = "GET",
+            service_account_email = credentials.service_account_email,
+            access_token          = credentials.token,
+        )
+
+
 def _upload_to_gcs(local_path: Path,
                     bucket_name: str,
                     object_name: str,
@@ -66,9 +103,11 @@ def _upload_to_gcs(local_path: Path,
     configured the caller falls back without ever touching the SDK,
     which means local-only test environments don't need GCP creds.
     """
-    from google.cloud import storage   # type: ignore[import-not-found]
+    import google.auth                      # type: ignore[import-not-found]
+    from google.cloud import storage        # type: ignore[import-not-found]
 
-    client = storage.Client()
+    credentials, _project = google.auth.default()
+    client = storage.Client(credentials=credentials)
     bucket = client.bucket(bucket_name)
     blob   = bucket.blob(object_name)
 
@@ -80,14 +119,7 @@ def _upload_to_gcs(local_path: Path,
                  local_path.name, bucket_name, object_name,
                  local_path.stat().st_size / 1024)
 
-    # v4 signed URL — uses the IAM service-account credentials Cloud Run
-    # already supplies; no extra key file required.
-    url = blob.generate_signed_url(
-        version    = "v4",
-        expiration = timedelta(hours=ttl_hours),
-        method     = "GET",
-    )
-    return url
+    return _signed_url(blob, credentials, ttl_hours)
 
 
 def upload_report(local_html_path: str | Path,
