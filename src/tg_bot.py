@@ -1426,6 +1426,14 @@ async def _send_pdf(
     # Push to GCS (or fall back to file:// in local-dev mode).
     url = upload_report(local_path, user_id=user_id, tier=tier)
 
+    # A file:// URL means the GCS upload/signing failed (in production the
+    # bucket is always configured).  Telegram rejects file:// links inside a
+    # markdown text-link entity, so sending one would crash send_message and
+    # the user would get nothing.  Signal the failure to the caller so it can
+    # refund tokens and show a clear message instead.
+    if url.startswith("file://"):
+        raise RuntimeError("report_delivery_failed")
+
     # Tell the user.  The link is a plain markdown URL — Telegram renders
     # it as a preview card on most clients.
     await bot.send_message(
@@ -1879,8 +1887,21 @@ async def _run_analysis_background(
         )
         await refund("no_real_portfolio")
     except RuntimeError as exc:
-        # market_data_subscription_required already reported + refunded above.
-        if str(exc) != "market_data_subscription_required":
+        if str(exc) == "market_data_subscription_required":
+            # Already reported + refunded above.
+            pass
+        elif str(exc) == "report_delivery_failed":
+            logger.error("Report generated but upload/delivery failed for %s", user_id)
+            await bot.send_message(
+                chat_id,
+                "⚠️ *Отчёт сформирован, но не удалось загрузить его в облачное "
+                "хранилище.*\n\n"
+                "Это сбой на нашей стороне — повторите анализ позже или "
+                "обратитесь в /support.",
+                parse_mode=ParseMode.MARKDOWN,
+            )
+            await refund("report_delivery_failed")
+        else:
             logger.exception("Background analysis runtime error: %s", exc)
             await bot.send_message(
                 chat_id,
