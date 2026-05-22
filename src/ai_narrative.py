@@ -232,6 +232,9 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
             '  "verdict": "≤150 знаков — вердикт с причинно-следственной связью",\n'
             '  "plain_summary": "≤250 знаков — Executive Summary: риски + позиция + действие",\n'
             '  "bullets": ["4 пункта ≤120 знаков каждый с [Источник] — взаимосвязи, риски, рекомендации"],\n'
+            '  "ai_cvar_note": "≤120 знаков — простыми словами про CVaR: сколько примерно теряется в худший день",\n'
+            '  "ai_sharpe_note": "≤120 знаков — простыми словами про Sharpe: окупается ли риск доходностью",\n'
+            '  "ai_mdd_note": "≤120 знаков — простыми словами про макс. просадку портфеля",\n'
             '  "ai_risk_comment": "≤150 знаков — CVaR/Vol/MaxDD: причины + Dollar impact + как снизить",\n'
             '  "ai_regime_comment": "≤130 знаков — макро-режим: как влияет на текущие позиции",\n'
             '  "ai_holdings_comment": "≤160 знаков — ключевые hotspots, скрытая концентрация по факторам",\n'
@@ -250,6 +253,8 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
             '  }\n'
             '}\n\n'
             "ПРАВИЛА: русский язык. Без «RAMP». Каждое число — [Quant Engine]/[SEC EDGAR]/[Regime]/[RAG].\n"
+            "ПРОСТОЙ ЯЗЫК: пиши для человека без финансового образования, минимум жаргона, "
+            "термины поясняй в скобках, связывай мысли логически.\n"
             f"Риск-профиль: {user_profile}. Режим: {regime_label}.\n"
             "Stock picks: РЕАЛЬНЫЕ АКЦИИ (PLTR, JNJ, KO, CRWD и т.п.), не только ETF. "
             "why обязательно с конкретными цифрами (ROE, маржа, Beta).\n"
@@ -296,6 +301,12 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
         '  "verdict": "≤200 знаков — причинно-следственный вердикт: что СЕЙЧАС и ПОЧЕМУ",\n'
         '  "plain_summary": "≤300 знаков — Executive Summary: позиция + главный риск + приоритет",\n'
         '  "bullets": ["5–7 пунктов ≤200 знаков каждый с [Источник] — взаимосвязи → риски → рекомендации"],\n'
+        '  "ai_cvar_note": "≤120 знаков — простыми словами про CVaR ЭТОГО портфеля: '
+        'примерно сколько денег теряется в худший день и нормально ли это.",\n'
+        '  "ai_sharpe_note": "≤120 знаков — простыми словами про Sharpe: окупается ли '
+        'риск доходностью.",\n'
+        '  "ai_mdd_note": "≤120 знаков — простыми словами про макс. просадку: насколько '
+        'глубоко портфель падал и что это значит для владельца.",\n'
         '  "ai_risk_comment": "≤220 знаков — CVaR/Vol/MaxDD/Sharpe: взаимосвязь метрик, $ потерь, '
         'нарушение лимитов мандата, способ снижения риска [Quant Engine]",\n'
         '  "ai_benchmark_comment": "≤200 знаков — IR vs бенчмарк: причины отставания/опережения, '
@@ -306,10 +317,11 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
         'подтверждение из банковских отчётов (если RAG), тактика",\n'
         '  "ai_holdings_comment": "≤200 знаков — hotspots, скрытая факторная концентрация, '
         'какие позиции увеличивают хвостовой риск [Quant Engine]",\n'
-        '  "ai_sector_comment": "≤160 знаков — секторные перевесы/недовесы vs бенчмарк, '
-        'риск ротации при смене режима",\n'
-        '  "ai_factor_comment": "≤220 знаков — факторное разложение: Market/Momentum/Quality/Rates '
-        'доминируют — почему и что это значит для риска [Quant Engine]",\n'
+        '  "ai_sector_comment": "≤170 знаков — секторные и СУБ-секторные перекосы '
+        '(напр. внутри Tech: софт vs полупроводники), риск ротации при смене режима",\n'
+        '  "ai_factor_comment": "≤220 знаков — какие факторы доминируют и что это значит '
+        'для риска; учти что факторы пересекаются (Momentum/Value/Quality — те же акции '
+        'под разными углами), поэтому беты не складываются напрямую [Quant Engine]",\n'
         '  "ai_4pillar_comment": "≤200 знаков — 4-Pillar Scoring: F/V/T/C паттерны, '
         'позиции с расходящимися сигналами, почему V=0 (если нет данных SEC) [SEC EDGAR]",\n'
         '  "ai_stress_comment": "≤220 знаков — стресс-сценарии: худший сценарий, размер просадки, '
@@ -325,6 +337,9 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
         '}\n\n'
         "ПРАВИЛА:\n"
         "- ВСЕ тексты на РУССКОМ. Без «RAMP».\n"
+        "- ПРОСТОЙ ЯЗЫК: пиши как другу без финансового образования. Минимум "
+        "жаргона; если термин необходим — поясни его в скобках простыми словами. "
+        "Связывай мысли логически (причина → следствие → что делать).\n"
         "- 3-step reasoning: взаимосвязи → риски → рекомендации с числами.\n"
         "- Каждое число — [Quant Engine], [SEC EDGAR], [Regime] или [RAG: файл].\n"
         f"- Риск-профиль: {user_profile}. Режим: {regime_label}.\n"
@@ -626,6 +641,9 @@ def generate_narrative(results: dict, tier: str = "base",
             "stock_picks":              stock_picks,
             "used_rag":                 used_rag,
             "model_used":               model,
+            "ai_cvar_note":             _comment("ai_cvar_note", 160),
+            "ai_sharpe_note":           _comment("ai_sharpe_note", 160),
+            "ai_mdd_note":              _comment("ai_mdd_note", 160),
             "ai_risk_comment":          _comment("ai_risk_comment"),
             "ai_benchmark_comment":     _comment("ai_benchmark_comment"),
             "ai_performance_comment":   _comment("ai_performance_comment"),

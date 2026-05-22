@@ -1890,7 +1890,7 @@ class ExpectedEffectRemapTest(unittest.TestCase):
             "sharpe":          cell(1.18, 1.32, 0.14, True),             # raw, no delta_pp
             "max_drawdown":    cell(-0.128, -0.104, 0.024, True, 2.4),
             "volatility_ann":  cell(0.148, 0.126, -0.022, True, -2.2),
-            "max_trc":         cell(0.244, 0.168, -0.076, True),         # fraction, no delta_pp
+            "max_trc":         cell(24.4, 16.8, -7.6, True),             # PERCENT (engine erc*100), no delta_pp
             "it_share":        cell(0.62, 0.50, -0.12, True, -12.0),
             "expected_return": cell(0.142, 0.126, -0.016, False, -1.6),
         }, "weight_changes": []}
@@ -1917,12 +1917,20 @@ class ExpectedEffectRemapTest(unittest.TestCase):
         self.assertIs(ee["expected_return"]["favourable"], False)
 
     def test_delta_pp_fallback_for_non_as_pp_metrics(self) -> None:
-        """risk_index/sharpe get raw delta; max_trc fraction scaled to pp."""
+        """risk_index/sharpe get raw delta; max_trc is already in pp."""
         from pdf_payload import _build_expected_effect
         ee = _build_expected_effect(self._engine_ee())
         self.assertEqual(ee["risk_index"]["delta_pp"], -8.0)   # raw points
         self.assertAlmostEqual(ee["sharpe"]["delta_pp"], 0.14)  # raw
-        self.assertAlmostEqual(ee["max_erc_pct"]["delta_pp"], -7.6)  # -0.076*100
+
+    def test_max_trc_rescaled_to_fraction(self) -> None:
+        """Engine max_trc is a percent; the card must NOT double-scale it."""
+        from pdf_payload import _build_expected_effect
+        ee = _build_expected_effect(self._engine_ee())
+        # 24.4% → 0.244 fraction (template fmt='pct' then ×100 → 24.4%).
+        self.assertAlmostEqual(ee["max_erc_pct"]["before"], 0.244)
+        self.assertAlmostEqual(ee["max_erc_pct"]["after"], 0.168)
+        self.assertAlmostEqual(ee["max_erc_pct"]["delta_pp"], -7.6)  # already pp
 
     def test_edge_empty_inputs(self) -> None:
         from pdf_payload import _build_expected_effect

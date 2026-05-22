@@ -1225,13 +1225,12 @@
         {{ data.kpi_sparklines.cvar_svg | safe }}
       </div>
       {% endif %}
+      {% if data.ai_cvar_note %}
       <div class="kpi-ai">
         <span class="tag">🤖</span>
-        <span class="txt">«Средний убыток портфеля за один худший день при самом
-          плохом сценарии в будущем. У вас ≈&nbsp;<b>{{ data.cvar }}</b>{% if data.cvar_dollar %} ({{ data.cvar_dollar }}{% if data.total_value_usd %} от {{ data.total_value_usd }}{% endif %}){% endif %}.
-          {% if data.cvar_ci %}Доверительный интервал (95%): {{ data.cvar_ci }}.{% endif %}»
-          <span class="src">[Quant Engine · Politis-Romano bootstrap]</span></span>
+        <span class="txt">{{ data.ai_cvar_note }}</span>
       </div>
+      {% endif %}
     </div>
 
     <!-- KPI 2 — Sharpe Ratio -->
@@ -1254,13 +1253,12 @@
         {{ data.kpi_sparklines.sharpe_svg | safe }}
       </div>
       {% endif %}
+      {% if data.ai_sharpe_note %}
       <div class="kpi-ai">
         <span class="tag">🤖</span>
-        <span class="txt">«Сколько прибыли приносит каждая единица риска. У вас
-          <b>{{ data.sharpe }}</b>{% if data.sortino %} (Sortino {{ data.sortino }} — учитывает только просадки){% endif %}.
-          Норма ≥&nbsp;1.0, ≥&nbsp;1.5 — отлично; &lt; 0 — портфель проигрывает безриск. ставке.»
-          <span class="src">[Quant Engine · RFR {{ data.risk_free_rate or '14%' }}]</span></span>
+        <span class="txt">{{ data.ai_sharpe_note }}</span>
       </div>
+      {% endif %}
     </div>
 
     <!-- KPI 3 — Max Drawdown -->
@@ -1283,17 +1281,12 @@
         {{ data.kpi_sparklines.mdd_svg | safe }}
       </div>
       {% endif %}
+      {% if data.ai_mdd_note %}
       <div class="kpi-ai">
         <span class="tag">🤖</span>
-        <span class="txt">«Максимальное падение портфеля от его пика за всю историю.
-          У вас <b>{{ data.max_drawdown }}</b>{% if data.mdd_dollar %} (≈ {{ data.mdd_dollar }}){% endif %}.
-          {% if data.hotspots and data.hotspots | length > 0 %}
-            Основной вклад — {% for h in data.hotspots[:2] %}<b>{{ h.ticker }}</b>{% if not loop.last %} и {% endif %}{% endfor %}: снижение их веса сгладит будущие просадки.
-          {% else %}
-            Снижение веса крупнейших позиций сглаживает будущие просадки.
-          {% endif %}»
-          <span class="src">[Quant Engine · peak-to-trough на equity curve]</span></span>
+        <span class="txt">{{ data.ai_mdd_note }}</span>
       </div>
+      {% endif %}
     </div>
 
   </div>
@@ -2031,11 +2024,11 @@
     <div class="sec-sub">{{ data.ideas_count }} идей (рост · ребалансировка · защита · режим) на основе <b style="color:var(--tech-blue);">Factor → Regime → RAG</b> pipeline · нажмите на карточку, чтобы раскрыть детали · <span style="color:var(--ink-60);">[{{ data.ai_model_used or 'Claude Haiku 4.5' }}]</span></div>
   </div>
 
-  <!-- ВВОДНЫЙ AI-БЛОК -->
-  {% if data.ai_holdings_comment %}
+  <!-- ВВОДНЫЙ AI-БЛОК — вердикт ИИ (НЕ дублирует блок «Что вы держите») -->
+  {% if data.ai_verdict %}
   <div class="sec-ai">
     <div class="ai-body">
-      {{ data.ai_holdings_comment }}
+      {{ data.ai_verdict }}
     </div>
   </div>
   {% endif %}

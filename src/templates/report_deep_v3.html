@@ -1765,13 +1765,12 @@
         {{ data.kpi_sparklines.cvar_svg | safe }}
       </div>
       {% endif %}
+      {% if data.ai_cvar_note %}
       <div class="kpi-ai">
         <span class="tag">🤖</span>
-        <span class="txt">«Средний убыток портфеля за один худший день при самом
-          плохом сценарии в будущем. У вас ≈&nbsp;<b>{{ data.cvar }}</b>{% if data.cvar_dollar %} ({{ data.cvar_dollar }}{% if data.total_value_usd %} от {{ data.total_value_usd }}{% endif %}){% endif %}.
-          {% if data.cvar_ci %}Доверительный интервал (95%): {{ data.cvar_ci }}.{% endif %}»
-          <span class="src">[Quant Engine · Politis-Romano bootstrap]</span></span>
+        <span class="txt">{{ data.ai_cvar_note }}</span>
       </div>
+      {% endif %}
     </div>
 
     <!-- KPI 2 — Sharpe Ratio -->
@@ -1794,13 +1793,12 @@
         {{ data.kpi_sparklines.sharpe_svg | safe }}
       </div>
       {% endif %}
+      {% if data.ai_sharpe_note %}
       <div class="kpi-ai">
         <span class="tag">🤖</span>
-        <span class="txt">«Сколько прибыли приносит каждая единица риска. У вас
-          <b>{{ data.sharpe }}</b>{% if data.sortino %} (Sortino {{ data.sortino }} — учитывает только просадки){% endif %}.
-          Норма ≥&nbsp;1.0, ≥&nbsp;1.5 — отлично; &lt; 0 — портфель проигрывает безриск. ставке.»
-          <span class="src">[Quant Engine · RFR {{ data.risk_free_rate or '14%' }}]</span></span>
+        <span class="txt">{{ data.ai_sharpe_note }}</span>
       </div>
+      {% endif %}
     </div>
 
     <!-- KPI 3 — Max Drawdown -->
@@ -1823,17 +1821,12 @@
         {{ data.kpi_sparklines.mdd_svg | safe }}
       </div>
       {% endif %}
+      {% if data.ai_mdd_note %}
       <div class="kpi-ai">
         <span class="tag">🤖</span>
-        <span class="txt">«Максимальное падение портфеля от его пика за всю историю.
-          У вас <b>{{ data.max_drawdown }}</b>{% if data.mdd_dollar %} (≈ {{ data.mdd_dollar }}){% endif %}.
-          {% if data.hotspots and data.hotspots | length > 0 %}
-            Основной вклад — {% for h in data.hotspots[:2] %}<b>{{ h.ticker }}</b>{% if not loop.last %} и {% endif %}{% endfor %}: снижение их веса сгладит будущие просадки.
-          {% else %}
-            Снижение веса крупнейших позиций сглаживает будущие просадки.
-          {% endif %}»
-          <span class="src">[Quant Engine · peak-to-trough на equity curve]</span></span>
+        <span class="txt">{{ data.ai_mdd_note }}</span>
       </div>
+      {% endif %}
     </div>
 
   </div>
@@ -2339,7 +2332,7 @@
       {% for w in data.sector_warnings %}
       <div class="sp-warn">
         <span>⚠</span>
-        <span>{{ w }}</span>
+        <span>{{ w.text }}</span>
       </div>
       {% endfor %}
     {% endif %}
@@ -2410,12 +2403,11 @@
         {{ data.factor_radar_svg | safe }}
       </div>
 
-      <!-- Factor table — 8 rows (EM_Equity / EM_Bond опущены: корреляция     -->
-      <!-- EM_Equity↔MARKET ≈ 0.85, EM_Bond↔RATES ≈ 0.50 — дублируют сигнал)  -->
+      <!-- Factor table — all 10 factor axes, data-driven from data.factor_betas -->
       <div class="factor-table-wrap">
         <table class="factor-table">
           <thead>
-            <tr><th>Фактор</th><th>β портф.</th><th>Бенч.</th><th>Δ</th></tr>
+            <tr><th>Фактор</th><th>β портф.</th><th>Рынок</th><th>Наклон Δ</th></tr>
           </thead>
           <tbody>
             {% for row in (data.factor_betas or []) %}
@@ -2436,6 +2428,14 @@
           Совпадение направлений по нескольким факторам — скрытая общая ставка
           (диверсификация ниже, чем кажется).
         </div>
+        <div style="margin-top:6px; font-size:9px; color:var(--ink-60); line-height:1.5;">
+          <b style="color:var(--ink);">Колонка «Рынок»:</b> эталон — широкий рынок (S&amp;P 500).
+          У него β рыночного фактора = 1.00, а стилевые факторы = 0 <i>по построению</i>
+          (рынок не имеет стилевого перекоса). Поэтому «Наклон Δ» по стилям равен β портфеля —
+          это и есть ваш перекос относительно рынка. Факторы частично пересекаются
+          (Momentum/Value/Quality — те же акции под разными углами), поэтому β
+          оценены Ridge-регрессией, гасящей мультиколлинеарность.
+        </div>
         {% if data.factor_coverage_pct %}
         <div style="margin-top:6px; font-size:9px; color:var(--ink-60);">Факторная модель покрывает {{ data.factor_coverage_pct }}% портфеля</div>
         {% endif %}
@@ -2454,9 +2454,13 @@
   <!-- ════ B. 4-PILLAR SCORING ════ -->
   <div class="d3-block">
     <div class="d3-block-head">
-      <div class="panel-title">4-Pillar Scoring — оценка позиций (F · V · T · C)</div>
-      <div class="d3-block-sub">Fundamental · Valuation · Technical · Credit ·
-        каждый −2…+2 · итог ∈ [−6, +6]
+      <div class="panel-title">4-Pillar Scoring — оценка позиций по 4 столпам</div>
+      <div class="d3-block-sub">
+        <b>F</b> — Фундамент (отчётность) ·
+        <b>V</b> — Оценка (дорого/дёшево) ·
+        <b>T</b> — Техника (тренд/импульс) ·
+        <b>C</b> — Кредитное качество ·
+        каждый столп −2…+2 · итог ∈ [−6, +6]
         <span class="src">[Quant Engine + SEC EDGAR]</span></div>
     </div>
 
@@ -3102,14 +3106,14 @@
           <div class="ef-name">{{ label }}</div>
           <div class="ef-row">
             <span class="ef-before">
-              {%- if fmt == 'pct'   -%}{{ '%+.1f' % (b * 100) if (b is number and b is not none) else '—' }}%
+              {%- if fmt == 'pct'   -%}{{ '%.1f' % (b * 100) if (b is number and b is not none) else '—' }}%
               {%- elif fmt == 'int' -%}{{ b | round | int if (b is not none) else '—' }}
               {%- elif fmt == 'raw' -%}{{ '%.2f' % b if (b is number and b is not none) else '—' }}
               {%- endif -%}
             </span>
             <span class="ef-arrow">→</span>
             <span class="ef-after">
-              {%- if fmt == 'pct'   -%}{{ '%+.1f' % (a * 100) if (a is number and a is not none) else '—' }}%
+              {%- if fmt == 'pct'   -%}{{ '%.1f' % (a * 100) if (a is number and a is not none) else '—' }}%
               {%- elif fmt == 'int' -%}{{ a | round | int if (a is not none) else '—' }}
               {%- elif fmt == 'raw' -%}{{ '%.2f' % a if (a is number and a is not none) else '—' }}
               {%- endif -%}
