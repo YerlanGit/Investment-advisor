@@ -662,6 +662,10 @@ def build_payload(results: dict, tier: str,
         "used_rag":              bool((ai_summary or {}).get("used_rag")),
         "ai_model_used":         _model_display_name((ai_summary or {}).get("model_used", "")),
         "ai_action_impact":      (ai_summary or {}).get("ai_action_impact", ""),
+        # Per-KPI AI notes (CVaR / Sharpe / MaxDD cards) — plain-language.
+        "ai_cvar_note":          (ai_summary or {}).get("ai_cvar_note", ""),
+        "ai_sharpe_note":        (ai_summary or {}).get("ai_sharpe_note", ""),
+        "ai_mdd_note":           (ai_summary or {}).get("ai_mdd_note", ""),
         # Per-section AI commentary (populated by Claude, empty if fallback —
         # the templates hide each block when its comment is empty).
         "ai_risk_comment":       (ai_summary or {}).get("ai_risk_comment", ""),

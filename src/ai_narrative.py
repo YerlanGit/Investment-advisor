@@ -232,6 +232,9 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
             '  "verdict": "≤150 знаков — вердикт",\n'
             '  "plain_summary": "≤250 знаков простым языком",\n'
             '  "bullets": ["3 пункта ≤120 знаков каждый с [Источник]"],\n'
+            '  "ai_cvar_note": "≤120 знаков — простыми словами про CVaR: сколько примерно теряется в худший день",\n'
+            '  "ai_sharpe_note": "≤120 знаков — простыми словами про Sharpe: окупается ли риск доходностью",\n'
+            '  "ai_mdd_note": "≤120 знаков — простыми словами про макс. просадку портфеля",\n'
             '  "ai_risk_comment": "≤150 знаков — комментарий к риск-метрикам (CVaR, Vol, MaxDD)",\n'
             '  "ai_regime_comment": "≤120 знаков — комментарий к рыночному режиму",\n'
             '  "ai_holdings_comment": "≤150 знаков — ключевые позиции, hotspots, перевесы",\n'
@@ -246,6 +249,8 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
             '  }\n'
             '}\n\n'
             "ПРАВИЛА: русский язык. Без «RAMP». Каждое число — [Quant Engine]/[SEC EDGAR]/[Regime]/[RAG].\n"
+            "ПРОСТОЙ ЯЗЫК: пиши для человека без финансового образования, минимум жаргона, "
+            "термины поясняй в скобках, связывай мысли логически.\n"
             f"Риск-профиль: {user_profile}. Режим: {regime_label}.\n"
             "Stock picks: РЕАЛЬНЫЕ АКЦИИ (PLTR, JNJ, KO и т.п.), не только ETF. "
             "why ≤100 знаков с цифрами.\n"
@@ -285,6 +290,12 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
         '  "verdict": "≤180 знаков — общий вердикт",\n'
         '  "plain_summary": "≤300 знаков простым языком",\n'
         '  "bullets": ["5–7 пунктов ≤180 знаков каждый с [Источник]"],\n'
+        '  "ai_cvar_note": "≤120 знаков — простыми словами про CVaR ЭТОГО портфеля: '
+        'примерно сколько денег теряется в худший день и нормально ли это.",\n'
+        '  "ai_sharpe_note": "≤120 знаков — простыми словами про Sharpe: окупается ли '
+        'риск доходностью.",\n'
+        '  "ai_mdd_note": "≤120 знаков — простыми словами про макс. просадку: насколько '
+        'глубоко портфель падал и что это значит для владельца.",\n'
         '  "ai_risk_comment": "≤200 знаков — вывод по риск-метрикам: CVaR, Vol, MaxDD, Sharpe. '
         'Сопоставь с лимитами мандата. Упомяни $ потерь.",\n'
         '  "ai_benchmark_comment": "≤200 знаков — обгоняет ли портфель бенчмарк? '
@@ -293,9 +304,11 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
         'подтверждается ли банковскими отчётами (если есть RAG).",\n'
         '  "ai_holdings_comment": "≤200 знаков — ключевые hotspots, перевесы, '
         'какие позиции увеличивают хвостовой риск.",\n'
-        '  "ai_sector_comment": "≤150 знаков — секторные перевесы/недовесы vs бенчмарк.",\n'
-        '  "ai_factor_comment": "≤200 знаков — факторное разложение: какие style/macro '
-        'факторы (Market, Momentum, Quality, Rates...) доминируют и что это значит для риска.",\n'
+        '  "ai_sector_comment": "≤170 знаков — секторные и СУБ-секторные перекосы '
+        '(напр. внутри Tech: софт vs полупроводники) и чем это рискованно.",\n'
+        '  "ai_factor_comment": "≤200 знаков — какие факторы доминируют и что это '
+        'значит; учти что факторы пересекаются (Momentum/Value/Quality — те же акции '
+        'под разными углами), поэтому беты не складываются напрямую.",\n'
         '  "ai_stress_comment": "≤200 знаков — стресс-сценарии: худший сценарий для портфеля, '
         'размер просадки и насколько портфель к нему устойчив.",\n'
         '  "ai_effect_comment": "≤200 знаков — ожидаемый эффект ребалансировки: '
@@ -306,6 +319,9 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
         '}\n\n'
         "ПРАВИЛА:\n"
         "- ВСЕ тексты на РУССКОМ. Без «RAMP».\n"
+        "- ПРОСТОЙ ЯЗЫК: пиши как другу без финансового образования. Минимум "
+        "жаргона; если термин необходим — поясни его в скобках простыми словами. "
+        "Связывай мысли логически (причина → следствие → что делать).\n"
         "- Каждое число — [Quant Engine], [SEC EDGAR], [Regime] или [RAG: файл].\n"
         f"- Риск-профиль: {user_profile}.\n"
         "- РЕАЛЬНЫЕ АКЦИИ: PLTR, CRWD, JNJ, COST, KO и т.п. — не только ETF.\n"
@@ -581,6 +597,9 @@ def generate_narrative(results: dict, tier: str = "base",
             "stock_picks":          stock_picks,
             "used_rag":             used_rag,
             "model_used":           model,
+            "ai_cvar_note":         _comment("ai_cvar_note", 160),
+            "ai_sharpe_note":       _comment("ai_sharpe_note", 160),
+            "ai_mdd_note":          _comment("ai_mdd_note", 160),
             "ai_risk_comment":      _comment("ai_risk_comment"),
             "ai_benchmark_comment": _comment("ai_benchmark_comment"),
             "ai_regime_comment":    _comment("ai_regime_comment"),

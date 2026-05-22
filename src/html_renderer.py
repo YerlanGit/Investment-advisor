@@ -111,6 +111,13 @@ def _mock_payload(tier: str = "base") -> dict:
             "stock_picks":    {},
             "used_rag":       False,
             "model_used":     _mock_model,
+            # Per-KPI plain-language notes.
+            "ai_cvar_note":   "В худший день из 20 портфель теряет около $2.6K — "
+                              "терпимо для умеренного профиля.",
+            "ai_sharpe_note": "На каждую единицу риска портфель приносит 1.34 "
+                              "доходности — риск окупается.",
+            "ai_mdd_note":    "Когда-то портфель просел на 12.8% от пика — "
+                              "переживаемо, но держите подушку.",
             # Per-section AI commentary — mock values so the smoke render
             # exercises the data-bound AI blocks in both templates.
             "ai_risk_comment":      "CVaR −5.2% (≈$2.6K) в пределах мандата, но "
