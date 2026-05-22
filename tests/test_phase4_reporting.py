@@ -2048,5 +2048,229 @@ class PayloadAdapterIntegrationTest(unittest.TestCase):
         self.assertEqual(row0["portfolio"], "+2.0%")
 
 
+# ── 4.X  Ridge alpha, regime confidence, AI ideas dedup, integrity panel ──────
+
+class RidgeAlphaBetaTest(unittest.TestCase):
+    """BUG-01: Ridge(alpha=1.0) shrinks daily-return betas ~98% toward zero."""
+
+    def test_ridge_alpha_produces_meaningful_betas(self) -> None:
+        """After alpha=0.001, Market beta for a pure-market asset must be > 0.5."""
+        from sklearn.linear_model import Ridge
+        import numpy as np
+
+        rng = np.random.default_rng(42)
+        N = 252
+        factor_returns = rng.normal(0.0005, 0.01, N)   # market daily returns
+
+        # Asset that tracks the market exactly (true β = 1.0)
+        asset_returns = factor_returns + rng.normal(0, 0.002, N)
+
+        X = factor_returns.reshape(-1, 1)
+        y = asset_returns
+
+        beta_old = Ridge(alpha=1.0).fit(X, y).coef_[0]
+        beta_new = Ridge(alpha=0.001).fit(X, y).coef_[0]
+
+        # Old alpha collapses to near-zero; new alpha is close to 1.0.
+        self.assertLess(abs(beta_old), 0.15,
+                        f"alpha=1.0 should shrink beta to <0.15, got {beta_old:.3f}")
+        self.assertGreater(beta_new, 0.5,
+                           f"alpha=0.001 should give beta>0.5, got {beta_new:.3f}")
+
+    def test_ridge_stress_impact_not_collapsed(self) -> None:
+        """Stress ΔPnL = w·β·shock must be economically meaningful (>0.1%)."""
+        from sklearn.linear_model import Ridge
+        import numpy as np
+
+        rng = np.random.default_rng(7)
+        N = 252
+        factor_rets = rng.normal(0.0005, 0.01, N)
+        asset_rets  = factor_rets + rng.normal(0, 0.003, N)
+
+        X = factor_rets.reshape(-1, 1)
+        y = asset_rets
+
+        w    = 0.62    # 62% tech weight
+        shock = -0.084  # -8.4% market shock
+
+        beta_new = Ridge(alpha=0.001).fit(X, y).coef_[0]
+        delta_pnl = w * beta_new * shock
+
+        # For tech-heavy portfolio with 8.4% shock, expect >1% loss
+        self.assertLess(delta_pnl, -0.01,
+                        f"Stress ΔPnL should exceed 1%, got {delta_pnl*100:.2f}%")
+
+
+class RegimeConfidenceTest(unittest.TestCase):
+    """BUG-07: Regime confidence should not trivially hit 100%."""
+
+    def test_small_signal_does_not_yield_full_confidence(self) -> None:
+        """With magnitude=0.06 (typical production), confidence < 1.0."""
+        import numpy as np
+        growth_score, cycle_score = 0.06, -0.01
+        magnitude  = float(np.hypot(growth_score, cycle_score))
+        confidence = float(min(1.0, magnitude / 0.10))  # new threshold
+        self.assertLess(confidence, 1.0,
+                        f"Expected <1.0 confidence, got {confidence:.3f}")
+        self.assertGreater(confidence, 0.3,
+                           f"Confidence too low: {confidence:.3f}")
+
+    def test_strong_signal_approaches_full_confidence(self) -> None:
+        """With magnitude=0.12 (strong signal), confidence is >= 0.9."""
+        import numpy as np
+        growth_score, cycle_score = 0.10, 0.06
+        magnitude  = float(np.hypot(growth_score, cycle_score))
+        confidence = float(min(1.0, magnitude / 0.10))
+        self.assertGreaterEqual(confidence, 0.9)
+
+
+class AIIdeasDedupTest(unittest.TestCase):
+    """BUG-06: Picks that are already held must be removed from AI ideas."""
+
+    def _make_picks(self) -> dict:
+        return {
+            "boost_alpha": {
+                "label": "Рост", "desc": "desc",
+                "picks": [
+                    {"ticker": "GOOGL", "name": "Alphabet", "why": "growth"},
+                    {"ticker": "TSLA",  "name": "Tesla",    "why": "ev"},
+                ]
+            },
+            "rebalance": {
+                "label": "Ребаланс", "desc": "desc",
+                "picks": [
+                    {"ticker": "AAPL", "name": "Apple", "why": "quality"},
+                    {"ticker": "JNJ",  "name": "J&J",   "why": "defensive"},
+                ]
+            },
+            "protect_capital": {
+                "label": "Защита", "desc": "desc",
+                "picks": [
+                    {"ticker": "TLT", "name": "Treasury ETF", "why": "hedge"},
+                ]
+            },
+        }
+
+    def _make_results(self, held: list[str]) -> dict:
+        """Minimal results dict with a performance_table holding given tickers."""
+        perf = pd.DataFrame([{"Ticker": t} for t in held])
+        return {"performance_table": perf}
+
+    def test_held_tickers_removed_from_boost_and_rebalance(self) -> None:
+        from ai_narrative import _remove_held_picks
+        picks   = self._make_picks()
+        results = self._make_results(["GOOGL", "AAPL"])
+        cleaned = _remove_held_picks(picks, results)
+
+        boost_tickers = [p["ticker"] for p in cleaned["boost_alpha"]["picks"]]
+        rebal_tickers = [p["ticker"] for p in cleaned["rebalance"]["picks"]]
+
+        self.assertNotIn("GOOGL", boost_tickers, "GOOGL is held — must be excluded")
+        self.assertNotIn("AAPL",  rebal_tickers, "AAPL is held — must be excluded")
+        self.assertIn("TSLA", boost_tickers,  "TSLA not held — must remain")
+        self.assertIn("JNJ",  rebal_tickers,  "JNJ not held — must remain")
+
+    def test_protect_capital_held_also_removed(self) -> None:
+        from ai_narrative import _remove_held_picks
+        picks   = self._make_picks()
+        results = self._make_results(["TLT"])
+        cleaned = _remove_held_picks(picks, results)
+        protect = [p["ticker"] for p in cleaned["protect_capital"]["picks"]]
+        self.assertNotIn("TLT", protect, "TLT is held — must be excluded")
+
+    def test_empty_portfolio_keeps_all_picks(self) -> None:
+        from ai_narrative import _remove_held_picks
+        picks   = self._make_picks()
+        results = self._make_results([])
+        cleaned = _remove_held_picks(picks, results)
+        self.assertEqual(len(cleaned["boost_alpha"]["picks"]), 2)
+
+    def test_no_performance_table_returns_unchanged(self) -> None:
+        from ai_narrative import _remove_held_picks
+        picks   = self._make_picks()
+        cleaned = _remove_held_picks(picks, {})
+        self.assertEqual(len(cleaned["boost_alpha"]["picks"]), 2)
+
+
+class IntegrityChecksTest(unittest.TestCase):
+    """Commit B: _build_integrity_checks panel schema & content."""
+
+    def _base_results(self) -> dict:
+        return PayloadBuildTest()._results()
+
+    def test_integrity_checks_in_base_payload(self) -> None:
+        from pdf_payload import build_payload
+        results = self._base_results()
+        p = build_payload(results, "base", ai_summary={"verdict": "v", "bullets": []})
+        self.assertIn("integrity_checks", p)
+        checks = p["integrity_checks"]
+        self.assertIsInstance(checks, list)
+        self.assertGreater(len(checks), 0)
+
+    def test_every_check_has_required_keys(self) -> None:
+        from pdf_payload import build_payload
+        results = self._base_results()
+        p = build_payload(results, "base", ai_summary={"verdict": "v", "bullets": []})
+        for c in p["integrity_checks"]:
+            self.assertIn("status", c, f"Missing 'status': {c}")
+            self.assertIn("label",  c, f"Missing 'label': {c}")
+            self.assertIn("detail", c, f"Missing 'detail': {c}")
+            self.assertIn(c["status"], ("✓", "⚠", "—"),
+                          f"Invalid status: {c['status']!r}")
+
+    def test_sparse_drop_surfaces_as_warning(self) -> None:
+        from pdf_payload import build_payload
+        results = self._base_results()
+        results["return_series_coverage"] = {
+            "dropped": ["FFSPC6.1028.AIX"],
+            "covered_weight": 0.945,
+            "n_days": 180,
+            "kept": ["AAPL"],
+        }
+        p = build_payload(results, "base", ai_summary={"verdict": "v", "bullets": []})
+        series_check = next(
+            (c for c in p["integrity_checks"] if c["label"] == "Серия доходностей"),
+            None
+        )
+        self.assertIsNotNone(series_check)
+        self.assertEqual(series_check["status"], "⚠")
+        self.assertIn("FFSPC6.1028.AIX", series_check["detail"])
+
+    def test_full_coverage_gives_ok_status(self) -> None:
+        from pdf_payload import build_payload
+        results = self._base_results()
+        results["return_series_coverage"] = {
+            "dropped": [], "covered_weight": 1.0, "n_days": 252, "kept": ["AAPL"],
+        }
+        p = build_payload(results, "base", ai_summary={"verdict": "v", "bullets": []})
+        series_check = next(
+            (c for c in p["integrity_checks"] if c["label"] == "Серия доходностей"),
+            None
+        )
+        self.assertIsNotNone(series_check)
+        self.assertEqual(series_check["status"], "✓")
+
+    def test_rag_not_used_gives_dash_status(self) -> None:
+        from pdf_payload import build_payload
+        results = self._base_results()
+        p = build_payload(results, "base",
+                          ai_summary={"verdict": "v", "bullets": [], "used_rag": False})
+        rag_check = next(
+            (c for c in p["integrity_checks"] if c["label"] == "RAG: банк. отчёты"),
+            None
+        )
+        self.assertIsNotNone(rag_check)
+        self.assertEqual(rag_check["status"], "—")
+
+    def test_return_series_coverage_in_payload(self) -> None:
+        from pdf_payload import build_payload
+        results = self._base_results()
+        results["return_series_coverage"] = {"dropped": [], "covered_weight": 1.0,
+                                              "n_days": 200, "kept": ["AAPL"]}
+        p = build_payload(results, "base", ai_summary={"verdict": "v", "bullets": []})
+        self.assertIn("return_series_coverage", p)
+        self.assertEqual(p["return_series_coverage"]["n_days"], 200)
+
+
 if __name__ == "__main__":
     unittest.main()

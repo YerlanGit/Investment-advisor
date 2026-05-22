@@ -145,6 +145,17 @@ class MAC3RiskEngine:
         'BAST':  'EM_Kazakhstan',
         'HRGL':  'EM_Kazakhstan',
         'KZAP':  'EM_Kazakhstan',
+        # US Bond ETFs
+        'TLT':   'Bonds',
+        'AGG':   'Bonds',
+        'BND':   'Bonds',
+        'LQD':   'Bonds',
+        'HYG':   'Bonds',
+        'IEF':   'Bonds',
+        'BIL':   'Bonds',
+        'EMB':   'Bonds',
+        'SHY':   'Bonds',
+        'VCIT':  'Bonds',
     }
 
     # Benchmark / catalogue ETFs fetched alongside factor ETFs.
@@ -455,8 +466,11 @@ class MAC3RiskEngine:
         for asset in valid_originals:
             y = a_data[asset]
             X = f_data
-            
-            model = Ridge(alpha=1.0, fit_intercept=True).fit(X, y)
+
+            # alpha=1.0 shrinks daily-return betas by ~98% (penalty >> RSS on
+            # 0.01-scale returns).  Use 0.001 — enough to stabilise correlated
+            # factors while keeping betas economically meaningful.
+            model = Ridge(alpha=0.001, fit_intercept=True).fit(X, y)
             betas = model.coef_
             alpha = model.intercept_
             residuals = y - model.predict(X)

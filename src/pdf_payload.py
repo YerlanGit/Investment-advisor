@@ -85,31 +85,66 @@ def _model_display_name(model_id: str) -> str:
     return model_id
 
 
-def _build_ai_ideas(stock_picks: dict) -> dict:
+def _build_ai_ideas(stock_picks: dict, tier: str = "base") -> dict:
     """
     Reshape the AI narrative's stock-picks into the idea-card schema the v3
     templates render.
 
     Input  (ai_narrative.generate_narrative → stock_picks):
-        {boost_alpha|rebalance|protect_capital:
+        {boost_alpha|rebalance|protect_capital|regime_play:
             {label, desc, picks: [{ticker, name, why, type}]}}
     Output (template ideas grid — buckets flattened in canonical order):
-        {risk_reduction|diversification|growth|hedge:
+        {risk_reduction|diversification|growth|hedge|rotation:
             [{idea_num, category, priority, title, rationale,
-              candidates: [{ticker, name, scenario}]}]}
+              pipeline, candidates: [{ticker, name, scenario}]}]}
 
-    One idea card per non-empty bucket; the bucket's picks become the
-    candidate chips.  Optional pipeline/expected_effect/sources are left
-    unset on purpose — the template hides those sub-blocks when absent, so
-    the report never shows fabricated pipeline/effect data.
+    Pipeline is synthesised from the pick types so the template renders the
+    Factor→Regime→RAG (BASE) or Factor→Regime→Stress→RAG (DEEP) notation.
     """
     _MAP = [
-        ("boost_alpha",     "growth",          "Рост доходности", "high"),
-        ("rebalance",       "diversification", "Ребалансировка",  "medium"),
-        ("protect_capital", "hedge",           "Защита капитала", "low"),
+        ("boost_alpha",     "growth",          "Рост доходности",   "high"),
+        ("rebalance",       "diversification", "Ребалансировка",    "medium"),
+        ("protect_capital", "hedge",           "Защита капитала",   "low"),
+        ("regime_play",     "rotation",        "Режимная ставка",   "medium"),
     ]
     ideas: dict = {"risk_reduction": [], "diversification": [],
-                   "growth": [], "hedge": []}
+                   "growth": [], "hedge": [], "rotation": []}
+
+    # Pipeline stage templates per tier and idea type
+    _PIPELINE_BASE = {
+        "boost_alpha":     [("FACTOR", "Momentum + Quality скоринг"),
+                            ("REGIME", "Соответствие текущему режиму роста"),
+                            ("RAG",    "Подтверждение банковскими отчётами")],
+        "rebalance":       [("FACTOR", "4-Pillar Scoring F+V+T+C"),
+                            ("REGIME", "Секторная ротация vs режим"),
+                            ("RAG",    "Фундаментальный анализ")],
+        "protect_capital": [("FACTOR", "Низкая Beta + дивидендная стабильность"),
+                            ("REGIME", "Защитные сектора при текущем режиме"),
+                            ("RAG",    "Оценка хвостового риска")],
+        "regime_play":     [("FACTOR", "Факторный сигнал по режиму"),
+                            ("REGIME", "Quadrant: Growth × Cycle"),
+                            ("RAG",    "Банковские прогнозы режима")],
+    }
+    _PIPELINE_DEEP = {
+        "boost_alpha":     [("FACTOR", "Momentum + Quality скоринг"),
+                            ("REGIME", "Соответствие Growth × Cycle квадранту"),
+                            ("STRESS", "Устойчивость при rate shock +200 bps"),
+                            ("RAG",    "Подтверждение инвестбанками")],
+        "rebalance":       [("FACTOR", "4-Pillar Scoring F+V+T+C"),
+                            ("REGIME", "Macro Alignment vs текущий режим"),
+                            ("STRESS", "Поведение при equity shock −20%"),
+                            ("RAG",    "SEC EDGAR фундаментал")],
+        "protect_capital": [("FACTOR", "Низкая Beta, дивидендный аристократ"),
+                            ("REGIME", "Защитные сектора Healthcare/Gold"),
+                            ("STRESS", "Positive P&L при recession сценарии"),
+                            ("RAG",    "CDS + банковские отчёты по риску")],
+        "regime_play":     [("FACTOR", "Regime-specific факторный сигнал"),
+                            ("REGIME", "Growth-Cycle квадрант + confidence"),
+                            ("STRESS", "Сценарный анализ смены режима"),
+                            ("RAG",    "Банковские прогнозы режима")],
+    }
+    pipeline_map = _PIPELINE_DEEP if tier == "deep" else _PIPELINE_BASE
+
     num = 0
     for src_key, bucket, category, priority in _MAP:
         scenario = (stock_picks or {}).get(src_key) or {}
@@ -129,6 +164,7 @@ def _build_ai_ideas(stock_picks: dict) -> dict:
             "priority":   priority,
             "title":      str(scenario.get("label") or category),
             "rationale":  str(scenario.get("desc") or ""),
+            "pipeline":   pipeline_map.get(src_key, []),
             "candidates": candidates,
         })
     return ideas
@@ -461,6 +497,9 @@ def build_payload(results: dict, tier: str,
         total_vol_ann  = vol_raw,
     )
 
+    # ── Return series coverage (sparse-history exclusions) ───────────────────
+    return_series_coverage = results.get("return_series_coverage") or {}
+
     # ── Multi-period performance (1м / 3м / 6м / 12м / YTD) ────────────────
     period_returns_table = _adapt_period_returns(results.get("period_returns_table"))
 
@@ -568,7 +607,7 @@ def build_payload(results: dict, tier: str,
                            f"{ap.get('reason','')}"[:120])
 
     # ── AI ideas: reshape stock-picks into the template idea-card schema ───
-    ai_ideas    = _build_ai_ideas((ai_summary or {}).get("stock_picks") or {})
+    ai_ideas    = _build_ai_ideas((ai_summary or {}).get("stock_picks") or {}, tier=tier)
     ideas_count = sum(len(v) for v in ai_ideas.values())
 
     # ── Fundamental layer — SEC-derived columns from the perf table ────────
@@ -650,6 +689,12 @@ def build_payload(results: dict, tier: str,
         "regime_rag_confirm": regime_rag_confirm or [],
         # Data quality
         "data_quality":      data_quality,
+        # Return series coverage (from sparse-history exclusions)
+        "return_series_coverage": return_series_coverage,
+        # Integrity checks panel — compact ✓/⚠/— list for both BASE and DEEP
+        "integrity_checks":  _build_integrity_checks(
+            results, ai_summary or {}, data_quality, return_series_coverage
+        ),
         # AI Narrative — placeholder unless caller passed one in
         "ai_verdict":            (ai_summary or {}).get("verdict", ""),
         "ai_plain_summary":      (ai_summary or {}).get("plain_summary", ""),
@@ -668,30 +713,28 @@ def build_payload(results: dict, tier: str,
         "ai_mdd_note":           (ai_summary or {}).get("ai_mdd_note", ""),
         # Per-section AI commentary (populated by Claude, empty if fallback —
         # the templates hide each block when its comment is empty).
-        "ai_risk_comment":       (ai_summary or {}).get("ai_risk_comment", ""),
-        "ai_benchmark_comment":  (ai_summary or {}).get("ai_benchmark_comment", ""),
-        "ai_regime_comment":     (ai_summary or {}).get("ai_regime_comment", ""),
-        "ai_holdings_comment":   (ai_summary or {}).get("ai_holdings_comment", ""),
-        "ai_sector_comment":     (ai_summary or {}).get("ai_sector_comment", ""),
-        "ai_factor_comment":     (ai_summary or {}).get("ai_factor_comment", ""),
-        "ai_stress_comment":     (ai_summary or {}).get("ai_stress_comment", ""),
-        "ai_effect_comment":     (ai_summary or {}).get("ai_effect_comment", ""),
+        "ai_risk_comment":           (ai_summary or {}).get("ai_risk_comment", ""),
+        "ai_benchmark_comment":      (ai_summary or {}).get("ai_benchmark_comment", ""),
+        "ai_performance_comment":    (ai_summary or {}).get("ai_performance_comment", ""),
+        "ai_regime_comment":         (ai_summary or {}).get("ai_regime_comment", ""),
+        "ai_holdings_comment":       (ai_summary or {}).get("ai_holdings_comment", ""),
+        "ai_sector_comment":         (ai_summary or {}).get("ai_sector_comment", ""),
+        "ai_factor_comment":         (ai_summary or {}).get("ai_factor_comment", ""),
+        "ai_4pillar_comment":        (ai_summary or {}).get("ai_4pillar_comment", ""),
+        "ai_stress_comment":         (ai_summary or {}).get("ai_stress_comment", ""),
+        "ai_action_comment":         (ai_summary or {}).get("ai_action_comment", ""),
+        "ai_effect_comment":         (ai_summary or {}).get("ai_effect_comment", ""),
         # Tier metadata
         "tier":              tier,
     }
 
-    # ── Deep-tier additions ────────────────────────────────────────────────
-    if tier == TIER_DEEP:
-        # Benchmarks (annualised excess + IR)
-        bm_data   = results.get("benchmark_comparison") or {}
-        # Determine which benchmark display name matches the user's ticker.
-        user_bm_name: Optional[str] = None
-        if user_bench_ticker:
-            user_bm_name = _BM_TICKER_TO_NAME.get(user_bench_ticker)
-        scenarios = []
+    # ── Benchmark scenarios (BOTH tiers — BASE "Рост против рынка" needs bm_return) ─
+    # bm_return = annualised benchmark return for the "Рынок · S&P 500" stat card.
+    # Previously built only in TIER_DEEP; now common so BASE template works.
+    def _build_scenarios(bm_data: dict, filter_name: Optional[str]) -> list:
+        rows = []
         for bm_name, bm in bm_data.items():
-            # Skip benchmarks not selected by this user (when we know their choice).
-            if user_bm_name and bm_name != user_bm_name:
+            if filter_name and bm_name != filter_name:
                 continue
             excess_ann = bm.get("Excess_Return_Ann")
             if excess_ann is None:
@@ -700,15 +743,28 @@ def build_payload(results: dict, tier: str,
                 excess_ann = _safe_float(excess_ann, 0.0)
             ir = _safe_float(bm.get("Information_Ratio"), 0.0)
             te = _safe_float(bm.get("Tracking_Error"), 0.0)
-            scenarios.append({
-                "name":    bm_name,
-                "excess":  _format_pnl_pct(excess_ann),
-                "te":      f"{te*100:.1f}%" if te else "—",
-                "ir":      f"{ir:.2f}" if ir else "—",
-                "beating": bool(bm.get("Beating_Benchmark")),
-                "color":   "pos" if excess_ann >= 0 else "neg",
+            bm_ann  = _safe_float(bm.get("Benchmark_Ann_Return"), float("nan"))
+            port_ann = _safe_float(bm.get("Port_Ann_Return"), float("nan"))
+            rows.append({
+                "name":       bm_name,
+                "excess":     _format_pnl_pct(excess_ann),
+                "te":         f"{te*100:.1f}%" if te else "—",
+                "ir":         f"{ir:.2f}" if ir else "—",
+                "beating":    bool(bm.get("Beating_Benchmark")),
+                "color":      "pos" if excess_ann >= 0 else "neg",
+                # bm_return: used by both BASE and DEEP "Рост против рынка" stat card.
+                "bm_return":  f"{bm_ann*100:+.1f}%" if not math.isnan(bm_ann) else "—",
+                "port_return": f"{port_ann*100:+.1f}%" if not math.isnan(port_ann) else "",
             })
-        payload["scenarios"] = scenarios
+        return rows
+
+    user_bm_filter: Optional[str] = _BM_TICKER_TO_NAME.get(user_bench_ticker) if user_bench_ticker else None
+    payload["scenarios"] = _build_scenarios(
+        results.get("benchmark_comparison") or {}, user_bm_filter
+    )
+
+    # ── Deep-tier additions ────────────────────────────────────────────────
+    if tier == TIER_DEEP:
 
         # Score breakdown table — pillar contributions per asset.
         # Cash positions are excluded: they carry no fundamentals/technicals
@@ -967,6 +1023,100 @@ def _build_risk_waterfall(risk_matrix: Optional[pd.DataFrame],
         "method": ("σᵢ = √Σᵢᵢ (annualised) · standalone = wᵢ·σᵢ · "
                    "diversified = √(w'Σw) · benefit = Σstandalone − diversified"),
     }
+
+
+def _build_integrity_checks(results: dict,
+                             ai_summary: dict,
+                             data_quality: dict,
+                             return_series_coverage: dict) -> list[dict]:
+    """
+    Compact integrity panel — list[{status, label, detail}].
+
+    Status symbols:
+      ✓  data loaded, math computed, within freshness window
+      ⚠  partial / degraded (sparse drop, partial factor load, stale cache)
+      —  source not used / not applicable for this run
+    """
+    checks: list[dict] = []
+
+    # 1. Market price data
+    history = results.get("history_result")
+    hist_data = getattr(history, "data", None) if history is not None else None
+    if hist_data is not None and len(hist_data) > 0:
+        n_days = len(hist_data)
+        checks.append({"status": "✓", "label": "Рыночные данные",
+                        "detail": f"Tradernet · {n_days} дней · daily CLOSE"})
+    else:
+        checks.append({"status": "⚠", "label": "Рыночные данные",
+                        "detail": "нет ценовой истории"})
+
+    # 2. Return series coverage (sparse-history exclusions)
+    dropped = return_series_coverage.get("dropped", [])
+    cov_w   = return_series_coverage.get("covered_weight", 1.0)
+    n_ser   = return_series_coverage.get("n_days", 0)
+    if dropped:
+        checks.append({"status": "⚠", "label": "Серия доходностей",
+                        "detail": (f"{cov_w*100:.0f}% портфеля покрыто · "
+                                   f"исключены: {', '.join(dropped)}")})
+    elif n_ser > 0:
+        checks.append({"status": "✓", "label": "Серия доходностей",
+                        "detail": f"100% покрытие · {n_ser} торговых дней"})
+    else:
+        checks.append({"status": "⚠", "label": "Серия доходностей",
+                        "detail": "ряд не построен"})
+
+    # 3. Factor model coverage
+    f_loaded = data_quality.get("factors_loaded", 0)
+    f_total  = data_quality.get("factors_total", 1)
+    f_pct    = round(f_loaded / f_total * 100) if f_total else 0
+    checks.append({
+        "status": "✓" if f_pct >= 80 else "⚠",
+        "label":  "Факторная модель",
+        "detail": f"Ridge β · {f_loaded}/{f_total} факторов · {f_pct}% покрытие",
+    })
+
+    # 4. Math: Euler decomposition presence
+    perf = results.get("performance_table")
+    has_euler = (perf is not None and not getattr(perf, "empty", True) and
+                 "Euler_Risk_Contribution_Pct" in perf.columns)
+    checks.append({
+        "status": "✓" if has_euler else "⚠",
+        "label":  "Euler-декомпозиция",
+        "detail": "TRC = w·MCTR/σ_p (Ledoit-Wolf 70/30 blended)" if has_euler
+                  else "недоступна",
+    })
+
+    # 5. CVaR bootstrap
+    metrics = results.get("portfolio_metrics") or {}
+    boot    = metrics.get("CVaR_95_Bootstrap") or {}
+    has_ci  = boot.get("lo95") is not None
+    checks.append({
+        "status": "✓" if has_ci else "⚠",
+        "label":  "CVaR Bootstrap",
+        "detail": ("Politis-Romano · 2000 блоков · 95% CI"
+                   if has_ci else "точечная оценка (мало данных)"),
+    })
+
+    # 6. RAG (bank research retrieval)
+    rag_used    = bool((ai_summary or {}).get("used_rag"))
+    rag_context = (ai_summary or {}).get("rag_context") or ""
+    snippets    = len(rag_context.split("---")) if rag_context else 0
+    checks.append({
+        "status": "✓" if rag_used else "—",
+        "label":  "RAG: банк. отчёты",
+        "detail": (f"ChromaDB · cosine ≥0.72 · ~{snippets} отрывков"
+                   if rag_used else "не использован"),
+    })
+
+    # 7. AI model attribution
+    model = _model_display_name((ai_summary or {}).get("model_used", ""))
+    checks.append({
+        "status": "✓" if model else "—",
+        "label":  "AI-модель",
+        "detail": model if model else "не задействована",
+    })
+
+    return checks
 
 
 __all__ = ["build_payload", "TIER_BASE", "TIER_DEEP"]

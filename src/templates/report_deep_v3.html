@@ -2096,6 +2096,22 @@
     </div>
     {% endif %}
 
+    <!-- КОНТРОЛЬ КАЧЕСТВА ДАННЫХ (Page 1) -->
+    {% if data.integrity_checks %}
+    <div style="margin-top:10px; padding:8px 12px; background:rgba(0,0,0,0.02); border-radius:5px; border-left:2px solid #4a90d9;">
+      <div style="font-size:8.5px; font-weight:700; color:#555; letter-spacing:.05em; margin-bottom:5px;">КОНТРОЛЬ КАЧЕСТВА ДАННЫХ</div>
+      <div style="display:flex; flex-wrap:wrap; gap:5px;">
+      {% for c in data.integrity_checks %}
+        <span style="font-size:8px; padding:2px 6px; border-radius:8px; font-family:var(--font-mono);
+               background:{% if c.status == '✓' %}#e8f5e9{% elif c.status == '⚠' %}#fff8e1{% else %}#f5f5f5{% endif %};
+               color:{% if c.status == '✓' %}#2e7d32{% elif c.status == '⚠' %}#f57f17{% else %}#757575{% endif %};">
+          {{ c.status }} <b>{{ c.label }}</b>: {{ c.detail }}
+        </span>
+      {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
   </div>
 
 
@@ -2325,7 +2341,7 @@
   </div><!-- /.holdings-layout -->
 
   <!-- СВОДНЫЙ AI-БЛОК -->
-  {% if data.ai_holdings_comment or data.ai_sector_comment %}
+  {% if data.ai_holdings_comment or data.ai_sector_comment or data.ai_benchmark_comment %}
   <div class="sec-ai">
     <div class="ai-body">
       {% if data.ai_holdings_comment %}
@@ -2334,10 +2350,28 @@
       {% if data.ai_sector_comment %}
       <p>{{ data.ai_sector_comment }}</p>
       {% endif %}
+      {% if data.ai_benchmark_comment %}
+      <p><span style="color:var(--tech-blue); font-weight:600;">vs Бенчмарк:</span> {{ data.ai_benchmark_comment }}</p>
+      {% endif %}
     </div>
   </div>
   {% endif %}
 
+  <!-- КОНТРОЛЬ КАЧЕСТВА ДАННЫХ (Page 2) -->
+  {% if data.integrity_checks %}
+  <div style="margin-top:10px; padding:8px 12px; background:rgba(0,0,0,0.02); border-radius:5px; border-left:2px solid #4a90d9;">
+    <div style="font-size:8.5px; font-weight:700; color:#555; letter-spacing:.05em; margin-bottom:5px;">КОНТРОЛЬ КАЧЕСТВА ДАННЫХ</div>
+    <div style="display:flex; flex-wrap:wrap; gap:5px;">
+    {% for c in data.integrity_checks %}
+      <span style="font-size:8px; padding:2px 6px; border-radius:8px; font-family:var(--font-mono);
+             background:{% if c.status == '✓' %}#e8f5e9{% elif c.status == '⚠' %}#fff8e1{% else %}#f5f5f5{% endif %};
+             color:{% if c.status == '✓' %}#2e7d32{% elif c.status == '⚠' %}#f57f17{% else %}#757575{% endif %};">
+        {{ c.status }} <b>{{ c.label }}</b>: {{ c.detail }}
+      </span>
+    {% endfor %}
+    </div>
+  </div>
+  {% endif %}
 
 </div>
 
@@ -2359,7 +2393,7 @@
   <div class="d3-block">
     <div class="d3-block-head">
       <div class="panel-title">Факторное разложение (β) — скрытые концентрации</div>
-      <div class="d3-block-sub">Ridge β-регрессия (α=1.0) · EWMA-ковариация λ≈0.94 · окно 60 дней
+      <div class="d3-block-sub">Ridge β-регрессия (α=0.001) · EWMA-ковариация λ≈0.94 · окно 60 дней
         <span class="src">[Quant Engine MAC3]</span></div>
     </div>
 
@@ -2508,6 +2542,12 @@
         Скоринг недоступен — нет фундаментальных данных SEC EDGAR.
       {% endif %}
     </div>
+
+    {% if data.ai_4pillar_comment %}
+    <div class="conc-ai" style="margin-top:10px;">
+      <div class="ai-body">{{ data.ai_4pillar_comment }}</div>
+    </div>
+    {% endif %}
   </div>
 
   <!-- ════ C. STRESS SCENARIOS ════ -->
@@ -2570,6 +2610,22 @@
     <div class="conc-ai" style="margin-top:12px;">
       <div class="ai-body">
         {{ data.ai_stress_comment }}
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- КОНТРОЛЬ КАЧЕСТВА ДАННЫХ (Page 3) -->
+    {% if data.integrity_checks %}
+    <div style="margin-top:10px; padding:8px 12px; background:rgba(0,0,0,0.02); border-radius:5px; border-left:2px solid #4a90d9;">
+      <div style="font-size:8.5px; font-weight:700; color:#555; letter-spacing:.05em; margin-bottom:5px;">КОНТРОЛЬ КАЧЕСТВА ДАННЫХ</div>
+      <div style="display:flex; flex-wrap:wrap; gap:5px;">
+      {% for c in data.integrity_checks %}
+        <span style="font-size:8px; padding:2px 6px; border-radius:8px; font-family:var(--font-mono);
+               background:{% if c.status == '✓' %}#e8f5e9{% elif c.status == '⚠' %}#fff8e1{% else %}#f5f5f5{% endif %};
+               color:{% if c.status == '✓' %}#2e7d32{% elif c.status == '⚠' %}#f57f17{% else %}#757575{% endif %};">
+          {{ c.status }} <b>{{ c.label }}</b>: {{ c.detail }}
+        </span>
+      {% endfor %}
       </div>
     </div>
     {% endif %}
@@ -2783,13 +2839,29 @@
   </div>
 
   <!-- ПОЛОСА ИСТОЧНИКОВ -->
+  {% if data.integrity_checks %}
+  <div style="margin-top:16px; padding:10px 14px; background:rgba(0,0,0,0.03); border-radius:6px; border-left:3px solid #4a90d9;">
+    <div style="font-size:9px; font-weight:700; color:#555; letter-spacing:.05em; margin-bottom:6px;">КОНТРОЛЬ КАЧЕСТВА ДАННЫХ</div>
+    <div style="display:flex; flex-wrap:wrap; gap:6px;">
+    {% for c in data.integrity_checks %}
+      <span style="font-size:8.5px; padding:2px 7px; border-radius:10px; white-space:nowrap;
+             background:{% if c.status == '✓' %}#e8f5e9{% elif c.status == '⚠' %}#fff8e1{% else %}#f5f5f5{% endif %};
+             color:{% if c.status == '✓' %}#2e7d32{% elif c.status == '⚠' %}#e65100{% else %}#777{% endif %};">
+        {{ c.status }} <b>{{ c.label }}</b>: {{ c.detail }}
+      </span>
+    {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
   <div class="section-sources" style="margin-top:14px;">
     ИСТОЧНИКИ:
     <b>Quant Engine MAC3</b> — расчёт режима по факторам Growth/Cycle ·
     <b>FRED</b> — макро-индикаторы (yield curve, HY spread, PMI) ·
     <b>SEC EDGAR</b> — earnings revisions ratio ·
     <b>Tradernet</b> — рыночные цены/тех-индикаторы ·
-    <b>ChromaDB · Bank PDF reports</b> — публичные обзоры GS / MS / JPM
+    <b>ChromaDB · Bank PDF reports</b> — публичные обзоры GS / MS / JPM ·
+    {% if data.ai_model_used %}<b>AI</b>: {{ data.ai_model_used }}{% endif %}
   </div>
 
 
@@ -2814,14 +2886,14 @@
   <div class="d3-block">
     <div class="d3-block-head">
       <div class="panel-title">AI Ideas — стратегические рекомендации</div>
-      <div class="d3-block-sub">{{ data.ideas_count }} идей: снижение риска · диверсификация · качественный рост · хедж.  Каждая идея пропущена через
+      <div class="d3-block-sub">{{ data.ideas_count }} идей: рост доходности · ребалансировка · защита капитала · режимная ставка.  Каждая идея пропущена через
         <b style="color:var(--tech-blue);">FACTOR → REGIME → STRESS → RAG</b> — pipeline доказывает, почему AI выбрал именно эти кандидаты.  Тикеры не из вашего портфеля — рассмотрите как замену / дополнение.
         <span class="src">[{{ data.ai_model_used or 'Claude Sonnet 4.6' }}]</span></div>
     </div>
 
-    {# DEEP-specific Ideas rendering — flatten 4 buckets in canonical order. #}
+    {# DEEP-specific Ideas rendering — flatten 5 buckets in canonical order. #}
     {% set _picks = data.ai_ideas or {} %}
-    {% set _bucket_order = ['risk_reduction', 'diversification', 'growth', 'hedge'] %}
+    {% set _bucket_order = ['risk_reduction', 'diversification', 'growth', 'rotation', 'hedge'] %}
     {% set ns_ideas = namespace(flat=[]) %}
     {% for bucket in _bucket_order %}
       {% for idea in (_picks.get(bucket) or []) %}
@@ -2994,6 +3066,12 @@
         {% endfor %}
       </tbody>
     </table>
+
+    {% if data.ai_action_comment %}
+    <div class="conc-ai" style="margin-top:10px;">
+      <div class="ai-body">{{ data.ai_action_comment }}</div>
+    </div>
+    {% endif %}
   </div>
 
   <!-- ════ C. ОЖИДАЕМЫЙ ЭФФЕКТ НА РИСК-ПОКАЗАТЕЛИ ════ -->
@@ -3062,6 +3140,22 @@
     <div class="conc-ai" style="margin-top:12px;">
       <div class="ai-body">
         {{ data.ai_effect_comment }}
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- КОНТРОЛЬ КАЧЕСТВА ДАННЫХ (Page 5) -->
+    {% if data.integrity_checks %}
+    <div style="margin-top:10px; padding:8px 12px; background:rgba(0,0,0,0.02); border-radius:5px; border-left:2px solid #4a90d9;">
+      <div style="font-size:8.5px; font-weight:700; color:#555; letter-spacing:.05em; margin-bottom:5px;">КОНТРОЛЬ КАЧЕСТВА ДАННЫХ</div>
+      <div style="display:flex; flex-wrap:wrap; gap:5px;">
+      {% for c in data.integrity_checks %}
+        <span style="font-size:8px; padding:2px 6px; border-radius:8px; font-family:var(--font-mono);
+               background:{% if c.status == '✓' %}#e8f5e9{% elif c.status == '⚠' %}#fff8e1{% else %}#f5f5f5{% endif %};
+               color:{% if c.status == '✓' %}#2e7d32{% elif c.status == '⚠' %}#f57f17{% else %}#757575{% endif %};">
+          {{ c.status }} <b>{{ c.label }}</b>: {{ c.detail }}
+        </span>
+      {% endfor %}
       </div>
     </div>
     {% endif %}

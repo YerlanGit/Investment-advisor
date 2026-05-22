@@ -1552,6 +1552,22 @@
     </div>
     {% endif %}
 
+    <!-- КОНТРОЛЬ КАЧЕСТВА ДАННЫХ (секция 1) -->
+    {% if data.integrity_checks %}
+    <div style="margin-top:10px; padding:8px 12px; background:rgba(0,0,0,0.02); border-radius:5px; border-left:2px solid #4a90d9;">
+      <div style="font-size:8.5px; font-weight:700; color:#555; letter-spacing:.05em; margin-bottom:5px;">КОНТРОЛЬ КАЧЕСТВА ДАННЫХ</div>
+      <div style="display:flex; flex-wrap:wrap; gap:5px;">
+      {% for c in data.integrity_checks %}
+        <span style="font-size:8px; padding:2px 6px; border-radius:8px; font-family:var(--font-mono);
+               background:{% if c.status == '✓' %}#e8f5e9{% elif c.status == '⚠' %}#fff8e1{% else %}#f5f5f5{% endif %};
+               color:{% if c.status == '✓' %}#2e7d32{% elif c.status == '⚠' %}#f57f17{% else %}#757575{% endif %};">
+          {{ c.status }} <b>{{ c.label }}</b>: {{ c.detail }}
+        </span>
+      {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
   </div>
 
 
@@ -1771,6 +1787,21 @@
   </div>
   {% endif %}
 
+  <!-- КОНТРОЛЬ КАЧЕСТВА ДАННЫХ (секция 2) -->
+  {% if data.integrity_checks %}
+  <div style="margin-top:10px; padding:8px 12px; background:rgba(0,0,0,0.02); border-radius:5px; border-left:2px solid #4a90d9;">
+    <div style="font-size:8.5px; font-weight:700; color:#555; letter-spacing:.05em; margin-bottom:5px;">КОНТРОЛЬ КАЧЕСТВА ДАННЫХ</div>
+    <div style="display:flex; flex-wrap:wrap; gap:5px;">
+    {% for c in data.integrity_checks %}
+      <span style="font-size:8px; padding:2px 6px; border-radius:8px; font-family:var(--font-mono);
+             background:{% if c.status == '✓' %}#e8f5e9{% elif c.status == '⚠' %}#fff8e1{% else %}#f5f5f5{% endif %};
+             color:{% if c.status == '✓' %}#2e7d32{% elif c.status == '⚠' %}#f57f17{% else %}#757575{% endif %};">
+        {{ c.status }} <b>{{ c.label }}</b>: {{ c.detail }}
+      </span>
+    {% endfor %}
+    </div>
+  </div>
+  {% endif %}
 
 </div>
 
@@ -1805,8 +1836,8 @@
     </div>
     <div class="gv-stat">
       <div class="gv-label">Рынок · {{ _bench.name if _bench else 'S&P 500' }}</div>
-      <div class="gv-value neu">{{ _bench.pnl if _bench else '—' }}</div>
-      <div class="gv-note">за тот же период</div>
+      <div class="gv-value neu">{{ _bench.bm_return if _bench else '—' }}</div>
+      <div class="gv-note">годовая доходность бенчмарка</div>
     </div>
     <div class="gv-stat accent">
       <div class="gv-label">Опережение рынка</div>
@@ -1951,14 +1982,31 @@
   </div><!-- /.gv-main -->
 
   <!-- СВОДНЫЙ AI-БЛОК -->
-  {% if data.ai_benchmark_comment %}
+  {% if data.ai_benchmark_comment or data.ai_performance_comment or data.ai_regime_comment %}
   <div class="sec-ai">
     <div class="ai-body">
-      <p>{{ data.ai_benchmark_comment }}</p>
+      {% if data.ai_benchmark_comment %}<p>{{ data.ai_benchmark_comment }}</p>{% endif %}
+      {% if data.ai_performance_comment %}<p>{{ data.ai_performance_comment }}</p>{% endif %}
+      {% if data.ai_regime_comment %}<p><span style="color:var(--tech-blue); font-weight:600;">Режим:</span> {{ data.ai_regime_comment }}</p>{% endif %}
     </div>
   </div>
   {% endif %}
 
+  <!-- КОНТРОЛЬ КАЧЕСТВА ДАННЫХ (секция 3) -->
+  {% if data.integrity_checks %}
+  <div style="margin-top:10px; padding:8px 12px; background:rgba(0,0,0,0.02); border-radius:5px; border-left:2px solid #4a90d9;">
+    <div style="font-size:8.5px; font-weight:700; color:#555; letter-spacing:.05em; margin-bottom:5px;">КОНТРОЛЬ КАЧЕСТВА ДАННЫХ</div>
+    <div style="display:flex; flex-wrap:wrap; gap:5px;">
+    {% for c in data.integrity_checks %}
+      <span style="font-size:8px; padding:2px 6px; border-radius:8px; font-family:var(--font-mono);
+             background:{% if c.status == '✓' %}#e8f5e9{% elif c.status == '⚠' %}#fff8e1{% else %}#f5f5f5{% endif %};
+             color:{% if c.status == '✓' %}#2e7d32{% elif c.status == '⚠' %}#f57f17{% else %}#757575{% endif %};">
+        {{ c.status }} <b>{{ c.label }}</b>: {{ c.detail }}
+      </span>
+    {% endfor %}
+    </div>
+  </div>
+  {% endif %}
 
 </div>
 
@@ -1973,7 +2021,7 @@
   <!-- ЗАГОЛОВОК СЕКЦИИ -->
   <div class="sec-head">
     <div class="sec-title">Идеи ИИ</div>
-    <div class="sec-sub">{{ data.ideas_count }} идей на основе данных портфеля, отчётности SEC и обзоров инвестбанков · нажмите на карточку, чтобы раскрыть детали</div>
+    <div class="sec-sub">{{ data.ideas_count }} идей (рост · ребалансировка · защита · режим) на основе <b style="color:var(--tech-blue);">Factor → Regime → RAG</b> pipeline · нажмите на карточку, чтобы раскрыть детали · <span style="color:var(--ink-60);">[{{ data.ai_model_used or 'Claude Haiku 4.5' }}]</span></div>
   </div>
 
   <!-- ВВОДНЫЙ AI-БЛОК — вердикт ИИ (НЕ дублирует блок «Что вы держите») -->
@@ -2118,12 +2166,28 @@
   </div>
 
   <!-- ПОЛОСА ИСТОЧНИКОВ -->
+  {% if data.integrity_checks %}
+  <div style="margin-top:16px; padding:10px 14px; background:rgba(0,0,0,0.03); border-radius:6px; border-left:3px solid #4a90d9;">
+    <div style="font-size:9px; font-weight:700; color:#555; letter-spacing:.05em; margin-bottom:6px;">КОНТРОЛЬ КАЧЕСТВА ДАННЫХ</div>
+    <div style="display:flex; flex-wrap:wrap; gap:6px;">
+    {% for c in data.integrity_checks %}
+      <span style="font-size:8.5px; padding:2px 7px; border-radius:10px; white-space:nowrap;
+             background:{% if c.status == '✓' %}#e8f5e9{% elif c.status == '⚠' %}#fff8e1{% else %}#f5f5f5{% endif %};
+             color:{% if c.status == '✓' %}#2e7d32{% elif c.status == '⚠' %}#e65100{% else %}#777{% endif %};">
+        {{ c.status }} <b>{{ c.label }}</b>: {{ c.detail }}
+      </span>
+    {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
   <div class="section-sources">
     ИСТОЧНИКИ:
     <b>SEC EDGAR</b> — публичная отчётность эмитентов ·
     <b>Quant Engine MAC3</b> — расчёт риска и сигналов ·
     <b>Factor Engine</b> — фактор-скрининг качества ·
     <b>Regime Model</b> — определение режима рынка ·
+    {% if data.ai_model_used %}<b>AI</b>: {{ data.ai_model_used }} · {% endif %}
     <b>Goldman Sachs</b> «Q2 2026 Market Outlook» ·
     <b>Morgan Stanley</b> «Technology Sector Outlook 2026» ·
     <b>JPMorgan</b> «Q2 2026 Strategy &amp; Allocation»
