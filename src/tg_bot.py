@@ -489,8 +489,21 @@ def _build_kpi_sparklines(results: dict) -> Optional[dict]:
         for _, row in perf.iterrows():
             t  = str(row.get("Ticker", "")).strip()
             cv = float(row.get("Current_Value", 0) or 0)
-            if t and t in prices.columns and cv > 0:
-                cols.append(t)
+            if not t or cv <= 0:
+                continue
+            # perf carries the broker's ORIGINAL tickers; the price frame is
+            # keyed by RESOLVED tickers (e.g. AAPL → AAPL.US).  Match exact
+            # first, then fall back to the base symbol before the dot — the
+            # missing fallback left `cols` empty and silently killed every
+            # sparkline.
+            if t in prices.columns:
+                col = t
+            else:
+                base = t.split(".")[0]
+                col  = next((c for c in prices.columns
+                             if c.split(".")[0] == base), None)
+            if col is not None:
+                cols.append(col)
                 weights.append(cv / total_val)
         if not cols:
             return None

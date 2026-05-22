@@ -217,10 +217,14 @@ def _it_share(tickers: list[str],
 
 # ── Public API ───────────────────────────────────────────────────────────────
 
-# Metrics whose IMPROVEMENT is a DECREASE.  Everything else "improves" by
-# going up.
-_RISK_METRICS_LOWER_IS_BETTER = {"volatility_ann", "cvar_95_magnitude",
-                                  "max_drawdown_magnitude", "max_trc",
+# Metrics whose IMPROVEMENT is a DECREASE of the raw `after - before` delta.
+#
+# CVaR and Max-Drawdown are intentionally NOT here: they are negative-valued
+# (e.g. −0.05), and an improvement means moving TOWARD zero, i.e. a POSITIVE
+# raw delta.  _delta_row compares raw values, not magnitudes — listing them
+# as "lower is better" inverted the favourable flag (a worse drawdown showed
+# green, an improved CVaR showed red).
+_RISK_METRICS_LOWER_IS_BETTER = {"volatility_ann", "max_trc",
                                   "it_share", "risk_index"}
 
 

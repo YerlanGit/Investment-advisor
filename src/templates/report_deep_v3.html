@@ -3024,14 +3024,14 @@
           <div class="ef-name">{{ label }}</div>
           <div class="ef-row">
             <span class="ef-before">
-              {%- if fmt == 'pct'   -%}{{ '%+.1f' % (b * 100) if (b is number and b is not none) else '—' }}%
+              {%- if fmt == 'pct'   -%}{{ '%.1f' % (b * 100) if (b is number and b is not none) else '—' }}%
               {%- elif fmt == 'int' -%}{{ b | round | int if (b is not none) else '—' }}
               {%- elif fmt == 'raw' -%}{{ '%.2f' % b if (b is number and b is not none) else '—' }}
               {%- endif -%}
             </span>
             <span class="ef-arrow">→</span>
             <span class="ef-after">
-              {%- if fmt == 'pct'   -%}{{ '%+.1f' % (a * 100) if (a is number and a is not none) else '—' }}%
+              {%- if fmt == 'pct'   -%}{{ '%.1f' % (a * 100) if (a is number and a is not none) else '—' }}%
               {%- elif fmt == 'int' -%}{{ a | round | int if (a is not none) else '—' }}
               {%- elif fmt == 'raw' -%}{{ '%.2f' % a if (a is number and a is not none) else '—' }}
               {%- endif -%}

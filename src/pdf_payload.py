@@ -170,15 +170,23 @@ def _build_expected_effect(raw: Optional[dict]) -> dict:
         cell = metrics.get(eng_key)
         if not isinstance(cell, dict):
             continue
+        before, after = cell.get("before"), cell.get("after")
         delta_pp = cell.get("delta_pp")
-        if delta_pp is None:
-            d = cell.get("delta")
-            # max_trc is a fraction with no as_pp flag — scale to points;
-            # risk_index/sharpe deltas are already in their display unit.
-            delta_pp = (d * 100) if (tpl_key == "max_erc_pct" and d is not None) else d
+        if tpl_key == "max_erc_pct":
+            # Engine max_trc is ALREADY a percent (0–100); the template card
+            # renders it with fmt='pct' (×100).  Rescale to a fraction so it
+            # is not double-scaled (17.2% → 1724%); the raw delta is already
+            # in percentage points.
+            before   = before / 100.0 if before is not None else None
+            after    = after  / 100.0 if after  is not None else None
+            delta_pp = cell.get("delta")
+        elif delta_pp is None:
+            # risk_index (points) and sharpe (raw) have no as_pp delta_pp —
+            # fall back to the raw delta in its own display unit.
+            delta_pp = cell.get("delta")
         out[tpl_key] = {
-            "before":     cell.get("before"),
-            "after":      cell.get("after"),
+            "before":     before,
+            "after":      after,
             "delta_pp":   delta_pp,
             "favourable": cell.get("improved"),
         }
