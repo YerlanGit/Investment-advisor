@@ -44,6 +44,125 @@ DEFAULT_HOTSPOT_TRC_PCT = 20.0
 CDSLookup = Callable[[str], dict]
 
 
+# ── V-Pillar: absolute sector P/E and P/B benchmarks ─────────────────────────
+# Calibrated to S&P 500 sector trailing P/E and P/B medians (2020-2025 avg).
+# Used because portfolio cohorts are typically <5 tickers — too small for
+# robust_z (which requires ≥5 samples).  Absolute benchmarks are sector-aware,
+# stable, and don't depend on portfolio composition.
+#
+# Scoring direction (same as valuations_score logic):
+#   z > +1.5  → expensive  → negative V contribution
+#   z > +0.5  → mildly expensive
+#   z < -0.5  → cheap
+#   z < -1.5  → very cheap → positive V contribution
+_SECTOR_PE_BENCHMARKS: dict[str, tuple[float, float]] = {
+    # (median_PE, MAD_equivalent_σ)
+    "Technology":     (28.0, 10.0),
+    "Semiconductors": (25.0,  9.0),
+    "Finance":        (14.0,  4.0),
+    "Healthcare":     (22.0,  7.0),
+    "Energy":         (14.0,  5.0),
+    "Consumer":       (22.0,  6.0),
+    "Industrials":    (20.0,  6.0),
+    "Gold":           (18.0,  6.0),
+    "default":        (20.0,  8.0),
+}
+
+_SECTOR_PB_BENCHMARKS: dict[str, tuple[float, float]] = {
+    # (median_PB, MAD_equivalent_σ)
+    "Technology":     (7.0, 3.5),
+    "Semiconductors": (6.0, 3.0),
+    "Finance":        (1.4, 0.5),
+    "Healthcare":     (4.0, 2.0),
+    "Energy":         (2.0, 0.8),
+    "Consumer":       (5.0, 2.5),
+    "Industrials":    (3.0, 1.5),
+    "Gold":           (2.5, 1.0),
+    "default":        (3.0, 1.5),
+}
+
+
+def _absolute_valuation_z(
+    ratio: Optional[float],
+    sector: Optional[str],
+    benchmarks: dict[str, tuple[float, float]],
+    clip: float = 3.0,
+) -> Optional[float]:
+    """
+    Convert a valuation ratio (P/E or P/B) into a z-score using
+    sector-specific absolute benchmarks.
+
+    Returns None when ratio is None/NaN/infinite.
+    z > 0 → expensive vs sector median; z < 0 → cheap.
+    """
+    if ratio is None:
+        return None
+    try:
+        r = float(ratio)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(r) or r <= 0:
+        return None
+    key = sector if sector in benchmarks else "default"
+    median, sigma = benchmarks[key]
+    if sigma <= 0:
+        return None
+    z = (r - median) / sigma
+    return float(np.clip(z, -clip, clip))
+
+
+def _compute_valuation_ratios(perf: pd.DataFrame) -> None:
+    """
+    Pre-compute SEC_PE_Ratio and SEC_PB_Ratio columns in-place.
+
+    P/E = Current_Price / EPS   where EPS = SEC_Net_Income / SEC_Shares_Outstanding
+          Only computed when net income is positive (loss companies → no P/E).
+
+    P/B = Current_Price * SEC_Shares_Outstanding / SEC_Book_Equity
+          Only computed when book equity is strictly positive
+          (buyback-heavy firms like AAPL/MSFT may carry negative equity).
+
+    Both ratios set to NaN when any input is missing or invalid.
+    """
+    pe_col: list[Optional[float]] = []
+    pb_col: list[Optional[float]] = []
+
+    for _, row in perf.iterrows():
+        price  = row.get("Current_Price")
+        ni     = row.get("SEC_Net_Income")
+        shares = row.get("SEC_Shares_Outstanding")
+        bkeq   = row.get("SEC_Book_Equity")
+
+        # P/E
+        pe: Optional[float] = None
+        try:
+            p  = float(price)
+            n  = float(ni)
+            sh = float(shares)
+            if p > 0 and n > 0 and sh > 0:
+                eps = n / sh
+                pe  = p / eps
+        except (TypeError, ValueError):
+            pass
+        pe_col.append(pe)
+
+        # P/B
+        pb: Optional[float] = None
+        try:
+            p  = float(price)
+            sh = float(shares)
+            bk = float(bkeq)
+            if p > 0 and sh > 0 and bk > 0:
+                bvps = bk / sh
+                pb   = p / bvps
+        except (TypeError, ValueError):
+            pass
+        pb_col.append(pb)
+
+    perf["SEC_PE_Ratio"] = pe_col
+    perf["SEC_PB_Ratio"] = pb_col
+
+
 def _macro_alignment(sector: Optional[str],
                      regime: Optional[RegimeReading]) -> float:
     """Map regime + sector to a -0.5..+0.5 macro-alignment bonus/penalty."""
@@ -111,9 +230,13 @@ def score_portfolio(
 
     if "Ticker" not in perf_table.columns:
         # Defensive — older callers may pass an indexed frame.
-        perf = perf_table.reset_index()
+        perf = perf_table.reset_index().copy()
     else:
-        perf = perf_table
+        perf = perf_table.copy()
+
+    # Pre-compute P/E and P/B for all rows so V-pillar z-scores are available
+    # during the per-asset loop below.
+    _compute_valuation_ratios(perf)
 
     for _, row in perf.iterrows():
         ticker = str(row.get("Ticker") or "?")
@@ -132,10 +255,18 @@ def score_portfolio(
             fcf_margin_z=fcf_z, macro_alignment=macro_align,
         )
 
-        # Pillar B — Valuations (P/E history Z is the only one we have today;
-        # P/B and EV/EBITDA can be wired when SEC fields are added later).
-        pe_z = None  # placeholder — kept here to make wiring explicit
-        v_score = valuations_score(pe_history_z=pe_z, pb_sector_z=None, ev_ebitda_z=None)
+        # Pillar B — Valuations.
+        # P/E z-score: uses absolute sector benchmarks (portfolio cohorts are
+        # typically <5 tickers — too small for robust_z which needs ≥5 samples).
+        # z > +1.5 → expensive (-2); z > +0.5 → mildly expensive (-1);
+        # z < -0.5 → cheap (+1);    z < -1.5 → very cheap (+2).
+        pe_z = _absolute_valuation_z(
+            row.get("SEC_PE_Ratio"), sector, _SECTOR_PE_BENCHMARKS
+        )
+        pb_z = _absolute_valuation_z(
+            row.get("SEC_PB_Ratio"), sector, _SECTOR_PB_BENCHMARKS
+        )
+        v_score = valuations_score(pe_history_z=pe_z, pb_sector_z=pb_z, ev_ebitda_z=None)
 
         # Pillar C — Technicals (already a -2..+2 reading)
         t_reading = technicals.get(ticker)

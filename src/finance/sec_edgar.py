@@ -352,11 +352,21 @@ def get_extended_fundamentals(ticker: str) -> dict:
     shares_out     = _get_annual_values(us_gaap, _SHARES_OUT_TAGS,     n=1)
 
     out: dict = {
-        "ebit":           op_income[0],
-        "cfo":            cfo[0],
-        "capex":          capex[0],
-        "long_term_debt": long_term_debt[0],
+        "ebit":              op_income[0],
+        "cfo":               cfo[0],
+        "capex":             capex[0],
+        "long_term_debt":    long_term_debt[0],
         "shares_outstanding": shares_out[0],
+        # V-pillar inputs: net income (→ EPS → P/E) and book equity (→ P/B).
+        # net_income is positive for profitable firms; None otherwise (no P/E).
+        # book_equity may be negative for buyback-heavy firms (AAPL, MSFT) —
+        # stored as-is; scoring_orchestrator skips P/B when ≤ 0.
+        "net_income":  net_income[0],
+        "book_equity": (
+            (total_assets[0] - total_liabs[0])
+            if (total_assets[0] is not None and total_liabs[0] is not None)
+            else None
+        ),
     }
 
     rev0 = revenue[0]
@@ -616,6 +626,10 @@ def batch_fundamental_scan(
                 "SEC_Altman_Zone":        ext.get("altman_zone"),
                 "SEC_Piotroski_F":        ext.get("piotroski_f"),
                 "SEC_Long_Term_Debt":     ext.get("long_term_debt"),
+                # V-pillar inputs (used by scoring_orchestrator to compute P/E and P/B)
+                "SEC_Net_Income":         ext.get("net_income"),
+                "SEC_Book_Equity":        ext.get("book_equity"),
+                "SEC_Shares_Outstanding": ext.get("shares_outstanding"),
             }
             return row
         except Exception as e:
