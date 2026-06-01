@@ -543,6 +543,7 @@ def _fallback_narrative(results: dict, tier: str) -> dict:
         "ai_action_comment":        "",
         "ai_effect_comment":        "",
         "regime_confirmation":      {"stance": "", "summary": "", "signals": []},
+        "rag_context":              "",
     }
 
 
@@ -779,6 +780,12 @@ def generate_narrative(results: dict, tier: str = "base",
             "ai_action_comment":        _comment("ai_action_comment"),
             "ai_effect_comment":        _comment("ai_effect_comment"),
             "regime_confirmation":      _regime_confirmation(),
+            # Surface the raw RAG context so integrity_checks can show the
+            # actual snippet count.  Without this the integrity pill was
+            # hard-wired to "~0 отрывков" even when ChromaDB returned real
+            # bank-report excerpts — the bank views WERE reaching the AI,
+            # but the UI claimed nothing was retrieved.
+            "rag_context":              market_context,
         }
     except Exception as exc:
         logger.warning("AI narrative FAILED (%s) — используется fallback. Модель: %s",
