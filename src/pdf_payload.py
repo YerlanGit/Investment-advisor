@@ -170,6 +170,58 @@ def _build_ai_ideas(stock_picks: dict, tier: str = "base") -> dict:
     return ideas
 
 
+def _build_macro_drivers_panel(raw: Optional[dict]) -> dict:
+    """
+    Adapt MacroFeed.get_regime_drivers() output to the DEEP «Сигналы-драйверы»
+    panel schema.
+
+    Engine returns a FLAT dict keyed by series key:
+        {yield_curve_10y2y: {series_id, value, as_of, status, unit, label, ...}, ...}
+    Template (report_deep_v3.html:2810) reads:
+        {series: [{id, name, value, as_of, status, comment}], as_of}
+    Without this remap `data.macro_drivers.series` is None → the panel
+    falls through to "FRED источник недоступен" even when ALL 4 series
+    are fresh (proved by the CoVe lineage rendering them ok same run).
+    """
+    if not raw:
+        return {}
+    # Per-unit value formatter — keeps the panel display compact and honest
+    # ("+0.18 pp" / "312 bp" / "14.2" / "2.32%").  HY OAS in FRED is reported
+    # in percent (3.12) but bond-market convention is basis points (×100).
+    def _fmt(value: float, unit: Optional[str], series_id: str) -> str:
+        if value is None or not isinstance(value, (int, float)):
+            return "—"
+        if series_id == "BAMLH0A0HYM2":
+            return f"{value * 100:.0f} bp"
+        if unit == "pp":
+            return f"{'+' if value > 0 else ''}{value:.2f} pp"
+        if unit == "%":
+            return f"{value:.2f}%"
+        if unit == "index":
+            return f"{value:.1f}"
+        return f"{value:.2f}"
+
+    series_rows: list[dict] = []
+    latest_as_of = ""
+    for key, row in raw.items():
+        if not isinstance(row, dict):
+            continue
+        series_id = row.get("series_id") or key
+        as_of     = str(row.get("as_of") or "")
+        series_rows.append({
+            "id":      series_id,
+            "key":     key,
+            "name":    row.get("label") or series_id,
+            "value":   _fmt(row.get("value"), row.get("unit"), series_id),
+            "as_of":   as_of,
+            "status":  row.get("status") or "missing",
+            "comment": row.get("note") or "",
+        })
+        if as_of > latest_as_of:
+            latest_as_of = as_of
+    return {"series": series_rows, "as_of": latest_as_of}
+
+
 def _build_expected_effect(raw: Optional[dict]) -> dict:
     """
     Adapt simulate_after_plan() output to the deep template's 8-card schema.
@@ -510,7 +562,10 @@ def build_payload(results: dict, tier: str,
     expected_effect = _build_expected_effect(results.get("expected_effect"))
 
     # ── Macro drivers from FRED (5-series pack for DEEP P5) ────────────────
-    macro_drivers = results.get("macro_drivers") or {}
+    # Engine emits a flat {key: {value, as_of, status, ...}} dict; the DEEP
+    # "Сигналы-драйверы" panel needs {series: [...], as_of}.  Adapt here so
+    # the renderer stays schema-agnostic.
+    macro_drivers = _build_macro_drivers_panel(results.get("macro_drivers"))
 
     # ── CoVe data-lineage (runtime status per source) ──────────────────────
     # Build a uniform list[dict] over all data sources consumed by this
@@ -1103,7 +1158,10 @@ def _build_integrity_checks(results: dict,
     # 6. RAG (bank research retrieval)
     rag_used    = bool((ai_summary or {}).get("used_rag"))
     rag_context = (ai_summary or {}).get("rag_context") or ""
-    snippets    = len(rag_context.split("---")) if rag_context else 0
+    # _fetch_rag_context joins sections with "\n\n"; count non-blank
+    # paragraphs as approximate snippet count (header lines included).
+    snippets    = (sum(1 for p in rag_context.split("\n\n") if p.strip())
+                   if rag_context else 0)
     checks.append({
         "status": "✓" if rag_used else "—",
         "label":  "RAG: банк. отчёты",

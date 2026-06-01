@@ -114,7 +114,7 @@ _PE_RATIO_DEFAULT       = None  # P/E sourced from market data when available
 
 
 def _get_annual_values(
-    us_gaap: dict, tags: list[str], n: int = 2
+    us_gaap: dict, tags: list[str], n: int = 2, *, unit: str = "USD"
 ) -> list[float | None]:
     """
     Extract the last *n* annual (10-K, FY) values for the tag with the most
@@ -128,6 +128,12 @@ def _get_annual_values(
     Tag selection: instead of returning the first matching tag, we evaluate ALL
     candidate tags and pick the one whose most recent ``end`` date is latest.
     This handles companies like NVDA that migrated from one XBRL tag to another.
+
+    `unit`: XBRL units bucket — defaults to "USD" for monetary tags.  Pass
+    ``unit="shares"`` for share-count concepts (CommonStockSharesOutstanding
+    etc.), which SEC stores in units.shares, NOT units.USD — the silent
+    USD-only lookup was THE reason shares_outstanding came back None and
+    every V-pillar score collapsed to 0.
     """
     best_result: list[float] | None = None
     best_end: str = ""
@@ -136,7 +142,7 @@ def _get_annual_values(
         concept = us_gaap.get(tag)
         if not concept:
             continue
-        units = concept.get("units", {}).get("USD", [])
+        units = concept.get("units", {}).get(unit, [])
         if not units:
             continue
         # Filter to annual 10-K filings only
@@ -382,7 +388,9 @@ def get_extended_fundamentals(ticker: str) -> dict:
     capex          = _get_annual_values(us_gaap, _CAPEX_TAGS,          n=1)
     long_term_debt = _get_annual_values(us_gaap, _LONG_TERM_DEBT_TAGS, n=2)
     gross_profit   = _get_annual_values(us_gaap, _GROSS_PROFIT_TAGS,   n=2)
-    shares_out     = _get_annual_values(us_gaap, _SHARES_OUT_TAGS,     n=1)
+    # Shares concepts live in units.shares (NOT units.USD) — fixing this
+    # restores SEC_Shares_Outstanding → P/E and P/B → V-pillar scoring.
+    shares_out     = _get_annual_values(us_gaap, _SHARES_OUT_TAGS,     n=1, unit="shares")
 
     out: dict = {
         "ebit":              op_income[0],
@@ -631,8 +639,11 @@ def batch_fundamental_scan(
     scannable = [t for t in tickers if not _should_skip(t)]
     skipped = [t for t in tickers if _should_skip(t)]
 
+    # ETFs / commodities / AIX instruments by definition file no 10-K — log
+    # at DEBUG only so it does not appear as noise in production INFO logs.
     if skipped:
-        logger.info("[SEC EDGAR] Пропущены (нет 10-K): %s", ", ".join(skipped))
+        logger.debug("[SEC EDGAR] Skip-listed (no 10-K expected): %s",
+                     ", ".join(skipped))
 
     results = []
 

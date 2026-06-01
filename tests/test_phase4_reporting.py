@@ -1447,20 +1447,34 @@ class MacroFeedTest(unittest.TestCase):
 
     # ─── payload passthrough ───────────────────────────────────────────
 
-    def test_payload_passes_through_macro_drivers(self) -> None:
-        """results["macro_drivers"] flows into payload unchanged."""
+    def test_payload_adapts_macro_drivers_to_panel_schema(self) -> None:
+        """
+        Engine emits a flat {key: {value, as_of, status, ...}} dict, but the
+        DEEP «Сигналы-драйверы» panel reads {series: [...], as_of}. Without
+        the adapter the panel hit its else branch and rendered "FRED
+        источник недоступен" even when all 4 series were fresh.
+        """
         from pdf_payload import build_payload, TIER_BASE, TIER_DEEP
         results = ConcentrationAndWaterfallTest()._base_results()
         results["macro_drivers"] = {
-            "vix": {"value": 14.2, "status": "ok", "freshness_days": 1,
-                    "as_of": "2026-05-14", "label": "CBOE VIX",
-                    "unit": "index", "history_30d": []},
+            "vix": {"series_id": "VIXCLS", "value": 14.2, "status": "ok",
+                    "freshness_days": 1, "as_of": "2026-05-14",
+                    "label": "CBOE VIX", "unit": "index", "history_30d": []},
+            "yield_curve_10y2y": {"series_id": "T10Y2Y", "value": 0.18,
+                    "status": "ok", "as_of": "2026-05-13",
+                    "label": "10Y−2Y", "unit": "pp"},
         }
         for tier in (TIER_BASE, TIER_DEEP):
             p = build_payload(results, tier)
-            self.assertIn("macro_drivers", p)
-            self.assertEqual(p["macro_drivers"]["vix"]["value"], 14.2)
-            self.assertEqual(p["macro_drivers"]["vix"]["status"], "ok")
+            md = p["macro_drivers"]
+            self.assertIn("series", md)
+            self.assertEqual(len(md["series"]), 2)
+            self.assertEqual(md["as_of"], "2026-05-14")          # latest of the two
+            vix = next(s for s in md["series"] if s["id"] == "VIXCLS")
+            self.assertEqual(vix["status"], "ok")
+            self.assertEqual(vix["value"], "14.2")               # unit=index → 1 dp
+            yc = next(s for s in md["series"] if s["id"] == "T10Y2Y")
+            self.assertEqual(yc["value"], "+0.18 pp")            # unit=pp → signed
 
 
 # ── 4.1.g  CoVe data-lineage + Volatility-фактор (Step 5 — final) ──────────
@@ -2560,6 +2574,86 @@ class SECSharedFetchTest(unittest.TestCase):
         se._fetch_company_facts.cache_clear()
         for etf in ("GLD", "SLV", "TLT", "FFSPC6.1028.AIX"):
             self.assertEqual(se._fetch_company_facts(etf), {})
+
+
+class SECSharesUnitFixTest(unittest.TestCase):
+    """
+    SEC XBRL stores share-count concepts in units.shares, NOT units.USD.
+    The hardcoded USD lookup made every CommonStockSharesOutstanding read
+    return None → SEC_Shares_Outstanding None → no P/E, no P/B → V=0 for
+    every asset in the 4-Pillar score.
+    """
+
+    def _facts(self) -> dict:
+        return {"facts": {"us-gaap": {
+            "CommonStockSharesOutstanding": {
+                "units": {"shares": [
+                    {"form": "10-K", "fp": "FY", "end": "2025-09-30",
+                     "val": 15_500_000_000},
+                ]},
+            },
+            "NetIncomeLoss": {
+                "units": {"USD": [
+                    {"form": "10-K", "fp": "FY", "end": "2025-09-30",
+                     "val": 99_000_000_000},
+                ]},
+            },
+        }}}
+
+    def test_shares_outstanding_resolves_with_shares_unit(self) -> None:
+        from finance.sec_edgar import _get_annual_values, _SHARES_OUT_TAGS
+        us_gaap = self._facts()["facts"]["us-gaap"]
+        out = _get_annual_values(us_gaap, _SHARES_OUT_TAGS, n=1, unit="shares")
+        self.assertEqual(out[0], 15_500_000_000.0)
+
+    def test_default_usd_still_works_for_monetary_tags(self) -> None:
+        from finance.sec_edgar import _get_annual_values
+        us_gaap = self._facts()["facts"]["us-gaap"]
+        out = _get_annual_values(us_gaap, ["NetIncomeLoss"], n=1)
+        self.assertEqual(out[0], 99_000_000_000.0)
+
+    def test_shares_unit_explicitly_required(self) -> None:
+        """
+        Querying shares with the (old) default unit="USD" returns None —
+        this is the original bug surface.  We assert the failure mode so a
+        future refactor that flips the default does not silently break
+        valuations again.
+        """
+        from finance.sec_edgar import _get_annual_values, _SHARES_OUT_TAGS
+        us_gaap = self._facts()["facts"]["us-gaap"]
+        out = _get_annual_values(us_gaap, _SHARES_OUT_TAGS, n=1)   # default USD
+        self.assertIsNone(out[0])
+
+
+class RagSnippetCounterTest(unittest.TestCase):
+    """The integrity-pill snippet counter must show the actual RAG context
+    size, not the structurally-always-0 it used to (rag_context was never
+    returned by generate_narrative)."""
+
+    def test_counter_reads_rag_context_from_summary(self) -> None:
+        from pdf_payload import _build_integrity_checks
+        rag_blob = ("=== MACRO TRENDS ===\n"
+                    "Goldman: late-cycle Tech rotation\n\n"
+                    "=== MICRO INSIGHTS ===\n"
+                    "JPM: trim AAPL on weakness")
+        checks = _build_integrity_checks(
+            results={}, ai_summary={"used_rag": True, "rag_context": rag_blob,
+                                     "model_used": "claude-sonnet-4-6"},
+            data_quality={}, return_series_coverage={})
+        rag_pill = next(c for c in checks if "RAG" in c["label"])
+        self.assertEqual(rag_pill["status"], "✓")
+        # 4 non-blank paragraphs (2 section headers + 2 content blocks)
+        self.assertIn("отрывков", rag_pill["detail"])
+        self.assertNotIn("~0 отрывков", rag_pill["detail"])
+
+    def test_counter_zero_when_rag_not_used(self) -> None:
+        from pdf_payload import _build_integrity_checks
+        checks = _build_integrity_checks(
+            results={}, ai_summary={"used_rag": False, "model_used": "fallback"},
+            data_quality={}, return_series_coverage={})
+        rag_pill = next(c for c in checks if "RAG" in c["label"])
+        self.assertEqual(rag_pill["status"], "—")
+        self.assertEqual(rag_pill["detail"], "не использован")
 
 
 if __name__ == "__main__":
