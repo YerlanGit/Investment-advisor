@@ -85,6 +85,31 @@ def _summarise_for_prompt(results: dict) -> dict:
         for name, d in (results.get("benchmark_comparison") or {}).items()
     }
     cvar_boot = metrics.get("CVaR_95_Bootstrap") or {}
+
+    # Compact macro-driver pack — surfaced so the AI can cross-check the
+    # engine's regime label against the actual yield curve / credit spread /
+    # volatility / inflation signals (FRED).  Only series with a real value
+    # are included; status flag is kept so the AI weights stale data lower.
+    macro_src = results.get("macro_drivers") or {}
+    _MACRO_KEYS = (
+        ("yield_curve_10y2y", "yield_curve_10y2y"),
+        ("hy_credit_spread",  "hy_oas"),
+        ("vix",               "vix"),
+        ("breakeven_inflation", "breakeven"),
+    )
+    macro_summary: dict = {}
+    for src_key, label in _MACRO_KEYS:
+        row = macro_src.get(src_key) or {}
+        val = row.get("value")
+        if val is None:
+            continue
+        macro_summary[label] = {
+            "value":  _safe_round(val, 2),
+            "status": row.get("status"),
+            "as_of":  row.get("as_of"),
+            "unit":   row.get("unit"),
+        }
+
     return {
         "metrics": {
             "vol_ann":      _safe_round((metrics.get("Total_Volatility_Ann") or 0) * 100, 1),
@@ -100,6 +125,7 @@ def _summarise_for_prompt(results: dict) -> dict:
         },
         "total_value":  _safe_round(results.get("total_value"), 0),
         "regime":       results.get("regime"),
+        "macro":        macro_summary,
         "sectors":      {k: round(float(v) * 100, 1)
                          for k, v in (results.get("sector_exposure") or {}).items()},
         "benchmarks":   bm,
@@ -358,6 +384,16 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
         '  "ai_regime_comment": "≤220 знаков — текущий режим рынка: что это значит простыми словами '
         '(рынок восстанавливается / перегрет / в стагфляции). Что рекомендуют Goldman Sachs, '
         'Barclays, JPMorgan для этого режима. Как это влияет на факторы [Quant Engine][GS][Barclays][JPM]",\n'
+        '  "regime_confirmation": {\n'
+        '    "stance": "confirms | partial | diverges",\n'
+        '    "summary": "≤220 знаков — простыми словами: подтверждается ли вывод движка о режиме, '
+        'на основании каких независимых сигналов",\n'
+        '    "signals": ["3–6 строк ≤90 знаков — каждая начинается с ✓/⚠/✗ + сигнал. '
+        'ПОКРЫТЬ обязательно: (1) кривая доходности 10Y−2Y из summary.macro, '
+        '(2) HY OAS (кредитный спред), (3) VIX (страх рынка), '
+        '(4) факторные беты портфеля vs ожидаемые для режима ([Barclays]), '
+        '(5) банковский консенсус [GS]/[Barclays]/[JPM]"]\n'
+        '  },\n'
         '  "ai_holdings_comment": "≤200 знаков — какие позиции занимают наибольшую долю в риске '
         '(TRC — доля в общем риске). Назови конкретные тикеры-hotspots и объясни почему они опасны. '
         'Свяжи с факторами [см. ai_factor_comment] [Quant Engine]",\n'
@@ -398,6 +434,14 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
         "- БАНКОВСКАЯ АНАЛИТИКА: даже без RAG-данных — используй знания о позициях "
         "Goldman Sachs, Barclays, JPMorgan, Morgan Stanley по текущему режиму и секторам. "
         "Теги: [GS], [Barclays], [JPM], [MS].\n"
+        "- ПОДТВЕРЖДЕНИЕ РЕЖИМА — заполни поле regime_confirmation:\n"
+        f"    движок выдал {regime_label} (confidence из summary.regime); проверь это на "
+        "    НЕЗАВИСИМЫХ сигналах: yield curve 10Y−2Y (положительная = рост, инверсия = "
+        "    рецессия), HY OAS (<350 bp = риск-он, >550 bp = стресс), VIX (<20 = спокойствие), "
+        "    breakeven (инфляционные ожидания), факторные беты портфеля и банковский консенсус. "
+        "    Stance: 'confirms' если ≥80% сигналов согласны, 'partial' если 2-3 расходятся, "
+        "    'diverges' при фундаментальном противоречии. Каждый сигнал в signals[] — "
+        "    одна строка с ✓/⚠/✗ + что именно подтверждает или противоречит.\n"
         "- 3-step reasoning: взаимосвязи → риски → рекомендации с числами.\n"
         "- Каждое число — [Quant Engine], [SEC EDGAR], [Regime] или [RAG: файл].\n"
         f"- Риск-профиль: {user_profile}. Режим: {regime_label}.\n"
@@ -498,6 +542,7 @@ def _fallback_narrative(results: dict, tier: str) -> dict:
         "ai_stress_comment":        "",
         "ai_action_comment":        "",
         "ai_effect_comment":        "",
+        "regime_confirmation":      {"stance": "", "summary": "", "signals": []},
     }
 
 
@@ -690,6 +735,26 @@ def generate_narrative(results: dict, tier: str = "base",
             txt = str(parsed.get(key, "")).strip()
             return _strip_unverified_rag_citations(txt, market_context)[:limit]
 
+        # Structured regime-confirmation cell — DEEP tier only.  Validates
+        # that the AI cross-checked the engine's regime label against macro
+        # drivers, factor betas and bank views.
+        def _regime_confirmation() -> dict:
+            if tier != "deep":
+                return {"stance": "", "summary": "", "signals": []}
+            raw = parsed.get("regime_confirmation") or {}
+            stance  = str(raw.get("stance", "")).strip().lower()
+            if stance not in {"confirms", "partial", "diverges"}:
+                stance = ""
+            summary = _strip_unverified_rag_citations(
+                str(raw.get("summary", "")).strip(), market_context)[:260]
+            signals_in = raw.get("signals") or []
+            signals = [
+                _strip_unverified_rag_citations(str(s).strip(),
+                                                 market_context)[:120]
+                for s in signals_in if str(s).strip()
+            ][:6]
+            return {"stance": stance, "summary": summary, "signals": signals}
+
         return {
             "verdict":                  verdict[:300],
             "plain_summary":            plain_summary[:400],
@@ -713,6 +778,7 @@ def generate_narrative(results: dict, tier: str = "base",
             "ai_stress_comment":        _comment("ai_stress_comment"),
             "ai_action_comment":        _comment("ai_action_comment"),
             "ai_effect_comment":        _comment("ai_effect_comment"),
+            "regime_confirmation":      _regime_confirmation(),
         }
     except Exception as exc:
         logger.warning("AI narrative FAILED (%s) — используется fallback. Модель: %s",

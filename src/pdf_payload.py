@@ -724,6 +724,9 @@ def build_payload(results: dict, tier: str,
         "ai_stress_comment":         (ai_summary or {}).get("ai_stress_comment", ""),
         "ai_action_comment":         (ai_summary or {}).get("ai_action_comment", ""),
         "ai_effect_comment":         (ai_summary or {}).get("ai_effect_comment", ""),
+        # Structured cross-check of the engine's regime label — DEEP only.
+        "regime_confirmation":       (ai_summary or {}).get("regime_confirmation",
+                                       {"stance": "", "summary": "", "signals": []}),
         # Tier metadata
         "tier":              tier,
     }
