@@ -325,15 +325,18 @@ class MacroFeed:
         return (self._now() - t).total_seconds() < self._ttl_sec
 
     def _http_fetch(self, spec: SeriesSpec) -> list[dict]:
-        """Hit FRED and return [{date, value}, ...] (chronological)."""
+        """Hit FRED and return [{date, value}, ...] (chronological, oldest→newest)."""
         params = {
             "series_id":    spec.series_id,
             "api_key":      self._api_key,
             "file_type":    "json",
-            "sort_order":   "asc",
-            # Pull a generous window so HISTORY_KEEP_DAYS trim has something
-            # to work with; FRED returns the latest if older absent.
-            "limit":        260,
+            # Newest observations first — ``sort_order=asc`` + ``limit=260``
+            # used to return FRED's FIRST 260 datapoints (i.e. the start of
+            # the series, ~1977 for T10Y2Y), which then drove freshness to
+            # decades-old "as_of" stamps.  Pull newest N, then reverse to
+            # restore the chronological ordering downstream code assumes.
+            "sort_order":   "desc",
+            "limit":        HISTORY_KEEP_DAYS,
         }
         resp = self._get(FRED_API_ROOT, params=params, timeout=HTTP_TIMEOUT_SEC)
         resp.raise_for_status()
@@ -349,6 +352,10 @@ class MacroFeed:
                 out.append({"date": d, "value": v})
         if not out:
             raise ValueError("FRED returned zero usable observations")
+        # Always re-sort chronologically so obs[-1] is the freshest point
+        # regardless of how FRED actually ordered the response.  Cheap
+        # (len ≤ HISTORY_KEEP_DAYS) and removes one whole class of bug.
+        out.sort(key=lambda r: r["date"])
         return out
 
     def _format_from_cache(self, spec: SeriesSpec, cached: dict,

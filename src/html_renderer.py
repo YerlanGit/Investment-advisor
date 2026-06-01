@@ -135,6 +135,21 @@ def _mock_payload(tier: str = "base") -> dict:
                                     "−15.8%, восстановление ≈6 мес.",
             "ai_effect_comment":    "Ребалансировка снижает индекс риска 62→54 и "
                                     "поднимает Sharpe 1.18→1.32.",
+            # Structured regime cross-check — DEEP only; populated to exercise
+            # the new confirmation panel in the smoke render.
+            "regime_confirmation":  {
+                "stance":  "partial",
+                "summary": "Движок видит Expansion; макро и беты в основном "
+                           "согласны, но HY-спред слегка расширяется — "
+                           "ранний сигнал слабости.",
+                "signals": [
+                    "✓ Кривая 10Y−2Y +0.18 пп — рецессия не сигналит",
+                    "⚠ HY OAS 312 bp растёт 3 нед. подряд — кредит сжимается",
+                    "✓ VIX 14 — спокойствие, страх не нарастает",
+                    "✓ Market β 1.05 — типично для late-Expansion",
+                    "⚠ [Barclays] предупреждает: близко к границе со Slowdown",
+                ],
+            },
         },
     )
     if tier == "deep":

@@ -2272,5 +2272,174 @@ class IntegrityChecksTest(unittest.TestCase):
         self.assertEqual(p["return_series_coverage"]["n_days"], 200)
 
 
+class FREDFreshnessFixTest(unittest.TestCase):
+    """
+    Regression for the FRED `sort_order=asc` bug: it used to pull the FIRST
+    260 datapoints of each series (e.g. T10Y2Y back to 1976), driving every
+    `as_of` stamp decades into the past and every status to 'stale'.  After
+    the fix the feed asks for newest-N and the chronological re-ordering
+    leaves `obs[-1]` = the latest observation.
+    """
+
+    def setUp(self) -> None:
+        import tempfile
+        self._cache_dir = Path(tempfile.mkdtemp(prefix="fred_fix_"))
+
+    def tearDown(self) -> None:
+        import shutil
+        shutil.rmtree(self._cache_dir, ignore_errors=True)
+
+    def _now(self) -> "datetime":
+        from datetime import datetime, timezone
+        return datetime(2026, 5, 15, 9, 0, tzinfo=timezone.utc)
+
+    def test_http_fetch_requests_newest_and_reorders_chronological(self) -> None:
+        from services.macro_data import MacroFeed, HISTORY_KEEP_DAYS
+        captured = {}
+        # FRED with sort_order=desc returns NEWEST first.  We simulate that.
+        desc_body = _fake_fred_observations([
+            ("2026-05-14", 0.20),
+            ("2026-05-13", 0.18),
+            ("2026-05-12", 0.17),
+        ])
+        def fake_get(url, params=None, timeout=None):
+            captured.update(params or {})
+            return _FakeResponse(desc_body)
+
+        feed = MacroFeed(api_key="K", cache_dir=self._cache_dir,
+                          http_get=fake_get, now=self._now)
+        out = feed.get_regime_drivers()
+
+        # 1. The fix requests newest-first with a bounded limit.
+        self.assertEqual(captured["sort_order"], "desc")
+        self.assertEqual(captured["limit"], HISTORY_KEEP_DAYS)
+        # 2. Despite FRED returning desc, the cached observations are
+        #    chronological (oldest → newest) so obs[-1] = freshest.
+        yc = out["yield_curve_10y2y"]
+        self.assertAlmostEqual(yc["value"], 0.20, places=4)   # newest, not 0.17
+        self.assertEqual(yc["as_of"], "2026-05-14")
+        self.assertEqual(yc["status"], "ok")                  # 1 day fresh
+
+    def test_status_was_stale_before_fix_proof(self) -> None:
+        """
+        Proof of the original bug: if the feed had returned the OLDEST
+        observation (which it did with asc+limit=260 against a series that
+        starts in 1976), freshness would be in the tens of thousands of
+        days and status would degrade to 'stale'.  We assert _the new code_
+        never produces that pathology when FRED behaves correctly.
+        """
+        from services.macro_data import MacroFeed
+        ancient_body = _fake_fred_observations([("1977-05-27", 0.18)])
+        def fake_get(url, params=None, timeout=None):
+            return _FakeResponse(ancient_body)
+        feed = MacroFeed(api_key="K", cache_dir=self._cache_dir,
+                          http_get=fake_get, now=self._now)
+        out = feed.get_regime_drivers()
+        # If FRED genuinely returns only an ancient observation, status is
+        # 'stale' (freshness far beyond the window) — the right behaviour.
+        # The fix is about no longer ASKING for the ancient slice.
+        self.assertEqual(out["yield_curve_10y2y"]["status"], "stale")
+
+
+class NarrativeSummaryMacroTest(unittest.TestCase):
+    """`_summarise_for_prompt` must surface macro_drivers so the AI can
+    cross-check the engine's regime label against FRED yield-curve, HY OAS,
+    VIX and breakeven."""
+
+    def test_macro_block_present_when_drivers_available(self) -> None:
+        from ai_narrative import _summarise_for_prompt
+        results = {
+            "macro_drivers": {
+                "yield_curve_10y2y": {"value": 0.18, "status": "ok",
+                                       "as_of": "2026-05-14", "unit": "pp"},
+                "hy_credit_spread":  {"value": 3.12, "status": "ok",
+                                       "as_of": "2026-05-14", "unit": "pp"},
+                "vix":               {"value": 14.2, "status": "ok",
+                                       "as_of": "2026-05-14", "unit": "index"},
+                "breakeven_inflation": {"value": 2.32, "status": "ok",
+                                         "as_of": "2026-05-14", "unit": "%"},
+            },
+        }
+        out = _summarise_for_prompt(results)
+        self.assertIn("macro", out)
+        # Engine keys are mapped to short labels the prompt will reference.
+        self.assertEqual(set(out["macro"]),
+                          {"yield_curve_10y2y", "hy_oas", "vix", "breakeven"})
+        self.assertAlmostEqual(out["macro"]["hy_oas"]["value"], 3.12, places=4)
+
+    def test_macro_block_omits_missing_series(self) -> None:
+        from ai_narrative import _summarise_for_prompt
+        results = {"macro_drivers": {
+            "vix": {"value": None, "status": "missing"},
+            "yield_curve_10y2y": {"value": 0.20, "status": "ok",
+                                   "as_of": "2026-05-14", "unit": "pp"},
+        }}
+        out = _summarise_for_prompt(results)
+        self.assertIn("yield_curve_10y2y", out["macro"])
+        self.assertNotIn("vix", out["macro"])    # value None → dropped
+
+    def test_macro_block_empty_when_drivers_unavailable(self) -> None:
+        from ai_narrative import _summarise_for_prompt
+        out = _summarise_for_prompt({})
+        self.assertEqual(out["macro"], {})
+
+
+class RegimeConfirmationTest(unittest.TestCase):
+    """generate_narrative must surface a structured regime_confirmation cell
+    (DEEP only) and the fallback / payload paths must carry the same shape."""
+
+    def test_fallback_returns_empty_confirmation_shape(self) -> None:
+        from ai_narrative import _fallback_narrative
+        out = _fallback_narrative({"portfolio_metrics": {"Sharpe_Ratio": 1.0}},
+                                   "deep")
+        self.assertEqual(out["regime_confirmation"],
+                          {"stance": "", "summary": "", "signals": []})
+
+    def test_payload_passes_through_confirmation(self) -> None:
+        from pdf_payload import build_payload
+        results = PayloadBuildTest()._results()
+        ai = {"verdict": "ok", "bullets": ["a"],
+              "regime_confirmation": {
+                  "stance": "confirms",
+                  "summary": "Все сигналы согласны с Expansion.",
+                  "signals": ["✓ yield curve +0.18", "✓ VIX 14"],
+              }}
+        p = build_payload(results, "deep", ai_summary=ai)
+        self.assertEqual(p["regime_confirmation"]["stance"], "confirms")
+        self.assertEqual(len(p["regime_confirmation"]["signals"]), 2)
+
+    def test_payload_defaults_when_summary_missing_key(self) -> None:
+        from pdf_payload import build_payload
+        results = PayloadBuildTest()._results()
+        p = build_payload(results, "deep",
+                          ai_summary={"verdict": "v", "bullets": ["a"]})
+        # Default shape — template's {% if _rc.stance %} guard then hides.
+        self.assertEqual(p["regime_confirmation"],
+                          {"stance": "", "summary": "", "signals": []})
+
+    def test_template_renders_confirmation_box(self) -> None:
+        from jinja2 import Environment, FileSystemLoader, select_autoescape
+        from pdf_payload import build_payload
+        results = PayloadBuildTest()._results()
+        p = build_payload(results, "deep", ai_summary={
+            "verdict": "v", "bullets": ["a"],
+            "regime_confirmation": {
+                "stance":  "partial",
+                "summary": "Тестовый summary подтверждения режима.",
+                "signals": ["✓ кривая +0.18", "⚠ HY OAS растёт"],
+            },
+        })
+        tdir = SRC / "templates"
+        env  = Environment(loader=FileSystemLoader(str(tdir)),
+                            autoescape=select_autoescape(["html"]))
+        html = env.get_template("report_deep_v3.html").render(
+            data=p, user_id="t", report_type="Тест",
+            generated_at="2026-05-22")
+        # Both label flavours appear: badge for partial, plus both signals.
+        self.assertIn("Частичное подтверждение", html)
+        self.assertIn("кривая +0.18", html)
+        self.assertIn("HY OAS растёт", html)
+
+
 if __name__ == "__main__":
     unittest.main()
