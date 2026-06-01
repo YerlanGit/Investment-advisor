@@ -173,6 +173,63 @@ def _get_annual_values(
     return [None] * n
 
 
+# ── Shared CompanyFacts fetch (retry + single cache) ─────────────────────────
+# SEC limits to 10 req/s.  get_critical_fundamentals() and
+# get_extended_fundamentals() used to GET the same companyfacts/CIK{cik}.json
+# SEPARATELY — two calls per ticker, run from a 3-worker pool, which bursts
+# past the rate limit.  When the *extended* fetch 429s it returned {}, so
+# net_income / book_equity / shares_outstanding vanished → V-pillar = 0 for
+# every asset.  One cached, retry-backed fetch removes both problems.
+_SEC_RETRY_STATUS = frozenset({429, 500, 502, 503, 504})
+_SEC_MAX_RETRIES  = 3
+_SEC_BACKOFF_BASE  = 0.5
+
+
+@functools.lru_cache(maxsize=256)
+def _fetch_company_facts(ticker: str) -> dict:
+    """
+    Fetch (and cache) the full CompanyFacts JSON for a ticker, with
+    exponential backoff on 429/5xx.  Returns {} for skip-listed tickers,
+    unknown CIKs, or after exhausted retries.  Cached so the critical and
+    extended scans share ONE network round-trip per ticker.
+    """
+    if _should_skip(ticker):
+        return {}
+    cik = _ticker_to_cik(ticker)
+    if not cik:
+        logger.debug("[SEC EDGAR] CIK не найден для %s", ticker)
+        return {}
+    url = f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json"
+    for attempt in range(_SEC_MAX_RETRIES):
+        try:
+            r = requests.get(url, headers=_SEC_HEADERS, timeout=_SEC_TIMEOUT)
+        except Exception as exc:
+            logger.warning("[SEC EDGAR] %s network error (%s), retry %d/%d",
+                            ticker, exc, attempt + 1, _SEC_MAX_RETRIES)
+            time.sleep(_SEC_BACKOFF_BASE * (2 ** attempt))
+            continue
+        if r.status_code in _SEC_RETRY_STATUS and attempt < _SEC_MAX_RETRIES - 1:
+            try:
+                retry_after = float(r.headers.get("Retry-After", 0))
+            except (TypeError, ValueError):
+                retry_after = 0.0
+            delay = max(retry_after, _SEC_BACKOFF_BASE * (2 ** attempt))
+            logger.warning("[SEC EDGAR] %s → HTTP %s, backoff %.1fs (%d/%d)",
+                            ticker, r.status_code, delay,
+                            attempt + 1, _SEC_MAX_RETRIES)
+            time.sleep(delay)
+            continue
+        if r.status_code != 200:
+            logger.warning("[SEC EDGAR] %s → HTTP %s (final)", ticker, r.status_code)
+            return {}
+        try:
+            return r.json()
+        except Exception as exc:
+            logger.warning("[SEC EDGAR] %s JSON parse failed: %s", ticker, exc)
+            return {}
+    return {}
+
+
 # ── Tickers to skip (no 10-K on SEC) ────────────────────────────────────────
 _SKIP_SUFFIXES = (".AIX", ".KZ", ".IL")
 _SKIP_ETFS = frozenset({
@@ -212,22 +269,8 @@ def get_critical_fundamentals(ticker: str) -> dict:
         operating_margin, debt_to_assets, roe, revenue_growth_yoy,
         filing_date, revenue, net_income
     """
-    if _should_skip(ticker):
-        return {}
-
-    cik = _ticker_to_cik(ticker)
-    if not cik:
-        logger.debug("[SEC EDGAR] CIK не найден для %s", ticker)
-        return {}
-
-    try:
-        url = f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json"
-        r = requests.get(url, headers=_SEC_HEADERS, timeout=_SEC_TIMEOUT)
-        r.raise_for_status()
-        facts = r.json()
-    except Exception as exc:
-        logger.warning("[SEC EDGAR] Ошибка загрузки CompanyFacts для %s: %s", ticker, exc)
-        time.sleep(0.15)
+    facts = _fetch_company_facts(ticker)
+    if not facts:
         return {}
 
     us_gaap = facts.get("facts", {}).get("us-gaap", {})
@@ -314,21 +357,11 @@ def get_extended_fundamentals(ticker: str) -> dict:
         cfo              : float | None
         capex            : float | None
     """
-    if _should_skip(ticker):
-        return {}
-
-    cik = _ticker_to_cik(ticker)
-    if not cik:
-        return {}
-
-    try:
-        url = f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json"
-        r = requests.get(url, headers=_SEC_HEADERS, timeout=_SEC_TIMEOUT)
-        r.raise_for_status()
-        facts = r.json()
-    except Exception as exc:
-        logger.warning("[SEC EDGAR] Extended fetch failed for %s: %s", ticker, exc)
-        time.sleep(0.15)
+    # Reuses the SAME cached CompanyFacts payload as the critical scan — no
+    # second network round-trip, so a rate-limited extended fetch can no
+    # longer wipe out net_income / book_equity / shares → V-pillar.
+    facts = _fetch_company_facts(ticker)
+    if not facts:
         return {}
 
     us_gaap = facts.get("facts", {}).get("us-gaap", {})
