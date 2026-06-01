@@ -157,6 +157,13 @@ def _sanitize_secret(text: object) -> str:
 HISTORY_KEEP_DAYS = 90        # local cache trims to this window
 HTTP_TIMEOUT_SEC  = 8.0
 
+# Retry policy for transient FRED failures (429 Too Many Requests, 5xx).
+# Exponential backoff: 0.5s, 1s, 2s — bounded so a cold start can never
+# block the whole report for more than a few seconds.
+HTTP_MAX_RETRIES  = 3
+HTTP_BACKOFF_BASE = 0.5       # seconds; delay = BACKOFF_BASE * 2**attempt
+_RETRY_STATUS     = frozenset({429, 500, 502, 503, 504})
+
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -256,6 +263,7 @@ class MacroFeed:
                   http_get:  Optional[Callable] = None,
                   now:       Optional[Callable[[], datetime]] = None,
                   catalog:   Optional[list[SeriesSpec]] = None,
+                  sleep:     Optional[Callable[[float], None]] = None,
                   ):
         self._api_key   = (api_key if api_key is not None
                             else os.getenv("FRED_API_KEY", "")).strip()
@@ -264,6 +272,7 @@ class MacroFeed:
         self._get       = http_get or requests.get
         self._now       = now or (lambda: datetime.now(timezone.utc))
         self._catalog   = list(catalog or MACRO_SERIES_CATALOG)
+        self._sleep     = sleep or time.sleep   # injectable for tests
 
     # ── Public API ──────────────────────────────────────────────────────
 
@@ -324,6 +333,39 @@ class MacroFeed:
             return False
         return (self._now() - t).total_seconds() < self._ttl_sec
 
+    def _request_with_retry(self, params: dict):
+        """
+        GET FRED with exponential backoff on 429 / 5xx.
+
+        FRED rate-limits bursts (a cold start fires 4 series at once →
+        429 Too Many Requests).  We honour a ``Retry-After`` header when
+        present, otherwise fall back to 0.5s·2^attempt.  The final attempt's
+        error propagates so the caller can fall back to disk cache.
+        """
+        last_exc: Optional[Exception] = None
+        for attempt in range(HTTP_MAX_RETRIES):
+            resp = self._get(FRED_API_ROOT, params=params, timeout=HTTP_TIMEOUT_SEC)
+            status = getattr(resp, "status_code", 200)
+            if status in _RETRY_STATUS and attempt < HTTP_MAX_RETRIES - 1:
+                retry_after = 0.0
+                try:
+                    retry_after = float(resp.headers.get("Retry-After", 0))
+                except (AttributeError, TypeError, ValueError):
+                    retry_after = 0.0
+                delay = max(retry_after, HTTP_BACKOFF_BASE * (2 ** attempt))
+                logger.warning("MacroFeed: %s → HTTP %s, retry %d/%d in %.1fs",
+                                params.get("series_id"), status,
+                                attempt + 1, HTTP_MAX_RETRIES, delay)
+                self._sleep(delay)
+                continue
+            resp.raise_for_status()   # success, or final non-retryable error
+            return resp
+        # Exhausted retries on a retryable status — surface the last status.
+        resp.raise_for_status()
+        if last_exc:
+            raise last_exc
+        return resp
+
     def _http_fetch(self, spec: SeriesSpec) -> list[dict]:
         """Hit FRED and return [{date, value}, ...] (chronological, oldest→newest)."""
         params = {
@@ -338,8 +380,7 @@ class MacroFeed:
             "sort_order":   "desc",
             "limit":        HISTORY_KEEP_DAYS,
         }
-        resp = self._get(FRED_API_ROOT, params=params, timeout=HTTP_TIMEOUT_SEC)
-        resp.raise_for_status()
+        resp = self._request_with_retry(params)
         body = resp.json()
         if not isinstance(body, dict) or "observations" not in body:
             raise ValueError(f"FRED response missing 'observations': {body!r}")

@@ -18,6 +18,7 @@ import asyncio
 import logging
 import math
 import os
+import signal
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -29,8 +30,13 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from aiogram import Bot, Dispatcher, F, Router
+from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
-from aiogram.exceptions import TelegramConflictError
+from aiogram.exceptions import (
+    TelegramConflictError,
+    TelegramNetworkError,
+    TelegramServerError,
+)
 from aiogram.filters import CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -2035,33 +2041,103 @@ def build_dispatcher() -> Dispatcher:
 _CONFLICT_MAX_RETRIES = 5
 _CONFLICT_RETRY_DELAY = 10  # seconds
 
+# aiogram session — bounded request timeout so a hung Telegram call can't
+# wedge the long-poll loop indefinitely (root of the TelegramNetworkError
+# "Request timeout" + TimeoutError seen in the logs).
+_SESSION_TIMEOUT_S = 60
+
+
+class _RetryingSession(AiohttpSession):
+    """
+    AiohttpSession that retries transient Telegram transport failures
+    (TelegramNetworkError "Request timeout", TelegramServerError "Bad
+    Gateway"/5xx) with exponential backoff.  TelegramConflictError is NOT
+    retried here — it is a multi-instance condition handled in main().
+    """
+
+    _MAX_RETRIES   = 3
+    _BACKOFF_BASE  = 1.0   # seconds: 1s, 2s, 4s
+
+    async def make_request(self, bot, method, timeout=None):  # type: ignore[override]
+        last_exc: Exception | None = None
+        for attempt in range(self._MAX_RETRIES):
+            try:
+                return await super().make_request(bot, method, timeout=timeout)
+            except (TelegramNetworkError, TelegramServerError) as exc:
+                last_exc = exc
+                if attempt == self._MAX_RETRIES - 1:
+                    break
+                delay = self._BACKOFF_BASE * (2 ** attempt)
+                logger.warning("Telegram transport error (%s) — retry %d/%d in %.0fs",
+                               type(exc).__name__, attempt + 1, self._MAX_RETRIES, delay)
+                await asyncio.sleep(delay)
+        assert last_exc is not None
+        raise last_exc
+
 
 async def main() -> None:
     await init_db()
-    bot = Bot(token=BOT_TOKEN)
+
+    # Bounded-timeout, auto-retrying transport for Telegram API calls.
+    session = _RetryingSession(timeout=_SESSION_TIMEOUT_S)
+    bot = Bot(token=BOT_TOKEN, session=session)
     dp  = build_dispatcher()
-    logger.info("RAMP Bot запущен.")
-    for attempt in range(_CONFLICT_MAX_RETRIES):
+
+    # Graceful shutdown: Cloud Run sends SIGTERM before tearing the
+    # container down on a new deploy.  Stopping the poller and CLOSING the
+    # session makes Telegram release the getUpdates lock immediately, so the
+    # incoming instance does not collide → no TelegramConflictError on deploy.
+    stop_event = asyncio.Event()
+
+    def _request_stop(signame: str) -> None:
+        logger.info("Получен сигнал %s — graceful shutdown.", signame)
+        stop_event.set()
+
+    loop = asyncio.get_running_loop()
+    for _sig in (signal.SIGTERM, signal.SIGINT):
         try:
-            await dp.start_polling(
-                bot,
-                allowed_updates=dp.resolve_used_update_types(),
-                drop_pending_updates=True,
-            )
-            break
-        except TelegramConflictError:
-            if attempt < _CONFLICT_MAX_RETRIES - 1:
-                logger.warning(
-                    "Конфликт (409), жду %ds перед попыткой %d/%d",
-                    _CONFLICT_RETRY_DELAY, attempt + 2, _CONFLICT_MAX_RETRIES,
+            loop.add_signal_handler(_sig, _request_stop, _sig.name)
+        except (NotImplementedError, RuntimeError):
+            pass   # add_signal_handler unsupported (e.g. non-main thread)
+
+    async def _watch_shutdown() -> None:
+        await stop_event.wait()
+        await dp.stop_polling()
+
+    logger.info("RAMP Bot запущен.")
+    watcher = asyncio.create_task(_watch_shutdown())
+    try:
+        for attempt in range(_CONFLICT_MAX_RETRIES):
+            try:
+                # Make sure no webhook is registered (webhook + polling = 409)
+                # and drop the backlog so a redeploy starts clean.
+                await bot.delete_webhook(drop_pending_updates=True)
+                await dp.start_polling(
+                    bot,
+                    allowed_updates=dp.resolve_used_update_types(),
+                    drop_pending_updates=True,
+                    handle_signals=False,   # we manage SIGTERM ourselves
                 )
-                await asyncio.sleep(_CONFLICT_RETRY_DELAY)
-            else:
-                logger.error(
-                    "Конфликт не разрешился за %d попыток. Завершение.",
-                    _CONFLICT_MAX_RETRIES,
-                )
-                raise
+                break
+            except TelegramConflictError:
+                if stop_event.is_set():
+                    break
+                if attempt < _CONFLICT_MAX_RETRIES - 1:
+                    logger.warning(
+                        "Конфликт (409), жду %ds перед попыткой %d/%d",
+                        _CONFLICT_RETRY_DELAY, attempt + 2, _CONFLICT_MAX_RETRIES,
+                    )
+                    await asyncio.sleep(_CONFLICT_RETRY_DELAY)
+                else:
+                    logger.error(
+                        "Конфликт не разрешился за %d попыток. Завершение.",
+                        _CONFLICT_MAX_RETRIES,
+                    )
+                    raise
+    finally:
+        watcher.cancel()
+        await bot.session.close()
+        logger.info("Сессия Telegram закрыта.")
 
 
 # if __name__ == "__main__":

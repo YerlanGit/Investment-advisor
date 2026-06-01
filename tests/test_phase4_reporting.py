@@ -12,8 +12,9 @@ import math
 import os
 import sys
 import unittest
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from unittest import mock
 
 import numpy as np
 import pandas as pd
@@ -1210,9 +1211,10 @@ class SimulatorTest(unittest.TestCase):
 
 class _FakeResponse:
     """Minimal stand-in for requests.Response used in MacroFeed tests."""
-    def __init__(self, payload: dict, status: int = 200):
+    def __init__(self, payload: dict, status: int = 200, headers: dict | None = None):
         self._payload = payload
         self.status_code = status
+        self.headers = headers or {}
     def raise_for_status(self) -> None:
         if self.status_code >= 400:
             raise RuntimeError(f"HTTP {self.status_code}")
@@ -2439,6 +2441,125 @@ class RegimeConfirmationTest(unittest.TestCase):
         self.assertIn("Частичное подтверждение", html)
         self.assertIn("кривая +0.18", html)
         self.assertIn("HY OAS растёт", html)
+
+
+class MacroFeed429BackoffTest(unittest.TestCase):
+    """FRED 429 → exponential backoff, then success on a later attempt."""
+
+    def setUp(self) -> None:
+        import tempfile
+        self._cache_dir = Path(tempfile.mkdtemp(prefix="macro_429_"))
+
+    def tearDown(self) -> None:
+        import shutil
+        shutil.rmtree(self._cache_dir, ignore_errors=True)
+
+    def _now(self):
+        from datetime import datetime, timezone
+        return datetime(2026, 6, 1, 9, 0, tzinfo=timezone.utc)
+
+    def test_retries_on_429_then_succeeds(self) -> None:
+        from services.macro_data import MacroFeed
+        ok_body = _fake_fred_observations([("2026-05-29", 2.32)])
+        calls = {"n": 0}
+        slept: list[float] = []
+
+        def flaky_get(url, params=None, timeout=None):
+            calls["n"] += 1
+            # First call 429 (with Retry-After), second call 200.
+            if calls["n"] == 1:
+                return _FakeResponse({}, status=429, headers={"Retry-After": "0"})
+            return _FakeResponse(ok_body)
+
+        feed = MacroFeed(api_key="K",
+                          cache_dir=self._cache_dir,
+                          http_get=flaky_get,
+                          now=self._now,
+                          sleep=slept.append,
+                          catalog=[s for s in __import__(
+                              "services.macro_data", fromlist=["MACRO_SERIES_CATALOG"]
+                          ).MACRO_SERIES_CATALOG if s.series_id == "T10YIE"])
+        out = feed.get_regime_drivers()
+
+        self.assertGreaterEqual(calls["n"], 2)          # retried at least once
+        self.assertEqual(len(slept), 1)                  # backed off exactly once
+        self.assertAlmostEqual(out["breakeven_inflation"]["value"], 2.32, places=2)
+
+    def test_persistent_429_falls_back_to_error_status(self) -> None:
+        from services.macro_data import MacroFeed
+        def always_429(url, params=None, timeout=None):
+            return _FakeResponse({}, status=429, headers={})
+        feed = MacroFeed(api_key="K", cache_dir=self._cache_dir,
+                          http_get=always_429, now=self._now,
+                          sleep=lambda *_: None,
+                          catalog=[s for s in __import__(
+                              "services.macro_data", fromlist=["MACRO_SERIES_CATALOG"]
+                          ).MACRO_SERIES_CATALOG if s.series_id == "VIXCLS"])
+        out = feed.get_regime_drivers()
+        # No cache to fall back to → status 'error', never raises.
+        self.assertEqual(out["vix"]["status"], "error")
+
+
+class CDSStaleGateTest(unittest.TestCase):
+    """The HY-OAS proxy lags a few business days; the gate must tolerate a
+    weekend-induced ~4-day stale window but still reject genuinely dead feeds."""
+
+    def test_four_day_old_proxy_accepted(self) -> None:
+        from finance.cds_feed import CDSQualityGate
+        gate = CDSQualityGate()
+        ts = datetime.now(timezone.utc) - timedelta(days=4, hours=7)  # ~4.3d (Mon)
+        ok, q, reason = gate.validate(bps=312.0, timestamp=ts, base_quality="C")
+        self.assertTrue(ok)
+        self.assertIsNone(reason)
+
+    def test_eight_day_old_proxy_rejected(self) -> None:
+        from finance.cds_feed import CDSQualityGate
+        gate = CDSQualityGate()
+        ts = datetime.now(timezone.utc) - timedelta(days=8)
+        ok, q, reason = gate.validate(bps=312.0, timestamp=ts, base_quality="C")
+        self.assertFalse(ok)
+        self.assertTrue(reason.startswith("stale:"))
+
+
+class SECSharedFetchTest(unittest.TestCase):
+    """get_critical_fundamentals + get_extended_fundamentals must share ONE
+    cached CompanyFacts fetch — the redundant 2nd fetch was the V-pillar
+    killer (429 on the extended call → net_income/book_equity/shares None)."""
+
+    def test_company_facts_fetched_once_and_cached(self) -> None:
+        import finance.sec_edgar as se
+        se._fetch_company_facts.cache_clear()
+        calls = {"n": 0}
+        sample = {"facts": {"us-gaap": {
+            "NetIncomeLoss": {"units": {"USD": [
+                {"form": "10-K", "fp": "FY", "end": "2025-09-30", "val": 9.9e10}]}},
+        }}}
+
+        class _Resp:
+            status_code = 200
+            headers: dict = {}
+            def json(self): return sample
+
+        def fake_get(url, headers=None, timeout=None):
+            calls["n"] += 1
+            return _Resp()
+
+        with mock.patch.object(se, "requests") as m_req, \
+             mock.patch.object(se, "_ticker_to_cik", return_value="0000320193"), \
+             mock.patch.object(se, "_should_skip", return_value=False):
+            m_req.get.side_effect = fake_get
+            a = se._fetch_company_facts("AAPL")
+            b = se._fetch_company_facts("AAPL")   # cache hit, no 2nd network call
+        self.assertEqual(calls["n"], 1)
+        self.assertIs(a, b)
+        self.assertIn("facts", a)
+        se._fetch_company_facts.cache_clear()
+
+    def test_etf_skipped_without_network(self) -> None:
+        import finance.sec_edgar as se
+        se._fetch_company_facts.cache_clear()
+        for etf in ("GLD", "SLV", "TLT", "FFSPC6.1028.AIX"):
+            self.assertEqual(se._fetch_company_facts(etf), {})
 
 
 if __name__ == "__main__":

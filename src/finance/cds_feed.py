@@ -90,7 +90,13 @@ class CDSQualityGate:
 
     MIN_BPS         = 1.0
     MAX_BPS         = 3000.0
-    MAX_STALE_DAYS  = 3
+    # The free-tier credit proxy is the FRED HY OAS (BAMLH0A0HYM2), which is
+    # published with a 1-2 business-day lag.  Across a weekend the freshest
+    # available datapoint is routinely 3-4 calendar days old, so a 3-day gate
+    # rejected EVERY ticker every Monday ("stale:4.3d").  7 calendar days
+    # (≈5 business + weekend buffer) matches macro_data's HY freshness window
+    # and keeps a genuinely abandoned feed gated.
+    MAX_STALE_DAYS  = 7
     AGREEMENT_BAND  = 0.25  # 25% spread between two sources is acceptable
 
     def validate(self,
