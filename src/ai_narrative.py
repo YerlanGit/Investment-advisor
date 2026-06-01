@@ -404,9 +404,11 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
         'положительный = портфель любит дешёвые акции, отрицательный = наоборот. '
         f'Режим {regime_label}: Barclays рекомендует Value>Growth — совпадает ли портфель? '
         'Назови конкретный фактор для наращивания и тикеры для этого [Quant Engine][Barclays]",\n'
-        '  "ai_4pillar_comment": "≤200 знаков — 4-Pillar Scoring (F=фундаментал, V=оценка P/E и P/B '
-        'из SEC EDGAR, T=техника, C=кредит): у каких позиций баллы расходятся (напр. F высокий '
-        'но V низкий = дорого при хорошем бизнесе)? Как это связано с выводами в ai_holdings_comment [SEC EDGAR]",\n'
+        '  "ai_4pillar_comment": "≤240 знаков — 4-Pillar (F=фундаментал, V=оценка, T=техника, '
+        'C=кредит). ВАЖНО про V простыми словами: оценка сравнивается с НОРМОЙ СЕКТОРА, а не '
+        'со всем рынком — у технологий P/E высокий ОТ ПРИРОДЫ (платим за рост), поэтому V≈0 у '
+        'теха значит «оценён справедливо ДЛЯ своего сектора», а НЕ «дорого». Отметь позиции с '
+        'расходящимися сигналами (F высокий, T низкий = хороший бизнес на спаде) [SEC EDGAR]",\n'
         '  "ai_stress_comment": "≤220 знаков — в худшем сценарии: насколько падает портфель и '
         'какие позиции пострадают сильнее всего (свяжи с TRC из ai_holdings_comment и '
         'факторными бетами из ai_factor_comment). Конкретные цифры просадки [Quant Engine]",\n'
@@ -642,7 +644,12 @@ def generate_narrative(results: dict, tier: str = "base",
     All output is in Russian.
     """
     api_key  = os.getenv("ANTHROPIC_API_KEY")
-    used_rag = bool(market_context) and tier == "deep"
+    # RAG is consulted for BOTH tiers (_fetch_rag_context runs tier-agnostic
+    # in tg_bot), and both Haiku (BASE) and Sonnet (DEEP) receive the bank
+    # context in their prompt.  Gating used_rag to deep-only made the BASE
+    # report's QC panel claim "RAG: не использован" even when bank excerpts
+    # were retrieved and cited — flag the ACTUAL availability instead.
+    used_rag = bool(market_context)
 
     if not api_key:
         logger.warning("ANTHROPIC_API_KEY отсутствует — используется fallback-нарратив.")
