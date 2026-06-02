@@ -226,13 +226,21 @@ def compute_benchmark_stats(port_log: "pd.Series | None",
         return None
     p = aligned.iloc[:, 0].values
     b = aligned.iloc[:, 1].values
-    te         = float(np.std(p - b, ddof=1) * np.sqrt(trading_days))
-    port_ann   = float(np.exp(float(np.mean(p)) * trading_days) - 1.0)
-    bm_ann     = float(np.exp(float(np.mean(b)) * trading_days) - 1.0)
-    excess_ann = port_ann - bm_ann
+    # Self-consistent units: numerator and denominator BOTH on annualised
+    # *log* space.  Tracking Error is std(p-b)·√T (already log-additive),
+    # and the IR numerator is also taken in log space (mean(p-b)·T) so the
+    # ratio is dimensionless and free of geometric/arithmetic skew.  The
+    # geometric annualised display returns are kept for the caller's
+    # display panels but are NOT used in the IR computation.
+    diff_log         = p - b
+    excess_ann_log   = float(np.mean(diff_log) * trading_days)
+    te               = float(np.std(diff_log, ddof=1) * np.sqrt(trading_days))
+    port_ann         = float(np.exp(float(np.mean(p)) * trading_days) - 1.0)
+    bm_ann           = float(np.exp(float(np.mean(b)) * trading_days) - 1.0)
+    excess_ann       = port_ann - bm_ann
     return {
         "tracking_error":    te,
-        "information_ratio": (excess_ann / te) if te > 1e-12 else 0.0,
+        "information_ratio": (excess_ann_log / te) if te > 1e-12 else 0.0,
         "excess_ann":        excess_ann,
         "port_ann_return":   port_ann,
         "bm_ann_return":     bm_ann,

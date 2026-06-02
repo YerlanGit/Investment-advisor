@@ -159,14 +159,23 @@ class RegimeClassifier:
             return None
 
         # ── Quadrant decision ─────────────────────────────────────────────
-        if growth_score >= 0 and cycle_score >= 0:
+        # Maps the (growth, cycle) plane to the four regimes exactly as
+        # drawn in the module docstring above:
+        #   cycle>0  ·  growth>0 → EXPANSION   (risk-on, late cycle)
+        #   cycle>0  ·  growth<0 → RECOVERY    (risk-on, early cycle)
+        #   cycle<0  ·  growth>0 → SLOWDOWN    (risk-off, late cycle)
+        #   cycle<0  ·  growth<0 → RECESSION   (risk-off, contraction)
+        # The prior code swapped RECOVERY and SLOWDOWN, so days with
+        # SPY>IEF (growth+) and XLY<XLP (cycle−) were mis-labelled "Recovery"
+        # instead of "Slowdown" — economically opposite signals.
+        if   cycle_score >= 0 and growth_score >= 0:
             regime = "Expansion"
-        elif growth_score >= 0 and cycle_score < 0:
+        elif cycle_score >= 0 and growth_score <  0:
             regime = "Recovery"
-        elif growth_score < 0 and cycle_score < 0:
-            regime = "Recession"
-        else:
+        elif cycle_score <  0 and growth_score >= 0:
             regime = "Slowdown"
+        else:
+            regime = "Recession"
 
         # Confidence: euclidean distance from origin scaled to [0,1].
         # Threshold 0.10 (10% 60-day spread) maps to 1.0; at |score|=0.05

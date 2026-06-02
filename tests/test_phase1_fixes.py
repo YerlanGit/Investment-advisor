@@ -146,12 +146,24 @@ class IRScaleTest(unittest.TestCase):
         self.assertIn("Benchmark_Ann_Return", bm)
         self.assertIn("Information_Ratio",    bm)
 
-        # IR consistency: |IR| = |excess_ann / TE| within numeric tolerance.
+        # IR scale sanity (post log-space fix): IR and excess_ann SHARE the
+        # same sign, and IR's magnitude is on the same order as
+        # excess_ann/TE (within ~10% — the difference between the geometric
+        # excess displayed and the log excess used in the IR numerator is
+        # second-order in daily returns).
         ir       = bm["Information_Ratio"]
         exc_ann  = bm["Excess_Return_Ann"]
         te       = bm["Tracking_Error"]
         if te is not None and te > 0 and ir is not None and exc_ann is not None:
-            self.assertAlmostEqual(ir, exc_ann / te, places=6)
+            if exc_ann == 0:
+                self.assertAlmostEqual(ir, 0.0, places=6)
+            else:
+                self.assertGreater(ir * exc_ann, 0,
+                                    "IR must share sign with excess_ann")
+                # Relative magnitude check (≤ 15% deviation is well within
+                # the geometric-vs-log gap on realistic daily series).
+                naive_ir = exc_ann / te
+                self.assertAlmostEqual(ir, naive_ir, delta=abs(naive_ir) * 0.15)
 
 
 class PdfPayloadTest(unittest.TestCase):

@@ -1445,8 +1445,10 @@
 }
 .idea-card.risk      { border-left-color: var(--amber); }
 .idea-card.diversify { border-left-color: var(--tech-blue); }
+.idea-card.rebalance { border-left-color: var(--ink-60); }
 .idea-card.grow      { border-left-color: var(--green); }
 .idea-card.hedge     { border-left-color: var(--ink-60); }
+.idea-card.rotation  { border-left-color: #6F8FB3; }
 
 .idea-head { cursor: pointer; }
 .idea-top {
@@ -1460,8 +1462,10 @@
 }
 .idea-card.risk      .idea-cat { color: var(--amber); }
 .idea-card.diversify .idea-cat { color: var(--tech-blue); }
+.idea-card.rebalance .idea-cat { color: var(--ink-60); }
 .idea-card.grow      .idea-cat { color: var(--green); }
 .idea-card.hedge     .idea-cat { color: var(--ink-60); }
+.idea-card.rotation  .idea-cat { color: #6F8FB3; }
 
 .idea-prio {
   font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.02em;
@@ -1958,18 +1962,28 @@
         {% set _div_pp   = _wf.diversification_pp or 0 %}
         {% set _tot_pp   = _wf.total_vol_pp or 0 %}
 
-        {# ─── Y-axis grid 0..20% (always shown) ──────────────────────────── #}
+        {# Dynamic vertical scale.  Earlier code hard-coded 7.35 px/pp
+           assuming a 0–20% axis; under leverage the standalone sum can
+           hit 40%+ and bars rendered with negative y (off-canvas).  We
+           now pick a y-max that always fits the data with a 5% headroom
+           and rebuild the grid labels accordingly. #}
+        {% set _y_top_pp = (([(_sum_pp or 0), (_tot_pp or 0), 20.0] | max)) %}
+        {% set _y_max_pp = (((_y_top_pp / 5.0) | round(0, 'ceil')) * 5.0) %}
+        {% if _y_max_pp <= 0 %}{% set _y_max_pp = 20.0 %}{% endif %}
+        {% set _y_scale  = 147.0 / _y_max_pp %}
+
+        {# ─── Y-axis grid (dynamic 0..N% in 4 even ticks) ─────────────────── #}
         <g font-family="IBM Plex Mono" font-size="8" fill="rgba(42,46,51,0.45)">
           <line x1="34" y1="165"    x2="352" y2="165"    stroke="#2A2E33" stroke-opacity="0.22" stroke-width="0.5"/>
           <text x="30" y="168" text-anchor="end">0%</text>
           <line x1="34" y1="128.25" x2="352" y2="128.25" stroke="#2A2E33" stroke-opacity="0.10" stroke-width="0.5" stroke-dasharray="2 3"/>
-          <text x="30" y="131" text-anchor="end">5%</text>
+          <text x="30" y="131" text-anchor="end">{{ '%.0f' % (_y_max_pp * 0.25) }}%</text>
           <line x1="34" y1="91.5"   x2="352" y2="91.5"   stroke="#2A2E33" stroke-opacity="0.10" stroke-width="0.5" stroke-dasharray="2 3"/>
-          <text x="30" y="94" text-anchor="end">10%</text>
+          <text x="30" y="94" text-anchor="end">{{ '%.0f' % (_y_max_pp * 0.50) }}%</text>
           <line x1="34" y1="54.75"  x2="352" y2="54.75"  stroke="#2A2E33" stroke-opacity="0.10" stroke-width="0.5" stroke-dasharray="2 3"/>
-          <text x="30" y="57" text-anchor="end">15%</text>
+          <text x="30" y="57" text-anchor="end">{{ '%.0f' % (_y_max_pp * 0.75) }}%</text>
           <line x1="34" y1="18"     x2="352" y2="18"     stroke="#2A2E33" stroke-opacity="0.10" stroke-width="0.5" stroke-dasharray="2 3"/>
-          <text x="30" y="21" text-anchor="end">20%</text>
+          <text x="30" y="21" text-anchor="end">{{ '%.0f' % _y_max_pp }}%</text>
         </g>
 
         {% if _N > 0 and _tot_pp > 0 %}
@@ -1990,8 +2004,8 @@
           {% for c in _contribs %}
             {% set _x_left = _plot_x0 + _step * (loop.index0 + 0.15) %}
             {% set _ns.cum = _ns.cum + (c.standalone_pp or 0) %}
-            {% set _y_top  = 165.0 - 7.35 * _ns.cum %}
-            {% set _h      = 7.35 * (c.standalone_pp or 0) %}
+            {% set _y_top  = 165.0 - _y_scale * _ns.cum %}
+            {% set _h      = _y_scale * (c.standalone_pp or 0) %}
             <rect x="{{ '%.1f' % _x_left }}" y="{{ '%.1f' % _y_top }}"
                   width="{{ '%.1f' % _bar_w }}" height="{{ '%.1f' % _h }}"
                   fill="url(#barAmber)" rx="1"/>
@@ -1999,15 +2013,15 @@
 
             {# Green: diversification — sits at amber-stack top, descends down #}
             {% set _green_x = _plot_x0 + _step * (_N + 0.15) %}
-            {% set _green_y = 165.0 - 7.35 * _sum_pp %}
-            {% set _green_h = 7.35 * _div_pp %}
+            {% set _green_y = 165.0 - _y_scale * _sum_pp %}
+            {% set _green_h = _y_scale * _div_pp %}
             <rect x="{{ '%.1f' % _green_x }}" y="{{ '%.1f' % _green_y }}"
                   width="{{ '%.1f' % _bar_w }}" height="{{ '%.1f' % _green_h }}"
                   fill="url(#barGreen)" rx="1"/>
 
             {# Blue: total diversified volatility — full bar from 0 #}
             {% set _blue_x = _plot_x0 + _step * (_N + 1 + 0.15) %}
-            {% set _blue_h = 7.35 * _tot_pp %}
+            {% set _blue_h = _y_scale * _tot_pp %}
             {% set _blue_y = 165.0 - _blue_h %}
             <rect x="{{ '%.1f' % _blue_x }}" y="{{ '%.1f' % _blue_y }}"
                   width="{{ '%.1f' % _bar_w }}" height="{{ '%.1f' % _blue_h }}"
@@ -2021,7 +2035,7 @@
             {% set _x_right_of_this = _plot_x0 + _step * (loop.index0 + 0.15) + _bar_w %}
             {% set _x_left_of_next  = _plot_x0 + _step * (loop.index0 + 1 + 0.15) %}
             {% set _ns2.cum = _ns2.cum + (c.standalone_pp or 0) %}
-            {% set _y_connect = 165.0 - 7.35 * _ns2.cum %}
+            {% set _y_connect = 165.0 - _y_scale * _ns2.cum %}
             <line x1="{{ '%.1f' % _x_right_of_this }}" y1="{{ '%.1f' % _y_connect }}"
                   x2="{{ '%.1f' % _x_left_of_next }}"  y2="{{ '%.1f' % _y_connect }}"/>
           {% endfor %}
@@ -2033,17 +2047,17 @@
           {% for c in _contribs %}
             {% set _cx = _plot_x0 + _step * (loop.index0 + 0.5) %}
             {% set _ns3.cum = _ns3.cum + (c.standalone_pp or 0) %}
-            {% set _y = 165.0 - 7.35 * _ns3.cum - 4 %}
+            {% set _y = 165.0 - _y_scale * _ns3.cum - 4 %}
             <text x="{{ '%.1f' % _cx }}" y="{{ '%.1f' % _y }}" text-anchor="middle">{{ '%.1f' % (c.standalone_pp or 0) }}%</text>
           {% endfor %}
             {# Green label — at top of green bar #}
             {% set _green_cx  = _plot_x0 + _step * (_N + 0.5) %}
-            {% set _green_lbl_y = 165.0 - 7.35 * _sum_pp - 4 %}
+            {% set _green_lbl_y = 165.0 - _y_scale * _sum_pp - 4 %}
             <text x="{{ '%.1f' % _green_cx }}" y="{{ '%.1f' % _green_lbl_y }}"
                   text-anchor="middle" fill="#2F7048" font-weight="600">−{{ '%.1f' % _div_pp }}%</text>
             {# Blue label — at top of blue bar #}
             {% set _blue_cx  = _plot_x0 + _step * (_N + 1 + 0.5) %}
-            {% set _blue_lbl_y = 165.0 - 7.35 * _tot_pp - 4 %}
+            {% set _blue_lbl_y = 165.0 - _y_scale * _tot_pp - 4 %}
             <text x="{{ '%.1f' % _blue_cx }}" y="{{ '%.1f' % _blue_lbl_y }}"
                   text-anchor="middle" fill="#23588F" font-weight="600">{{ '%.1f' % _tot_pp }}%</text>
           </g>
@@ -2187,7 +2201,7 @@
                 ${{ pnl_abs_raw }}
               {%- endif %}</span>
         </div>
-        <div class="h-cell action">{% if asset.is_cash %}<span class="badge hold">Кэш</span>{% else %}<span class="badge {{ action_class }}">{{ (asset.action or 'HOLD') | upper }}</span>{% endif %}</div>
+        <div class="h-cell action">{% if asset.is_cash %}{# Negative cash weight ⇒ margin debt — render with a dashed neutral badge so it cannot be confused with a profit. #}{% set _cash_label = 'Долг' if (asset.weight_pct_num is defined and asset.weight_pct_num < 0) else 'Кэш' %}{% set _cash_style = 'border-style:dashed; background:rgba(42,46,51,0.04); color:var(--ink-60);' if _cash_label == 'Долг' else '' %}<span class="badge hold" style="{{ _cash_style }}">{{ _cash_label }}</span>{% else %}<span class="badge {{ action_class }}">{{ (asset.action or 'HOLD') | upper }}</span>{% endif %}</div>
         <div class="h-cell caret-cell">
           <span class="h-toggle">
             <span class="t-more">Детали</span>
@@ -2278,7 +2292,11 @@
        for the long tail.  1% separator between slices keeps the
        banker-grade visual. #}
   {% set _palette  = ['var(--amber)', 'var(--tech-blue)', 'var(--green)', 'var(--ink-60)', 'var(--ink-40)'] %}
-  {% set _sectors  = data.sectors or [] %}
+  {# Pie wedge angles use the renormalised long-only payload
+     (`pie_chart_data` sums to 100%); falls back to raw `sectors`.  All
+     other tables (Action Plan, CoVe, Expected Effect) keep reading the
+     true `data.sectors` weights, including the >100% sum under leverage. #}
+  {% set _sectors  = data.pie_chart_data or data.sectors or [] %}
   {% set _gap_pp   = 1.0 %}
   {% set _top_sec  = _sectors[0] if _sectors else None %}
 
@@ -2287,6 +2305,22 @@
       <div class="sp-title">Структура по секторам</div>
       <div class="sp-sub">доля капитала · {{ (data.assets or []) | length }} позиций</div>
     </div>
+
+    {# Leverage / gross-exposure banner — visible ONLY when margin debt is
+       present (cash weight < -0.001).  Long-only portfolios skip this. #}
+    {% if data.leverage_metrics and data.leverage_metrics.is_leveraged %}
+    <div style="margin:0 14px 8px; padding:6px 10px; border-radius:4px;
+                background:#fff8e1; border-left:3px solid #e65100;
+                font-size:10px; color:#e65100; line-height:1.4;
+                font-family:var(--font-mono);">
+      Gross Exposure: <b>{{ '%.0f' % (data.leverage_metrics.gross_exposure * 100) }}%</b>
+      &nbsp;·&nbsp;
+      Leverage: <b>{{ '%.2f' % data.leverage_metrics.leverage_ratio }}x</b>
+      <span style="font-family:var(--font-ui); font-weight:400; color:#7a4a00;">
+        — пирог нормализован к 100% (только лонг)
+      </span>
+    </div>
+    {% endif %}
 
     <div class="sp-body">
     <div class="pie-wrap">
@@ -2506,8 +2540,11 @@
       {% for sc in (data.score_breakdown or []) %}
         {% set act_raw = (sc.action or 'HOLD') %}
         {% set act_up  = act_raw | upper %}
+        {# SELL must read red (act-sell), not amber (act-trim).  Reduction
+           verbs (Trim/Reduce) stay amber — they signal a softer action. #}
         {% if 'BUY' in act_up %}{% set act_cls = 'act-buy' %}
-        {% elif 'SELL' in act_up or 'TRIM' in act_up or 'REDUCE' in act_up %}{% set act_cls = 'act-trim' %}
+        {% elif 'SELL' in act_up %}{% set act_cls = 'act-sell' %}
+        {% elif 'TRIM' in act_up or 'REDUCE' in act_up %}{% set act_cls = 'act-trim' %}
         {% else %}{% set act_cls = 'act-hold' %}{% endif %}
         {% set total_raw = (sc.total | string) | replace('+','') | replace('−','-') %}
         {% set total_v = total_raw | float %}
@@ -2869,6 +2906,28 @@
       </div>
     </div>
     {% endif %}
+
+    {# Bank-RAG excerpts — data-driven from data.regime_rag_confirm.
+       The CSS for .rag-quotes / .rag-quote was already defined upstream
+       but no DOM was emitted, so the section was missing in production
+       whenever ChromaDB returned real bank-report snippets.  Hidden when
+       the engine returned no excerpts. #}
+    {% if data.regime_rag_confirm %}
+    <div class="rag-quotes" style="margin-top:14px;">
+      <div style="font-size:10px; font-weight:600; color:var(--ink-60);
+                  text-transform:uppercase; letter-spacing:.04em; margin-bottom:6px;">
+        Bank RAG · ChromaDB · cosine ≥ 0.72
+      </div>
+      {% for excerpt in data.regime_rag_confirm[:3] %}
+      <div class="rag-quote" style="background:var(--ai-bg); border-left:3px solid var(--tech-blue);
+                                     border-radius:3px; padding:8px 11px; margin-bottom:6px;
+                                     font-size:10.5px; line-height:1.5; font-style:italic;
+                                     color:var(--ink);">
+        “{{ excerpt }}”
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
   </div>
 
   <!-- ПОЛОСА ИСТОЧНИКОВ -->
@@ -2944,11 +3003,17 @@
       {% for idea in ns_ideas.flat %}
         {% set prio_cls = idea.priority or 'medium' %}
         {% set cat_low  = (idea.category or '') | lower %}
-        {% if 'риск' in cat_low %}{% set card_cls = 'risk' %}
+        {# Map idea category → colour stripe class.  We accept both English
+           and Russian keywords so a new bucket name doesn't silently lose
+           its category badge (was empty for "Ребалансировка" / "Защита" /
+           "Режимная ставка" → trailing-space `<div class="idea-card ">`). #}
+        {% if 'риск' in cat_low or 'risk' in cat_low %}{% set card_cls = 'risk' %}
         {% elif 'диверс' in cat_low %}{% set card_cls = 'diversify' %}
-        {% elif 'рост' in cat_low %}{% set card_cls = 'grow' %}
-        {% elif 'хедж' in cat_low or 'hedge' in cat_low %}{% set card_cls = 'hedge' %}
-        {% else %}{% set card_cls = '' %}{% endif %}
+        {% elif 'ребаланс' in cat_low or 'rebalance' in cat_low %}{% set card_cls = 'rebalance' %}
+        {% elif 'рост' in cat_low or 'grow' in cat_low %}{% set card_cls = 'grow' %}
+        {% elif 'хедж' in cat_low or 'hedge' in cat_low or 'защит' in cat_low %}{% set card_cls = 'hedge' %}
+        {% elif 'ротац' in cat_low or 'режим' in cat_low or 'rotation' in cat_low %}{% set card_cls = 'rotation' %}
+        {% else %}{% set card_cls = 'grow' %}{% endif %}
       <div class="idea-card {{ card_cls }}">
         <div class="idea-head" onclick="tgIdea(this)">
           <div class="idea-top">
@@ -2960,7 +3025,7 @@
           <div class="idea-why">{{ idea.rationale or '' }}</div>
           {% if idea.candidates %}
           <div class="idea-swap">
-            <div class="swap-label">3 кандидата (не в портфеле)</div>
+            <div class="swap-label">{{ idea.candidates | length }} кандидат{% if (idea.candidates | length) in [2,3,4] %}а{% elif (idea.candidates | length) > 4 %}ов{% endif %} (не в портфеле)</div>
             <div class="swap-tickers">
               {% for c in idea.candidates %}<span class="tk-chip">{{ c.ticker }}</span>{% endfor %}
             </div>
@@ -3074,12 +3139,16 @@
         {# data.action_plan — list of {ticker, action, reason, price, buy_zone,
            sell_target, stop_loss}.  Engine source: investment_logic.action_levels
            via pdf_payload._action_plan.  Action verb → badge class:
-             BUY/Buy   → act-buy ·  HOLD → act-hold ·  SELL/Trim/Reduce → act-trim. #}
+             BUY     → act-buy   (green)
+             SELL    → act-sell  (red — full liquidation)
+             TRIM    → act-trim  (amber — partial reduction)
+             HOLD    → act-hold  (grey). #}
         {% for r in (data.action_plan or []) %}
           {% set act_raw = (r.action or 'HOLD') | string %}
           {% set act_up  = act_raw | upper %}
           {% if 'BUY' in act_up %}{% set badge = 'act-buy' %}
-          {% elif 'SELL' in act_up or 'TRIM' in act_up or 'REDUCE' in act_up %}{% set badge = 'act-trim' %}
+          {% elif 'SELL' in act_up %}{% set badge = 'act-sell' %}
+          {% elif 'TRIM' in act_up or 'REDUCE' in act_up %}{% set badge = 'act-trim' %}
           {% else %}{% set badge = 'act-hold' %}{% endif %}
         <tr>
           <td class="l"><span class="ticker">{{ r.ticker }}</span></td>
@@ -3153,7 +3222,12 @@
             </span>
           </div>
           <div class="ef-delta {% if fav %}pos{% else %}neg{% endif %}">
-            {%- if d is not none -%}{{ '%+.1f' % d }} {{ unit_lbl }}{% else %}—{% endif -%}
+            {%- if d is not none -%}
+              {# Sharpe is a ratio — show its delta with 2 dp and no "пп" #}
+              {%- if fmt == 'raw' -%}{{ '%+.2f' % d }}{% if unit_lbl and unit_lbl != 'пп' %} {{ unit_lbl }}{% endif %}
+              {%- else -%}{{ '%+.1f' % d }} {{ unit_lbl }}
+              {%- endif -%}
+            {%- else -%}—{%- endif -%}
           </div>
         </div>
       {%- endif -%}
@@ -3251,7 +3325,8 @@
       <b style="color:var(--ink);">✓</b> — данные прошли QualityGate ·
       <b style="color:var(--amber);">!</b> — частичное покрытие или fallback на устаревший кэш ·
       <b style="color:var(--neg);">✗</b> — источник недоступен.
-      Документ не является ИИИ — только аналитическая рекомендация.
+      Документ не является ИИР (индивидуальной инвестиционной рекомендацией) —
+      только аналитический материал.
     </div>
   </div>
 

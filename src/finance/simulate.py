@@ -318,8 +318,14 @@ def simulate_after_plan(*,
     # ── Structural metrics (vol, max_TRC) — always computable ──────────────
     vol_before, erc_before = _structural_vol_and_trc(w_before, cov_ann)
     vol_after,  erc_after  = _structural_vol_and_trc(w_after,  cov_ann)
-    max_trc_before = float(np.max(np.abs(erc_before))) if erc_before.size else 0.0
-    max_trc_after  = float(np.max(np.abs(erc_after)))  if erc_after.size  else 0.0
+    # max_TRC is the largest CONCENTRATION of risk in a single position —
+    # only positive ERC contributors count.  Negative ERC means the asset is
+    # NET hedging the portfolio (its covariance with the rest is negative),
+    # so |erc| would mis-flag a strong diversifier as a concentration.
+    _pos_before    = erc_before[erc_before > 0] if erc_before.size else erc_before
+    _pos_after     = erc_after[erc_after > 0]   if erc_after.size  else erc_after
+    max_trc_before = float(np.max(_pos_before)) if _pos_before.size else 0.0
+    max_trc_after  = float(np.max(_pos_after))  if _pos_after.size  else 0.0
 
     # ── Sample-replay metrics — need daily returns ─────────────────────────
     sample_before: dict = {"cvar_95": float("nan"), "sharpe": float("nan"),
