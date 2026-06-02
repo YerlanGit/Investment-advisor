@@ -341,6 +341,31 @@ def simulate_after_plan(*,
             sample_before = _sample_metrics(dl_matrix, w_b_aligned, risk_free_rate)
             sample_after  = _sample_metrics(dl_matrix, w_a_aligned, risk_free_rate)
 
+    # ── Anchor "before" to the HEADLINE metrics, keep the simulated delta ──
+    # The sample-replay window differs from the engine's main Sharpe/CVaR/MDD
+    # calc, so the raw `sample_before` disagreed with the KPI strip (Sharpe
+    # 0.81 headline vs 0.76 here).  We anchor the displayed "before" to the
+    # headline value and carry the simulated Δ forward to "after", so the
+    # Expected-Effect panel is consistent with the rest of the report while
+    # still showing the true effect of the rebalance.
+    def _anchor(metric_key: str, headline_key: str) -> None:
+        headline = current_metrics.get(headline_key)
+        b, a = sample_before.get(metric_key), sample_after.get(metric_key)
+        if (headline is None or b is None or a is None
+                or (isinstance(b, float) and math.isnan(b))
+                or (isinstance(a, float) and math.isnan(a))):
+            return
+        try:
+            delta = float(a) - float(b)
+            sample_before[metric_key] = float(headline)
+            sample_after[metric_key]  = float(headline) + delta
+        except (TypeError, ValueError):
+            return
+
+    _anchor("sharpe",       "Sharpe_Ratio")
+    _anchor("cvar_95",      "CVaR_95_Daily")
+    _anchor("max_drawdown", "Max_Drawdown")
+
     # ── Composite risk index ───────────────────────────────────────────────
     cvar_b = sample_before["cvar_95"]
     cvar_a = sample_after["cvar_95"]
