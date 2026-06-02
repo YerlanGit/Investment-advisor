@@ -1414,18 +1414,28 @@
         {% set _div_pp   = _wf.diversification_pp or 0 %}
         {% set _tot_pp   = _wf.total_vol_pp or 0 %}
 
-        {# ─── Y-axis grid 0..20% (always shown) ──────────────────────────── #}
+        {# Dynamic vertical scale (mirrors the DEEP waterfall).  A fixed
+           0–20% axis clipped bars whenever the standalone sum exceeded 20%
+           (which is the norm — 4-5 names easily sum to ~40%), so BASE and
+           DEEP disagreed.  y-max = max(sum, total, 20)% rounded up to the
+           next 5%; 147 px of plot height maps to that range. #}
+        {% set _y_top_pp = (([(_sum_pp or 0), (_tot_pp or 0), 20.0] | max)) %}
+        {% set _y_max_pp = (((_y_top_pp / 5.0) | round(0, 'ceil')) * 5.0) %}
+        {% if _y_max_pp <= 0 %}{% set _y_max_pp = 20.0 %}{% endif %}
+        {% set _y_scale  = 147.0 / _y_max_pp %}
+
+        {# ─── Y-axis grid (dynamic 0..N% in 4 even ticks) ─────────────────── #}
         <g font-family="IBM Plex Mono" font-size="8" fill="rgba(42,46,51,0.45)">
           <line x1="34" y1="165"    x2="352" y2="165"    stroke="#2A2E33" stroke-opacity="0.22" stroke-width="0.5"/>
           <text x="30" y="168" text-anchor="end">0%</text>
           <line x1="34" y1="128.25" x2="352" y2="128.25" stroke="#2A2E33" stroke-opacity="0.10" stroke-width="0.5" stroke-dasharray="2 3"/>
-          <text x="30" y="131" text-anchor="end">5%</text>
+          <text x="30" y="131" text-anchor="end">{{ '%.0f' % (_y_max_pp * 0.25) }}%</text>
           <line x1="34" y1="91.5"   x2="352" y2="91.5"   stroke="#2A2E33" stroke-opacity="0.10" stroke-width="0.5" stroke-dasharray="2 3"/>
-          <text x="30" y="94" text-anchor="end">10%</text>
+          <text x="30" y="94" text-anchor="end">{{ '%.0f' % (_y_max_pp * 0.50) }}%</text>
           <line x1="34" y1="54.75"  x2="352" y2="54.75"  stroke="#2A2E33" stroke-opacity="0.10" stroke-width="0.5" stroke-dasharray="2 3"/>
-          <text x="30" y="57" text-anchor="end">15%</text>
+          <text x="30" y="57" text-anchor="end">{{ '%.0f' % (_y_max_pp * 0.75) }}%</text>
           <line x1="34" y1="18"     x2="352" y2="18"     stroke="#2A2E33" stroke-opacity="0.10" stroke-width="0.5" stroke-dasharray="2 3"/>
-          <text x="30" y="21" text-anchor="end">20%</text>
+          <text x="30" y="21" text-anchor="end">{{ '%.0f' % _y_max_pp }}%</text>
         </g>
 
         {% if _N > 0 and _tot_pp > 0 %}
@@ -1446,8 +1456,8 @@
           {% for c in _contribs %}
             {% set _x_left = _plot_x0 + _step * (loop.index0 + 0.15) %}
             {% set _ns.cum = _ns.cum + (c.standalone_pp or 0) %}
-            {% set _y_top  = 165.0 - 7.35 * _ns.cum %}
-            {% set _h      = 7.35 * (c.standalone_pp or 0) %}
+            {% set _y_top  = 165.0 - _y_scale * _ns.cum %}
+            {% set _h      = _y_scale * (c.standalone_pp or 0) %}
             <rect x="{{ '%.1f' % _x_left }}" y="{{ '%.1f' % _y_top }}"
                   width="{{ '%.1f' % _bar_w }}" height="{{ '%.1f' % _h }}"
                   fill="url(#barAmber)" rx="1"/>
@@ -1455,15 +1465,15 @@
 
             {# Green: diversification — sits at amber-stack top, descends down #}
             {% set _green_x = _plot_x0 + _step * (_N + 0.15) %}
-            {% set _green_y = 165.0 - 7.35 * _sum_pp %}
-            {% set _green_h = 7.35 * _div_pp %}
+            {% set _green_y = 165.0 - _y_scale * _sum_pp %}
+            {% set _green_h = _y_scale * _div_pp %}
             <rect x="{{ '%.1f' % _green_x }}" y="{{ '%.1f' % _green_y }}"
                   width="{{ '%.1f' % _bar_w }}" height="{{ '%.1f' % _green_h }}"
                   fill="url(#barGreen)" rx="1"/>
 
             {# Blue: total diversified volatility — full bar from 0 #}
             {% set _blue_x = _plot_x0 + _step * (_N + 1 + 0.15) %}
-            {% set _blue_h = 7.35 * _tot_pp %}
+            {% set _blue_h = _y_scale * _tot_pp %}
             {% set _blue_y = 165.0 - _blue_h %}
             <rect x="{{ '%.1f' % _blue_x }}" y="{{ '%.1f' % _blue_y }}"
                   width="{{ '%.1f' % _bar_w }}" height="{{ '%.1f' % _blue_h }}"
@@ -1477,7 +1487,7 @@
             {% set _x_right_of_this = _plot_x0 + _step * (loop.index0 + 0.15) + _bar_w %}
             {% set _x_left_of_next  = _plot_x0 + _step * (loop.index0 + 1 + 0.15) %}
             {% set _ns2.cum = _ns2.cum + (c.standalone_pp or 0) %}
-            {% set _y_connect = 165.0 - 7.35 * _ns2.cum %}
+            {% set _y_connect = 165.0 - _y_scale * _ns2.cum %}
             <line x1="{{ '%.1f' % _x_right_of_this }}" y1="{{ '%.1f' % _y_connect }}"
                   x2="{{ '%.1f' % _x_left_of_next }}"  y2="{{ '%.1f' % _y_connect }}"/>
           {% endfor %}
@@ -1489,17 +1499,17 @@
           {% for c in _contribs %}
             {% set _cx = _plot_x0 + _step * (loop.index0 + 0.5) %}
             {% set _ns3.cum = _ns3.cum + (c.standalone_pp or 0) %}
-            {% set _y = 165.0 - 7.35 * _ns3.cum - 4 %}
+            {% set _y = 165.0 - _y_scale * _ns3.cum - 4 %}
             <text x="{{ '%.1f' % _cx }}" y="{{ '%.1f' % _y }}" text-anchor="middle">{{ '%.1f' % (c.standalone_pp or 0) }}%</text>
           {% endfor %}
             {# Green label — at top of green bar #}
             {% set _green_cx  = _plot_x0 + _step * (_N + 0.5) %}
-            {% set _green_lbl_y = 165.0 - 7.35 * _sum_pp - 4 %}
+            {% set _green_lbl_y = 165.0 - _y_scale * _sum_pp - 4 %}
             <text x="{{ '%.1f' % _green_cx }}" y="{{ '%.1f' % _green_lbl_y }}"
                   text-anchor="middle" fill="#2F7048" font-weight="600">−{{ '%.1f' % _div_pp }}%</text>
             {# Blue label — at top of blue bar #}
             {% set _blue_cx  = _plot_x0 + _step * (_N + 1 + 0.5) %}
-            {% set _blue_lbl_y = 165.0 - 7.35 * _tot_pp - 4 %}
+            {% set _blue_lbl_y = 165.0 - _y_scale * _tot_pp - 4 %}
             <text x="{{ '%.1f' % _blue_cx }}" y="{{ '%.1f' % _blue_lbl_y }}"
                   text-anchor="middle" fill="#23588F" font-weight="600">{{ '%.1f' % _tot_pp }}%</text>
           </g>

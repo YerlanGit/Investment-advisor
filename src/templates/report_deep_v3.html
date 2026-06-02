@@ -2907,27 +2907,6 @@
     </div>
     {% endif %}
 
-    {# Bank-RAG excerpts — data-driven from data.regime_rag_confirm.
-       The CSS for .rag-quotes / .rag-quote was already defined upstream
-       but no DOM was emitted, so the section was missing in production
-       whenever ChromaDB returned real bank-report snippets.  Hidden when
-       the engine returned no excerpts. #}
-    {% if data.regime_rag_confirm %}
-    <div class="rag-quotes" style="margin-top:14px;">
-      <div style="font-size:10px; font-weight:600; color:var(--ink-60);
-                  text-transform:uppercase; letter-spacing:.04em; margin-bottom:6px;">
-        Bank RAG · ChromaDB · cosine ≥ 0.72
-      </div>
-      {% for excerpt in data.regime_rag_confirm[:3] %}
-      <div class="rag-quote" style="background:var(--ai-bg); border-left:3px solid var(--tech-blue);
-                                     border-radius:3px; padding:8px 11px; margin-bottom:6px;
-                                     font-size:10.5px; line-height:1.5; font-style:italic;
-                                     color:var(--ink);">
-        “{{ excerpt }}”
-      </div>
-      {% endfor %}
-    </div>
-    {% endif %}
   </div>
 
   <!-- ПОЛОСА ИСТОЧНИКОВ -->
@@ -3128,7 +3107,7 @@
         <tr>
           <th class="l">Тикер</th>
           <th class="l">Action</th>
-          <th>Цена</th>
+          <th>Текущая цена</th>
           <th>Buy zone</th>
           <th>Sell target</th>
           <th>Stop loss</th>

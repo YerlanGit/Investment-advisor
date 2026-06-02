@@ -914,9 +914,13 @@ def build_payload(results: dict, tier: str,
                 "buy_zone":    f"{buy_zone[0]:.2f} – {buy_zone[1]:.2f}" if buy_zone else "—",
                 "sell_zone":   f"{sell_zone[0]:.2f} – {sell_zone[1]:.2f}" if sell_zone else "—",
                 "take_target": f"{tgt:.2f}"  if tgt  is not None else "—",
-                # Template reads `sell_target` (the v3 schema uses that name);
-                # keep `take_target` for back-compat with legacy templates.
-                "sell_target": f"{tgt:.2f}"  if tgt  is not None else "—",
+                # `sell_target` column: the engine sets a profit `take_target`
+                # only for BUY actions; for Trim/Sell it produces a `sell_zone`
+                # (the price band to sell into).  Show whichever exists so the
+                # column is meaningful for every row instead of "—" on sells.
+                "sell_target": (f"{tgt:.2f}" if tgt is not None else
+                                (f"{sell_zone[0]:.2f} – {sell_zone[1]:.2f}"
+                                 if sell_zone else "—")),
                 "stop_loss":   f"{stop:.2f}" if stop is not None else "—",
                 "reason":      r.get("reason", ""),
             })

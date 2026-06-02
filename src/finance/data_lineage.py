@@ -350,7 +350,7 @@ def _ai_status(ai_summary: Optional[dict]) -> dict:
         source = "Anthropic Claude " + (a.get("model_used") or ""),
         method = "advisory only; verdict + plain summary + bullets",
         status = "ok",
-        note   = "не является ИИИ",
+        note   = "не является ИИР (индивидуальной инвест. рекомендацией)",
     )
 
 
