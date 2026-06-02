@@ -116,25 +116,30 @@ def fundamentals_score(*,
 # ── Pillar B — Valuations score (−2..+2) ─────────────────────────────────────
 
 def valuations_score(*,
-                     pe_history_z: Optional[float] = None,
+                     pe_z:         Optional[float] = None,
                      pb_sector_z:  Optional[float] = None,
-                     ev_ebitda_z:  Optional[float] = None) -> float:
+                     ev_ebitda_z:  Optional[float] = None,
+                     # Back-compat: older callers used pe_history_z.  Treated
+                     # as an alias so we don't break any external caller.
+                     pe_history_z: Optional[float] = None) -> float:
     """
     Build the Valuation pillar from Z-scores.
 
-      pe_history_z  : Z of current trailing P/E vs the ticker's own 5-year history
-      pb_sector_z   : Z of P/B vs sector cross-section
-      ev_ebitda_z   : Z of EV/EBITDA vs sector cross-section
+      pe_z         : Z of P/E vs sector (or history, depending on the
+                     orchestrator's choice — both use the SAME ±1 scale)
+      pb_sector_z  : Z of P/B vs sector cross-section
+      ev_ebitda_z  : Z of EV/EBITDA vs sector cross-section
 
-    Each metric:  Z < −1.5 → +X cheap;  Z > +1.5 → −X expensive.
-    Returns 0 (neutral) when all inputs are None.
+    Each metric contributes the SAME ±1 scale (Z < −1 → +1 cheap,
+    Z > +1 → −1 expensive), preventing one signal from dominating the
+    others.  Returns 0 (neutral) when all inputs are None.  Clipped to
+    [-2, +2].
     """
+    pe = pe_z if pe_z is not None else pe_history_z
     s = 0.0
-    if pe_history_z is not None:
-        if pe_history_z < -1.5: s += 2.0
-        elif pe_history_z < -0.5: s += 1.0
-        elif pe_history_z >  1.5: s -= 2.0
-        elif pe_history_z >  0.5: s -= 1.0
+    if pe is not None:
+        if pe < -1: s += 1.0
+        if pe >  1: s -= 1.0
     if pb_sector_z is not None:
         if pb_sector_z < -1: s += 1.0
         if pb_sector_z >  1: s -= 1.0

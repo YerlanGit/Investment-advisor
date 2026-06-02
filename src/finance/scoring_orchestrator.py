@@ -256,17 +256,17 @@ def score_portfolio(
         )
 
         # Pillar B — Valuations.
-        # P/E z-score: uses absolute sector benchmarks (portfolio cohorts are
-        # typically <5 tickers — too small for robust_z which needs ≥5 samples).
-        # z > +1.5 → expensive (-2); z > +0.5 → mildly expensive (-1);
-        # z < -0.5 → cheap (+1);    z < -1.5 → very cheap (+2).
+        # P/E and P/B z-scores: both vs absolute sector benchmarks
+        # (portfolio cohorts are typically <5 tickers — too small for
+        # robust_z which needs ≥5 samples).  Both contribute on the SAME
+        # ±1 scale in valuations_score, so neither signal double-counts.
         pe_z = _absolute_valuation_z(
             row.get("SEC_PE_Ratio"), sector, _SECTOR_PE_BENCHMARKS
         )
         pb_z = _absolute_valuation_z(
             row.get("SEC_PB_Ratio"), sector, _SECTOR_PB_BENCHMARKS
         )
-        v_score = valuations_score(pe_history_z=pe_z, pb_sector_z=pb_z, ev_ebitda_z=None)
+        v_score = valuations_score(pe_z=pe_z, pb_sector_z=pb_z, ev_ebitda_z=None)
 
         # Pillar C — Technicals (already a -2..+2 reading)
         t_reading = technicals.get(ticker)

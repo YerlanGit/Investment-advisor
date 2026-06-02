@@ -391,6 +391,18 @@ def get_extended_fundamentals(ticker: str) -> dict:
     # Shares concepts live in units.shares (NOT units.USD) — fixing this
     # restores SEC_Shares_Outstanding → P/E and P/B → V-pillar scoring.
     shares_out     = _get_annual_values(us_gaap, _SHARES_OUT_TAGS,     n=1, unit="shares")
+    # Parent-only book equity from us-gaap:StockholdersEquity (or alias).
+    # Falls back to TotalAssets − TotalLiabilities when the tag is absent,
+    # but that residual INCLUDES minority interest and systematically
+    # understates P/B for holdcos with material NCI.
+    equity         = _get_annual_values(us_gaap, _EQUITY_TAGS,         n=1)
+
+    def _book_equity() -> float | None:
+        if equity[0] is not None:
+            return equity[0]
+        if total_assets[0] is not None and total_liabs[0] is not None:
+            return total_assets[0] - total_liabs[0]
+        return None
 
     out: dict = {
         "ebit":              op_income[0],
@@ -403,11 +415,7 @@ def get_extended_fundamentals(ticker: str) -> dict:
         # book_equity may be negative for buyback-heavy firms (AAPL, MSFT) —
         # stored as-is; scoring_orchestrator skips P/B when ≤ 0.
         "net_income":  net_income[0],
-        "book_equity": (
-            (total_assets[0] - total_liabs[0])
-            if (total_assets[0] is not None and total_liabs[0] is not None)
-            else None
-        ),
+        "book_equity": _book_equity(),
     }
 
     rev0 = revenue[0]

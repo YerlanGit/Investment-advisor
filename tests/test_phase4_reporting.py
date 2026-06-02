@@ -494,9 +494,17 @@ class SparseHistoryRobustnessTest(unittest.TestCase):
         st = compute_benchmark_stats(series, bm, trading_days=252)
         self.assertIsNotNone(st)
         self.assertGreater(st["tracking_error"], 0)
-        # IR is scale-consistent: excess / TE on the same window.
+        # IR self-consistency (post-fix): both numerator and denominator
+        # are computed in LOG space so the ratio is dimensionless and the
+        # geometric/arithmetic units stay aligned.  The displayed
+        # `excess_ann` is the geometric annualised return diff used for
+        # READ-ONLY display panels; for IR we re-derive the log numerator
+        # from the same series the function received.
+        aligned = pd.concat([series, bm], axis=1, join="inner").dropna()
+        diff = (aligned.iloc[:, 0] - aligned.iloc[:, 1]).values
+        excess_log = float(np.mean(diff) * 252)
         self.assertAlmostEqual(st["information_ratio"],
-                               st["excess_ann"] / st["tracking_error"], places=6)
+                               excess_log / st["tracking_error"], places=6)
 
     def test_benchmark_stats_insufficient_overlap(self) -> None:
         from finance.period_returns import compute_benchmark_stats

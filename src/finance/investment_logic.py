@@ -480,7 +480,10 @@ class MAC3RiskEngine:
             
             exposures_report[asset] = {f'Beta_{k}': b for k, b in zip(f_data.columns, betas)}
             exposures_report[asset]['Specific_Alpha_Daily'] = alpha
-            exposures_report[asset]['Residual_Vol_Ann'] = np.std(residuals) * np.sqrt(self.trading_days)
+            # ddof=1 for self-consistency with specific_variances above
+            # (both are estimators of residual dispersion; biased ddof=0
+            # under-reports the per-asset residual vol by ~√((n-1)/n)).
+            exposures_report[asset]['Residual_Vol_Ann'] = np.std(residuals, ddof=1) * np.sqrt(self.trading_days)
             exposures_report[asset]['Weight_Pct'] = weights_dict.get(asset, 0) * 100
 
         B = np.array(B_matrix) # (N_assets, K_factors)
@@ -1212,12 +1215,35 @@ class UniversalPortfolioManager:
             logger.warning("Action plan skipped: %s", exc)
             action_plan_rows = []
 
+        # ── Leverage / gross exposure (read-only, AFTER risk math) ─────────
+        # Margin debt manifests as a NEGATIVE weight on the cash leg (e.g.
+        # USD wt = -17.7% → leverage 117.7%).  We compute these metrics
+        # AFTER all matrix maths so the linear-algebra pipeline still
+        # consumes the raw weights_dict unchanged.
+        _NON_RISK = self.engine.NON_RISK_ASSETS
+        long_weight = sum(max(0.0, float(w)) for w in weights_dict.values())
+        gross_expo  = sum(abs(float(w))      for w in weights_dict.values())
+        net_expo    = sum(float(w)           for w in weights_dict.values())
+        cash_weight = sum(float(weights_dict.get(t, 0.0)) for t in weights_dict
+                          if str(t).upper() in _NON_RISK)
+        # Strict threshold guards float noise on a fully-funded book.
+        is_leveraged = cash_weight < -0.001
+        leverage_metrics = {
+            "gross_exposure":   round(gross_expo, 6),
+            "net_exposure":     round(net_expo,   6),
+            "long_weight":      round(long_weight, 6),
+            "cash_weight":      round(cash_weight, 6),
+            "leverage_ratio":   round(long_weight / net_expo, 4) if net_expo > 1e-9 else 1.0,
+            "is_leveraged":     bool(is_leveraged),
+        }
+
         return {
             "performance_table": perf,
             "risk_matrix": cov_matrix,
             "total_portfolio_pnl": df['PnL'].sum(),
             "total_value": total_portfolio_value,
             "portfolio_metrics": port_metrics,
+            "leverage_metrics":  leverage_metrics,
             "risk_free_rate": self.engine.current_rfr_annual,
             "benchmark_comparison": benchmark_results,
             "period_returns_table": period_returns_table,

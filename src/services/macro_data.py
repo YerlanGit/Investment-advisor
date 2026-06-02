@@ -342,7 +342,6 @@ class MacroFeed:
         present, otherwise fall back to 0.5s·2^attempt.  The final attempt's
         error propagates so the caller can fall back to disk cache.
         """
-        last_exc: Optional[Exception] = None
         for attempt in range(HTTP_MAX_RETRIES):
             resp = self._get(FRED_API_ROOT, params=params, timeout=HTTP_TIMEOUT_SEC)
             status = getattr(resp, "status_code", 200)
@@ -358,13 +357,13 @@ class MacroFeed:
                                 attempt + 1, HTTP_MAX_RETRIES, delay)
                 self._sleep(delay)
                 continue
-            resp.raise_for_status()   # success, or final non-retryable error
+            # On the final attempt: success returns, retryable status falls
+            # through to raise_for_status() which surfaces the HTTPError to
+            # the caller (it then degrades to disk cache).
+            resp.raise_for_status()
             return resp
-        # Exhausted retries on a retryable status — surface the last status.
-        resp.raise_for_status()
-        if last_exc:
-            raise last_exc
-        return resp
+        # Loop body always returns or raises; unreachable in practice.
+        return resp  # pragma: no cover
 
     def _http_fetch(self, spec: SeriesSpec) -> list[dict]:
         """Hit FRED and return [{date, value}, ...] (chronological, oldest→newest)."""

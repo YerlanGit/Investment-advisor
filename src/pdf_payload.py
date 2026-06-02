@@ -498,7 +498,11 @@ def build_payload(results: dict, tier: str,
                 "mvar_bps":      f"{mvar*10000:.0f}" if mvar is not None else "—",
                 "pnl_pct":       _format_pnl_pct(ret_pct),
                 "pnl_abs":       _format_pnl_abs(pnl_abs),
-                "pnl_color":     "pos" if ret_pct >= 0 else "neg",
+                # Cash positions never carry a real P&L — colour them
+                # neutrally so a margin-debt (negative-weight) USD row
+                # does not render as "green/profit" (it isn't).
+                "pnl_color":     "neut" if is_cash else
+                                  ("pos" if ret_pct >= 0 else "neg"),
                 "total_score":   "—" if total_score is None else f"{total_score:+.1f}",
                 "score_color":   "pos" if (total_score or 0) > 0 else
                                   ("neg" if (total_score or 0) < 0 else "neut"),
@@ -524,13 +528,32 @@ def build_payload(results: dict, tier: str,
 
     # ── Sector exposure for the bars chart ─────────────────────────────────
     sector_exposure = results.get("sector_exposure") or {}
-    # Drop non-positive buckets: a short/margin cash balance can surface as a
-    # negative-weight pseudo-sector ("Other -1%") and corrupt the cumulative
-    # conic-gradient pie in the template.
+    # `sectors` keeps the REAL portfolio weights (decimal % of NAV).  Under
+    # leverage these may sum to > 100% — that is the truth and other tables
+    # (Action Plan, Expected Effect, CoVe) must continue to see it.  Only
+    # non-positive buckets are dropped — a negative-weight pseudo-sector
+    # would corrupt the cumulative conic-gradient pie geometry.
     sectors = [
         {"name": s, "weight_pct": float(w) * 100, "weight_str": f"{float(w)*100:.0f}%"}
         for s, w in sector_exposure.items() if float(w) > 0
     ]
+
+    # ── Pie-chart data (LOCAL normalised copy — display-only) ──────────────
+    # Renormalises the long-only sleeve to sum to exactly 1.0 so the pie's
+    # wedge angles are well-defined under leverage.  IMPORTANT: this is an
+    # ISOLATED structure consumed ONLY by the sector-pie SVG; the original
+    # `sectors` array (above) feeds every other table/card and is left
+    # untouched.  Falls back to the raw weights when total ≤ 0.
+    long_only = [(s, float(w)) for s, w in sector_exposure.items() if float(w) > 0]
+    _long_sum = sum(w for _, w in long_only)
+    if _long_sum > 1e-9:
+        pie_chart_data = [
+            {"name": s, "weight_pct": round(w / _long_sum * 100, 2),
+             "weight_str": f"{w / _long_sum * 100:.0f}%"}
+            for s, w in long_only
+        ]
+    else:
+        pie_chart_data = []
 
     # ── Concentration metrics (sectors and individual assets) ──────────────
     sector_pairs = [(s, float(w)) for s, w in sector_exposure.items() if float(w) > 0]
@@ -722,6 +745,17 @@ def build_payload(results: dict, tier: str,
         "holdings_count":    len(assets),
         "hotspots":          hotspots,
         "sectors":           sectors,
+        # Pie chart wedge data — long-only, normalised to 1.0 for display
+        # ONLY.  Other panels keep using `sectors` (real % of NAV).
+        "pie_chart_data":    pie_chart_data,
+        # Leverage / gross-exposure metrics from the engine — drives the
+        # "Gross Exposure / Leverage" badge above the sector pie when the
+        # book carries margin debt (USD weight < -0.001).
+        "leverage_metrics":  results.get("leverage_metrics") or {
+            "is_leveraged": False, "gross_exposure": 1.0,
+            "leverage_ratio": 1.0, "long_weight": 1.0,
+            "net_exposure": 1.0,   "cash_weight": 0.0,
+        },
         # SEC fundamentals — both tiers render a holdings-detail panel.
         "fundamental_layer": fundamental_rows,
         # Concentration & waterfall (new — data ready for next-gen template)
@@ -843,8 +877,21 @@ def build_payload(results: dict, tier: str,
             })
         payload["score_breakdown"] = score_breakdown
 
-        # Action plan (with Buy zone / Sell target / Stop)
+        # Action plan (with current Price / Buy zone / Sell target / Stop)
         action_plan = results.get("action_plan") or []
+        # Cache current prices from perf_df so the template's `r.price`
+        # column actually shows the latest close (was blanket "—" before).
+        price_by_ticker: dict = {}
+        if perf_df is not None and not perf_df.empty and "Current_Price" in perf_df.columns:
+            for _, _row in perf_df.iterrows():
+                _tk = str(_row.get("Ticker") or "").strip()
+                _px = _row.get("Current_Price")
+                if _tk and _px is not None:
+                    try:
+                        price_by_ticker[_tk] = float(_px)
+                    except (TypeError, ValueError):
+                        pass
+
         plan_rows = []
         for r in action_plan:
             if _classify_asset(str(r.get("ticker") or "")) == "Ден. средства":
@@ -853,15 +900,23 @@ def build_payload(results: dict, tier: str,
             sell_zone  = r.get("sell_zone")
             tgt        = r.get("take_target")
             stop       = r.get("stop_loss")
+            px         = price_by_ticker.get(str(r.get("ticker") or ""))
             plan_rows.append({
                 "ticker":      r.get("ticker"),
                 "action":      r.get("action"),
                 "action_color":_action_color(r.get("action")),
                 "delta_w_pp":  f"{r.get('delta_w_pp', 0):+.1f}",
                 "qty_delta":   r.get("qty_delta") if r.get("qty_delta") is not None else "—",
+                # `price` is the field the v3 template renders; payload now
+                # supplies it from perf_df.Current_Price so the column is
+                # no longer a row of dashes.
+                "price":       f"{px:.2f}" if px is not None else "—",
                 "buy_zone":    f"{buy_zone[0]:.2f} – {buy_zone[1]:.2f}" if buy_zone else "—",
                 "sell_zone":   f"{sell_zone[0]:.2f} – {sell_zone[1]:.2f}" if sell_zone else "—",
                 "take_target": f"{tgt:.2f}"  if tgt  is not None else "—",
+                # Template reads `sell_target` (the v3 schema uses that name);
+                # keep `take_target` for back-compat with legacy templates.
+                "sell_target": f"{tgt:.2f}"  if tgt  is not None else "—",
                 "stop_loss":   f"{stop:.2f}" if stop is not None else "—",
                 "reason":      r.get("reason", ""),
             })

@@ -1638,7 +1638,7 @@
                 ${{ pnl_abs_raw }}
               {%- endif %}</span>
         </div>
-        <div class="h-cell action">{% if asset.is_cash %}<span class="badge hold">Кэш</span>{% else %}<span class="badge {{ action_class }}">{{ (asset.action or 'HOLD') | upper }}</span>{% endif %}</div>
+        <div class="h-cell action">{% if asset.is_cash %}{# Negative cash weight ⇒ margin debt — render with a dashed neutral badge so it cannot be confused with a profit. #}{% set _cash_label = 'Долг' if (asset.weight_pct_num is defined and asset.weight_pct_num < 0) else 'Кэш' %}{% set _cash_style = 'border-style:dashed; background:rgba(42,46,51,0.04); color:var(--ink-60);' if _cash_label == 'Долг' else '' %}<span class="badge hold" style="{{ _cash_style }}">{{ _cash_label }}</span>{% else %}<span class="badge {{ action_class }}">{{ (asset.action or 'HOLD') | upper }}</span>{% endif %}</div>
         <div class="h-cell caret-cell">
           <span class="h-toggle">
             <span class="t-more">Детали</span>
@@ -1719,7 +1719,11 @@
   {# Sector panel — legend + warning data-driven from data.sectors;
      pie's conic-gradient computed inline using a Jinja namespace. #}
   {% set _palette = ['var(--amber)', 'var(--tech-blue)', 'var(--green)', 'var(--ink-60)', 'var(--ink-40)'] %}
-  {% set _sectors = data.sectors or [] %}
+  {# Pie wedge angles use the renormalised long-only payload
+     (`pie_chart_data` sums to 100%); falls back to raw `sectors` when the
+     payload didn't supply it (older results dicts).  Real % of NAV is
+     never overwritten — every other table still reads `data.sectors`. #}
+  {% set _sectors = data.pie_chart_data or data.sectors or [] %}
   {% set _gap_pp  = 1.0 %}
   {% set _top_sec = _sectors[0] if _sectors else None %}
 
@@ -1728,6 +1732,23 @@
       <div class="sp-title">Структура по секторам</div>
       <div class="sp-sub">доля капитала · {{ (data.assets or []) | length }} позиций</div>
     </div>
+
+    {# Leverage / gross-exposure banner — appears ONLY when the book
+       carries margin debt (cash weight < -0.001).  Long-only portfolios
+       render exactly as before. #}
+    {% if data.leverage_metrics and data.leverage_metrics.is_leveraged %}
+    <div style="margin:0 14px 8px; padding:6px 10px; border-radius:4px;
+                background:#fff8e1; border-left:3px solid #e65100;
+                font-size:10px; color:#e65100; line-height:1.4;
+                font-family:var(--font-mono);">
+      Gross Exposure: <b>{{ '%.0f' % (data.leverage_metrics.gross_exposure * 100) }}%</b>
+      &nbsp;·&nbsp;
+      Leverage: <b>{{ '%.2f' % data.leverage_metrics.leverage_ratio }}x</b>
+      <span style="font-family:var(--font-ui); font-weight:400; color:#7a4a00;">
+        — пирог нормализован к 100% (только лонг)
+      </span>
+    </div>
+    {% endif %}
 
     <div class="sp-body">
     <div class="pie-wrap">

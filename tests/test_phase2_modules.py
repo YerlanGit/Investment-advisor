@@ -127,8 +127,14 @@ class RegimeClassifierTest(unittest.TestCase):
         )
         reading = RegimeClassifier().classify(prices)
         self.assertIsNotNone(reading)
-        self.assertIn(reading.regime,
-                      ("Expansion", "Recovery"))  # both have growth_score > 0
+        # growth > 0 (SPY ↑ vs IEF ↓) ⇒ regime ∈ {Expansion, Slowdown}
+        # (the cycle sign depends on the relative drifts of XLY/XLP/IWM
+        # over the 60-day window, which can flip with small noise on this
+        # tiny synthetic fixture).  Both are growth-positive regimes —
+        # what we're verifying here is that the post-fix mapping NEVER
+        # returns Recovery/Recession in this quadrant.
+        self.assertIn(reading.regime, ("Expansion", "Slowdown"))
+        self.assertNotIn(reading.regime, ("Recovery", "Recession"))
         self.assertGreaterEqual(reading.confidence, 0.0)
         self.assertLessEqual(reading.confidence, 1.0)
 
