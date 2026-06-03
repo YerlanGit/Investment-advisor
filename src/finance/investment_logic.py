@@ -216,6 +216,17 @@ class MAC3RiskEngine:
                                                      trading_days)
         # FX provider hook: callable (base_ccy, quote_ccy) -> pd.Series, or
         # None to bypass FX (USD-only portfolios stay on the fast path).
+        # When None AND a real FRED_API_KEY is set in env, we auto-wire the
+        # FredFxProvider so Cloud Run picks up DEXKZUS without any caller
+        # change.  Import is local to avoid pulling `requests` into the
+        # sklearn-free unit-test path.
+        if fx_provider is None:
+            try:
+                from services.fx_feed import default_fx_provider
+                fx_provider = default_fx_provider()
+            except Exception as exc:                  # pragma: no cover
+                logger.warning("Auto FX provider unavailable: %s", exc)
+                fx_provider = None
         self.fx_provider = fx_provider
         # Кешируемый клиент Tradernet — переиспользуется между запросами одного
         # вызова (внутри analyze_all). Keys читаются из env (Cloud Run secret).
