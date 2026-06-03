@@ -22,7 +22,7 @@ from typing import Optional
 
 logger = logging.getLogger("AINarrative")
 
-MAX_TOKENS_BASE = 3_500
+MAX_TOKENS_BASE = 4_500  # raised from 3_500 — Haiku BASE was hitting cap on long action plans, triggering JSON repair on every call
 MAX_TOKENS_DEEP = 7_000
 
 MODEL_BASE = os.getenv("ANTHROPIC_MODEL_BASE", "claude-haiku-4-5-20251001")

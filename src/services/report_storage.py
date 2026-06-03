@@ -80,7 +80,10 @@ def _signed_url(blob, credentials, ttl_hours: int) -> str:
             method     = "GET",
         )
     except Exception as exc:
-        logger.info("Local URL signing unavailable (%s); using IAM signBlob", exc)
+        # Expected on Cloud Run: compute_engine credentials have no private
+        # key, so the v4 signer always falls back to IAM signBlob.  Keep at
+        # DEBUG to avoid steady-state INFO noise on every report delivery.
+        logger.debug("Local URL signing unavailable (%s); using IAM signBlob", exc)
         auth_request = google.auth.transport.requests.Request()
         credentials.refresh(auth_request)
         return blob.generate_signed_url(
