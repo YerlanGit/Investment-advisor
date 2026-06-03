@@ -539,17 +539,23 @@ def build_payload(results: dict, tier: str,
     ]
 
     # ── Pie-chart data (LOCAL normalised copy — display-only) ──────────────
-    # Renormalises the long-only sleeve to sum to exactly 1.0 so the pie's
-    # wedge angles are well-defined under leverage.  IMPORTANT: this is an
-    # ISOLATED structure consumed ONLY by the sector-pie SVG; the original
-    # `sectors` array (above) feeds every other table/card and is left
-    # untouched.  Falls back to the raw weights when total ≤ 0.
+    # `weight_pct` is renormalised so wedge angles sum to 100% (well-defined
+    # geometry under leverage).  `weight_str` shows the REAL NAV % so the
+    # legend, centre label and sector-warning text all read the same number
+    # (e.g. "Technology 62%" everywhere).  `nav_pct` mirrors the raw share
+    # for any future consumer.  This structure is consumed ONLY by the
+    # sector-pie SVG; `sectors` (above) keeps real weights for every other
+    # table/card.
     long_only = [(s, float(w)) for s, w in sector_exposure.items() if float(w) > 0]
     _long_sum = sum(w for _, w in long_only)
     if _long_sum > 1e-9:
         pie_chart_data = [
-            {"name": s, "weight_pct": round(w / _long_sum * 100, 2),
-             "weight_str": f"{w / _long_sum * 100:.0f}%"}
+            {
+                "name":       s,
+                "weight_pct": round(w / _long_sum * 100, 2),  # angle share
+                "weight_str": f"{w * 100:.0f}%",              # real NAV %
+                "nav_pct":    round(w * 100, 2),
+            }
             for s, w in long_only
         ]
     else:

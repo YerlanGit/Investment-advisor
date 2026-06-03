@@ -1616,6 +1616,46 @@
 .src-chip.data { color: var(--ink-60); background: rgba(42,46,51,0.05); }
 .src-chip.stress { color: var(--amber); background: var(--amber-08); }
 
+/* ─────────── АДАПТИВ — DEEP-only components (P3+ : фактор-радар,
+   4-pillar, стресс, action plan, expected effect, CoVe, режим, идеи) ─── */
+@media (max-width: 900px) {
+  .factor-layout    { grid-template-columns: 1fr; }
+  .regime-layout    { grid-template-columns: 1fr; }
+  .score-grid       { grid-template-columns: repeat(2, 1fr); }
+  .effect-grid      { grid-template-columns: repeat(2, 1fr); }
+  .rag-quotes       { grid-template-columns: 1fr; }
+  .ideas-grid       { grid-template-columns: 1fr; }
+  .factor-radar-svg,
+  .reg-quadrant-svg { max-width: 100%; }
+  /* широкие таблицы не должны "ломать" поток — горизонтальный скролл */
+  .factor-table-wrap,
+  .stress-table-wrap,
+  .action-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.factor-table,
+  table.stress-table,
+  table.action-table { min-width: 480px; }
+}
+@media (max-width: 600px) {
+  .score-grid       { grid-template-columns: 1fr; }
+  .effect-grid      { grid-template-columns: 1fr; }
+  .cove-grid        { grid-template-columns: 1fr; }
+  .reg-signal-row   { grid-template-columns: 1fr auto; }
+  .reg-signal-row .reg-signal-state { grid-column: 2; }
+  .d3-block         { padding: 12px 13px 13px; }
+  table.factor-table tbody td,
+  table.stress-table tbody td,
+  table.action-table tbody td { font-size: 10.5px; padding: 5px 6px; }
+}
+@media (max-width: 480px) {
+  .d3-block-sub     { font-size: 10px; }
+  .panel-title      { font-size: 14px; }
+  .sc-name          { font-size: 13px; }
+  .ef-row           { font-size: 12px; }
+  .reg-signal-name  { font-size: 11px; }
+  .rag-text         { font-size: 12px; }
+  .idea-card        { padding: 10px 11px 11px; }
+}
+
 </style>
 </head>
 <body>
@@ -2467,8 +2507,11 @@
           У него β рыночного фактора = 1.00, а стилевые факторы = 0 <i>по построению</i>
           (рынок не имеет стилевого перекоса). Поэтому «Наклон Δ» по стилям равен β портфеля —
           это и есть ваш перекос относительно рынка. Факторы частично пересекаются
-          (Momentum/Value/Quality — те же акции под разными углами), поэтому β
-          оценены Ridge-регрессией, гасящей мультиколлинеарность.
+          (Momentum/Value/Quality — те же акции под разными углами; EM_Equity ≈ 0.85
+          скоррелирован с Market, EM_Bond — с Rates и кредитным риском), поэтому β
+          оценены Ridge-регрессией (α=0.001), гасящей мультиколлинеарность. β_EM
+          интерпретируется как <i>дополнительная</i> EM-экспозиция сверх того, что
+          уже объясняют Market и Rates.
         </div>
         {% if data.factor_coverage_pct %}
         <div style="margin-top:6px; font-size:9px; color:var(--ink-60);">Факторная модель покрывает {{ data.factor_coverage_pct }}% портфеля</div>
@@ -2605,6 +2648,7 @@
         <span class="src">[Quant Engine]</span></div>
     </div>
 
+    <div class="stress-table-wrap">
     <table class="stress-table">
       <thead>
         <tr>
@@ -2645,6 +2689,7 @@
         {% endfor %}
       </tbody>
     </table>
+    </div>
     <div style="margin-top:6px; font-size:9px; color:var(--ink-60);">
       Магнитуда нормирована к ±20%. Drawdown — пиковая просадка внутри квартала
       при реализации сценария.
@@ -3102,6 +3147,7 @@
         <span class="src">[Quant Engine]</span></div>
     </div>
 
+    <div class="action-table-wrap">
     <table class="action-table">
       <thead>
         <tr>
@@ -3147,6 +3193,7 @@
         {% endfor %}
       </tbody>
     </table>
+    </div>
 
     {% if data.ai_action_comment %}
     <div class="conc-ai" style="margin-top:10px;">
