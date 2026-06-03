@@ -20,7 +20,19 @@ from finance.period_returns import (
     compute_benchmark_stats as _compute_benchmark_stats,
 )
 # Stress engine (parametric factor shocks) — also sklearn-free.
-from finance.stress import run_stress_scenarios as _run_stress_scenarios
+from finance.stress import (
+    run_stress_scenarios as _run_stress_scenarios,
+    STRESS_TEST_DISCLAIMER as _STRESS_TEST_DISCLAIMER,
+)
+# Base-currency layer (H2): reporting-currency-aware FX transformation +
+# currency-matched RFR with geometric daily compounding (H3).
+from finance.currency import (
+    ReportingCurrency,
+    convert_price_matrix,
+    daily_rfr_geometric,
+    get_rfr_for_currency,
+    infer_currencies_for_tickers,
+)
 # Simulator (Black-Litterman "after-plan" portfolio metrics) — sklearn-free.
 from finance.simulate import simulate_after_plan as _simulate_after_plan
 # FRED macro feed (yield curve / HY spread / PMI / VIX / breakeven) — also
@@ -167,7 +179,9 @@ class MAC3RiskEngine:
         # Factor ETFs already in factor_tickers (SPY, MTUM, VLUE, QUAL, IWM, DBC, IEF, EEM, EMB)
     ]
 
-    def __init__(self, trading_days=252, ewma_halflife=63):
+    def __init__(self, trading_days=252, ewma_halflife=63,
+                 reporting_currency: ReportingCurrency | str | None = None,
+                 fx_provider=None):
         self.trading_days = trading_days
         self.ewma_halflife = ewma_halflife  # 63 дней ≈ λ=0.94 (RiskMetrics)
         # Факторные прокси (формат Tradernet — все .US ETF).
@@ -185,12 +199,31 @@ class MAC3RiskEngine:
             'EM_Equity':   'EEM.US',    # MSCI Emerging Markets — EM equity premium
             'EM_Bond':     'EMB.US',    # JP Morgan EM Bond ETF — EM credit/FX premium
         }
-        # Безрисковая ставка: для казахстанских инвесторов ставка НБК актуальнее
-        # 4% US T-bill. Задаётся через env KZ_RFR_ANNUAL (default 14%).
-        self.current_rfr_annual = float(os.getenv("KZ_RFR_ANNUAL", "0.14"))
+        # ── H2: Base-currency / RFR layer ────────────────────────────────────
+        # Reporting currency drives BOTH the FX transformation of the price
+        # matrix and the RFR applied in Sharpe/Sortino — they must agree to
+        # avoid the cross-currency premium leak (USD assets vs KZ-RFR bug).
+        if reporting_currency is None:
+            self.reporting_currency = ReportingCurrency.from_env()
+        elif isinstance(reporting_currency, ReportingCurrency):
+            self.reporting_currency = reporting_currency
+        else:
+            self.reporting_currency = ReportingCurrency(str(reporting_currency).upper())
+        self.current_rfr_annual, self.rfr_source = get_rfr_for_currency(self.reporting_currency)
+        # Geometric daily RFR (H3) — cached once, used by both Sharpe and
+        # Sortino's downside filter so they stay consistent.
+        self.current_rfr_daily = daily_rfr_geometric(self.current_rfr_annual,
+                                                     trading_days)
+        # FX provider hook: callable (base_ccy, quote_ccy) -> pd.Series, or
+        # None to bypass FX (USD-only portfolios stay on the fast path).
+        self.fx_provider = fx_provider
         # Кешируемый клиент Tradernet — переиспользуется между запросами одного
         # вызова (внутри analyze_all). Keys читаются из env (Cloud Run secret).
         self._tradernet_client: TradernetClient | None = None
+        # Audit trail filled by `_apply_fx_conversion` — surfaced into the
+        # report's QC panel so the user can verify what was converted.
+        self._last_fx_records: list = []
+        self._last_asset_currencies: dict[str, str] = {}
 
     def math_firewall(self, df):
         """Защита от 'битых' данных (галлюцинаций API)."""
@@ -199,7 +232,7 @@ class MAC3RiskEngine:
     # ── Bootstrap CVaR (stationary block bootstrap, Politis-Romano 1994) ─────
     @staticmethod
     def _bootstrap_cvar(returns: np.ndarray, n_boot: int = 2000,
-                        alpha: float = 0.05, seed: int = 42) -> dict:
+                        alpha: float = 0.05, seed: int | None = None) -> dict:
         """
         Compute CVaR(alpha) point estimate plus 95% bootstrap CI.
 
@@ -207,8 +240,26 @@ class MAC3RiskEngine:
         preserves daily-return autocorrelation — naive iid resampling
         underestimates tail risk on serially-dependent series.
 
+        H5 — deterministic-yet-data-driven seed
+        ────────────────────────────────────────
+        When `seed is None`, the seed is derived from the returns vector
+        itself (`int(abs(hash(tuple(round(r, 6)))) % 1e8)`).  This keeps
+        the call deterministic for unit tests (same input → same CI) but
+        makes the CI move when the input window rolls forward — fixing
+        the H5 "CI never widens between runs" UX bug while preserving
+        reproducibility.  Tests that explicitly pin `seed=N` keep working.
+
         Returns: {'point': float, 'lo95': float, 'hi95': float}
         """
+        if seed is None:
+            # Round to 6 decimals so floating-point noise on identical
+            # inputs across runs doesn't change the seed.
+            try:
+                arr = np.round(np.asarray(returns, dtype=float), 6)
+                key = tuple(arr.tolist())
+                seed = int(abs(hash(key)) % 100_000_000)
+            except (TypeError, ValueError):
+                seed = 42       # fall back if returns is exotic (object dtype)
         rng = np.random.default_rng(seed)
         N = len(returns)
         if N == 0:
@@ -358,6 +409,11 @@ class MAC3RiskEngine:
 
         Returns (data, history_result) tuple where history_result contains
         loaded/failed/retried ticker details for user-facing messages.
+
+        H2: After Tradernet loads native-currency prices, we transform
+        every column whose native currency differs from
+        `self.reporting_currency` by multiplying with the matching FX
+        series.  USD-only portfolios short-circuit (no FX calls, no copy).
         """
         valid_tickers = self.resolve_tickers(tickers)
         all_req = list(dict.fromkeys(
@@ -374,7 +430,44 @@ class MAC3RiskEngine:
             logger.error("Tradernet вернул пустой набор цен — все тикеры провалились")
             return history_result.data, history_result
 
-        return self.math_firewall(history_result.data), history_result
+        firewalled = self.math_firewall(history_result.data)
+        # ── H2: FX conversion to reporting currency ──────────────────────────
+        converted = self._apply_fx_conversion(firewalled)
+        return converted, history_result
+
+    def _apply_fx_conversion(self, prices: pd.DataFrame) -> pd.DataFrame:
+        """
+        Transform the price matrix into the reporting currency (H2).
+
+        Safety:
+          • If every column is already in `reporting_currency`, returns the
+            input frame unchanged (no allocation).
+          • Never mutates the caller's frame: convert_price_matrix copies
+            internally before writing.
+          • Updates `self._last_fx_records` and `self._last_asset_currencies`
+            so the report's QC panel can show what was actually converted.
+        """
+        asset_currencies = infer_currencies_for_tickers(prices.columns)
+        # Factor ETFs are all .US → USD; explicitly pin them so an exotic
+        # symbol that sneaks in doesn't trigger a spurious FX call.
+        for factor_tkr in self.factor_tickers.values():
+            asset_currencies.setdefault(factor_tkr, "USD")
+        result = convert_price_matrix(
+            prices            = prices,
+            asset_currencies  = asset_currencies,
+            reporting         = self.reporting_currency,
+            fx_provider       = self.fx_provider,
+            lag_one_day       = True,
+        )
+        self._last_fx_records       = result.fx_records
+        self._last_asset_currencies = result.asset_currencies
+        if not result.no_op:
+            logger.info(
+                "FX → %s applied to %d pair(s): %s",
+                self.reporting_currency.value, len(result.fx_records),
+                ", ".join(r.pair for r in result.fx_records),
+            )
+        return result.prices_base
 
     def get_ticker_sector(self, ticker: str) -> str:
         """Возвращает сектор для тикера (или 'Other').
@@ -529,15 +622,27 @@ class MAC3RiskEngine:
             exposures_report[asset]['Euler_Risk_Contribution_Pct'] = erc_pct[i] * 100
 
         # 6. Хвостовые метрики
-        port_returns_daily = a_data.values @ weights # Это будет "разбавлено" так как sum(weights)<1, что верно для Total Return
-        risk_free_rate_daily = self.current_rfr_annual / self.trading_days
-        
+        # `port_returns_daily` carries LOG returns in the REPORTING CURRENCY
+        # (H2 pre-converted the price matrix → a_data is base-currency log
+        # returns).  Sum(weights) < 1 by design when cash sits in the
+        # portfolio — that dilutes risk correctly without renormalisation.
+        port_returns_daily = a_data.values @ weights
+        # H3: geometric daily RFR — `(1+r)^(1/252)-1` rather than `r/252`.
+        # Keeps Sortino's downside filter consistent with Sharpe's annual
+        # excess-return numerator.
+        risk_free_rate_daily = self.current_rfr_daily
+
         excess_returns = port_returns_daily - risk_free_rate_daily
         downside_returns = excess_returns[excess_returns < 0]
         downside_vol = np.std(downside_returns) * np.sqrt(self.trading_days)
-        
-        ann_return = np.mean(port_returns_daily) * self.trading_days
-        
+
+        # H1: geometric annualisation of log-returns.
+        # Arithmetic `mean·252` over-states annual return by ~σ²/2 (it
+        # ignores the Itô correction).  For 24% annual vol that's ~+2.9
+        # pp of phantom return per year — directly inflates Sharpe.
+        # `exp(mean_log·252) - 1` is the exact equivalent simple return.
+        ann_return = float(np.exp(np.mean(port_returns_daily) * self.trading_days) - 1.0)
+
         var_95 = np.percentile(port_returns_daily, 5) if len(port_returns_daily)>0 else 0
         cvar_95 = port_returns_daily[port_returns_daily <= var_95].mean() if len(port_returns_daily)>0 else 0
 
@@ -585,17 +690,39 @@ class MAC3RiskEngine:
             volatility=port_volatility, cvar=cvar_95, max_erc_pct=max_erc,
         )
 
+        # Sharpe / Sortino with currency-matched, geometrically-compounded RFR
+        # (H1+H3).  ann_return is geometric simple-return, RFR is annual
+        # simple-return — both already in the same units (no fractional/log mix).
+        sharpe  = ((ann_return - self.current_rfr_annual) / port_volatility
+                   if port_volatility > 0 else np.nan)
+        sortino = ((ann_return - self.current_rfr_annual) / downside_vol
+                   if downside_vol > 0 else np.nan)
+
         portfolio_metrics = {
-            "Total_Volatility_Ann": port_volatility,
-            "Sharpe_Ratio": (ann_return - self.current_rfr_annual) / port_volatility if port_volatility > 0 else np.nan,
-            "Sortino_Ratio": (ann_return - self.current_rfr_annual) / downside_vol if downside_vol > 0 else np.nan,
-            "VaR_95_Daily": var_95,
-            "CVaR_95_Daily": cvar_95,
-            "CVaR_95_Bootstrap": cvar_boot,           # NEW: {point, lo95, hi95}
-            "Max_Drawdown": max_drawdown,             # NEW: realised peak-to-trough drawdown
-            "Max_Euler_Risk_Pct": max_erc,            # NEW: max single-asset TRC %
-            "Composite_Risk_Score": composite_risk,   # NEW: blended 0..100 gauge
-            "Positive_Days_Pct": (port_returns_daily > 0).mean() * 100 if len(port_returns_daily)>0 else 0
+            "Total_Volatility_Ann":  port_volatility,
+            "Annualised_Return":     ann_return,            # H1: geometric simple return
+            "Sharpe_Ratio":          sharpe,
+            "Sortino_Ratio":         sortino,
+            "VaR_95_Daily":          var_95,
+            "CVaR_95_Daily":         cvar_95,
+            "CVaR_95_Bootstrap":     cvar_boot,
+            "Max_Drawdown":          max_drawdown,
+            "Max_Euler_Risk_Pct":    max_erc,
+            "Composite_Risk_Score":  composite_risk,
+            "Positive_Days_Pct":     (port_returns_daily > 0).mean() * 100 if len(port_returns_daily) > 0 else 0,
+            # H2 audit trail — surfaced to the report's QC panel.
+            "reporting_currency":    self.reporting_currency.value,
+            "risk_free_rate_annual": self.current_rfr_annual,
+            "risk_free_rate_daily":  self.current_rfr_daily,
+            "risk_free_rate_source": self.rfr_source,
+            "fx_conversion": [
+                {"pair": r.pair, "coverage_pct": r.coverage_pct,
+                 "last": r.last_value, "fallback_used": r.fallback_used}
+                for r in self._last_fx_records
+            ],
+            # H4 disclaimer is always present — even on portfolios where
+            # no scenario hits the convex cap, the user sees the policy.
+            "stress_test_disclaimer": _STRESS_TEST_DISCLAIMER,
         }
 
         return cov_df, pd.DataFrame(exposures_report).T, portfolio_metrics

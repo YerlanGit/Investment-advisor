@@ -63,6 +63,59 @@ DEFAULT_ANN_RETURN_FOR_RECOVERY: float = 0.08
 # than the period close.  σ_period for a quarter = σ_ann · √0.25 = σ_ann / 2.
 QUARTER_FRACTION_OF_YEAR: float = 0.25
 
+# ── H4: Convexity cap for per-asset stress impact ────────────────────────────
+# Linear β-shock works while shocks are small (single-digit %), but a
+# β=2.1 semiconductor name under a "Market -10%, Momentum -15%" scenario
+# computes to a -25% one-shot move — and the linear extrapolation
+# arithmetic is meaningless at that scale (betas are estimated on
+# normal-regime returns, they decompress non-linearly in tails).
+#
+# We apply a smooth, monotonic, C^∞ saturation above
+# CONVEXITY_THRESHOLD (|20%|) that asymptotically approaches HARD_CAP
+# (|35%|).  Below the threshold the function is the identity (no
+# behaviour change for moderate scenarios).
+#
+# Functional form (sign-preserving):
+#   x' = sign(x) · (T + (C − T) · (1 − exp(−(|x| − T) / (C − T))))     if |x| > T
+#   x' = x                                                              otherwise
+# Properties:
+#   • Continuous in value and derivative at |x| = T (derivative = 1).
+#   • Strictly monotonic in x.
+#   • lim_{|x|→∞} |x'| = C  (asymptotic; no actual hard kink at C).
+CONVEXITY_THRESHOLD: float = 0.20    # below this — linear pass-through
+CONVEXITY_HARD_CAP:  float = 0.35    # asymptotic absolute cap
+
+STRESS_TEST_DISCLAIMER: str = (
+    "Стресс-сценарии используют линейное приближение β-факторов, "
+    "стабильное для шоков до ±20%. Для активов, чья модельная просадка "
+    "превышает 20%, применяется выпуклое сглаживание с асимптотой ±35% — "
+    "это компенсирует нестабильность бет в хвостах, но в реальном "
+    "тейл-событии возможны более глубокие потери. Сценарии — "
+    "иллюстративный stress-test, не прогноз."
+)
+
+
+def _convex_cap(x: float,
+                threshold: float = CONVEXITY_THRESHOLD,
+                hard_cap:  float = CONVEXITY_HARD_CAP) -> float:
+    """
+    Smooth convex saturation above `threshold`, asymptotic to ±hard_cap.
+
+    Identity for |x| ≤ threshold.  No kink at the threshold (C^1 smooth).
+    Exported for unit tests.
+    """
+    if not math.isfinite(x):
+        return x
+    a = abs(x)
+    if a <= threshold:
+        return x
+    extra_room = hard_cap - threshold
+    if extra_room <= 0:
+        return math.copysign(hard_cap, x)
+    overshoot = a - threshold
+    saturated = extra_room * (1.0 - math.exp(-overshoot / extra_room))
+    return math.copysign(threshold + saturated, x)
+
 
 # ── Default scenario catalog ────────────────────────────────────────────────
 # Each scenario declares a shock vector (period decimal returns) keyed by
@@ -217,6 +270,7 @@ def apply_scenario(perf_df: pd.DataFrame,
     # Per-asset contributions.
     port_pct = 0.0
     by_asset: list[dict] = []
+    convexity_applied = 0          # how many positions hit the cap (audit)
     for _, row in perf_df.iterrows():
         ticker = str(row.get("Ticker", "—"))
         cv     = _safe_float(row.get("Current_Value"), 0.0)
@@ -225,19 +279,25 @@ def apply_scenario(perf_df: pd.DataFrame,
         w_i = cv / total_value
 
         # Σ_f β_{i,f} · shock_f for shocks whose factor is present in betas.
-        delta_log_ret = 0.0
+        delta_log_ret_raw = 0.0
         for f in used_factors:
             beta_col = f"Beta_{f}"
             beta_val = _safe_float(row.get(beta_col), 0.0)
-            delta_log_ret += beta_val * scenario.shocks[f]
+            delta_log_ret_raw += beta_val * scenario.shocks[f]
+
+        # H4: convex saturation above ±20% with asymptote at ±35%.
+        delta_log_ret = _convex_cap(delta_log_ret_raw)
+        if abs(delta_log_ret_raw) > CONVEXITY_THRESHOLD:
+            convexity_applied += 1
         contrib_pct = w_i * delta_log_ret         # fraction of total portfolio
         port_pct   += contrib_pct
         by_asset.append({
-            "ticker":         ticker,
-            "weight_pct":     round(w_i * 100, 2),
-            "asset_delta_pct": round(delta_log_ret * 100, 2),  # ΔPnL_i / V_i
-            "contrib_pct":    round(contrib_pct * 100, 3),     # of total portfolio
-            "contrib_dollar": round(contrib_pct * total_value, 2),
+            "ticker":           ticker,
+            "weight_pct":       round(w_i * 100, 2),
+            "asset_delta_pct":  round(delta_log_ret * 100, 2),    # ΔPnL_i / V_i (after cap)
+            "asset_delta_raw":  round(delta_log_ret_raw * 100, 2),# pre-cap, for transparency
+            "contrib_pct":      round(contrib_pct * 100, 3),      # of total portfolio
+            "contrib_dollar":   round(contrib_pct * total_value, 2),
         })
 
     # Sort contributions by absolute impact (worst first).
@@ -245,6 +305,7 @@ def apply_scenario(perf_df: pd.DataFrame,
 
     out["port_pct"]    = round(port_pct, 4)              # decimal, e.g. -0.093
     out["port_dollar"] = round(port_pct * total_value, 2)
+    out["convexity_applied_n"] = convexity_applied       # H4 audit count
 
     # Intra-period max drawdown estimate (only for losing scenarios).
     if port_pct < 0:
@@ -304,8 +365,12 @@ def run_stress_scenarios(perf_df:          pd.DataFrame,
 __all__ = [
     "DEFAULT_ANN_RETURN_FOR_RECOVERY",
     "QUARTER_FRACTION_OF_YEAR",
+    "CONVEXITY_THRESHOLD",
+    "CONVEXITY_HARD_CAP",
+    "STRESS_TEST_DISCLAIMER",
     "ScenarioSpec",
     "DEFAULT_SCENARIOS",
     "apply_scenario",
     "run_stress_scenarios",
+    "_convex_cap",
 ]
