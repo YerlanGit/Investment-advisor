@@ -278,6 +278,16 @@ def _build_expected_effect(raw: Optional[dict]) -> dict:
             "delta_pp":   delta_pp,
             "favourable": cell.get("improved"),
         }
+    # Pass-through the composite verdict computed by simulate_after_plan
+    # (improvement / tradeoff / degradation / neutral) — the template
+    # uses it to colour-code and label the rebalance honestly.
+    verdict = (raw or {}).get("verdict")
+    if isinstance(verdict, dict):
+        out["verdict"] = {
+            "kind":     str(verdict.get("kind", "neutral")),
+            "headline": str(verdict.get("headline", "")),
+            "worsened": list(verdict.get("worsened") or []),
+        }
     return out
 
 
@@ -465,10 +475,19 @@ def build_payload(results: dict, tier: str,
             action        = "—"  if is_cash else (sc.get("action") or "Hold")
             hotspot       = False if is_cash else bool(sc.get("hotspot"))
 
-            beta_mkt = row.get("Beta_Market")
-            beta_mkt = (None if beta_mkt is None
-                        or (isinstance(beta_mkt, float) and math.isnan(beta_mkt))
-                        else float(beta_mkt))
+            # Beta must be NaN-safe across native float, numpy.float64, and
+            # pd.NA: the previous `isinstance(x, float) and math.isnan(x)`
+            # path silently let `numpy.float64('nan')` through, producing a
+            # literal "nan" in the holdings table for some assets while
+            # others rendered "—".  np.isfinite handles all three cases.
+            beta_mkt_raw = row.get("Beta_Market")
+            try:
+                if beta_mkt_raw is None or not np.isfinite(float(beta_mkt_raw)):
+                    beta_mkt = None
+                else:
+                    beta_mkt = float(beta_mkt_raw)
+            except (TypeError, ValueError):
+                beta_mkt = None
 
             if ret_pct > best_pct:
                 best_pct, best_abs, best_t = ret_pct, pnl_abs, ticker
@@ -871,12 +890,18 @@ def build_payload(results: dict, tier: str,
         for ticker, sc in (asset_scores or {}).items():
             if _classify_asset(str(ticker)) == "Ден. средства":
                 continue
+            credit_applicable = bool(sc.get("credit_applicable", True))
             score_breakdown.append({
                 "ticker":       ticker,
                 "fundamentals": f"{sc.get('fundamentals', 0):+.1f}",
                 "valuations":   f"{sc.get('valuations', 0):+.1f}",
                 "technicals":   f"{sc.get('technicals', 0):+.1f}",
-                "credit":       f"{sc.get('credit', 0):+.1f}",
+                # Asset-class guard: commodities and sovereign bonds carry
+                # no corporate credit risk → show em-dash, not "0.0", so
+                # the user sees the pillar is conceptually NA, not neutral.
+                "credit":       (f"{sc.get('credit', 0):+.1f}"
+                                 if credit_applicable else "—"),
+                "credit_na":    not credit_applicable,
                 "total":        f"{sc.get('total', 0):+.1f}",
                 "action":       sc.get("action", "Hold"),
                 "action_color": _action_color(sc.get("action")),
@@ -1241,6 +1266,35 @@ def _build_integrity_checks(results: dict,
         "label":  "AI-модель",
         "detail": model if model else "не задействована",
     })
+
+    # 8. Reporting currency + RFR provenance (H2 transparency).
+    # Surfaces the actual currency the engine used and which env-var (or
+    # default) provided the risk-free rate.  Without this the user cannot
+    # audit Sharpe / Sortino vs the right benchmark.
+    metrics_h2 = results.get("portfolio_metrics") or {}
+    rc       = metrics_h2.get("reporting_currency")
+    rfr_ann  = metrics_h2.get("risk_free_rate_annual")
+    rfr_src  = metrics_h2.get("risk_free_rate_source")
+    if rc and rfr_ann is not None:
+        detail = f"Валюта: {rc} · RFR: {float(rfr_ann)*100:.2f}%"
+        if rfr_src:
+            detail += f" · источник: {rfr_src}"
+        checks.append({"status": "✓", "label": "Валюта отчёта",
+                       "detail": detail})
+
+    # 9. FX conversion audit (only when something was actually converted).
+    fx_records = metrics_h2.get("fx_conversion") or []
+    if fx_records:
+        pairs_str = " · ".join(
+            f"{r.get('pair', '?')} ({float(r.get('coverage_pct', 0)):.0f}%)"
+            for r in fx_records
+        )
+        any_fallback = any(r.get("fallback_used") for r in fx_records)
+        checks.append({
+            "status": "⚠" if any_fallback else "✓",
+            "label":  "FX-конверсия",
+            "detail": pairs_str,
+        })
 
     return checks
 

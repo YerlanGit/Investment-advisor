@@ -429,8 +429,53 @@ def simulate_after_plan(*,
             })
     weight_changes.sort(key=lambda d: abs(d["delta_pp"]), reverse=True)
 
+    # ── Composite verdict: "improvement" or "tradeoff" ────────────────────
+    # An honest verdict for the rebalance.  The legacy headline read
+    # "снижение риска" any time vol went down — but a rebalance that drops
+    # vol while concentration (max_trc) or drawdown gets worse is a
+    # COMPROMISE, not an improvement.  Flag that explicitly so the AI
+    # narrative and the template show the user what they're trading off.
+    def _cell_worsened(name: str) -> bool:
+        cell = metrics.get(name) or {}
+        if cell.get("delta") is None or cell.get("improved") is None:
+            return False
+        return cell["improved"] is False and abs(cell["delta"]) > 1e-6
+
+    vol_cell       = metrics.get("volatility_ann") or {}
+    vol_delta      = vol_cell.get("delta") or 0.0
+    vol_improved   = vol_cell.get("improved") is True
+    vol_worsened   = vol_cell.get("improved") is False and abs(vol_delta) > 1e-6
+    trc_worsened   = _cell_worsened("max_trc")
+    dd_worsened    = _cell_worsened("max_drawdown")
+
+    if vol_improved and (trc_worsened or dd_worsened):
+        worsened = []
+        if trc_worsened: worsened.append("max_trc")
+        if dd_worsened:  worsened.append("max_drawdown")
+        verdict = {
+            "kind":     "tradeoff",
+            "headline": "Компромисс: снижение волатильности за счёт "
+                        "роста концентрации/просадки",
+            "worsened": worsened,
+        }
+    elif vol_improved:
+        verdict = {"kind": "improvement",
+                   "headline": "Снижение риска без значимых компромиссов",
+                   "worsened": []}
+    elif vol_worsened:
+        verdict = {"kind": "degradation",
+                   "headline": "Рост волатильности — план не улучшает риск",
+                   "worsened": ["volatility_ann"]}
+    else:
+        # Either vol delta is zero (target == current) or improvement flag is
+        # None.  Either way the rebalance is materially a no-op.
+        verdict = {"kind": "neutral",
+                   "headline": "Эффект ребалансировки маржинален",
+                   "worsened": []}
+
     return {
         "metrics":          metrics,
+        "verdict":          verdict,
         "weight_changes":   weight_changes,
         "n_days_used":      sample_after.get("n_days", 0),
         "uses_bl_returns":  bl_records is not None and len(bl_records) > 0

@@ -25,6 +25,39 @@ logger = logging.getLogger("AINarrative")
 MAX_TOKENS_BASE = 4_500  # raised from 3_500 — Haiku BASE was hitting cap on long action plans, triggering JSON repair on every call
 MAX_TOKENS_DEEP = 7_000
 
+
+# ── Soft-trim helper ────────────────────────────────────────────────────────
+# Hard-cap slicing (`text[:N]`) produces obviously truncated sentences in
+# the production report ("Это давит на перегруженный Tech-портфель [GS][Bar").
+# `_soft_trim` cuts at the LAST sentence boundary (".", "!", "?", "…")
+# inside the budget so the user never sees a half-sentence.  Hard fallback
+# to the budget if no boundary is present (e.g. one long URL).
+_SENTENCE_END_RE = re.compile(r"[\.\!\?…](?:\s|\)|\]|$)")
+
+
+def _soft_trim(text: str, max_chars: int) -> str:
+    """
+    Trim ``text`` to ``max_chars`` characters, ending at the LAST complete
+    sentence boundary inside the budget.  If the candidate would lose more
+    than 50% of the budget, fall back to a hard cut + ellipsis so the
+    truncation is at least visually marked, not silent.
+    """
+    if not text:
+        return ""
+    s = str(text).strip()
+    if len(s) <= max_chars:
+        return s
+    head    = s[:max_chars]
+    matches = list(_SENTENCE_END_RE.finditer(head))
+    if matches:
+        end = matches[-1].end()
+        # Strip trailing whitespace after the boundary char.
+        candidate = head[:end].rstrip()
+        if len(candidate) >= max_chars // 2:
+            return candidate
+    # Boundary too far back → ellipsis-tagged hard cut.
+    return head.rstrip(" ,;:[(") + "…"
+
 MODEL_BASE = os.getenv("ANTHROPIC_MODEL_BASE", "claude-haiku-4-5-20251001")
 MODEL_DEEP = os.getenv("ANTHROPIC_MODEL_DEEP", "claude-sonnet-4-6")
 
@@ -739,9 +772,12 @@ def generate_narrative(results: dict, tier: str = "base",
 
         # Extract per-section AI comments.  Strip unverified RAG citations so
         # a comment never references a bank report that wasn't retrieved.
+        # `_soft_trim` lands the cut on a sentence boundary so the report
+        # never shows half-sentences like "[GS][Bar".
         def _comment(key: str, limit: int = 250) -> str:
             txt = str(parsed.get(key, "")).strip()
-            return _strip_unverified_rag_citations(txt, market_context)[:limit]
+            stripped = _strip_unverified_rag_citations(txt, market_context)
+            return _soft_trim(stripped, limit)
 
         # Structured regime-confirmation cell — DEEP tier only.  Validates
         # that the AI cross-checked the engine's regime label against macro
@@ -753,22 +789,22 @@ def generate_narrative(results: dict, tier: str = "base",
             stance  = str(raw.get("stance", "")).strip().lower()
             if stance not in {"confirms", "partial", "diverges"}:
                 stance = ""
-            summary = _strip_unverified_rag_citations(
-                str(raw.get("summary", "")).strip(), market_context)[:260]
+            summary = _soft_trim(_strip_unverified_rag_citations(
+                str(raw.get("summary", "")).strip(), market_context), 260)
             signals_in = raw.get("signals") or []
             signals = [
-                _strip_unverified_rag_citations(str(s).strip(),
-                                                 market_context)[:120]
+                _soft_trim(_strip_unverified_rag_citations(
+                    str(s).strip(), market_context), 120)
                 for s in signals_in if str(s).strip()
             ][:6]
             return {"stance": stance, "summary": summary, "signals": signals}
 
         return {
-            "verdict":                  verdict[:300],
-            "plain_summary":            plain_summary[:400],
+            "verdict":                  _soft_trim(verdict, 300),
+            "plain_summary":            _soft_trim(plain_summary, 400),
             "bullets":                  bullets[:7 if tier == "deep" else 4],
-            "action_plan_text":         plan_txt[:1000] if tier == "deep" else "",
-            "ai_action_impact":         impact_txt[:400] if tier == "deep" else "",
+            "action_plan_text":         _soft_trim(plan_txt, 1000) if tier == "deep" else "",
+            "ai_action_impact":         _soft_trim(impact_txt, 400) if tier == "deep" else "",
             "stock_picks":              stock_picks,
             "used_rag":                 used_rag,
             "model_used":               model,
