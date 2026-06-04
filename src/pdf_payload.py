@@ -769,6 +769,11 @@ def build_payload(results: dict, tier: str,
         "pnl_total_color":   "pos" if total_return_pct >= 0 else "neg",
         "pnl_best":          best,
         "pnl_worst":         worst,
+        # Engine-emitted portfolio_metrics (H2 reporting currency, RFR,
+        # H4 stress disclaimer, etc.).  Must be propagated so the template
+        # can render `data.portfolio_metrics.stress_test_disclaimer` and
+        # similar QC fields without hand-mapping each one.
+        "portfolio_metrics": results.get("portfolio_metrics") or {},
         # Holdings + risk
         "assets":            assets,
         "holdings_count":    len(assets),

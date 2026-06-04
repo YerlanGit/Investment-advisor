@@ -166,6 +166,41 @@ def _summarise_for_prompt(results: dict) -> dict:
         "action_plan":  (results.get("action_plan") or [])[:8],
         "asset_scores": {t: s for t, s in
                          (results.get("asset_scores") or {}).items()},
+        # ── Stress scenarios with per-asset CAPPED deltas ──────────────────
+        # Sonnet's old narrative kept re-computing β × shock by hand, which
+        # bypassed the H4 convex cap and produced "AVGO −42%, NVDA −47%"
+        # against table figures of −15.6% port.  Feed the engine's CAPPED
+        # `asset_delta_pct` directly so the AI cites the same numbers the
+        # table shows.
+        "stress_scenarios": [
+            {
+                "name":          s.get("name"),
+                "port_pct":      _safe_round((s.get("port_pct") or 0) * 100, 2),
+                "max_dd_pct":    _safe_round((s.get("max_dd_pct") or 0) * 100, 2),
+                "recovery_mo":   s.get("recovery_months"),
+                # Top-5 per-asset CAPPED impacts (after convex cap ±35%);
+                # `asset_delta_pct` ALREADY %-scaled (not decimal) — keep
+                # as-is so the AI quotes the number verbatim.
+                "top_assets": [
+                    {"ticker":  a.get("ticker"),
+                     "delta_pct_capped": a.get("asset_delta_pct"),
+                     "delta_pct_raw":    a.get("asset_delta_raw"),
+                     "weight_pct":       a.get("weight_pct")}
+                    for a in (s.get("by_asset") or [])[:5]
+                ],
+            }
+            for s in (results.get("stress_scenarios") or [])
+        ],
+        # Reporting-currency / RFR metadata so the AI never writes the
+        # wrong RFR in trailing commentary (Sharpe, Sortino).
+        "reporting": {
+            "currency": (results.get("portfolio_metrics") or {}).get("reporting_currency"),
+            "rfr_ann":  (results.get("portfolio_metrics") or {}).get("risk_free_rate_annual"),
+        },
+        # Composite verdict from simulate_after_plan — the AI must echo
+        # this verdict in `ai_effect_comment` instead of inventing its own.
+        "rebalance_verdict": ((results.get("expected_effect") or {}).get("verdict")
+                              if isinstance(results.get("expected_effect"), dict) else None),
     }
 
 
