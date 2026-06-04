@@ -256,6 +256,10 @@ class AssetScore:
     # the visible total's denominator.  Default True keeps every existing
     # caller / test compatible.
     credit_applicable: bool = True
+    # Same idea for the Fundamentals pillar: physical commodities and
+    # sovereign-rate ETFs have no financial statements, so F is N/A (em-dash)
+    # rather than a misleading regime-tilt number.
+    fundamentals_applicable: bool = True
 
 
 def total_score(fundamentals: float, valuations: float,

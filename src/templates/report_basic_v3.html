@@ -227,6 +227,15 @@
     color: var(--tech-blue); margin-bottom: 5px;
   }
   .conc-ai .ai-body { font-style: italic; font-size: 12px; line-height: 1.6; }
+  /* AI model-attribution chip — auto-prepended to every AI comment block. */
+  .conc-ai::before, .sec-ai::before {
+    content: "✦ ИИ-комментарий · " var(--ai-model, 'AI');
+    display: inline-block;
+    font-family: var(--font-mono); font-size: 8.5px; font-weight: 600;
+    letter-spacing: .02em; color: var(--tech-blue);
+    background: var(--tech-blue-08, rgba(74,144,217,.08));
+    border-radius: 3px; padding: 1px 7px; margin-bottom: 6px;
+  }
 
   /* ═══ ФУТЕР ═══ */
   .foot {
@@ -1080,7 +1089,7 @@
   }
 </style>
 </head>
-<body>
+<body style="--ai-model:'{{ data.ai_model_used or 'AI' }}';">
 
 <div class="sheet">
 
