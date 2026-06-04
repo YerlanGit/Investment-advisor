@@ -313,11 +313,21 @@ def apply_scenario(perf_df: pd.DataFrame,
         est_dd = port_pct - sigma_quarter             # both negative → deeper
         out["max_dd_pct"] = round(est_dd, 4)
 
-        # Recovery: |max_dd| / (annual_return / 12).  Guard against tiny/zero
-        # expected return (would produce inf).
-        monthly_ret = ann_return_baseline / 12.0
-        if monthly_ret > 1e-6:
-            out["recovery_months"] = round(abs(est_dd) / monthly_ret, 1)
+        # Recovery time — GEOMETRIC: months to compound back the realised
+        # loss, n = ln(1/(1−|dd|)) / ln(1 + r_monthly).
+        #
+        # The recovery RATE is the portfolio's own return potential, not the
+        # generic 8% market drift.  A growth/equity book recovers faster than
+        # the long-run average because (a) its expected return is higher and
+        # (b) post-drawdown forward returns mean-revert upward.  The caller
+        # passes a per-portfolio `ann_return_baseline` already clamped to a
+        # sane band [8%, 18%]; we never assume an unsustainable trailing CAGR.
+        rate = max(0.0, float(ann_return_baseline))
+        if rate > 1e-6:
+            monthly_rate = (1.0 + rate) ** (1.0 / 12.0) - 1.0
+            gain_needed  = 1.0 / (1.0 - min(abs(est_dd), 0.99))   # +X to regain peak
+            out["recovery_months"] = round(
+                math.log(gain_needed) / math.log(1.0 + monthly_rate), 1)
     else:
         # Positive shock: report the gain itself as max_dd (it's "no drawdown")
         out["max_dd_pct"]      = 0.0
