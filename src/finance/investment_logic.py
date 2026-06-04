@@ -1097,10 +1097,18 @@ class UniversalPortfolioManager:
         # list[dict] — always present, possibly empty when perf_df is too
         # thin to support any scenario.
         try:
+            # Recovery rate = portfolio's own annualised return, clamped to a
+            # realistic band [8%, 18%].  A growth book recovers faster than
+            # the generic 8% market drift, but we cap at 18% so an
+            # unsustainable trailing CAGR (e.g. +36%) cannot fabricate an
+            # absurdly fast recovery.  Floor 8% = long-run market average.
+            _ann_ret = float(port_metrics.get("Annualised_Return") or 0.0)
+            _recovery_rate = min(0.18, max(0.08, _ann_ret))
             stress_scenarios = _run_stress_scenarios(
                 perf_df      = df.reset_index(),
                 total_value  = total_portfolio_value,
                 port_metrics = port_metrics,
+                ann_return_baseline = _recovery_rate,
             )
         except Exception as exc:
             logger.warning("stress scenarios build failed: %s", exc)

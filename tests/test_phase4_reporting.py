@@ -651,10 +651,16 @@ class StressEngineTest(unittest.TestCase):
 
     def test_recovery_months_formula(self) -> None:
         """
-        recovery_months = |max_dd| / (ann_return / 12)
-        With ann_return = 0.08: monthly = 0.08/12 ≈ 0.006667
-        max_dd = -0.20 → recovery = 0.20 / 0.006667 ≈ 30.0
+        GEOMETRIC recovery: months = ln(1/(1−|max_dd|)) / ln(1 + r_monthly).
+        With ann_return = 0.08: monthly = 1.08^(1/12)−1 ≈ 0.006434.
+        max_dd = -0.20 → gain to regain peak = 1/0.80 = 1.25.
+        months = ln(1.25)/ln(1.006434) = 0.22314 / 0.006413 ≈ 34.8.
+        (The old linear |dd|/monthly gave 30.0 — geometric is the
+        mathematically correct time-to-recover and is slightly longer
+        for a given rate; the report shortens the horizon by using the
+        portfolio's own clamped return as the rate, not a flat 8%.)
         """
+        import math
         from finance.stress import apply_scenario, ScenarioSpec
         perf = pd.DataFrame([{
             "Ticker": "X", "Current_Value": 1000.0, "Beta_Market": 1.0,
@@ -662,8 +668,13 @@ class StressEngineTest(unittest.TestCase):
         sc = ScenarioSpec("Test", {"Market": -0.10})
         out = apply_scenario(perf, 1000.0, sc,
                               port_vol_ann=0.20, ann_return_baseline=0.08)
-        # max_dd = -0.20 (verified above) → recovery ≈ 30.0 months
-        self.assertAlmostEqual(out["recovery_months"], 30.0, places=1)
+        mr = 1.08 ** (1 / 12) - 1
+        expected = math.log(1 / (1 - 0.20)) / math.log(1 + mr)
+        self.assertAlmostEqual(out["recovery_months"], expected, places=1)
+        # Sanity: a higher recovery rate must SHORTEN the horizon.
+        out_fast = apply_scenario(perf, 1000.0, sc,
+                                  port_vol_ann=0.20, ann_return_baseline=0.18)
+        self.assertLess(out_fast["recovery_months"], out["recovery_months"])
 
     def test_positive_scenario_has_no_drawdown_and_no_recovery(self) -> None:
         """Gains never trigger the drawdown/recovery branch."""
