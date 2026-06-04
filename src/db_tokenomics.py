@@ -2,16 +2,29 @@
 Tokenomics DB — async SQLite layer for RAMP user balances.
 Pricing: 10 tokens = 5000 KZT (1 token = 500 KZT).
 New users receive 10 test tokens on first registration.
+
+Persistence
+───────────
+Cloud Run's container filesystem is ephemeral — a redeploy or scale-to-
+zero wipes anything outside of `/tmp`.  When `TOKENOMICS_DB_PATH` is set
+(e.g. `/mnt/data/tokenomics.db` via gcsfuse, or any persistent mount),
+the DB lives there and survives restarts.  Otherwise we fall back to the
+repo-local `data/tokenomics.db` (good for local dev, NOT for production).
 """
 
 import aiosqlite
 import json
 import logging
+import os
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-DB_PATH = Path(__file__).parent.parent / "data" / "tokenomics.db"
+# Persistent path takes precedence — set via Cloud Run env var to a
+# gcsfuse mount, NFS, or any non-ephemeral volume.  Fallback is the
+# repo-local data/ folder (suitable only for local dev).
+_DEFAULT_DB_PATH = Path(__file__).parent.parent / "data" / "tokenomics.db"
+DB_PATH = Path(os.getenv("TOKENOMICS_DB_PATH", str(_DEFAULT_DB_PATH)))
 INITIAL_TOKENS = 10
 
 

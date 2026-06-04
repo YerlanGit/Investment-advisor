@@ -1521,8 +1521,23 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
     user_id = callback.from_user.id
     cost    = TIER_COST[tier]
 
+    # Single-flight guard: refuse a second concurrent report from the same
+    # user.  Without this, double-tapping the button (or running BASE +
+    # DEEP back-to-back) doubles the worker load AND double-charges tokens
+    # on the second deduct.  Worker pool is single-instance (Cloud Run
+    # max-instances=1), so one greedy user could starve every other user.
+    if not _try_acquire_user_slot(user_id):
+        await callback.message.edit_text(
+            "⏳ *У вас уже выполняется анализ.*\n\n"
+            "Подождите завершения предыдущего отчёта — следующий запрос "
+            "обработаем сразу после.",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        return
+
     success = await deduct_tokens(user_id, cost, reason=f"{tier}_analysis")
     if not success:
+        _release_user_slot(user_id)         # nothing to do — free the slot
         balance = await get_balance(user_id)
         await callback.message.edit_text(
             f"❌ *Недостаточно токенов.*\n\n"
@@ -1952,6 +1967,11 @@ async def _run_analysis_background(
             parse_mode=ParseMode.MARKDOWN,
         )
         await refund("unexpected_error")
+    finally:
+        # Always release the single-flight slot, regardless of success /
+        # failure / cancellation.  Without this a single hung task locks
+        # the user out forever (they would only see "анализ уже идёт").
+        _release_user_slot(user_id)
 
 
 async def cb_cancel(callback: CallbackQuery, state: FSMContext) -> None:
@@ -2014,10 +2034,99 @@ async def cmd_mandate(message: Message, state: FSMContext) -> None:
     await state.update_data(ob_message_id=sent.message_id)
 
 
+# ── Beta-access middleware ────────────────────────────────────────────────────
+# Closed-beta gating: when TG_ALLOWED_USERS is set (comma-separated Telegram
+# user IDs), the bot silently ignores any update from a non-listed user
+# AFTER a single polite "beta closed" reply.  Empty/unset env → open mode
+# (matches the pre-beta behaviour).  Used to safely onboard the first 10
+# users without spam exposure on a public bot.
+from aiogram import BaseMiddleware
+from aiogram.types import TelegramObject
+
+_ALLOWED_USERS_CACHE: set[int] | None = None
+_DENIED_NOTIFIED: set[int] = set()   # tell each user ONCE they're not in the beta
+
+
+def _allowed_users() -> set[int] | None:
+    """Return whitelist set, or None when no gating is configured."""
+    global _ALLOWED_USERS_CACHE
+    if _ALLOWED_USERS_CACHE is not None:
+        return _ALLOWED_USERS_CACHE
+    raw = (os.getenv("TG_ALLOWED_USERS") or "").strip()
+    if not raw:
+        _ALLOWED_USERS_CACHE = set()
+        return None
+    out: set[int] = set()
+    for token in raw.replace(";", ",").split(","):
+        token = token.strip()
+        if token.lstrip("-").isdigit():
+            out.add(int(token))
+    _ALLOWED_USERS_CACHE = out
+    logger.info("Beta whitelist active: %d user(s)", len(out))
+    return out
+
+
+class WhitelistMiddleware(BaseMiddleware):
+    """Drop updates from non-whitelisted users (with a one-time notice)."""
+
+    async def __call__(self, handler, event: TelegramObject, data: dict):
+        allowed = _allowed_users()
+        if allowed is None:                       # gating disabled — fall through
+            return await handler(event, data)
+        user = getattr(event, "from_user", None)
+        if user is None:
+            inner = getattr(event, "message", None) or getattr(event, "callback_query", None)
+            user = getattr(inner, "from_user", None)
+        if user is None or user.id in allowed:
+            return await handler(event, data)
+        # Non-allowed: send a one-shot reply, then ignore further updates.
+        if user.id not in _DENIED_NOTIFIED:
+            _DENIED_NOTIFIED.add(user.id)
+            try:
+                bot = data.get("bot")
+                chat_id = (getattr(event, "chat", None) and event.chat.id) or user.id
+                if bot is not None:
+                    await bot.send_message(
+                        chat_id,
+                        "🔒 *Закрытая бета* — доступ только по списку. "
+                        "Если хотите подключиться, напишите владельцу.",
+                        parse_mode=ParseMode.MARKDOWN,
+                    )
+            except Exception as exc:           # noqa: BLE001
+                logger.debug("beta-deny notice send failed: %s", exc)
+        logger.info("Beta gate: blocked update from user_id=%s", user.id)
+        return None   # short-circuit: handler never runs
+
+
+# ── Per-user single-flight guard ─────────────────────────────────────────────
+# Prevents the same user from queuing multiple report jobs (intentional or
+# fat-finger).  Single-instance Cloud Run + concurrency=4 can chew through
+# 4 reports in parallel; without this guard, one user spamming "DEEP" would
+# block the worker pool for everyone else.
+_IN_FLIGHT_USERS: set[int] = set()
+
+
+def _try_acquire_user_slot(user_id: int) -> bool:
+    if user_id in _IN_FLIGHT_USERS:
+        return False
+    _IN_FLIGHT_USERS.add(user_id)
+    return True
+
+
+def _release_user_slot(user_id: int) -> None:
+    _IN_FLIGHT_USERS.discard(user_id)
+
+
 # ── Dispatcher assembly ───────────────────────────────────────────────────────
 
 def build_dispatcher() -> Dispatcher:
     dp = Dispatcher(storage=MemoryStorage())
+
+    # Beta whitelist runs FIRST so non-allowed users are filtered out before
+    # any handler / FSM transition.  Registered on both message and callback
+    # buses so neither path bypasses it.
+    dp.message.middleware(WhitelistMiddleware())
+    dp.callback_query.middleware(WhitelistMiddleware())
 
     # Routers first — StateFilter guards prevent cross-fire with AnalysisFlow.
     dp.include_router(onboarding_router)
