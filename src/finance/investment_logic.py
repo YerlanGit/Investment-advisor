@@ -1406,6 +1406,7 @@ class UniversalPortfolioManager:
                                       "total":        s.total,
                                       "action":       s.action,
                                       "hotspot":      s.hotspot,
+                                      "credit_applicable": getattr(s, "credit_applicable", True),
                                   } for t, s in asset_scores.items()},
             # Phase 3 additions
             "black_litterman":   bl_records,
