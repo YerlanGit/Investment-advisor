@@ -900,14 +900,18 @@ def build_payload(results: dict, tier: str,
             if _classify_asset(str(ticker)) == "Ден. средства":
                 continue
             credit_applicable = bool(sc.get("credit_applicable", True))
+            fund_applicable   = bool(sc.get("fundamentals_applicable", True))
             score_breakdown.append({
                 "ticker":       ticker,
-                "fundamentals": f"{sc.get('fundamentals', 0):+.1f}",
+                # Asset-class guard: commodities / sovereign bonds have no
+                # financial statements → em-dash, not a regime-tilt number
+                # masquerading as a fundamental verdict.
+                "fundamentals": (f"{sc.get('fundamentals', 0):+.1f}"
+                                 if fund_applicable else "—"),
+                "fundamentals_na": not fund_applicable,
                 "valuations":   f"{sc.get('valuations', 0):+.1f}",
                 "technicals":   f"{sc.get('technicals', 0):+.1f}",
-                # Asset-class guard: commodities and sovereign bonds carry
-                # no corporate credit risk → show em-dash, not "0.0", so
-                # the user sees the pillar is conceptually NA, not neutral.
+                # Same guard for Credit — no corporate credit risk → em-dash.
                 "credit":       (f"{sc.get('credit', 0):+.1f}"
                                  if credit_applicable else "—"),
                 "credit_na":    not credit_applicable,
@@ -1285,9 +1289,11 @@ def _build_integrity_checks(results: dict,
     rfr_ann  = metrics_h2.get("risk_free_rate_annual")
     rfr_src  = metrics_h2.get("risk_free_rate_source")
     if rc and rfr_ann is not None:
-        detail = f"Валюта: {rc} · RFR: {float(rfr_ann)*100:.2f}%"
+        # Label already says "Валюта отчёта" — don't repeat "Валюта:" in the
+        # detail (was rendering "Валюта отчёта: Валюта: USD").
+        detail = f"{rc} · RFR {float(rfr_ann)*100:.2f}%"
         if rfr_src:
-            detail += f" · источник: {rfr_src}"
+            detail += f" · {rfr_src}"
         checks.append({"status": "✓", "label": "Валюта отчёта",
                        "detail": detail})
 

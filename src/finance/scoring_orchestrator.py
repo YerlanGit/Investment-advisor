@@ -384,18 +384,33 @@ def _score_one_asset(out, row, ticker, sector, perf, technicals,
                      regime, cds_lookup, hotspot_trc_pct) -> None:
     """Score a single asset and write the AssetScore into `out` (in place)."""
     if True:
+        # Physical commodities (Gold/Silver/Oil) and sovereign-rate ETFs
+        # (TLT/IEF/…) have NO financial statements — the Fundamentals
+        # pillar ("Фундамент · отчётность") is conceptually N/A.  Without
+        # this guard, F collapsed to the regime tilt alone (macro_alignment)
+        # → GLD/SLV showed F = -0.4 purely because Gold/Silver are penalised
+        # in Expansion, which reads as a (non-existent) fundamental verdict.
+        # The SAME asset classes already have C (credit) marked N/A, so we
+        # reuse that guard for a consistent "no corporate financials" rule.
+        fundamentals_applicable = not _is_credit_not_applicable(ticker, sector)
+
         # Pillar A — Fundamentals (sector cross-sectional Z-scores)
         roe_z = _sector_z(row.get("SEC_ROE"),                  sector, perf, "SEC_ROE")
         opm_z = _sector_z(row.get("SEC_Op_Margin"),            sector, perf, "SEC_Op_Margin")
         dta_z = _sector_z(row.get("SEC_Debt_to_Assets"),       sector, perf, "SEC_Debt_to_Assets")
         rg_z  = _sector_z(row.get("SEC_Revenue_Growth_YoY"),   sector, perf, "SEC_Revenue_Growth_YoY")
         fcf_z = _sector_z(row.get("SEC_FCF_Margin"),           sector, perf, "SEC_FCF_Margin")
-        macro_align = _macro_alignment(sector, regime)
-        f_score = fundamentals_score(
-            roe_z=roe_z, op_margin_z=opm_z,
-            debt_to_assets_z=dta_z, revenue_growth_z=rg_z,
-            fcf_margin_z=fcf_z, macro_alignment=macro_align,
-        )
+        if fundamentals_applicable:
+            macro_align = _macro_alignment(sector, regime)
+            f_score = fundamentals_score(
+                roe_z=roe_z, op_margin_z=opm_z,
+                debt_to_assets_z=dta_z, revenue_growth_z=rg_z,
+                fcf_margin_z=fcf_z, macro_alignment=macro_align,
+            )
+        else:
+            # No financial statements → neutral F; regime tilt is shown
+            # separately in the regime section, not smuggled into F.
+            f_score = 0.0
 
         # Pillar B — Valuations.
         # P/E and P/B z-scores: both vs absolute sector benchmarks
@@ -444,15 +459,16 @@ def _score_one_asset(out, row, ticker, sector, perf, technicals,
         action = action_from_total(total, hotspot=hotspot)
 
         out[ticker] = AssetScore(
-            ticker            = ticker,
-            fundamentals      = f_score,
-            valuations        = v_score,
-            technicals        = t_score,
-            credit            = c_score,
-            total             = total,
-            action            = action,
-            hotspot           = hotspot,
-            credit_applicable = credit_applicable,
+            ticker                  = ticker,
+            fundamentals            = f_score,
+            valuations              = v_score,
+            technicals              = t_score,
+            credit                  = c_score,
+            total                   = total,
+            action                  = action,
+            hotspot                 = hotspot,
+            credit_applicable       = credit_applicable,
+            fundamentals_applicable = fundamentals_applicable,
         )
 
     return out

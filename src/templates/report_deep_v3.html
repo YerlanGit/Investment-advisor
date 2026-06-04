@@ -228,6 +228,17 @@
     color: var(--tech-blue); margin-bottom: 5px;
   }
   .conc-ai .ai-body { font-style: italic; font-size: 12px; line-height: 1.6; }
+  /* AI model-attribution chip — auto-prepended to every AI comment block so
+     the reader always sees which model wrote the interpretation.  Model name
+     comes from the --ai-model custom property set once on <body>. */
+  .conc-ai::before, .sec-ai::before {
+    content: "✦ ИИ-комментарий · " var(--ai-model, 'AI');
+    display: inline-block;
+    font-family: var(--font-mono); font-size: 8.5px; font-weight: 600;
+    letter-spacing: .02em; color: var(--tech-blue);
+    background: var(--tech-blue-08, rgba(74,144,217,.08));
+    border-radius: 3px; padding: 1px 7px; margin-bottom: 6px;
+  }
 
   /* ═══ ФУТЕР ═══ */
   .foot {
@@ -1658,7 +1669,7 @@
 
 </style>
 </head>
-<body>
+<body style="--ai-model:'{{ data.ai_model_used or 'AI' }}';">
 
 <div class="sheet">
 
@@ -2598,7 +2609,19 @@
           <span class="sc-total {{ total_cls }}">Итог: {{ sc.total }}</span>
         </div>
         <div class="sc-pillars">
+          {# Fundamentals pillar: em-dash for commodities / sovereign bonds
+             (no financial statements) so a regime tilt is never shown as a
+             fundamental verdict.  Numeric F restored for every equity. #}
+          {% if sc.fundamentals_na %}
+          <div class="sc-pillar">
+            <span class="sc-pillar-name">F</span>
+            <span class="sc-pillar-bar"><span class="sc-pillar-fill" style="left:50%; width:0%;"></span></span>
+            <span class="sc-pillar-val" style="color:var(--ink-50);"
+                  title="Фундаментальный пилляр неприменим: у сырья и суверенных облигаций нет финансовой отчётности.">—</span>
+          </div>
+          {% else %}
           {{ _pillar('F', sc.fundamentals) }}
+          {% endif %}
           {{ _pillar('V', sc.valuations) }}
           {{ _pillar('T', sc.technicals) }}
           {# Credit pillar is rendered as a neutral em-dash for asset classes
@@ -2703,9 +2726,17 @@
       </tbody>
     </table>
     </div>
-    <div style="margin-top:6px; font-size:9px; color:var(--ink-60);">
-      Магнитуда нормирована к ±20%. Drawdown — пиковая просадка внутри квартала
-      при реализации сценария.
+    <div style="margin-top:6px; font-size:9px; color:var(--ink-60); line-height:1.5;">
+      <b>Откуда сценарии:</b> 7 гипотетических шоков, калиброванных по
+      историческим аналогам (Tech-распродажа Q2 2022, кредитный стресс
+      2008/2020, сюрприз ФРС, гео-риск, ралли USD, шок CPI). Это
+      <b>не прогноз</b>, а проверка устойчивости.<br>
+      <b>Магнитуда</b> нормирована к ±20%. <b>Drawdown</b> — пиковая просадка
+      внутри квартала (закрытие − 1σ_кв).
+      <b>Восстановление</b> = |просадка| ÷ (8%/год ÷ 12) — консервативное
+      допущение долгосрочной среднерыночной доходности 8%/год без довложений;
+      поэтому срок выглядит длинным. При реальной доходности портфеля
+      восстановление было бы быстрее.
     </div>
 
     {# H4 disclaimer: linear β-shock is honest for moderate scenarios; for
