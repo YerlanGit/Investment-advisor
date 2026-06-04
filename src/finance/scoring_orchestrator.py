@@ -228,22 +228,94 @@ def _macro_alignment(sector: Optional[str],
     return 0.0
 
 
+# ── F-pillar absolute sector benchmarks (fallback for small cohorts) ────────
+# Real portfolios rarely carry ≥5 names per sector (the `robust_z` minimum
+# cohort size).  Without a fallback, all sector members collapse to the
+# same F-score from `macro_alignment` alone — every Tech name reads
+# "F=+0.4" regardless of fundamentals.  The benchmarks below let the
+# F-pillar still distinguish strong from weak fundamentals when the cohort
+# is too small (<5).  Numbers are best-effort sector medians compiled from
+# S&P 500 2020–2025 universe; the σ-equivalent column is MAD-ish (robust
+# spread), NOT standard deviation, so it survives outliers.
+#
+# Each entry: sector → {metric: (median, robust_sigma)}
+_SECTOR_FUNDAMENTAL_BENCHMARKS: dict[str, dict[str, tuple[float, float]]] = {
+    "Technology":     {"SEC_ROE": (0.30, 0.15),  "SEC_Op_Margin": (0.25, 0.10),
+                       "SEC_Debt_to_Assets": (0.35, 0.15),
+                       "SEC_Revenue_Growth_YoY": (0.10, 0.08),
+                       "SEC_FCF_Margin": (0.25, 0.10)},
+    "Semiconductors": {"SEC_ROE": (0.20, 0.15),  "SEC_Op_Margin": (0.25, 0.12),
+                       "SEC_Debt_to_Assets": (0.30, 0.12),
+                       "SEC_Revenue_Growth_YoY": (0.15, 0.12),
+                       "SEC_FCF_Margin": (0.20, 0.12)},
+    "Finance":        {"SEC_ROE": (0.12, 0.04),  "SEC_Op_Margin": (0.30, 0.10),
+                       "SEC_Debt_to_Assets": (0.85, 0.05),
+                       "SEC_Revenue_Growth_YoY": (0.05, 0.05),
+                       "SEC_FCF_Margin": (0.15, 0.08)},
+    "Healthcare":     {"SEC_ROE": (0.18, 0.10),  "SEC_Op_Margin": (0.20, 0.08),
+                       "SEC_Debt_to_Assets": (0.45, 0.12),
+                       "SEC_Revenue_Growth_YoY": (0.08, 0.05),
+                       "SEC_FCF_Margin": (0.15, 0.08)},
+    "Energy":         {"SEC_ROE": (0.15, 0.10),  "SEC_Op_Margin": (0.18, 0.10),
+                       "SEC_Debt_to_Assets": (0.45, 0.10),
+                       "SEC_Revenue_Growth_YoY": (0.05, 0.15),
+                       "SEC_FCF_Margin": (0.10, 0.10)},
+    "Consumer":       {"SEC_ROE": (0.20, 0.10),  "SEC_Op_Margin": (0.12, 0.06),
+                       "SEC_Debt_to_Assets": (0.50, 0.10),
+                       "SEC_Revenue_Growth_YoY": (0.06, 0.04),
+                       "SEC_FCF_Margin": (0.10, 0.05)},
+    "Industrials":    {"SEC_ROE": (0.18, 0.08),  "SEC_Op_Margin": (0.13, 0.05),
+                       "SEC_Debt_to_Assets": (0.50, 0.12),
+                       "SEC_Revenue_Growth_YoY": (0.06, 0.05),
+                       "SEC_FCF_Margin": (0.10, 0.05)},
+}
+
+
+def _absolute_fundamental_z(value: float, sector: str, column: str,
+                            clip: float = 3.0) -> Optional[float]:
+    """Absolute z vs sector median/MAD.  None if no benchmark for this pair."""
+    spec = _SECTOR_FUNDAMENTAL_BENCHMARKS.get(sector, {}).get(column)
+    if spec is None:
+        return None
+    median, sigma = spec
+    if sigma <= 0:
+        return None
+    z = (float(value) - median) / sigma
+    return float(np.clip(z, -clip, clip))
+
+
 def _sector_z(value: Optional[float],
               ticker_sector: Optional[str],
               perf_table: pd.DataFrame,
               column: str) -> Optional[float]:
     """
-    Compute the sector cross-sectional robust z-score for a single value.
-    Returns None if the column is missing or the sector cohort is too small.
+    Sector-relative z-score with TWO fallbacks:
+
+      1. Try cross-sectional robust_z on the in-portfolio cohort.  When
+         the cohort has ≥5 finite samples this is the most accurate signal.
+      2. If the cohort is too small (<5 — the usual case for retail
+         portfolios), fall back to an ABSOLUTE sector benchmark keyed by
+         long-run sector medians (`_SECTOR_FUNDAMENTAL_BENCHMARKS`).
+         Without this fallback every single-name Tech holding got the
+         same F-score from `macro_alignment` alone — visible in production
+         as 8 of 11 stocks reading "F=+0.4".
+      3. If neither path works (no value, no benchmark for the sector),
+         return None so the pillar reads "no data" instead of fabricating.
     """
-    if column not in perf_table.columns or value is None:
+    if value is None or not np.isfinite(float(value)):
         return None
-    if ticker_sector is None or "Fundamental_Sector" not in perf_table.columns:
-        return None
-    cohort = perf_table.loc[
-        perf_table["Fundamental_Sector"] == ticker_sector, column
-    ].dropna().tolist()
-    return robust_z(value, cohort)
+    if column in perf_table.columns and ticker_sector and \
+       "Fundamental_Sector" in perf_table.columns:
+        cohort = perf_table.loc[
+            perf_table["Fundamental_Sector"] == ticker_sector, column
+        ].dropna().tolist()
+        z_rel = robust_z(value, cohort)
+        if z_rel is not None:
+            return z_rel
+    # Cohort too small — try the absolute sector benchmark.
+    if ticker_sector:
+        return _absolute_fundamental_z(value, ticker_sector, column)
+    return None
 
 
 def score_portfolio(
