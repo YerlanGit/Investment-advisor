@@ -38,6 +38,46 @@ from finance.technicals import TechnicalReading
 DEFAULT_HOTSPOT_TRC_PCT = 20.0
 
 
+# ── Asset-class filter for the Credit pillar (D) ─────────────────────────────
+# CDS / Altman / Piotroski / Interest-coverage do NOT apply to physical
+# commodities (Gold/Silver/Oil/broad Commodities ETFs) or sovereign-rate
+# instruments (US Treasuries via TLT/IEF/SHY/AGG/BND/BIL).  When the CDS
+# feed has nothing for these and SEC EDGAR returns no filings, the legacy
+# pipeline emitted ``credit=0`` which is mathematically right but the
+# downstream PDF showed a -2.0 row because of stale CDS / fallback paths.
+#
+# The defensive fix: short-circuit the entire C-pillar to NEUTRAL for these
+# classes BEFORE any feed lookup, then exclude C from the Total Score
+# normaliser so the asset is not pulled artificially toward "Sell".
+_CREDIT_NA_SECTORS: frozenset[str] = frozenset({
+    "Commodities", "Gold", "Silver", "Oil", "Bonds",
+})
+_CREDIT_NA_TICKER_PREFIXES: tuple[str, ...] = (
+    # US Treasury / govt-bond ETFs
+    "TLT", "IEF", "SHY", "AGG", "BND", "BIL", "GOVT",
+    # Pure commodity ETFs
+    "GLD", "SLV", "GDX", "USO", "DBC", "UNG",
+)
+
+
+def _is_credit_not_applicable(ticker: str, sector: Optional[str]) -> bool:
+    """
+    Asset-class guard: True when the Credit pillar (CDS / Altman / Piotroski /
+    InterestCoverage) is conceptually meaningless for this position.
+
+    Triggers on either condition (defensive OR — sector classification can
+    be sparse on KZ-listed ETFs):
+      • sector ∈ {Commodities, Gold, Silver, Oil, Bonds}
+      • ticker stem starts with a known sovereign-bond or pure-commodity
+        ETF prefix
+    """
+    s = (sector or "").strip()
+    if s in _CREDIT_NA_SECTORS:
+        return True
+    stem = str(ticker or "").upper().split(".")[0]
+    return stem.startswith(_CREDIT_NA_TICKER_PREFIXES)
+
+
 # CDS lookup callable type:
 #   ticker → {bps: float|None, change_7d: float|None, source: str|None,
 #             quality: 'A'|'B'|'C'|None}
@@ -273,16 +313,26 @@ def score_portfolio(
         t_score = technicals_score_from_reading(t_reading)
 
         # Pillar D — Credit (SEC layer always; CDS layer when feed is wired)
-        cds_info = cds_lookup(ticker) if cds_lookup else {}
-        bps      = cds_info.get("bps")
-        change7  = cds_info.get("change_7d")
-        c_score = credit_score(
-            cds_bps          = bps,
-            cds_change_7d    = change7,
-            altman_zone      = row.get("SEC_Altman_Zone"),
-            piotroski_f      = int(row.get("SEC_Piotroski_F")) if pd.notna(row.get("SEC_Piotroski_F")) else None,
-            interest_coverage= row.get("SEC_Interest_Coverage"),
-        )
+        # Asset-class guard: commodities and sovereign-rate ETFs have no
+        # corporate credit risk, so the C-pillar must stay neutral instead
+        # of inheriting a phantom -2.0 from a missing CDS lookup.  The
+        # `credit_applicable` flag is propagated to AssetScore so the
+        # downstream PDF can render an em-dash and exclude C from the
+        # denominator of the user-facing total.
+        credit_applicable = not _is_credit_not_applicable(ticker, sector)
+        if credit_applicable:
+            cds_info = cds_lookup(ticker) if cds_lookup else {}
+            bps      = cds_info.get("bps")
+            change7  = cds_info.get("change_7d")
+            c_score = credit_score(
+                cds_bps          = bps,
+                cds_change_7d    = change7,
+                altman_zone      = row.get("SEC_Altman_Zone"),
+                piotroski_f      = int(row.get("SEC_Piotroski_F")) if pd.notna(row.get("SEC_Piotroski_F")) else None,
+                interest_coverage= row.get("SEC_Interest_Coverage"),
+            )
+        else:
+            c_score = 0.0
 
         # Hotspot override
         trc      = float(row.get("Euler_Risk_Contribution_Pct") or 0.0)
@@ -292,14 +342,15 @@ def score_portfolio(
         action = action_from_total(total, hotspot=hotspot)
 
         out[ticker] = AssetScore(
-            ticker       = ticker,
-            fundamentals = f_score,
-            valuations   = v_score,
-            technicals   = t_score,
-            credit       = c_score,
-            total        = total,
-            action       = action,
-            hotspot      = hotspot,
+            ticker            = ticker,
+            fundamentals      = f_score,
+            valuations        = v_score,
+            technicals        = t_score,
+            credit            = c_score,
+            total             = total,
+            action            = action,
+            hotspot           = hotspot,
+            credit_applicable = credit_applicable,
         )
 
     return out

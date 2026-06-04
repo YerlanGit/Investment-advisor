@@ -177,13 +177,50 @@ class RegimeClassifier:
         else:
             regime = "Recession"
 
-        # Confidence: euclidean distance from origin scaled to [0,1].
-        # Threshold 0.10 (10% 60-day spread) maps to 1.0; at |score|=0.05
-        # confidence ≈ 0.5 — matching empirical uncertainty at the quadrant
-        # boundary.  Old threshold (0.05) caused the typical production signal
-        # (magnitude ~0.06) to round up to 100%, which was misleading.
-        magnitude  = float(np.hypot(growth_score, cycle_score))
-        confidence = float(min(1.0, magnitude / 0.10))
+        # Confidence is a product of two independent factors:
+        #
+        #   (a) MAGNITUDE — how far from the origin in the (growth, cycle)
+        #       plane is the macro state.  A typical "clear" regime sits at
+        #       magnitude ≈ 0.20; below that we should not claim certainty.
+        #       Linear ramp 0 → MAGNITUDE_REF (0.20) maps to 0 → 1.0.
+        #
+        #   (b) DIRECTIONAL AGREEMENT — what share of the underlying signal
+        #       components actually point into the assigned quadrant.  If
+        #       three out of four 60-day spreads agree the assignment is
+        #       robust; if only one agrees, the regime is a coin-flip.
+        #
+        # Combined: confidence = magnitude_factor × directional_agreement.
+        # This avoids the prior failure mode where a barely-positive
+        # (growth, cycle) = (0.15, 0.04) blew up to 100% just because
+        # magnitude/0.10 saturated the ratio.
+        MAGNITUDE_REF = 0.20
+        magnitude         = float(np.hypot(growth_score, cycle_score))
+        magnitude_factor  = float(min(1.0, magnitude / MAGNITUDE_REF))
+
+        all_components = list(growth_components) + list(cycle_components)
+        if all_components:
+            # Assigned quadrant signs the engine just chose:
+            g_sign = 1.0 if growth_score >= 0 else -1.0
+            c_sign = 1.0 if cycle_score  >= 0 else -1.0
+            agree  = 0
+            total  = 0
+            for v in growth_components:
+                total += 1
+                if (v >= 0 and g_sign > 0) or (v < 0 and g_sign < 0):
+                    agree += 1
+            for v in cycle_components:
+                total += 1
+                if (v >= 0 and c_sign > 0) or (v < 0 and c_sign < 0):
+                    agree += 1
+            directional_agreement = agree / total if total else 0.5
+        else:
+            directional_agreement = 0.5
+
+        confidence = float(magnitude_factor * directional_agreement)
+        # Expose the two factors so the report's QC panel can show WHY
+        # confidence is high or low, instead of a single opaque number.
+        signals["confidence_magnitude"]   = round(magnitude_factor, 3)
+        signals["confidence_directional"] = round(directional_agreement, 3)
 
         return RegimeReading(
             regime       = regime,

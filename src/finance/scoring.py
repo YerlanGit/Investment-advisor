@@ -250,6 +250,12 @@ class AssetScore:
     total:        float       # clipped -6..+6
     action:       str
     hotspot:      bool
+    # When False, the Credit pillar is conceptually not applicable to this
+    # asset class (e.g. physical commodities, sovereign-bond ETFs).  The
+    # template renders an em-dash for the C cell and DOES NOT include C in
+    # the visible total's denominator.  Default True keeps every existing
+    # caller / test compatible.
+    credit_applicable: bool = True
 
 
 def total_score(fundamentals: float, valuations: float,

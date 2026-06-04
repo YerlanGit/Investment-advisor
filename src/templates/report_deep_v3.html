@@ -2601,7 +2601,20 @@
           {{ _pillar('F', sc.fundamentals) }}
           {{ _pillar('V', sc.valuations) }}
           {{ _pillar('T', sc.technicals) }}
+          {# Credit pillar is rendered as a neutral em-dash for asset classes
+             where corporate credit risk is conceptually NA (sovereign-bond
+             ETFs, physical commodities).  Numeric scoring restored for all
+             single-name equities. #}
+          {% if sc.credit_na %}
+          <div class="sc-pillar">
+            <span class="sc-pillar-name">C</span>
+            <span class="sc-pillar-bar"><span class="sc-pillar-fill" style="left:50%; width:0%;"></span></span>
+            <span class="sc-pillar-val" style="color:var(--ink-50);"
+                  title="Credit-пилляр неприменим для этого класса активов (сырьё / суверенные облигации).">—</span>
+          </div>
+          {% else %}
           {{ _pillar('C', sc.credit) }}
+          {% endif %}
         </div>
         <div class="sc-foot">
           <span class="sc-action {{ act_cls }}">{{ act_up }}</span>
@@ -2694,6 +2707,20 @@
       Магнитуда нормирована к ±20%. Drawdown — пиковая просадка внутри квартала
       при реализации сценария.
     </div>
+
+    {# H4 disclaimer: linear β-shock is honest for moderate scenarios; for
+       per-asset hits beyond ±20% the engine applies a smooth convex cap
+       with asymptote ±35%.  Surface that so the user understands why a
+       β=2.1 name does NOT show as -42% under a Market -20% shock. #}
+    {% if data.portfolio_metrics and data.portfolio_metrics.stress_test_disclaimer %}
+    <div style="margin-top:6px; padding:7px 10px;
+                background:rgba(255,193,7,0.06);
+                border-left:3px solid rgba(255,193,7,0.7);
+                font-size:9px; color:var(--ink-70); line-height:1.45;">
+      <b style="color:var(--ink-90);">Стресс-методология:</b>
+      {{ data.portfolio_metrics.stress_test_disclaimer }}
+    </div>
+    {% endif %}
 
     {% if data.ai_stress_comment %}
     <div class="conc-ai" style="margin-top:12px;">
@@ -3268,6 +3295,45 @@
       {{ _ef_card('it_share',       'Доля IT-сектора',             fmt='pct') }}
       {{ _ef_card('expected_return','Ожид. доходность (год.)',     fmt='pct') }}
     </div>
+
+    {# Temporal axis disambiguation: Sharpe is computed on trailing daily
+       log-returns, expected_return is a forward Black-Litterman equilibrium.
+       Keeping them next to each other without a label is what produced the
+       "Sharpe 1.49 vs expected 4.0%" confusion. #}
+    <div style="margin-top:8px; padding:6px 10px;
+                background:rgba(74,144,217,0.05);
+                border-left:3px solid rgba(74,144,217,0.5);
+                font-size:9px; color:var(--ink-70); line-height:1.45;">
+      <b style="color:var(--ink-90);">Временные оси.</b>
+      Sharpe / CVaR / MaxDD / Vol — <b>исторические</b> метрики (trailing,
+      окно ≈ 500 торговых дней, до сегодняшней даты).
+      «Ожид. доходность» — <b>форвардная</b> оценка из Black-Litterman
+      (equilibrium prior + RAG-views, без учёта реализованной траектории).
+      Сравнивать эти две числа напрямую нельзя.
+    </div>
+
+    {# Composite verdict for the rebalance: tradeoff vs improvement vs
+       degradation.  Engine emits this in expected_effect.verdict — see
+       finance.simulate.simulate_after_plan.  Without this the headline
+       "снижение риска" can hide the fact that concentration grew. #}
+    {% set _verdict = _ee.get('verdict') if _ee.get('verdict') else None %}
+    {% if _verdict %}
+    {% set _vkind = _verdict.kind or 'neutral' %}
+    {% set _vbg   = '#e8f5e9' if _vkind == 'improvement' else
+                    ('#fff8e1' if _vkind == 'tradeoff' else
+                     ('#ffebee' if _vkind == 'degradation' else '#eceff1')) %}
+    {% set _vbd   = '#2e7d32' if _vkind == 'improvement' else
+                    ('#f57f17' if _vkind == 'tradeoff' else
+                     ('#c62828' if _vkind == 'degradation' else '#546e7a')) %}
+    <div style="margin-top:8px; padding:8px 12px; background:{{ _vbg }};
+                border-left:3px solid {{ _vbd }}; font-size:10px;
+                color:{{ _vbd }}; line-height:1.4;">
+      <b>Сводный вердикт по плану:</b> {{ _verdict.headline }}
+      {% if _verdict.worsened %}
+        <span style="opacity:0.8;">· ухудшено: {{ _verdict.worsened | join(', ') }}</span>
+      {% endif %}
+    </div>
+    {% endif %}
 
     {% if data.ai_effect_comment %}
     <div class="conc-ai" style="margin-top:12px;">
