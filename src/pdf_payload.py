@@ -545,43 +545,47 @@ def build_payload(results: dict, tier: str,
             hotspots.append(f"{a['ticker']}: TRC {a['euler_risk']}, вес {a['weight']}")
     hotspots = hotspots[:3]
 
-    # ── Sector exposure for the bars chart ─────────────────────────────────
+    # ── Sector exposure ────────────────────────────────────────────────────
+    # Under margin/leverage the LONG sectors sum to >100% of NAV (e.g. 118%
+    # when a -17.8% USD margin-debt funds the longs).  Displaying raw NAV %
+    # made the legend sum to 118%, which reads as a bug to the user.
+    #
+    # Fix: present every sector as a share of the INVESTED (long) book, so
+    # the breakdown sums to exactly 100%.  This is the standard pie-chart
+    # convention and matches the wedge angles (which were already
+    # normalised).  `nav_pct` preserves the raw NAV share for any table
+    # that needs the leveraged truth; the leverage itself is still shown
+    # separately in the "Gross Exposure / Leverage" badge above the pie.
     sector_exposure = results.get("sector_exposure") or {}
-    # `sectors` keeps the REAL portfolio weights (decimal % of NAV).  Under
-    # leverage these may sum to > 100% — that is the truth and other tables
-    # (Action Plan, Expected Effect, CoVe) must continue to see it.  Only
-    # non-positive buckets are dropped — a negative-weight pseudo-sector
-    # would corrupt the cumulative conic-gradient pie geometry.
-    sectors = [
-        {"name": s, "weight_pct": float(w) * 100, "weight_str": f"{float(w)*100:.0f}%"}
-        for s, w in sector_exposure.items() if float(w) > 0
-    ]
-
-    # ── Pie-chart data (LOCAL normalised copy — display-only) ──────────────
-    # `weight_pct` is renormalised so wedge angles sum to 100% (well-defined
-    # geometry under leverage).  `weight_str` shows the REAL NAV % so the
-    # legend, centre label and sector-warning text all read the same number
-    # (e.g. "Technology 62%" everywhere).  `nav_pct` mirrors the raw share
-    # for any future consumer.  This structure is consumed ONLY by the
-    # sector-pie SVG; `sectors` (above) keeps real weights for every other
-    # table/card.
     long_only = [(s, float(w)) for s, w in sector_exposure.items() if float(w) > 0]
     _long_sum = sum(w for _, w in long_only)
+
     if _long_sum > 1e-9:
+        # share of long book (sums to 100%)
+        sectors = [
+            {"name":       s,
+             "weight_pct": round(w / _long_sum * 100, 2),
+             "weight_str": f"{w / _long_sum * 100:.0f}%",
+             "nav_pct":    round(w * 100, 2)}
+            for s, w in long_only
+        ]
         pie_chart_data = [
             {
                 "name":       s,
-                "weight_pct": round(w / _long_sum * 100, 2),  # angle share
-                "weight_str": f"{w * 100:.0f}%",              # real NAV %
-                "nav_pct":    round(w * 100, 2),
+                "weight_pct": round(w / _long_sum * 100, 2),   # angle share
+                "weight_str": f"{w / _long_sum * 100:.0f}%",   # share of long book
+                "nav_pct":    round(w * 100, 2),               # raw NAV %
             }
             for s, w in long_only
         ]
     else:
+        sectors = []
         pie_chart_data = []
 
     # ── Concentration metrics (sectors and individual assets) ──────────────
-    sector_pairs = [(s, float(w)) for s, w in sector_exposure.items() if float(w) > 0]
+    # Computed on the SAME normalised (share-of-long-book) basis as the
+    # display so the warning % matches the legend % exactly.
+    sector_pairs = [(s, float(w) / _long_sum) for s, w in long_only] if _long_sum > 1e-9 else []
     sector_concentration = _build_concentration(sector_pairs)
     sector_warnings      = _build_sector_warnings(sector_pairs, cap_pct=SECTOR_CAP_PCT)
 

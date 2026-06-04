@@ -70,8 +70,17 @@ def _is_credit_not_applicable(ticker: str, sector: Optional[str]) -> bool:
       • sector ∈ {Commodities, Gold, Silver, Oil, Bonds}
       • ticker stem starts with a known sovereign-bond or pure-commodity
         ETF prefix
+
+    NaN-safe: a missing sector can arrive as float('nan') (pandas fills
+    unmapped Fundamental_Sector cells with NaN, and `NaN or ""` returns NaN
+    because NaN is truthy).  We coerce any non-string sector to "" so the
+    guard never raises — a single unmapped ticker must NOT crash the whole
+    scoring pass.
     """
-    s = (sector or "").strip()
+    if isinstance(sector, str):
+        s = sector.strip()
+    else:
+        s = ""        # None / NaN / float → treat as "no sector"
     if s in _CREDIT_NA_SECTORS:
         return True
     stem = str(ticker or "").upper().split(".")[0]
@@ -280,8 +289,29 @@ def score_portfolio(
 
     for _, row in perf.iterrows():
         ticker = str(row.get("Ticker") or "?")
-        sector = row.get("Fundamental_Sector") or None
+        # NaN-safe sector: pandas fills unmapped cells with float('nan'),
+        # and `NaN or None` returns NaN (NaN is truthy) — which then crashes
+        # any string op downstream.  Coerce non-str / NaN to None here, once.
+        sector_raw = row.get("Fundamental_Sector")
+        sector = sector_raw if isinstance(sector_raw, str) and sector_raw.strip() else None
 
+      # Per-ticker resilience: a single malformed row (bad SEC value, exotic
+      # ticker) must never wipe the entire 4-pillar panel + Black-Litterman.
+      # Wrap the body; on failure log and skip just that asset.
+        try:
+            _score_one_asset(out, row, ticker, sector, perf, technicals,
+                             regime, cds_lookup, hotspot_trc_pct)
+        except Exception as exc:                       # noqa: BLE001
+            import logging as _lg
+            _lg.getLogger("ScoringOrchestrator").warning(
+                "Scoring skipped for %s: %s", ticker, exc)
+    return out
+
+
+def _score_one_asset(out, row, ticker, sector, perf, technicals,
+                     regime, cds_lookup, hotspot_trc_pct) -> None:
+    """Score a single asset and write the AssetScore into `out` (in place)."""
+    if True:
         # Pillar A — Fundamentals (sector cross-sectional Z-scores)
         roe_z = _sector_z(row.get("SEC_ROE"),                  sector, perf, "SEC_ROE")
         opm_z = _sector_z(row.get("SEC_Op_Margin"),            sector, perf, "SEC_Op_Margin")

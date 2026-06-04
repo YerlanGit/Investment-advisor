@@ -765,6 +765,15 @@ def generate_narrative(results: dict, tier: str = "base",
         stock_picks = _remove_held_picks(stock_picks, results)
         # Post-generation contradiction check: remove Sell/Trim tickers from buy picks.
         stock_picks = _check_pick_contradictions(stock_picks, results)
+        # Backfill any scenario the AI left empty (or that the held/contradiction
+        # filters drained) from the rule-based fallback, so the user always
+        # sees the full 4-scenario strategic menu instead of a silently
+        # shrinking idea list.  Held tickers are filtered again so a backfilled
+        # pick is never one the user already owns.
+        _regime_label = ((results.get("regime") or {}).get("regime")
+                         if isinstance(results.get("regime"), dict) else None) or "unknown"
+        stock_picks = _backfill_empty_scenarios(stock_picks, _regime_label, tier,
+                                                 market_context, results)
         total_picks = sum(len(s.get("picks", [])) for s in stock_picks.values())
 
         logger.info("AI narrative: SUCCESS model=%s verdict=%d chars bullets=%d picks=%d",
@@ -932,6 +941,38 @@ def _check_pick_contradictions(stock_picks: dict, results: dict) -> dict:
                         removed, scenario_key)
         scenario["picks"] = filtered
 
+    return stock_picks
+
+
+def _backfill_empty_scenarios(stock_picks: dict, regime_label: str, tier: str,
+                              market_context: str, results: dict) -> dict:
+    """
+    Guarantee all four strategic scenarios carry at least one pick.
+
+    The deep/base templates skip any scenario whose `picks` list is empty,
+    so a category the AI left blank (or that the held/contradiction filters
+    drained) silently shrinks the idea menu from 4 cards to 3.  We backfill
+    such gaps from the deterministic rule-based catalogue, then re-run the
+    held-ticker filter so a backfilled idea is never one the user owns.
+    """
+    fallback = _fallback_stock_picks(regime_label, tier)
+    fallback = _normalise_stock_picks(fallback, tier, market_context)
+    fallback = _remove_held_picks(fallback, results)
+
+    for key in ("boost_alpha", "rebalance", "protect_capital", "regime_play"):
+        scenario = stock_picks.get(key) or {}
+        if scenario.get("picks"):
+            continue
+        fb = fallback.get(key) or {}
+        if fb.get("picks"):
+            # Preserve the AI's label/desc if present, else take the fallback's.
+            stock_picks[key] = {
+                "label": scenario.get("label") or fb.get("label", key),
+                "desc":  scenario.get("desc")  or fb.get("desc", ""),
+                "picks": fb["picks"],
+            }
+            logger.info("Idea backfill: scenario '%s' was empty → filled from "
+                        "rule-based catalogue (%d picks)", key, len(fb["picks"]))
     return stock_picks
 
 
