@@ -14,9 +14,15 @@
 # ────────────────────────────────────────────────────────────────────────────
 
 substitutions:
-  _REGION:  us-central1
-  _REPO:    ramp
-  _SERVICE: ramp-bot
+  _REGION:   us-central1
+  _REPO:     ramp
+  _SERVICE:  ramp-bot
+  # GCS bucket that backs the gcsfuse-mounted state volume (free tier:
+  # SQLite is <1 MB, well under the 5 GB Standard-storage free allowance
+  # in us-central1).  Create once before first deploy:
+  #   gcloud storage buckets create gs://ramp-bot-state \
+  #     --location=us-central1 --uniform-bucket-level-access
+  _STATE_BUCKET: ramp-bot-state
 
 steps:
   # ── Step 1: Build Docker image ──────────────────────────────────────────────
@@ -29,19 +35,40 @@ steps:
       - --cache-from=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:latest
       - .
 
-  # ── Step 2: Push both tags ──────────────────────────────────────────────────
-  - id: push
+  # ── Step 2: TEST GATE — run unittest discover INSIDE the just-built image ──
+  # Hard prerequisite for push + deploy.  Any failed assertion fails the
+  # build and the deploy step (which waits for [push, test]) never runs.
+  # Network-isolated: the suite mocks FRED / Anthropic / Tradernet — no
+  # live calls leave the builder.
+  - id: test
     name: gcr.io/cloud-builders/docker
     waitFor: [build]
+    args:
+      - run
+      - --rm
+      - -e
+      - PYTHONPATH=/app/src
+      - --entrypoint=python
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:$SHORT_SHA
+      - -m
+      - unittest
+      - discover
+      - -s
+      - /app/tests
+
+  # ── Step 3: Push both tags (only when tests are green) ─────────────────────
+  - id: push
+    name: gcr.io/cloud-builders/docker
+    waitFor: [test]
     args:
       - push
       - --all-tags
       - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}
 
-  # ── Step 3: Deploy to Cloud Run ─────────────────────────────────────────────
+  # ── Step 4: Deploy to Cloud Run (only when push + test succeeded) ──────────
   - id: deploy
     name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
-    waitFor: [push]
+    waitFor: [push, test]
     entrypoint: gcloud
     args:
       - run
@@ -58,10 +85,19 @@ steps:
       - --concurrency=1
       - --no-cpu-throttling        # CRITICAL: bot uses long-polling, not incoming HTTP
       - --no-allow-unauthenticated
+      # PERSISTENT STATE — gcsfuse-mounted Cloud Storage bucket survives
+      # every redeploy / scale-to-zero / cold-start.  Free-tier safe.
+      # The runtime SA needs roles/storage.objectAdmin on _STATE_BUCKET.
+      - --add-volume=name=state,type=cloud-storage,bucket=${_STATE_BUCKET}
+      - --add-volume-mount=volume=state,mount-path=/mnt/state
       # Secrets injected from Secret Manager — values never touch image layers
       - --set-secrets=RAMP_BOT_TOKEN=RAMP_BOT_TOKEN:latest,FINTECH_MASTER_KEY=FINTECH_MASTER_KEY:latest,ANTHROPIC_API_KEY=ANTHROPIC_API_KEY:latest,FREEDOM_API_KEY=FREEDOM_API_KEY:latest,FREEDOM_API_SECRET=FREEDOM_API_SECRET:latest,FRED_API_KEY=FRED_API_KEY:latest
-      # Plain env vars — non-sensitive configuration
-      - --set-env-vars=REPORT_BUCKET_NAME=ramp-bot-reports,CHROMA_BUCKET=ramp-bot-chroma-db
+      # Plain env vars — non-sensitive configuration.
+      # TOKENOMICS_DB_PATH points the async SQLite layer at the persistent
+      # gcsfuse volume — without this every redeploy wipes user balances.
+      # REPORTING_CURRENCY=USD pins H2 base-currency to USD for the beta
+      # cohort; FX-conversion auto-no-ops on USD-only portfolios.
+      - --set-env-vars=REPORT_BUCKET_NAME=ramp-bot-reports,CHROMA_BUCKET=ramp-bot-chroma-db,TOKENOMICS_DB_PATH=/mnt/state/tokenomics.db,REPORTING_CURRENCY=USD
 
 # Images promoted to Artifact Registry after a successful build
 images:

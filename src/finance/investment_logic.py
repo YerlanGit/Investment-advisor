@@ -823,6 +823,20 @@ class UniversalPortfolioManager:
         _is_fallback = raw_df.attrs.get('_ramp_is_fallback', False)
         _is_mock     = raw_df.attrs.get('_ramp_is_mock',     False)
 
+        # ── EMPTY-PORTFOLIO GUARD ────────────────────────────────────────────
+        # 0-row frame → `total = df['Current_Value'].sum()` = 0 →
+        # `df['Current_Value']/total` = all-NaN → Ridge fit + bootstrap CVaR
+        # explode with cryptic errors.  Bail out with a user-facing message
+        # the existing handler (`RealPortfolioRequired` is caught by
+        # tg_bot._build_analysis_payload) already understands.
+        if raw_df is None or raw_df.empty:
+            logger.warning("MAC3 ENGINE GATE ▸ empty portfolio (0 rows) — halting.")
+            raise RealPortfolioRequired(
+                "У вас нет открытых позиций для анализа.\n\n"
+                "Откройте хотя бы одну позицию у брокера или выберите "
+                "«Демо-режим» в настройках подключения."
+            )
+
         if _is_fallback:
             logger.error(
                 "MAC3 ENGINE GATE ▸ FALLBACK mock portfolio detected "
@@ -910,7 +924,16 @@ class UniversalPortfolioManager:
         df['PnL'] = df['Current_Value'] - df['Total_Cost']
         df['Return_Pct'] = (df['PnL'] / df['Total_Cost'])
 
-        total_portfolio_value = df['Current_Value'].sum()
+        total_portfolio_value = float(df['Current_Value'].sum())
+        # Second guard: even with rows, if every Current_Price is 0 or all
+        # rows are NON_RISK_ASSETS with zero balance, total is 0.  Don't
+        # divide — propagate the same user-friendly error.
+        if not np.isfinite(total_portfolio_value) or total_portfolio_value <= 0:
+            logger.warning("MAC3 ENGINE ▸ total portfolio value is 0 or NaN — halting.")
+            raise RealPortfolioRequired(
+                "Стоимость портфеля = 0. Проверьте подключение к брокеру "
+                "или откройте позиции — анализ невозможен на пустом счёте."
+            )
         weights_dict = (df['Current_Value'] / total_portfolio_value).to_dict()
 
         # MAC3 Structural Risk.
