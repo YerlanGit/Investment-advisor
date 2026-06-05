@@ -30,26 +30,52 @@ class WhitelistEnvParseTest(unittest.TestCase):
     def setUp(self) -> None:
         self._snap = os.environ.get("TG_ALLOWED_USERS")
         os.environ.pop("TG_ALLOWED_USERS", None)
+        tg = _import_tg_bot()
+        if tg is not None:
+            tg._ALLOWED_USERS_CACHE = tg._UNINIT
 
     def tearDown(self) -> None:
         if self._snap is None:
             os.environ.pop("TG_ALLOWED_USERS", None)
         else:
             os.environ["TG_ALLOWED_USERS"] = self._snap
+        tg = _import_tg_bot()
+        if tg is not None:
+            tg._ALLOWED_USERS_CACHE = tg._UNINIT
 
     def test_empty_env_returns_none(self) -> None:
         tg = _import_tg_bot()
         if tg is None:
             self.skipTest("tg_bot import unavailable")
-        tg._ALLOWED_USERS_CACHE = None
+        tg._ALLOWED_USERS_CACHE = tg._UNINIT
         self.assertIsNone(tg._allowed_users())
+
+    def test_empty_env_cache_stays_none(self) -> None:
+        """REGRESSION: a second call must NOT return an empty set().
+
+        Phase 12 cached `set()` for the disabled state but RETURNED None on
+        the first call.  The second call returned the cached `set()`, which
+        the middleware truthy-checked as "active whitelist with 0 members"
+        and blocked every user except the very first request.
+        """
+        tg = _import_tg_bot()
+        if tg is None:
+            self.skipTest("tg_bot import unavailable")
+        tg._ALLOWED_USERS_CACHE = tg._UNINIT
+        # First call seeds the cache.
+        first = tg._allowed_users()
+        # Second call MUST keep returning None — never a leftover empty set.
+        second = tg._allowed_users()
+        self.assertIsNone(first)
+        self.assertIsNone(second)
+        self.assertIs(second, first)
 
     def test_csv_parsed(self) -> None:
         tg = _import_tg_bot()
         if tg is None:
             self.skipTest("tg_bot import unavailable")
         os.environ["TG_ALLOWED_USERS"] = "111, 222 ; 333"
-        tg._ALLOWED_USERS_CACHE = None
+        tg._ALLOWED_USERS_CACHE = tg._UNINIT
         self.assertEqual(tg._allowed_users(), {111, 222, 333})
 
 
