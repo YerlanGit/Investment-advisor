@@ -28,9 +28,16 @@ RUN pip install --no-cache-dir --upgrade pip \
 
 # ── Application source ────────────────────────────────────────────────────────
 COPY src/ ./src/
+# Test suite — copied so the CI test-gate (`docker run … python -m unittest
+# discover -s /app/tests`) finds them inside the just-built image.  Files
+# are tiny (~500 KB), Python-only, and the runtime entrypoint never imports
+# from /app/tests, so there is zero behavioural impact in production.
+COPY tests/ ./tests/
 
 # ── Runtime data directories ──────────────────────────────────────────────────
-# NOTE: Cloud Run containers are ephemeral — SQLite data is lost on restart.
+# Tokenomics SQLite lives on a gcsfuse-mounted persistent volume in
+# production (TOKENOMICS_DB_PATH=/mnt/state/tokenomics.db, set in
+# cloudbuild.yaml).  The /app/data fallback below is only used in local dev.
 # Reports are rendered to /tmp/user_reports (writable, ephemeral) and then
 # uploaded to GCS via services/report_storage.py — see REPORT_BUCKET_NAME.
 # /app/data/chroma_db is pre-warmed on boot from gs://ramp-bot-chroma-db/

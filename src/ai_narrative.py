@@ -26,6 +26,40 @@ MAX_TOKENS_BASE = 4_500  # raised from 3_500 — Haiku BASE was hitting cap on l
 MAX_TOKENS_DEEP = 7_000
 
 
+# ── Prompt-injection defence: input sanitization ────────────────────────────
+# Every string that flows from BROKER / RAG / TELEGRAM into the LLM prompt
+# passes through these guards.  Without them a holding called
+# "Ignore previous instructions" or a poisoned bank-PDF chunk can override
+# the system prompt.  Tickers go through a strict regex; free-text strings
+# (sector tags, fund names) are control-char-stripped and length-clamped.
+#
+# Ticker regex permits up to 32 chars so KZ structured notes like
+# "FFSPC6.1028.AIX" (16 chars) survive — strictly tighter ^[A-Z0-9.\-]{1,10}$
+# from the original spec would drop them, breaking KZ workflows.
+_TICKER_RE       = re.compile(r"^[A-Z0-9.\-]{1,32}$")
+_SAFE_TEXT_DROP  = re.compile(r"[\x00-\x1F\x7F<>{}|`]")   # control / tag chars
+
+
+def _safe_ticker(t) -> str:
+    """Strict ticker validator.  Non-matching input → '?' (never propagated as instruction)."""
+    s = str(t or "").strip().upper()
+    return s if _TICKER_RE.match(s) else "?"
+
+
+def _safe_text(t, max_len: int = 60) -> str:
+    """Strip control chars + length-clamp untrusted free-text fields."""
+    s = str(t or "")[:max_len]
+    return _SAFE_TEXT_DROP.sub("", s).strip()
+
+
+def _wrap_untrusted(label: str, payload: str) -> str:
+    """
+    Fence external data with an XML-like tag.  The system prompt instructs
+    the model to NEVER follow instructions found inside these tags.
+    """
+    return f"<untrusted_data source=\"{label}\">\n{payload}\n</untrusted_data>"
+
+
 # ── Soft-trim helper ────────────────────────────────────────────────────────
 # Hard-cap slicing (`text[:N]`) produces obviously truncated sentences in
 # the production report ("Это давит на перегруженный Tech-портфель [GS][Bar").
@@ -94,16 +128,19 @@ def _summarise_for_prompt(results: dict) -> dict:
         if "Current_Value" in df.columns:
             df = df.sort_values("Current_Value", ascending=False)
         for _, row in df.head(25).iterrows():
+            # SANITIZE every string field — these flow straight into the LLM
+            # prompt, so a broker-supplied ticker like "<ignore_above>" or a
+            # sector field with hidden instructions must never reach Claude.
             perf_rows.append({
-                "ticker":   str(row.get("Ticker") or "?"),
+                "ticker":   _safe_ticker(row.get("Ticker")),
                 "weight":   round(float(row.get("Current_Value") or 0)
                                   / float(results.get("total_value") or 1) * 100, 2),
                 "trc_pct":  _safe_round(row.get("Euler_Risk_Contribution_Pct"), 2),
                 "atr_pct":  _safe_round(row.get("ATR_Pct"), 2),
                 "pnl_pct":  _safe_round((row.get("Return_Pct") or 0) * 100, 2),
                 "score":    _safe_round(row.get("Score_Total"), 1),
-                "action":   row.get("Score_Action"),
-                "sector":   row.get("Fundamental_Sector"),
+                "action":   _safe_text(row.get("Score_Action"), 20),
+                "sector":   _safe_text(row.get("Fundamental_Sector"), 30),
                 "beta_mkt": _safe_round(row.get("Beta_Market"), 2),
                 "sec_roe":  _safe_round(row.get("SEC_ROE"), 3),
                 "sec_debt": _safe_round(row.get("SEC_Debt_to_Assets"), 3),
@@ -287,10 +324,14 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
     rag_rule  = ""
     if market_context:
         ctx_limit = 6000 if tier == "deep" else 2000
+        # Defence: RAG chunks come from third-party PDFs that may carry
+        # injection payloads.  Fence the entire block as `<untrusted_data>`
+        # so the system-prompt guardrail tells the model to treat it as
+        # pure data, never as instructions.
         rag_block = (
             "\n\n=== АНАЛИТИКА БАНКОВ (RAG) ===\n"
-            f"{market_context[:ctx_limit]}\n"
-            "=== КОНЕЦ АНАЛИТИКИ БАНКОВ ==="
+            + _wrap_untrusted("rag_bank_pdfs", market_context[:ctx_limit])
+            + "\n=== КОНЕЦ АНАЛИТИКИ БАНКОВ ==="
         )
         rag_rule = (
             "Если используешь факт из АНАЛИТИКИ БАНКОВ — цитируй "
@@ -389,7 +430,8 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
             "why — конкретные цифры (ROE, маржа, Бета) с тегом [Источник].\n"
             f"{contradiction_rule}"
             f"{rag_rule}\n"
-            f"=== ДАННЫЕ ПОРТФЕЛЯ ===\n{json.dumps(summary, ensure_ascii=False)[:7000]}"
+            f"=== ДАННЫЕ ПОРТФЕЛЯ ===\n"
+            f"{_wrap_untrusted('broker_portfolio_json', json.dumps(summary, ensure_ascii=False)[:7000])}"
             f"{rag_block}"
         )
 
@@ -519,7 +561,8 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
         "- why: конкретные цифры (ROE, маржа, Beta, P/E, momentum) с тегом [источник].\n"
         f"{contradiction_rule}"
         f"{rag_rule}"
-        f"\n=== ДАННЫЕ ПОРТФЕЛЯ ===\n{json.dumps(summary, ensure_ascii=False)[:9000]}"
+        f"\n=== ДАННЫЕ ПОРТФЕЛЯ ===\n"
+        f"{_wrap_untrusted('broker_portfolio_json', json.dumps(summary, ensure_ascii=False)[:9000])}"
         f"{rag_block}"
     )
 

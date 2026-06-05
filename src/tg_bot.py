@@ -1403,6 +1403,23 @@ async def msg_login(message: Message, state: FSMContext) -> None:
 async def msg_api_key(message: Message, state: FSMContext) -> None:
     await state.update_data(connect_api_key=message.text.strip())
     await state.set_state(PortfolioConnection.SecretKey)
+    # CRITICAL: live broker API key was just transmitted as plain-text — purge
+    # it from the chat IMMEDIATELY (bot needs Delete-Messages permission in a
+    # group; in a 1:1 chat with the user, bots can delete their OWN sent
+    # messages but NOT the user's; Telegram restricts that to admins).  If
+    # the delete fails (permission, network), we surface a clear instruction
+    # to the user as the fallback.  We delete BEFORE asking for the next
+    # secret so even an interrupted onboarding doesn't leave the key visible.
+    try:
+        await message.delete()
+    except Exception as exc:                       # noqa: BLE001
+        logger.info("Couldn't auto-delete API-key message for %s: %s",
+                    message.from_user.id, exc)
+        await message.answer(
+            "⚠️ *Удалите вручную* предыдущее сообщение с API-ключом из чата — "
+            "у бота нет прав на автоматическое удаление в этом диалоге.",
+            parse_mode=ParseMode.MARKDOWN,
+        )
     await message.answer(
         "🔑 Введите ваш *Secret Key* (приватный ключ):",
         parse_mode=ParseMode.MARKDOWN,
@@ -1423,12 +1440,25 @@ async def msg_secret_key(message: Message, state: FSMContext) -> None:
     await save_connection_mode(user_id, "freedom")
     await state.clear()
 
-    await message.answer(
+    # CRITICAL: secret key just travelled through the chat in plaintext —
+    # purge it BEFORE we acknowledge save, so even if the next call fails
+    # the secret is gone from Telegram's chat history.
+    delete_failed = False
+    try:
+        await message.delete()
+    except Exception as exc:                       # noqa: BLE001
+        delete_failed = True
+        logger.info("Couldn't auto-delete Secret-key message for %s: %s",
+                    user_id, exc)
+
+    ack_text = (
         "🔐 *Подключение успешно. Ваши данные под квантовой защитой.*\n\n"
-        "✅ API-ключ и Secret Key надёжно зашифрованы. Пожалуйста, удалите "
-        "предыдущие сообщения с ключами из истории чата.",
-        parse_mode=ParseMode.MARKDOWN,
+        "✅ API-ключ и Secret Key зашифрованы (Fernet, master-key в Secret Manager)."
     )
+    if delete_failed:
+        ack_text += ("\n\n⚠️ *Удалите вручную* предыдущие сообщения с ключами — "
+                     "у бота нет прав на автоудаление в этом чате.")
+    await message.answer(ack_text, parse_mode=ParseMode.MARKDOWN)
     await _show_analysis_menu(message, slug)
 
 
