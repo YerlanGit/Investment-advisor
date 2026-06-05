@@ -2073,18 +2073,25 @@ async def cmd_mandate(message: Message, state: FSMContext) -> None:
 from aiogram import BaseMiddleware
 from aiogram.types import TelegramObject
 
-_ALLOWED_USERS_CACHE: set[int] | None = None
+# Sentinel for "cache never populated yet".  We can't use None for this
+# slot because None ALSO means "gating intentionally disabled" — the two
+# states must be distinguishable.  Without this sentinel, an empty
+# TG_ALLOWED_USERS env var was cached as set() and the second `_allowed_users`
+# call returned set() (truthy-checked as non-None) → every user except the
+# very first request was blocked by the middleware.
+_UNINIT = object()
+_ALLOWED_USERS_CACHE: object = _UNINIT
 _DENIED_NOTIFIED: set[int] = set()   # tell each user ONCE they're not in the beta
 
 
 def _allowed_users() -> set[int] | None:
     """Return whitelist set, or None when no gating is configured."""
     global _ALLOWED_USERS_CACHE
-    if _ALLOWED_USERS_CACHE is not None:
-        return _ALLOWED_USERS_CACHE
+    if _ALLOWED_USERS_CACHE is not _UNINIT:
+        return _ALLOWED_USERS_CACHE  # type: ignore[return-value]
     raw = (os.getenv("TG_ALLOWED_USERS") or "").strip()
     if not raw:
-        _ALLOWED_USERS_CACHE = set()
+        _ALLOWED_USERS_CACHE = None      # disabled — DO NOT cache as set()
         return None
     out: set[int] = set()
     for token in raw.replace(";", ",").split(","):
@@ -2101,7 +2108,11 @@ class WhitelistMiddleware(BaseMiddleware):
 
     async def __call__(self, handler, event: TelegramObject, data: dict):
         allowed = _allowed_users()
-        if allowed is None:                       # gating disabled — fall through
+        # Defence in depth: also treat an explicitly empty set as "disabled".
+        # An empty whitelist would otherwise block every single user — that
+        # is never the intended config; misconfiguration should fail OPEN
+        # for the beta, not lock everyone out.
+        if not allowed:                           # None or empty set
             return await handler(event, data)
         user = getattr(event, "from_user", None)
         if user is None:
