@@ -34,10 +34,18 @@ env/
 .ruff_cache/
 .pytest_cache/
 
-# ── Tests & docs ──────────────────────────────────────────────────────────────
-tests/
+# ── Docs ──────────────────────────────────────────────────────────────────────
+# Exclude markdown docs EXCEPT SYSTEM_PROMPT.md, which the runtime reads via
+# ai_narrative._build_system_prompt (expects it at /app/SYSTEM_PROMPT.md).
+# Without the negation the bot silently falls back to a 2-line stub prompt,
+# losing the analyst persona AND the prompt-injection guardrail.
 *.md
+!SYSTEM_PROMPT.md
 assets/
+
+# NOTE: tests/ is intentionally NOT excluded — the CI test-gate copies it
+# into the image and runs `unittest discover` against the exact deployed
+# artifact.  Test files are Python-only, tiny, never imported at runtime.
 
 # ── Rust workspace (not part of the Python bot) ───────────────────────────────
 rust/

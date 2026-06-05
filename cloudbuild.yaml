@@ -55,6 +55,11 @@ steps:
       - discover
       - -s
       - /app/tests
+      # Only the hermetic, network-free engine suite (test_phase*.py).  The
+      # broker-integration tests (test_freedom_*.py) depend on pytest +
+      # live credentials and are intentionally excluded from the deploy gate.
+      - -p
+      - "test_phase*.py"
 
   # ── Step 3: Push both tags (only when tests are green) ─────────────────────
   - id: push
