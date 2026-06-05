@@ -1765,7 +1765,9 @@ class DataLineageTest(unittest.TestCase):
         import importlib
         try:
             tg = importlib.import_module("tg_bot")
-        except Exception:
+        except BaseException:
+            # BaseException, not Exception: cryptography's Rust binding can
+            # raise pyo3 PanicException (a BaseException) in some sandboxes.
             self.skipTest("tg_bot imports not available in this env")
         self.assertIn("Volatility", tg._RADAR_FACTOR_AXES)
         # Count = 10 axes.

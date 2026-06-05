@@ -28,6 +28,11 @@ RUN pip install --no-cache-dir --upgrade pip \
 
 # ── Application source ────────────────────────────────────────────────────────
 COPY src/ ./src/
+# System prompt — MUST be present at /app/SYSTEM_PROMPT.md, where
+# ai_narrative._build_system_prompt looks (src/../SYSTEM_PROMPT.md).
+# Previously never copied → the bot ran on a 2-line fallback prompt in
+# production, silently dropping the analyst persona + injection guardrail.
+COPY SYSTEM_PROMPT.md ./
 # Test suite — copied so the CI test-gate (`docker run … python -m unittest
 # discover -s /app/tests`) finds them inside the just-built image.  Files
 # are tiny (~500 KB), Python-only, and the runtime entrypoint never imports
