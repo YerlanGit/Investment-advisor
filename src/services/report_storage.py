@@ -44,9 +44,14 @@ logger = logging.getLogger(__name__)
 
 # ── Public config ────────────────────────────────────────────────────────────
 BUCKET_NAME       = os.getenv("REPORT_BUCKET_NAME", "").strip()
-DEFAULT_TTL_HOURS = int(os.getenv("REPORT_URL_TTL_HOURS", "168"))   # 7 days
+# PII protection: reports contain holdings + P&L.  Default signed-URL life
+# lowered 168h → 48h (still long enough for a user to revisit a link the
+# bot sent, short enough to bound exposure if a link leaks).  Override via
+# REPORT_URL_TTL_HOURS but the default is now privacy-conservative.
+DEFAULT_TTL_HOURS = int(os.getenv("REPORT_URL_TTL_HOURS", "48"))    # 2 days
 CONTENT_TYPE      = "text/html; charset=utf-8"
-CACHE_CONTROL     = "public, max-age=3600"     # 1h cache at GCS edge
+# Never let a private financial report rest in any shared/CDN/browser cache.
+CACHE_CONTROL     = "private, no-store, max-age=0"
 
 
 def _object_path(user_id: int | str, tier: str, today: Optional[str] = None) -> str:

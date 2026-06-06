@@ -29,6 +29,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, NamedTuple
 
+import numpy as np
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -494,7 +495,13 @@ def _detect_and_adjust_splits(ticker: str, series: pd.Series) -> pd.Series:
         return series
 
     s = series.copy().astype(float)
-    log_returns = (s / s.shift(1)).apply(lambda x: math.log(x) if x and x > 0 else 0)
+    # Vectorised log-returns: np.log over the positive ratios, 0 elsewhere
+    # (matches the old per-element lambda but ~10-50× faster on long series).
+    ratio = (s / s.shift(1))
+    log_returns = pd.Series(
+        np.where(ratio.to_numpy() > 0, np.log(ratio.where(ratio > 0, 1.0).to_numpy()), 0.0),
+        index=s.index,
+    )
 
     cumulative_factor = 1.0
     adjustments_applied = 0

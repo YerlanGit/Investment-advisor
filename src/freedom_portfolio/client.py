@@ -194,10 +194,10 @@ class TradernetClient:
                     return self._parse_portfolio(raw)
                 except (InvalidSignatureError, AuthenticationError) as exc:
                     logger.warning(
-                        "Tradernet v2 signed auth rejected [cmd=%s apiKey_prefix=%s… secret_len=%d]: %s "
+                        "Tradernet v2 signed auth rejected [cmd=%s api_key_present=%s secret_len=%d]: %s "
                         "— falling back to v1 md5 signing",
                         cmd,
-                        self.public_key[:8] if self.public_key else "EMPTY",
+                        bool(self.public_key),
                         len(self.secret_key),
                         exc,
                     )
@@ -340,13 +340,14 @@ class TradernetClient:
             "X-NtApi-Sig":      sig,
             "X-NtApi-PublicKey": self.public_key,
         }
+        # Log only presence/lengths — never any prefix of the public key,
+        # secret key, or HMAC signature (the sig is derived from the secret).
         logger.info(
-            "Tradernet POST (v2 signed) %s [cmd=%s apiKey_prefix=%s… key_len=%d secret_len=%d sig_prefix=%s…]",
+            "Tradernet POST (v2 signed) %s [cmd=%s api_key_present=%s key_len=%d secret_len=%d]",
             url, cmd,
-            self.public_key[:8] if self.public_key else "EMPTY",
+            bool(self.public_key),
             len(self.public_key),
             len(self.secret_key),
-            sig[:8],
         )
         resp = self._session.post(url, data=body, headers=headers, timeout=self.timeout)
         return self._decode(resp)

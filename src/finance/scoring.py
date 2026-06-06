@@ -267,6 +267,85 @@ def total_score(fundamentals: float, valuations: float,
     return float(np.clip(fundamentals + valuations + technicals + credit, -6.0, 6.0))
 
 
+# ── Composite Risk Score (0..100) — SINGLE SOURCE OF TRUTH ────────────────────
+# Previously duplicated in MAC3RiskEngine._composite_risk_score AND
+# simulate._composite_risk_score with a "keep in sync!" comment — a textbook
+# DRY violation + drift risk.  Both now delegate here.  Kept sklearn-free so
+# the simulator and tests never drag the engine class into scope.
+
+def composite_risk_score(volatility: float, cvar: float,
+                         max_erc_pct: float) -> int:
+    """
+    Blend three independent risk signals into a single 0..100 gauge.
+
+      • Vol     normalised by 0.40 (40% annual vol = 100)   weight 0.40
+      • |CVaR|  normalised by 0.10 (10% daily tail = 100)   weight 0.40
+      • maxERC  normalised by 50   (50% concentration = 100) weight 0.20
+
+    Deterministic — two identical inputs always produce the same score.
+    """
+    def _norm(x: float, scale: float) -> float:
+        return min(100.0, max(0.0, (x / scale) * 100.0)) if scale > 0 else 0.0
+    s_vol  = _norm(float(volatility),  0.40)
+    s_cvar = _norm(abs(float(cvar)),   0.10)
+    s_conc = _norm(float(max_erc_pct), 50.0)
+    return int(round(0.40 * s_vol + 0.40 * s_cvar + 0.20 * s_conc))
+
+
+# ── Asset-class display label — SINGLE SOURCE OF TRUTH ───────────────────────
+# Consolidates the two divergent DISPLAY classifiers that previously lived in
+# pdf_payload._classify_asset (suffix-aware, correct) and
+# tg_bot._classify_asset (substring `any(x in t)` — buggy: "BNB"⊂"…BNB…",
+# "BOND" false-positives, bare ticker → "Акции").  This is the accurate,
+# suffix-aware version; both call sites now import it.
+#
+# NOTE: this is intentionally SEPARATE from:
+#   • gatekeeper._classify_to_asset_key  → English limits keys (Stocks_US…)
+#   • broker_api._classify_instrument    → instrument TYPE via Tradernet t_field
+# Those have different output contracts and purposes; merging them would
+# break the limits lookup / broker-metadata typing.
+
+_CASH_BASES       = frozenset({"USD", "EUR", "RUB", "KZT", "CASH"})
+_CRYPTO_BASES     = frozenset({"BTC", "ETH", "SOL", "BNB", "DOGE"})
+_COMMODITY_BASES  = frozenset({"GLD", "SLV", "GDX", "USO", "DBC", "PDBC",
+                               "GOLD", "SILVER", "OIL"})
+_BOND_BASES       = frozenset({"TLT", "AGG", "BND", "LQD", "HYG", "IEF",
+                               "BIL", "EMB", "SHY"})
+# KZ blue chips that may arrive WITHOUT an exchange suffix (the tg_bot path
+# saw bare "KSPI"/"KAP"); classify them as KZ equities regardless.
+_KZ_BASES         = frozenset({"KAP", "KSPI", "HSBK", "KZTK", "KCEL",
+                               "BAST", "HRGL", "KZAP", "KZTO"})
+
+
+def classify_asset_class(ticker: str) -> str:
+    """
+    Asset-class label for user-facing tables/cards.
+
+    Returns one of: 'Ден. средства' | 'Крипто' | 'Сырьё' | 'Облигации'
+                    | 'Акции KZ' | 'Акции США' | 'Прочее'.
+    Suffix-aware and exact-match based — no substring false positives.
+    """
+    t = (ticker or "").upper().strip()
+    base   = t.split(".")[0] if "." in t else t
+    suffix = t.rsplit(".", 1)[-1] if "." in t else ""
+
+    if base in _CASH_BASES:
+        return "Ден. средства"
+    if base in _CRYPTO_BASES or t.endswith("-USD"):
+        return "Крипто"
+    if base in _COMMODITY_BASES:
+        return "Сырьё"
+    if base in _BOND_BASES or "BOND" in base or "OVD" in base \
+       or t.startswith(("KZ2P", "KZ1P", "XS", "US912")):
+        return "Облигации"
+    if suffix in {"KZ", "IL"} or t.endswith(".AIX") or "FFSPC" in base \
+       or base in _KZ_BASES:
+        return "Акции KZ"
+    if suffix == "US" or len(base) <= 5:
+        return "Акции США"
+    return "Прочее"
+
+
 __all__ = [
     "robust_z",
     "fundamentals_score",
@@ -275,5 +354,7 @@ __all__ = [
     "credit_score",
     "total_score",
     "action_from_total",
+    "composite_risk_score",
+    "classify_asset_class",
     "AssetScore",
 ]

@@ -60,22 +60,11 @@ import numpy as np
 import pandas as pd
 
 
-# ── Composite Risk Score (mirrors MAC3RiskEngine._composite_risk_score) ──────
-
-def _composite_risk_score(volatility: float, cvar: float, max_erc_pct: float) -> int:
-    """
-    Faithful reimplementation of investment_logic.MAC3RiskEngine
-    ._composite_risk_score — kept private so the simulator never depends
-    on importing the engine class (which would drag sklearn into tests).
-
-    Keep in sync with the engine version!  Tests assert equivalence.
-    """
-    def _norm(x: float, scale: float) -> float:
-        return min(100.0, max(0.0, (x / scale) * 100.0)) if scale > 0 else 0.0
-    s_vol  = _norm(float(volatility),  0.40)
-    s_cvar = _norm(abs(float(cvar)),   0.10)
-    s_conc = _norm(float(max_erc_pct), 50.0)
-    return int(round(0.40 * s_vol + 0.40 * s_cvar + 0.20 * s_conc))
+# ── Composite Risk Score — re-exported from the single source of truth ───────
+# finance.scoring.composite_risk_score is the canonical implementation.  We
+# alias it under the historical private name so `_composite_risk_score` and
+# the module's `__all__` export keep working for every existing caller/test.
+from finance.scoring import composite_risk_score as _composite_risk_score  # noqa: E402,F401
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
