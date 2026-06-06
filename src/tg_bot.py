@@ -91,10 +91,13 @@ logger = logging.getLogger("ramp_bot")
 
 BOT_TOKEN: str = os.environ["RAMP_BOT_TOKEN"].strip()
 if not BOT_TOKEN or ":" not in BOT_TOKEN:
+    # Never echo any part of the secret — only its length on the error path.
     raise ValueError(
-        f"Invalid RAMP_BOT_TOKEN format — expected 'id:secret', got prefix: {BOT_TOKEN[:10]!r}"
+        f"Invalid RAMP_BOT_TOKEN format — expected 'id:secret' (len={len(BOT_TOKEN)})"
     )
-logger.info("Starting bot with token prefix: %s…", BOT_TOKEN[:10])
+# The numeric id BEFORE ':' is public (it's the bot's user id); the secret
+# AFTER ':' must never be logged.  Log only the public id segment.
+logger.info("Starting bot id=%s", BOT_TOKEN.split(":", 1)[0])
 VAULT_DB: str  = str(Path(__file__).parent.parent / "data" / "users_vault.db")
 
 # ── FSM ───────────────────────────────────────────────────────────────────────
@@ -200,22 +203,11 @@ def _source_label(slug: str) -> str:
     return SOURCE_GREETING.get(slug, f"канала «{slug}»")
 
 
-def _classify_asset(ticker: str) -> str:
-    t = ticker.upper()
-    if any(x in t for x in ("BTC", "ETH", "SOL", "BNB")):
-        return "Крипто"
-    if any(x in t for x in ("GOLD", "GLD", "DBC", "OIL", "PDBC")):
-        return "Сырьё"
-    if any(x in t for x in ("CASH", "USD", "EUR", "KZT", "RUB")):
-        return "Ден. средства"
-    if any(x in t for x in ("KAP", "KSPI", "HSBK", "KZTK")):
-        return "Акции KZ"
-    if any(x in t for x in ("TLT", "AGG", "BND", "TNX", "BOND", "LQD", "HYG", "BIL", "IEF", "SHY")):
-        return "Облигации"
-    # KZ / international bond ISIN patterns from Freedom Finance
-    if t.startswith(("KZ2P", "KZ1P", "XS", "US912")):
-        return "Облигации"
-    return "Акции"
+# Asset-class label — single source of truth in finance.scoring.  The old
+# bot-local version used substring `any(x in t)` matching which mis-classified
+# tickers (e.g. "BNB" inside other symbols, "BOND" false positives, bare
+# tickers → "Акции").  Aliased to the canonical, suffix-aware classifier.
+from finance.scoring import classify_asset_class as _classify_asset
 
 
 def _get_keys_sync(user_id: int):
@@ -880,24 +872,26 @@ async def _build_analysis_payload(user_id: int, tier: str) -> dict:
             api_key    = os.getenv("FREEDOM_API_KEY",    "demo")
             secret_key = os.getenv("FREEDOM_API_SECRET", "")
             login      = os.getenv("FREEDOM_LOGIN",      "")
+            # Never log any portion of a live broker key — log only presence.
             logger.info(
-                "KEY SOURCE: env-vars  user=%s  key_prefix=%s  secret_len=%d  login=%s…",
+                "KEY SOURCE: env-vars  user=%s  api_key_present=%s  secret_present=%s  login_present=%s",
                 user_id,
-                api_key[:6] if api_key else "EMPTY",
-                len(secret_key),
-                login[:6]   if login   else "EMPTY",
+                bool(api_key and api_key != "demo"),
+                bool(secret_key),
+                bool(login),
             )
         else:
             login, api_key, secret_key = keys
             login      = (login      or "").strip()
             api_key    = (api_key    or "").strip()
             secret_key = (secret_key or "").strip()
+            # Never log any portion of a live broker key — log only presence.
             logger.info(
-                "KEY SOURCE: vault  user=%s  key_prefix=%s  secret_len=%d  login=%s…",
+                "KEY SOURCE: vault  user=%s  api_key_present=%s  secret_present=%s  login_present=%s",
                 user_id,
-                api_key[:6] if api_key else "EMPTY",
-                len(secret_key),
-                login[:6]   if login   else "EMPTY",
+                bool(api_key),
+                bool(secret_key),
+                bool(login),
             )
     else:
         api_key    = "demo"

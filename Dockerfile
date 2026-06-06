@@ -9,8 +9,7 @@ FROM python:3.11-slim
 # System packages
 #   gcc / libffi-dev / libssl-dev  — needed to compile cryptography wheel
 #   ca-certificates                — requests need valid TLS roots
-# Chromium system deps removed 2026-05-17: PDF generation was retired,
-# reports now ship as interactive HTML URLs via Cloud Storage.
+# Reports ship as interactive HTML URLs via Cloud Storage (no PDF/Chromium).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         gcc \

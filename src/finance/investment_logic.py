@@ -237,8 +237,16 @@ class MAC3RiskEngine:
         self._last_asset_currencies: dict[str, str] = {}
 
     def math_firewall(self, df):
-        """Защита от 'битых' данных (галлюцинаций API)."""
-        return df.ffill().bfill()
+        """
+        Защита от 'битых' данных (галлюцинаций API).
+
+        Replaces ±Inf with NaN BEFORE the directional fill so a single
+        infinite price tick can't survive ffill/bfill and poison the
+        covariance matrix or Sharpe/CVaR downstream.  ffill→bfill then
+        carries the last/next finite value across the gap.
+        """
+        cleaned = df.replace([np.inf, -np.inf], np.nan)
+        return cleaned.ffill().bfill()
 
     # ── Bootstrap CVaR (stationary block bootstrap, Politis-Romano 1994) ─────
     @staticmethod
@@ -322,28 +330,14 @@ class MAC3RiskEngine:
         return pd.Series(out)
 
     # ── Composite Risk Score (0..100) ────────────────────────────────────────
+    # Thin delegate to the single source of truth in finance.scoring.
+    # Kept as a staticmethod so existing callers / tests that reference
+    # MAC3RiskEngine._composite_risk_score keep working unchanged.
     @staticmethod
     def _composite_risk_score(volatility: float, cvar: float,
                               max_erc_pct: float) -> int:
-        """
-        Blend three independent risk signals into a single 0..100 user-facing
-        gauge.  Replaces the prior 'risk_pct = vol/0.40 * 100' which ignored
-        tails and concentration.
-
-          • Vol     normalised by 0.40 (40% annual vol = 100)        weight 0.40
-          • |CVaR|  normalised by 0.10 (10% daily tail = 100)        weight 0.40
-          • maxERC  normalised by 50    (50% concentration = 100)    weight 0.20
-
-        All weights are deterministic so two consecutive runs on the same
-        portfolio produce the same score.
-        """
-        def _norm(x: float, scale: float) -> float:
-            return min(100.0, max(0.0, (x / scale) * 100.0)) if scale > 0 else 0.0
-        s_vol  = _norm(float(volatility),       0.40)
-        s_cvar = _norm(abs(float(cvar)),        0.10)
-        s_conc = _norm(float(max_erc_pct),      50.0)
-        score = 0.40 * s_vol + 0.40 * s_cvar + 0.20 * s_conc
-        return int(round(score))
+        from finance.scoring import composite_risk_score as _crs
+        return _crs(volatility, cvar, max_erc_pct)
 
     def _get_tradernet_client(self) -> TradernetClient:
         """Lazy-init Tradernet client.  Reused across calls inside analyze_all."""
@@ -577,17 +571,29 @@ class MAC3RiskEngine:
             model = Ridge(alpha=0.001, fit_intercept=True).fit(X, y)
             betas = model.coef_
             alpha = model.intercept_
-            residuals = y - model.predict(X)
-            
+            residuals = np.asarray(y - model.predict(X), dtype=float)
+
+            # Guard: ddof=1 variance needs ≥2 finite residuals, else it
+            # divides by (n-1)=0 → NaN/Inf that would poison D and the
+            # structural covariance.  A 1-sample (or degenerate) regression
+            # carries no measurable specific risk → treat as 0.
+            finite_res = residuals[np.isfinite(residuals)]
+            if finite_res.size < 2:
+                spec_var = 0.0
+                resid_vol_ann = 0.0
+            else:
+                spec_var = float(np.var(finite_res, ddof=1))
+                resid_vol_ann = float(np.std(finite_res, ddof=1)) * np.sqrt(self.trading_days)
+
             B_matrix.append(betas)
-            specific_variances.append(np.var(residuals, ddof=1))
-            
+            specific_variances.append(spec_var)
+
             exposures_report[asset] = {f'Beta_{k}': b for k, b in zip(f_data.columns, betas)}
             exposures_report[asset]['Specific_Alpha_Daily'] = alpha
             # ddof=1 for self-consistency with specific_variances above
             # (both are estimators of residual dispersion; biased ddof=0
             # under-reports the per-asset residual vol by ~√((n-1)/n)).
-            exposures_report[asset]['Residual_Vol_Ann'] = np.std(residuals, ddof=1) * np.sqrt(self.trading_days)
+            exposures_report[asset]['Residual_Vol_Ann'] = resid_vol_ann
             exposures_report[asset]['Weight_Pct'] = weights_dict.get(asset, 0) * 100
 
         B = np.array(B_matrix) # (N_assets, K_factors)

@@ -7,7 +7,6 @@ aiosqlite>=0.20.0
 
 # ── Finance / MAC3 Risk Engine ───────────────────────────────────────────────
 # Цены и история: Tradernet (Freedom Broker) API — см. freedom_portfolio.history.
-# yfinance удалён 2026-04 (нестабилен из Cloud Run, не покрывает AIX/KZ).
 # Фундаменталка: SEC EDGAR CompanyFacts JSON API (data.sec.gov, без edgartools).
 pandas>=2.1.0
 numpy>=1.26.0
@@ -26,10 +25,8 @@ cryptography>=42.0.0
 
 # ── HTML Report Rendering ────────────────────────────────────────────────────
 # Reports are delivered as interactive HTML pages via signed GCS URLs (see
-# src/html_renderer.py + src/services/report_storage.py).  Playwright +
-# Chromium dependency removed 2026-05-17 — ~1.1 GB image shrinkage; PDF
-# support dropped per product decision (mobile-friendly interactive HTML
-# replaces static A4 PDF).
+# src/html_renderer.py + src/services/report_storage.py).  Pure Jinja2 — no
+# headless-browser / PDF dependency.
 jinja2>=3.1.3
 
 # ── AI (advisor_bot / rag_engine) ────────────────────────────────────────────

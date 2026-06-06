@@ -1987,40 +1987,17 @@
                • Adapts to portfolios with 1-5+ positions; 5+ shows top-5,
                  with HHI from the truncated tail logged via cove_lineage.
         #}
+        {# H6: top-4 + "+N др." aggregation, cumulative offsets and the
+           y-axis domain are all precomputed in
+           pdf_payload._build_risk_waterfall.  The template only maps pp →
+           pixel via the fixed 147 px plot height (pure view scaling). #}
         {% set _wf       = data.risk_waterfall or {} %}
-        {% set _all_contribs = _wf.contributions or [] %}
-        {% if _all_contribs | length > 5 %}
-          {# More than 5 positions — show top-4 + aggregate "Others" bar so
-             the waterfall stays readable AND every position still contributes
-             to the displayed sum (no silent drops).  Math: others_pp =
-             Σ remaining standalone_pp; ticker label "+N" shows how many
-             positions are folded in. #}
-          {% set _top4 = _all_contribs[:4] %}
-          {% set _rest = _all_contribs[4:] %}
-          {% set _ns_rest = namespace(s=0.0) %}
-          {% for c in _rest %}{% set _ns_rest.s = _ns_rest.s + (c.standalone_pp or 0) %}{% endfor %}
-          {% set _others_row = {'ticker': '+' ~ (_rest | length) ~ ' др.',
-                                'standalone_pp': _ns_rest.s,
-                                'weight_pct': 0,
-                                'standalone_vol_pct': 0,
-                                'standalone_share_pct': 0} %}
-          {% set _contribs = _top4 + [_others_row] %}
-        {% else %}
-          {% set _contribs = _all_contribs %}
-        {% endif %}
+        {% set _contribs = _wf.bars or _wf.contributions or [] %}
         {% set _N        = _contribs | length %}
         {% set _sum_pp   = _wf.sum_standalone_pp or 0 %}
         {% set _div_pp   = _wf.diversification_pp or 0 %}
         {% set _tot_pp   = _wf.total_vol_pp or 0 %}
-
-        {# Dynamic vertical scale.  Earlier code hard-coded 7.35 px/pp
-           assuming a 0–20% axis; under leverage the standalone sum can
-           hit 40%+ and bars rendered with negative y (off-canvas).  We
-           now pick a y-max that always fits the data with a 5% headroom
-           and rebuild the grid labels accordingly. #}
-        {% set _y_top_pp = (([(_sum_pp or 0), (_tot_pp or 0), 20.0] | max)) %}
-        {% set _y_max_pp = (((_y_top_pp / 5.0) | round(0, 'ceil')) * 5.0) %}
-        {% if _y_max_pp <= 0 %}{% set _y_max_pp = 20.0 %}{% endif %}
+        {% set _y_max_pp = _wf.y_max_pp or 20.0 %}
         {% set _y_scale  = 147.0 / _y_max_pp %}
 
         {# ─── Y-axis grid (dynamic 0..N% in 4 even ticks) ─────────────────── #}
@@ -2049,13 +2026,11 @@
           <rect x="{{ '%.1f' % _shade_x }}" y="26" width="{{ '%.1f' % _shade_w }}" height="139"
                 fill="#C77B2C" fill-opacity="0.05"/>
 
-          {# Amber waterfall — cumulative stack of contributions #}
-          {% set _ns = namespace(cum=0.0) %}
+          {# Amber waterfall — cumulative stack (cum_end_pp from backend). #}
           <g filter="url(#barShadow)">
           {% for c in _contribs %}
             {% set _x_left = _plot_x0 + _step * (loop.index0 + 0.15) %}
-            {% set _ns.cum = _ns.cum + (c.standalone_pp or 0) %}
-            {% set _y_top  = 165.0 - _y_scale * _ns.cum %}
+            {% set _y_top  = 165.0 - _y_scale * (c.cum_end_pp if c.cum_end_pp is defined else 0) %}
             {% set _h      = _y_scale * (c.standalone_pp or 0) %}
             <rect x="{{ '%.1f' % _x_left }}" y="{{ '%.1f' % _y_top }}"
                   width="{{ '%.1f' % _bar_w }}" height="{{ '%.1f' % _h }}"
@@ -2079,26 +2054,22 @@
                   fill="url(#barBlue)" rx="1"/>
           </g>
 
-          {# Connector tails (dashed) between cumulative tops of adjacent amber bars #}
-          {% set _ns2 = namespace(cum=0.0) %}
+          {# Connector tails (dashed) between cumulative tops — cum_end_pp from backend. #}
           <g stroke="#2A2E33" stroke-opacity="0.42" stroke-width="0.5" stroke-dasharray="2.5 2">
           {% for c in _contribs %}
             {% set _x_right_of_this = _plot_x0 + _step * (loop.index0 + 0.15) + _bar_w %}
             {% set _x_left_of_next  = _plot_x0 + _step * (loop.index0 + 1 + 0.15) %}
-            {% set _ns2.cum = _ns2.cum + (c.standalone_pp or 0) %}
-            {% set _y_connect = 165.0 - _y_scale * _ns2.cum %}
+            {% set _y_connect = 165.0 - _y_scale * (c.cum_end_pp if c.cum_end_pp is defined else 0) %}
             <line x1="{{ '%.1f' % _x_right_of_this }}" y1="{{ '%.1f' % _y_connect }}"
                   x2="{{ '%.1f' % _x_left_of_next }}"  y2="{{ '%.1f' % _y_connect }}"/>
           {% endfor %}
           </g>
 
-          {# Value labels above each bar #}
-          {% set _ns3 = namespace(cum=0.0) %}
+          {# Value labels above each bar (cum_end_pp from backend) #}
           <g font-family="IBM Plex Mono" font-size="8.5" fill="#2A2E33">
           {% for c in _contribs %}
             {% set _cx = _plot_x0 + _step * (loop.index0 + 0.5) %}
-            {% set _ns3.cum = _ns3.cum + (c.standalone_pp or 0) %}
-            {% set _y = 165.0 - _y_scale * _ns3.cum - 4 %}
+            {% set _y = 165.0 - _y_scale * (c.cum_end_pp if c.cum_end_pp is defined else 0) - 4 %}
             <text x="{{ '%.1f' % _cx }}" y="{{ '%.1f' % _y }}" text-anchor="middle">{{ '%.1f' % (c.standalone_pp or 0) }}%</text>
           {% endfor %}
             {# Green label — at top of green bar #}

@@ -32,24 +32,9 @@ def _format_pnl_abs(x: float) -> str:
     return f"{x:+,.0f}"
 
 
-def _classify_asset(ticker: str) -> str:
-    """Lightweight asset-class label for the PDF table."""
-    t = (ticker or "").upper().strip()
-    base = t.split(".")[0] if "." in t else t
-    suffix = t.rsplit(".", 1)[-1] if "." in t else ""
-    if base in {"USD", "EUR", "RUB", "KZT", "CASH"}:
-        return "Ден. средства"
-    if base in {"BTC", "ETH", "SOL", "BNB", "DOGE"} or t.endswith("-USD"):
-        return "Крипто"
-    if base in {"GLD", "SLV", "GDX", "USO", "DBC", "PDBC", "GOLD", "SILVER", "OIL"}:
-        return "Сырьё"
-    if base in {"TLT", "AGG", "BND", "LQD", "HYG", "IEF", "BIL", "EMB"} or "BOND" in base or "OVD" in base:
-        return "Облигации"
-    if suffix in {"KZ", "IL"} or t.endswith(".AIX"):
-        return "Акции KZ"
-    if suffix == "US" or len(base) <= 5:
-        return "Акции США"
-    return "Прочее"
+# Asset-class label — single source of truth in finance.scoring.
+# Aliased to the historical private name so existing call sites are untouched.
+from finance.scoring import classify_asset_class as _classify_asset
 
 
 def _action_color(action: Optional[str]) -> str:
@@ -1174,8 +1159,43 @@ def _build_risk_waterfall(risk_matrix: Optional[pd.DataFrame],
         for c in contributions:
             c["standalone_share_pct"] = 0.0
 
+    # ── H6: plot-ready geometry, computed HERE (was math-in-Jinja) ───────────
+    # The template previously merged contributions[4:] into a "+N др." bar,
+    # ran cumulative sums via a Jinja `namespace`, and derived the y-axis
+    # domain — all presentation-layer math.  Compute it once, here, and hand
+    # the template ready arrays + scalars; the template now only maps a value
+    # to a pixel via the fixed plot height (legitimate view scaling).
+    TOP_N = 4
+    if len(contributions) > TOP_N:
+        rest = contributions[TOP_N:]
+        bars = list(contributions[:TOP_N])
+        bars.append({
+            "ticker":             f"+{len(rest)} др.",
+            "standalone_pp":      round(sum(c["standalone_pp"] for c in rest), 2),
+            "standalone_vol_pct": None,
+            "weight_pct":         round(sum(c["weight_pct"] for c in rest), 2),
+            "is_aggregate":       True,
+        })
+    else:
+        bars = list(contributions)
+
+    # Cumulative offset per bar (for the stacked waterfall).
+    cum = 0.0
+    for b in bars:
+        b["cum_start_pp"] = round(cum, 3)
+        cum += b.get("standalone_pp", 0.0) or 0.0
+        b["cum_end_pp"]   = round(cum, 3)
+
+    # Dynamic y-axis domain: max(Σstandalone, total, 20%) rounded up to 5%.
+    y_top   = max(sum_standalone_pp, total_vol_pp, 20.0)
+    y_max_pp = math.ceil(y_top / 5.0) * 5.0 or 20.0
+    y_ticks = [round(y_max_pp * f, 1) for f in (0.0, 0.25, 0.50, 0.75, 1.0)]
+
     return {
         "contributions":     contributions,
+        "bars":              bars,          # NEW: pre-aggregated + cumulative
+        "y_max_pp":          y_max_pp,      # NEW: axis domain (no Jinja math)
+        "y_ticks":           y_ticks,       # NEW: axis tick labels
         "sum_standalone_pp": sum_standalone_pp,
         "total_vol_pp":      total_vol_pp,
         "diversification_pp": max(0.0, diversification_pp),   # clip tiny negative noise to 0
