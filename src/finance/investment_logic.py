@@ -181,9 +181,13 @@ class MAC3RiskEngine:
 
     def __init__(self, trading_days=252, ewma_halflife=63,
                  reporting_currency: ReportingCurrency | str | None = None,
-                 fx_provider=None):
+                 fx_provider=None, risk_mandate: str = "MODERATE"):
         self.trading_days = trading_days
         self.ewma_halflife = ewma_halflife  # 63 дней ≈ λ=0.94 (RiskMetrics)
+        # H4: investor risk mandate (CONSERVATIVE/MODERATE/AGGRESSIVE) — drives
+        # the composite-risk-score weighting + CVaR base divisor.
+        from finance.scoring import normalize_risk_mandate as _nrm
+        self.risk_mandate = _nrm(risk_mandate)
         # Факторные прокси (формат Tradernet — все .US ETF).
         # EM_Equity (EEM.US) и EM_Bond (EMB.US) добавлены для корректного
         # моделирования казахстанских и EM-активов (.KZ/.IL тикеры).
@@ -335,9 +339,9 @@ class MAC3RiskEngine:
     # MAC3RiskEngine._composite_risk_score keep working unchanged.
     @staticmethod
     def _composite_risk_score(volatility: float, cvar: float,
-                              max_erc_pct: float) -> int:
+                              max_erc_pct: float, mandate: str = "MODERATE") -> int:
         from finance.scoring import composite_risk_score as _crs
-        return _crs(volatility, cvar, max_erc_pct)
+        return _crs(volatility, cvar, max_erc_pct, mandate=mandate)
 
     def _get_tradernet_client(self) -> TradernetClient:
         """Lazy-init Tradernet client.  Reused across calls inside analyze_all."""
@@ -644,6 +648,16 @@ class MAC3RiskEngine:
         # returns).  Sum(weights) < 1 by design when cash sits in the
         # portfolio — that dilutes risk correctly without renormalisation.
         port_returns_daily = a_data.values @ weights
+        # H3 (Phase-3): expose the date-indexed portfolio log-return series so
+        # the Telegram equity-curve SVG consumes it instead of recomputing
+        # `log(prices/prices.shift) @ weights` in the bot layer.  Stored on
+        # the engine (same pattern as _last_fx_records); analyze_all copies it
+        # into results["port_log_returns"].
+        try:
+            self._last_port_log_returns = pd.Series(port_returns_daily,
+                                                    index=a_data.index)
+        except Exception:
+            self._last_port_log_returns = None
         # H3: geometric daily RFR — `(1+r)^(1/252)-1` rather than `r/252`.
         # Keeps Sortino's downside filter consistent with Sharpe's annual
         # excess-return numerator.
@@ -705,6 +719,7 @@ class MAC3RiskEngine:
             max_erc = float(np.max(np.abs(erc_pct))) * 100
         composite_risk = self._composite_risk_score(
             volatility=port_volatility, cvar=cvar_95, max_erc_pct=max_erc,
+            mandate=getattr(self, "risk_mandate", "MODERATE"),
         )
 
         # Sharpe / Sortino with currency-matched, geometrically-compounded RFR
@@ -812,12 +827,21 @@ class UniversalPortfolioManager:
             if actual_col: df = df.rename(columns={actual_col: standard})
         return df
 
-    def analyze_all(self, source, scenario_shocks=None, profile_benchmark: str | None = None):
+    def analyze_all(self, source, scenario_shocks=None, profile_benchmark: str | None = None,
+                    risk_mandate: str | None = None):
         """
         profile_benchmark: Tradernet ETF ticker for the user's mandate benchmark
         (e.g. 'AGG.US' for Conservative, 'SPY.US' for Moderate, 'QQQ.US' for Aggressive).
         When provided it is computed first and labelled 'Профильный бенчмарк' in results.
+
+        risk_mandate: CONSERVATIVE / MODERATE / AGGRESSIVE (or an RU/EN profile
+        name / numeric score) — drives the composite-risk-score calibration
+        (H4).  When None, the engine keeps its current mandate (MODERATE
+        default).
         """
+        if risk_mandate is not None:
+            from finance.scoring import normalize_risk_mandate as _nrm
+            self.engine.risk_mandate = _nrm(risk_mandate)
         if isinstance(source, pd.DataFrame): raw_df = source
         else: raise ValueError("Неверный источник данных.")
 
@@ -1419,6 +1443,11 @@ class UniversalPortfolioManager:
             "total_value": total_portfolio_value,
             "portfolio_metrics": port_metrics,
             "leverage_metrics":  leverage_metrics,
+            # H3 (Phase-3): date-indexed portfolio log-return series for the
+            # Telegram equity-curve SVG — the bot no longer recomputes it.
+            "port_log_returns":  getattr(self.engine, "_last_port_log_returns", None),
+            # H4: the mandate actually used for the composite-risk calibration.
+            "risk_mandate":      getattr(self.engine, "risk_mandate", "MODERATE"),
             "risk_free_rate": self.engine.current_rfr_annual,
             "benchmark_comparison": benchmark_results,
             "period_returns_table": period_returns_table,

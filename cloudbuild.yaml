@@ -104,6 +104,32 @@ steps:
       # cohort; FX-conversion auto-no-ops on USD-only portfolios.
       - --set-env-vars=REPORT_BUCKET_NAME=ramp-bot-reports,CHROMA_BUCKET=ramp-bot-chroma-db,TOKENOMICS_DB_PATH=/mnt/state/tokenomics.db,REPORTING_CURRENCY=USD
 
+  # ── Step 5: Deploy the RAG-ingest Cloud Function (M3) ──────────────────────
+  # Listens to the DEDICATED, write-controlled ingest bucket (NOT the reports
+  # bucket — M2 fix) and re-indexes uploaded bank PDFs into ChromaDB.
+  # Entry point is `on_pdf_uploaded` (the actual handler in
+  # cloud_function/main.py); FINTECH_MASTER_KEY is intentionally NOT passed
+  # (the function never touches the user vault — L6).
+  - id: deploy-rag-function
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    waitFor: [deploy]
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        gcloud functions deploy ramp-bot-rag-ingest \
+          --gen2 \
+          --runtime python312 \
+          --region ${_REGION} \
+          --source ./cloud_function \
+          --entry-point on_pdf_uploaded \
+          --trigger-event-filters="type=google.cloud.storage.object.v1.finalized" \
+          --trigger-event-filters="bucket=ramp-bot-ingest" \
+          --set-env-vars CHROMA_BUCKET=ramp-bot-chroma-db \
+          --memory 1Gi \
+          --timeout 300s \
+          --quiet
+
 # Images promoted to Artifact Registry after a successful build
 images:
   - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:$SHORT_SHA

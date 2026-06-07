@@ -238,9 +238,11 @@ def _fetch_portfolio_sync(api_key: str, secret_key: str = "", login: str = ""):
     return FreedomConnector(api_key, secret_key, login).fetch_portfolio()
 
 
-def _analyze_existing_portfolio_sync(df, bench_ticker: str | None = None) -> dict:
+def _analyze_existing_portfolio_sync(df, bench_ticker: str | None = None,
+                                     risk_mandate: str | None = None) -> dict:
     """Blocking: только MAC3 анализ уже загруженного DataFrame."""
-    return UniversalPortfolioManager().analyze_all(df, profile_benchmark=bench_ticker)
+    return UniversalPortfolioManager().analyze_all(
+        df, profile_benchmark=bench_ticker, risk_mandate=risk_mandate)
 
 
 def _format_portfolio_preview(df) -> str:
@@ -324,29 +326,18 @@ def _build_equity_curve_svg(results: dict) -> str:
         if prices is None or prices.empty:
             return equity_curve_svg([])
 
-        # Cap-weighted portfolio daily log-return stream.
+        # H3 (Phase-3): the portfolio daily log-return stream is computed by
+        # the engine and shipped in results["port_log_returns"].  The bot no
+        # longer recomputes `log(prices/prices.shift) @ weights` — all
+        # portfolio math lives in the finance layer.
         import numpy as _np
-        total_val = float(results.get("total_value") or 1.0)
-        cols: list[str]    = []
-        weights: list[float] = []
-        for _, row in perf.iterrows():
-            t = str(row.get("Ticker"))
-            cv = float(row.get("Current_Value") or 0.0)
-            w  = cv / total_val if total_val else 0.0
-            if w <= 0:
-                continue
-            if t in prices.columns:
-                cols.append(t); weights.append(w)
-            else:
-                base = t.split(".")[0]
-                for c in prices.columns:
-                    if c.split(".")[0] == base:
-                        cols.append(c); weights.append(w); break
-        if not cols:
+        port_series = results.get("port_log_returns")
+        if port_series is None or len(port_series) == 0:
             return equity_curve_svg([])
-
-        sub      = prices[cols].dropna()
-        port_log = _np.log(sub / sub.shift(1)).dropna().values @ _np.array(weights)
+        port_log = _np.asarray(getattr(port_series, "values", port_series), dtype=float)
+        port_log = port_log[_np.isfinite(port_log)]
+        if port_log.size == 0:
+            return equity_curve_svg([])
 
         # Pick the benchmark — concrete name first, then profile benchmark
         # (resolved through its actual ticker mapping).
@@ -1445,13 +1436,16 @@ async def msg_secret_key(message: Message, state: FSMContext) -> None:
         logger.info("Couldn't auto-delete Secret-key message for %s: %s",
                     user_id, exc)
 
+    # H2 — strict, minimalist security acknowledgement.  The auto-delete above
+    # usually succeeds in groups but Telegram forbids bots from deleting a
+    # user's message in a 1:1 chat, so the reminder below is shown regardless
+    # (it IS the mitigation — ask the user to delete their key message now).
     ack_text = (
-        "🔐 *Подключение успешно. Ваши данные под квантовой защитой.*\n\n"
-        "✅ API-ключ и Secret Key зашифрованы (Fernet, master-key в Secret Manager)."
+        "✅ Ваши ключи успешно привязаны и зашифрованы. Мы не храним их в "
+        "открытом виде.\n\n"
+        "⚠️ Ради вашей безопасности, пожалуйста, удалите своё предыдущее "
+        "сообщение с ключами из этого чата прямо сейчас."
     )
-    if delete_failed:
-        ack_text += ("\n\n⚠️ *Удалите вручную* предыдущие сообщения с ключами — "
-                     "у бота нет прав на автоудаление в этом чате.")
     await message.answer(ack_text, parse_mode=ParseMode.MARKDOWN)
     await _show_analysis_menu(message, slug)
 
@@ -1500,7 +1494,7 @@ async def _send_pdf(
         text=(
             f"📊 *{report_type}* готов.\n\n"
             f"[Открыть отчёт]({url})\n\n"
-            "Ссылка действительна 7 дней.  Отчёт сформирован институциональным "
+            "Ссылка действительна 48 часов.  Отчёт сформирован институциональным "
             "риск-движком (Euler Decomposition · Bootstrap CVaR · 4-pillar "
             "Scoring · Black-Litterman).  Штурвал всегда у вас."
         ),
@@ -1559,10 +1553,12 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
         )
         return
 
-    success = await deduct_tokens(user_id, cost, reason=f"{tier}_analysis")
-    if not success:
-        _release_user_slot(user_id)         # nothing to do — free the slot
-        balance = await get_balance(user_id)
+    # H1 (Phase-3): NO upfront deduction.  Read-only balance pre-check —
+    # refuse if the user cannot afford the report, but DO NOT charge until
+    # Checkpoint 3 (report successfully rendered + uploaded to GCS).
+    balance = await get_balance(user_id)
+    if balance < cost:
+        _release_user_slot(user_id)
         await callback.message.edit_text(
             f"❌ *Недостаточно токенов.*\n\n"
             f"Требуется: *{cost}*, доступно: *{balance}*.\n\n"
@@ -1572,10 +1568,10 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
         await state.clear()
         return
 
-    balance_after = await get_balance(user_id)
     await callback.message.edit_text(
         f"⏳ Подключаюсь к Freedom Broker и загружаю портфель…\n\n"
-        f"Остаток баланса: *{balance_after} токен(а)*.",
+        f"💳 Токен спишется *только после готового отчёта* "
+        f"(сейчас на балансе: *{balance}*).",
         parse_mode=ParseMode.MARKDOWN,
     )
 
@@ -1605,27 +1601,32 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
         )
     except BrokerAuthError as exc:
         logger.error("Freedom Broker auth failed for %s: %s", user_id, exc)
+        _release_user_slot(user_id)          # H1: free slot — bg task never spawned
         await callback.message.answer(
-            "⚠️ *Ошибка: Ваши API-ключи брокера неверны или отозваны.*\n\n"
-            "Проверьте их в /start → 🔗 Freedom Broker API.\n\n"
-            "Токены не потеряны — обратитесь в /support.",
+            "⚠️ *Не удалось подключиться к брокеру.*\n\n"
+            "Похоже, API-ключи неверны или отозваны — проверьте их в "
+            "/start → 🔗 Freedom Broker API.\n\n"
+            "✅ Токен *не списан* — платите только за готовый отчёт.",
             parse_mode=ParseMode.MARKDOWN,
         )
         await state.clear()
         return
     except BrokerEmptyPortfolioError as exc:
+        _release_user_slot(user_id)
         await callback.message.answer(
             f"📭 *Портфель пуст*\n\n{exc}\n\n"
-            "Токены не потеряны — обратитесь в /support.",
+            "✅ Токен *не списан* — анализировать пока нечего.",
             parse_mode=ParseMode.MARKDOWN,
         )
         await state.clear()
         return
     except Exception as exc:
         logger.exception("Не удалось загрузить портфель для %s: %s", user_id, exc)
+        _release_user_slot(user_id)
         await callback.message.answer(
-            f"⚠️ *Не удалось получить портфель:*\n`{str(exc)[:200]}`\n\n"
-            "Токены не потеряны — обратитесь в /support.",
+            "ℹ️ *Не удалось загрузить портфель прямо сейчас.*\n\n"
+            f"`{str(exc)[:160]}`\n\n"
+            "✅ Токен *не списан*. Попробуйте ещё раз через пару минут.",
             parse_mode=ParseMode.MARKDOWN,
         )
         await state.clear()
@@ -1688,18 +1689,20 @@ async def _run_analysis_background(
             return None
 
     async def refund(reason: str) -> None:
-        """Вернуть списанные токены и сообщить пользователю."""
+        """
+        H1 (Phase-3): nothing is deducted upfront anymore — the token is
+        charged ONLY after Checkpoint 3 (report rendered + uploaded).  So a
+        failure before that point means the user simply WASN'T charged; we
+        just reassure them.  (Name kept to minimise call-site churn.)
+        """
         try:
-            await credit_tokens(user_id, cost, reason=f"refund_{reason}")
-            balance_after = await get_balance(user_id)
             await bot.send_message(
                 chat_id,
-                f"↩️ *{cost} токен(а) возвращены* на ваш счёт.\n"
-                f"Текущий баланс: *{balance_after} токен(а)*.",
+                "✅ Токен *не списан* — вы платите только за готовый отчёт.",
                 parse_mode=ParseMode.MARKDOWN,
             )
         except Exception as exc:
-            logger.error("Не удалось вернуть токены для %s: %s", user_id, exc)
+            logger.warning("Не удалось отправить уведомление о неспискании для %s: %s", user_id, exc)
 
     try:
         # ── Step 1: load market history ──────────────────────────────────
@@ -1811,9 +1814,13 @@ async def _run_analysis_background(
 
         # ── Step 2: full MAC3 analysis (includes SEC EDGAR) ────────────────
         await step("🧮", "*Шаг 2/4:* Запускаю MAC3 (Ridge + Ledoit-Wolf) + SEC EDGAR…")
+        # H4: resolve the investor's risk mandate from their profile so the
+        # composite-risk score + AI narrative are calibrated to it.
+        _profile_h4   = await get_profile(user_id)
+        _mandate_name = (_profile_h4 or {}).get("profile_name")
         try:
             results = await loop.run_in_executor(
-                None, _analyze_existing_portfolio_sync, df, bench_tick,
+                None, _analyze_existing_portfolio_sync, df, bench_tick, _mandate_name,
             )
         except Exception as exc:
             logger.exception("Stage 2 (MAC3) failed: %s", exc)
@@ -1927,7 +1934,21 @@ async def _run_analysis_background(
             prev_snapshot=prev_snapshot,
             user_risk_profile=profile_name,
         )
+        # CHECKPOINT 3 — render + upload.  `_send_pdf` raises
+        # RuntimeError("report_delivery_failed") if the GCS upload fails, so
+        # reaching the next line means the report is genuinely delivered.
         await _send_pdf(bot, chat_id, user_id, tier, payload)
+
+        # ── H1 BILLING: deduct the token ONLY now (post-Checkpoint-3) ───────
+        # This is the single charge point in the whole flow.  Any earlier
+        # failure (broker / engine / render) never reaches here, so the user
+        # is never charged for a report they didn't receive.
+        charged = await deduct_tokens(user_id, cost, reason=f"{tier}_analysis")
+        balance_after = await get_balance(user_id)
+        if not charged:
+            # Extremely unlikely (balance was pre-checked + single-flight),
+            # but the report is already delivered — log and don't double-bill.
+            logger.error("Post-CP3 deduct failed for %s (report already sent).", user_id)
 
         # Persist this report's key metrics for future MoM comparison
         metrics = results.get("portfolio_metrics") or {}
@@ -1946,9 +1967,10 @@ async def _run_analysis_background(
 
         await bot.send_message(
             chat_id,
-            "✅ *Отчёт готов!*\n\n"
-            "Скачайте PDF выше — там полный анализ MAC3, "
-            "разложение рисков по факторам и сравнение с бенчмарками.",
+            f"✅ Ваш отчёт готов! С баланса списан *{cost}* токен.\n\n"
+            f"Остаток: *{balance_after}* токен(а).\n\n"
+            "Расчёты завершены — мы подготовили аналитику и нашли точки "
+            "роста для вашего портфеля. Все подробности в отчёте 👆",
             parse_mode=ParseMode.MARKDOWN,
         )
 

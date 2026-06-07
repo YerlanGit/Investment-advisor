@@ -273,23 +273,69 @@ def total_score(fundamentals: float, valuations: float,
 # DRY violation + drift risk.  Both now delegate here.  Kept sklearn-free so
 # the simulator and tests never drag the engine class into scope.
 
+# H4 — risk-mandate calibration.  A conservative investor is more
+# tail-sensitive (weights CVaR higher AND uses a tighter CVaR base, so the
+# same tail produces a higher perceived-risk score); an aggressive investor
+# tolerates more tail (lower CVaR weight + looser base) and cares more about
+# raw volatility.  Each row's three weights sum to exactly 1.0.
+_RISK_MANDATE_MATRIX: dict[str, dict[str, float]] = {
+    #                w_cvar  w_vol  w_erc   cvar_base (divisor → 100)
+    "CONSERVATIVE": {"w_cvar": 0.60, "w_vol": 0.30, "w_erc": 0.10, "cvar_base": 0.03},
+    "MODERATE":     {"w_cvar": 0.40, "w_vol": 0.40, "w_erc": 0.20, "cvar_base": 0.05},
+    "AGGRESSIVE":   {"w_cvar": 0.20, "w_vol": 0.50, "w_erc": 0.30, "cvar_base": 0.08},
+}
+
+# Vol / concentration normalisation scales are mandate-independent.
+_VOL_BASE = 0.40    # 40% annual vol  = 100
+_ERC_BASE = 50.0    # 50% single-asset concentration = 100
+
+
+def normalize_risk_mandate(profile) -> str:
+    """
+    Map a user profile (RU/EN name, or numeric risk-score) to one of the
+    three canonical mandates.  Defaults to MODERATE for anything unknown.
+    """
+    if profile is None:
+        return "MODERATE"
+    if isinstance(profile, (int, float)):
+        s = float(profile)        # onboarding risk-score 6..18
+        if s <= 8:  return "CONSERVATIVE"
+        if s <= 12: return "MODERATE"
+        return "AGGRESSIVE"
+    p = str(profile).strip().upper()
+    if p in _RISK_MANDATE_MATRIX:
+        return p
+    if "КОНСЕРВАТ" in p or "CONSERV" in p:
+        return "CONSERVATIVE"
+    if "АГРЕССИВ" in p or "AGGRESS" in p:
+        # "Умеренно-агрессивный" leans MODERATE; pure "Агрессивный" → AGGRESSIVE.
+        return "MODERATE" if ("УМЕРЕНН" in p or "MODERAT" in p) else "AGGRESSIVE"
+    return "MODERATE"
+
+
 def composite_risk_score(volatility: float, cvar: float,
-                         max_erc_pct: float) -> int:
+                         max_erc_pct: float, mandate: str = "MODERATE") -> int:
     """
-    Blend three independent risk signals into a single 0..100 gauge.
+    Blend three independent risk signals into a single 0..100 gauge,
+    calibrated to the investor's risk mandate (see _RISK_MANDATE_MATRIX).
 
-      • Vol     normalised by 0.40 (40% annual vol = 100)   weight 0.40
-      • |CVaR|  normalised by 0.10 (10% daily tail = 100)   weight 0.40
-      • maxERC  normalised by 50   (50% concentration = 100) weight 0.20
+      • Vol     normalised by 0.40 (40% annual vol = 100)
+      • |CVaR|  normalised by mandate cvar_base (0.03 / 0.05 / 0.08)
+      • maxERC  normalised by 50   (50% concentration = 100)
 
-    Deterministic — two identical inputs always produce the same score.
+    Deterministic — identical inputs + mandate always produce the same
+    score.  Unknown mandate falls back to MODERATE.
     """
+    m = _RISK_MANDATE_MATRIX.get(str(mandate).strip().upper(),
+                                 _RISK_MANDATE_MATRIX["MODERATE"])
+
     def _norm(x: float, scale: float) -> float:
         return min(100.0, max(0.0, (x / scale) * 100.0)) if scale > 0 else 0.0
-    s_vol  = _norm(float(volatility),  0.40)
-    s_cvar = _norm(abs(float(cvar)),   0.10)
-    s_conc = _norm(float(max_erc_pct), 50.0)
-    return int(round(0.40 * s_vol + 0.40 * s_cvar + 0.20 * s_conc))
+
+    s_vol  = _norm(float(volatility),  _VOL_BASE)
+    s_cvar = _norm(abs(float(cvar)),   m["cvar_base"])
+    s_conc = _norm(float(max_erc_pct), _ERC_BASE)
+    return int(round(m["w_vol"] * s_vol + m["w_cvar"] * s_cvar + m["w_erc"] * s_conc))
 
 
 # ── Asset-class display label — SINGLE SOURCE OF TRUTH ───────────────────────
@@ -355,6 +401,7 @@ __all__ = [
     "total_score",
     "action_from_total",
     "composite_risk_score",
+    "normalize_risk_mandate",
     "classify_asset_class",
     "AssetScore",
 ]

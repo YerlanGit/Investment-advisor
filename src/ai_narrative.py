@@ -92,6 +92,25 @@ def _soft_trim(text: str, max_chars: int) -> str:
     # Boundary too far back → ellipsis-tagged hard cut.
     return head.rstrip(" ,;:[(") + "…"
 
+
+def validate_stress_comment(text: str) -> str:
+    """
+    M1 — post-validator for the stress-test AI comment.
+
+    The system prompt INSTRUCTS the model to mention the non-linear convex
+    cap, but Sonnet/Haiku sometimes omit it.  This guard appends an explicit
+    footnote whenever neither "ограничител…" nor "cap" is present, so the
+    reader always knows extreme per-asset drawdowns were convex-capped.
+    """
+    if not text:
+        return text
+    low = text.lower()
+    if "ограничител" not in low and "cap" not in low:
+        text += ("\n\n*(Примечание: Экстремальные просадки рассчитаны с учётом "
+                 "нелинейного ограничителя риска).*")
+    return text
+
+
 MODEL_BASE = os.getenv("ANTHROPIC_MODEL_BASE", "claude-haiku-4-5-20251001")
 MODEL_DEEP = os.getenv("ANTHROPIC_MODEL_DEEP", "claude-sonnet-4-6")
 
@@ -238,6 +257,10 @@ def _summarise_for_prompt(results: dict) -> dict:
         # this verdict in `ai_effect_comment` instead of inventing its own.
         "rebalance_verdict": ((results.get("expected_effect") or {}).get("verdict")
                               if isinstance(results.get("expected_effect"), dict) else None),
+        # H4: investor risk mandate so the LLM tailors tone/recommendations
+        # (a conservative investor needs tail-risk framing; an aggressive one
+        # growth framing).  Composite-risk score is already calibrated for it.
+        "risk_mandate": results.get("risk_mandate", "MODERATE"),
     }
 
 
@@ -906,7 +929,7 @@ def generate_narrative(results: dict, tier: str = "base",
             "ai_sector_comment":        _comment("ai_sector_comment", 200),
             "ai_factor_comment":        _comment("ai_factor_comment"),
             "ai_4pillar_comment":       _comment("ai_4pillar_comment"),
-            "ai_stress_comment":        _comment("ai_stress_comment"),
+            "ai_stress_comment":        validate_stress_comment(_comment("ai_stress_comment")),
             "ai_action_comment":        _comment("ai_action_comment"),
             "ai_effect_comment":        _comment("ai_effect_comment"),
             "regime_confirmation":      _regime_confirmation(),

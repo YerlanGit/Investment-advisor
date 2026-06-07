@@ -364,3 +364,11 @@ to:
 - a **claw-native execution runtime**
 - an **event-native orchestration substrate**
 - a **plugin/hook-first autonomous coding harness**
+
+## Scaling / Concurrency (M4)
+
+- **При масштабировании системы >10 активных пользователей (или при
+  concurrency > 1 в Cloud Run) необходимо заменить in-memory блокировку
+  `_IN_FLIGHT_USERS` на распределённую блокировку через Redis (Google
+  Cloud Memorystore). Это предотвратит задвоение задач, если запросы
+  балансировщик раскидает на разные контейнеры.**

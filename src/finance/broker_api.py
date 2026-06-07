@@ -311,12 +311,23 @@ class FreedomConnector:
             if broker_current is not None and broker_current <= 0:
                 broker_current = None
 
+            # M2: single source of truth — project the broker's raw metadata
+            # (t/k/curr) onto our canonical AssetClass + display label so the
+            # downstream layers consume a READY type instead of re-classifying
+            # from the ticker string.  The ticker-heuristic classifier remains
+            # the fallback for demo / proxy rows that lack broker metadata.
+            from finance.asset_taxonomy import (
+                from_freedom_metadata as _ftm, display_label as _dl,
+            )
+            _aclass = _ftm(ticker=p.i, t_field=p.t, k_field=p.k, currency=p.curr)
             rows.append({
                 "Ticker":               ticker,
                 "Quantity":             qty,
                 "Purchase_Price":       purchase_price,
                 "Broker_Current_Price": broker_current,
                 "Asset_Type":           _classify_instrument(p.i, t_field=p.t),
+                "Asset_Class":          _aclass.value,        # canonical enum value
+                "Asset_Class_Label":    _dl(_aclass),         # ready RU display label
                 "Raw_Ticker":           p.i,    # untouched broker ticker for history fetch
             })
 
