@@ -110,6 +110,18 @@ steps:
   # Entry point is `on_pdf_uploaded` (the actual handler in
   # cloud_function/main.py); FINTECH_MASTER_KEY is intentionally NOT passed
   # (the function never touches the user vault — L6).
+  #
+  # FAIL-SOFT: this step does NOT block the main bot deploy.  Cloud Build SA
+  # needs `roles/cloudfunctions.developer` (or `.admin`) on the project to
+  # deploy/update functions; until that's granted, the step logs a warning
+  # and exits 0 so the bot itself ships.  Grant once with:
+  #   PROJECT_NUMBER=$(gcloud projects describe $PROJECT_ID --format='value(projectNumber)')
+  #   gcloud projects add-iam-policy-binding $PROJECT_ID \
+  #     --member="serviceAccount:${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com" \
+  #     --role="roles/cloudfunctions.developer"
+  #   gcloud projects add-iam-policy-binding $PROJECT_ID \
+  #     --member="serviceAccount:${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com" \
+  #     --role="roles/iam.serviceAccountUser"
   - id: deploy-rag-function
     name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
     waitFor: [deploy]
@@ -117,6 +129,7 @@ steps:
     args:
       - -c
       - |
+        set +e
         gcloud functions deploy ramp-bot-rag-ingest \
           --gen2 \
           --runtime python312 \
@@ -129,6 +142,14 @@ steps:
           --memory 1Gi \
           --timeout 300s \
           --quiet
+        rc=$?
+        if [ "$rc" -ne 0 ]; then
+          echo "⚠️  Cloud Function deploy skipped (exit=$rc).  Grant the Cloud"
+          echo "    Build SA roles/cloudfunctions.developer +"
+          echo "    roles/iam.serviceAccountUser to enable it.  Main bot deploy"
+          echo "    is NOT affected — this step is intentionally fail-soft."
+        fi
+        exit 0
 
 # Images promoted to Artifact Registry after a successful build
 images:
