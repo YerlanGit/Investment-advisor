@@ -129,7 +129,6 @@ steps:
     args:
       - -c
       - |
-        set +e
         gcloud functions deploy ramp-bot-rag-ingest \
           --gen2 \
           --runtime python312 \
@@ -141,14 +140,8 @@ steps:
           --set-env-vars CHROMA_BUCKET=ramp-bot-chroma-db \
           --memory 1Gi \
           --timeout 300s \
-          --quiet
-        rc=$?
-        if [ "$rc" -ne 0 ]; then
-          echo "⚠️  Cloud Function deploy skipped (exit=$rc).  Grant the Cloud"
-          echo "    Build SA roles/cloudfunctions.developer +"
-          echo "    roles/iam.serviceAccountUser to enable it.  Main bot deploy"
-          echo "    is NOT affected — this step is intentionally fail-soft."
-        fi
+          --quiet \
+          || echo "WARN: Cloud Function deploy skipped (likely 403). Grant the Cloud Build SA roles/cloudfunctions.developer + roles/iam.serviceAccountUser to enable. Main bot deploy is unaffected."
         exit 0
 
 # Images promoted to Artifact Registry after a successful build
