@@ -450,7 +450,11 @@ def build_payload(results: dict, tier: str,
             pnl_abs    = _safe_float(row.get("PnL"),        0.0)
             ret_pct    = _safe_float(row.get("Return_Pct"), 0.0)
 
-            asset_class = _classify_asset(ticker)
+            # M2: prefer the broker-provided class label (single source of
+            # truth from Freedom metadata); fall back to the ticker classifier
+            # for demo / proxy rows that have no broker metadata.
+            asset_class = (row.get("Asset_Class_Label")
+                           or _classify_asset(ticker))
             is_cash     = asset_class == "Ден. средства"
 
             # Cash is not a tradable risk asset — never carries a 4-pillar
