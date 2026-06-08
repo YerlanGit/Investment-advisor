@@ -1207,6 +1207,15 @@
                  fill="rgba(255,255,255,0.32)"/>
       </svg>
       <div class="risk-readout-big">{{ data.risk_pct }} / 100 — <span class="tier-text">{{ data.risk_label }}</span></div>
+      {# H1: mandate calibration note — the gauge weights/CVaR base differ
+         per mandate, so the score must be read in that context. #}
+      {% if data.risk_mandate_label %}
+      <div style="text-align:center; font-family:var(--font-mono); font-size:9.5px;
+                  color:var(--ink-60); margin-top:4px; letter-spacing:.02em;">
+        Индекс рассчитан для вашего профиля:
+        <b style="color:var(--ink-90);">{{ data.risk_mandate_label }}</b>
+      </div>
+      {% endif %}
     </div>
   </section>
 

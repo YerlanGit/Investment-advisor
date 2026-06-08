@@ -281,7 +281,11 @@ def total_score(fundamentals: float, valuations: float,
 _RISK_MANDATE_MATRIX: dict[str, dict[str, float]] = {
     #                w_cvar  w_vol  w_erc   cvar_base (divisor → 100)
     "CONSERVATIVE": {"w_cvar": 0.60, "w_vol": 0.30, "w_erc": 0.10, "cvar_base": 0.03},
-    "MODERATE":     {"w_cvar": 0.40, "w_vol": 0.40, "w_erc": 0.20, "cvar_base": 0.05},
+    # H1 recalibration: MODERATE cvar_base widened 0.05 → 0.065 so the
+    # CVaR component no longer dominates the gauge for quality-tech books.
+    # The previous 0.05 base pushed long-running portfolios from index 48 → 75
+    # for the same risk profile, which read as a phantom spike to users.
+    "MODERATE":     {"w_cvar": 0.40, "w_vol": 0.40, "w_erc": 0.20, "cvar_base": 0.065},
     "AGGRESSIVE":   {"w_cvar": 0.20, "w_vol": 0.50, "w_erc": 0.30, "cvar_base": 0.08},
 }
 
@@ -320,7 +324,7 @@ def composite_risk_score(volatility: float, cvar: float,
     calibrated to the investor's risk mandate (see _RISK_MANDATE_MATRIX).
 
       • Vol     normalised by 0.40 (40% annual vol = 100)
-      • |CVaR|  normalised by mandate cvar_base (0.03 / 0.05 / 0.08)
+      • |CVaR|  normalised by mandate cvar_base (0.03 / 0.065 / 0.08)
       • maxERC  normalised by 50   (50% concentration = 100)
 
     Deterministic — identical inputs + mandate always produce the same

@@ -98,7 +98,15 @@ if not BOT_TOKEN or ":" not in BOT_TOKEN:
 # The numeric id BEFORE ':' is public (it's the bot's user id); the secret
 # AFTER ':' must never be logged.  Log only the public id segment.
 logger.info("Starting bot id=%s", BOT_TOKEN.split(":", 1)[0])
-VAULT_DB: str  = str(Path(__file__).parent.parent / "data" / "users_vault.db")
+# B1: vault DB path is overridable via env so the encrypted broker
+# credentials live on the persistent gcsfuse volume (/mnt/state) in prod.
+# Without this every Cloud Run redeploy wipes the file and forces every
+# user through re-onboarding (which itself re-leaks their keys into chat).
+# Local dev keeps the historical repo-relative default.
+VAULT_DB: str = os.getenv(
+    "VAULT_DB_PATH",
+    str(Path(__file__).parent.parent / "data" / "users_vault.db"),
+)
 
 # ── FSM ───────────────────────────────────────────────────────────────────────
 
@@ -1454,7 +1462,7 @@ async def msg_secret_key(message: Message, state: FSMContext) -> None:
 # ANALYSIS FLOW
 # ══════════════════════════════════════════════════════════════════════════════
 
-async def _send_pdf(
+async def _send_report(
     bot: Bot,
     chat_id: int,
     user_id: int,
@@ -1464,9 +1472,9 @@ async def _send_pdf(
     """
     Render the HTML report, push to GCS, send the user a signed URL.
 
-    Function name kept as `_send_pdf` for now to minimise call-site churn;
-    will be renamed once all references are updated.  The underlying
-    delivery is HTML + signed URL — no PDF, no Chromium.
+    The delivery is an interactive HTML page (no PDF, no Chromium); the
+    bot just hands the user a signed URL.  "Отчёт" everywhere — both in
+    the function name and the user-facing copy.
     """
     report_type = TIER_LABEL[tier]
 
@@ -1632,14 +1640,13 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
         await state.clear()
         return
 
-    # ── Шаг 2 — отправляем превью + уведомление о длительности ──────────
+    # ── Шаг 2 — концьерж-уведомление + превью портфеля ──────────────────
     preview_md = _format_portfolio_preview(df)
     await callback.message.answer(
-        "✅ *Портфель загружен:*\n\n"
+        "✅ *Портфель успешно получен и принят в обработку.*\n\n"
         f"{preview_md}\n\n"
-        f"⚙️ Запускаю анализ *{TIER_LABEL[tier]}*. "
-        "Это займёт *5–10 минут* — я пришлю PDF-отчёт сюда сразу как он будет готов.\n\n"
-        "Можно продолжать пользоваться ботом — анализ работает в фоне.",
+        f"Запускаю *{TIER_LABEL[tier]}* — пришлю ссылку на отчёт через "
+        "*5–10 минут*. Можно продолжать пользоваться ботом.",
         parse_mode=ParseMode.MARKDOWN,
     )
 
@@ -1706,7 +1713,7 @@ async def _run_analysis_background(
 
     try:
         # ── Step 1: load market history ──────────────────────────────────
-        await step("📈", "*Шаг 1/4:* Загружаю исторические цены через Freedom API…")
+        await step("⏳", "*Шаг 1/4:* Интеграция рыночных данных и FX-трансформация цен…")
 
         manager = UniversalPortfolioManager()
 
@@ -1813,7 +1820,7 @@ async def _run_analysis_background(
         )
 
         # ── Step 2: full MAC3 analysis (includes SEC EDGAR) ────────────────
-        await step("🧮", "*Шаг 2/4:* Запускаю MAC3 (Ridge + Ledoit-Wolf) + SEC EDGAR…")
+        await step("⏳", "*Шаг 2/4:* Факторное моделирование и декомпозиция рисков по Эйлеру…")
         # H4: resolve the investor's risk mandate from their profile so the
         # composite-risk score + AI narrative are calibrated to it.
         _profile_h4   = await get_profile(user_id)
@@ -1833,42 +1840,18 @@ async def _run_analysis_background(
             await refund("mac3_failure")
             raise
 
-        await step("✅", "MAC3 факторная модель, SEC EDGAR и риск-декомпозиция посчитаны.")
+        await step("✅", "Факторная модель и декомпозиция рисков рассчитаны.")
 
-        # ── MAC3 Risk Summary notification ─────────────────────────────────
-        port_metrics = results.get("portfolio_metrics", {})
-        if port_metrics:
-            vol = port_metrics.get("Total_Volatility_Ann", 0)
-            sharpe = port_metrics.get("Sharpe_Ratio", float("nan"))
-            cvar = port_metrics.get("CVaR_95_Daily", 0)
-            var95 = port_metrics.get("VaR_95_Daily", 0)
-            sortino = port_metrics.get("Sortino_Ratio", float("nan"))
-            pos_days = port_metrics.get("Positive_Days_Pct", 0)
-
-            import math
-            sharpe_str = f"{sharpe:.2f}" if not math.isnan(sharpe) else "—"
-            sortino_str = f"{sortino:.2f}" if not math.isnan(sortino) else "—"
-
-            risk_lines = [
-                "📊 *MAC3 Risk Summary:*",
-                f"  Volatility: *{vol*100:.1f}%* годовых",
-                f"  Sharpe Ratio: *{sharpe_str}*",
-                f"  Sortino Ratio: *{sortino_str}*",
-                f"  CVaR (95%): *{cvar*100:.2f}%*",
-                f"  VaR (95%): *{var95*100:.2f}%*",
-                f"  Positive Days: *{pos_days:.0f}%*",
-            ]
-            try:
-                await bot.send_message(
-                    chat_id,
-                    "\n".join(risk_lines),
-                    parse_mode=ParseMode.MARKDOWN,
-                )
-            except Exception:
-                pass  # Don't block on send failure
+        # Note: an intermediate "MAC3 Risk Summary" dump used to surface
+        # raw vol / Sharpe / Sortino / CVaR / VaR / positive-days here.
+        # Concierge-tone redesign removed it — all of those numbers belong
+        # to the final report (gauge, KPI strip, performance table) and
+        # double-posting them as in-chat metric blasts undermines the
+        # "polished, minimalist" UX directive.  The progress chain stays:
+        #   ✅ portfolio received  →  ⏳ 1/4  →  2/4  →  3/4  →  4/4  →  ✅ done.
 
         # ── Step 3: gatekeeper (advisory only, non-blocking) ──────────────
-        await step("📊", "*Шаг 3/4:* Проверяю риск-лимиты…")
+        await step("⏳", "*Шаг 3/4:* Оптимизация целевых весов по модели Блэка-Литтермана…")
 
         gate = run_gatekeeper(results)  # Always run with defaults
 
@@ -1889,7 +1872,7 @@ async def _run_analysis_background(
                 for w in gate["warnings"][:3]:
                     alert_lines.append(f"  {w}")
             if len(gate["critical"]) + len(gate["warnings"]) > 6:
-                alert_lines.append(f"_…ещё {len(gate['critical']) + len(gate['warnings']) - 6} в PDF-отчёте_")
+                alert_lines.append(f"_…ещё {len(gate['critical']) + len(gate['warnings']) - 6} в отчёте_")
 
             try:
                 await bot.send_message(
@@ -1902,24 +1885,14 @@ async def _run_analysis_background(
         else:
             await step("✅", "Все риск-проверки пройдены.")
 
-        # Show sector exposure
-        sector_exposure = results.get("sector_exposure", {})
-        if sector_exposure:
-            sector_lines = ["📊 *Секторное распределение:*"]
-            for sector, weight in list(sector_exposure.items())[:6]:
-                bar = "█" * max(1, int(weight * 100 / 5))
-                sector_lines.append(f"  {bar} {sector}: {weight:.0%}")
-            try:
-                await bot.send_message(
-                    chat_id,
-                    "\n".join(sector_lines),
-                    parse_mode=ParseMode.MARKDOWN,
-                )
-            except Exception:
-                pass
+        # Concierge-tone redesign: the sector exposure used to render an
+        # ASCII-bar chart in chat (`█████ Technology: 55%`).  The same data
+        # is already a polished pie chart in the report — duplicating it
+        # as raw bars in chat looked unfinished.  Removed here; the
+        # progress-message chain carries the user straight to the report.
 
-        # ── Step 4: PDF generation ────────────────────────────────────────
-        await step("📄", "*Шаг 4/4:* Генерирую PDF-отчёт…")
+        # ── Step 4: report assembly ───────────────────────────────────────
+        await step("⏳", "*Шаг 4/4:* Сборка интерактивного интерфейса и валидация данных…")
 
         # Fetch previous snapshot for month-over-month delta
         prev_snapshot = await get_last_report_snapshot(user_id, tier)
@@ -1934,10 +1907,10 @@ async def _run_analysis_background(
             prev_snapshot=prev_snapshot,
             user_risk_profile=profile_name,
         )
-        # CHECKPOINT 3 — render + upload.  `_send_pdf` raises
+        # CHECKPOINT 3 — render + upload.  `_send_report` raises
         # RuntimeError("report_delivery_failed") if the GCS upload fails, so
         # reaching the next line means the report is genuinely delivered.
-        await _send_pdf(bot, chat_id, user_id, tier, payload)
+        await _send_report(bot, chat_id, user_id, tier, payload)
 
         # ── H1 BILLING: deduct the token ONLY now (post-Checkpoint-3) ───────
         # This is the single charge point in the whole flow.  Any earlier
@@ -1967,10 +1940,11 @@ async def _run_analysis_background(
 
         await bot.send_message(
             chat_id,
-            f"✅ Ваш отчёт готов! С баланса списан *{cost}* токен.\n\n"
-            f"Остаток: *{balance_after}* токен(а).\n\n"
-            "Расчёты завершены — мы подготовили аналитику и нашли точки "
-            "роста для вашего портфеля. Все подробности в отчёте 👆",
+            "✅ *Расчёты успешно завершены.* Мы подготовили детальную "
+            "аналитику и нашли перспективные точки роста для вашего "
+            "портфеля. Все подробности доступны по ссылке выше 👆\n\n"
+            f"💳 С баланса списан *{cost}* токен · остаток: "
+            f"*{balance_after}* токен(а).",
             parse_mode=ParseMode.MARKDOWN,
         )
 
