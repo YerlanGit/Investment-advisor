@@ -105,7 +105,9 @@ steps:
       # VAULT_DB_PATH points the SecureVault (Fernet-encrypted broker
       # credentials) at the SAME persistent gcsfuse volume so users do NOT
       # have to re-onboard after every redeploy (B1).
-      - --set-env-vars=REPORT_BUCKET_NAME=ramp-bot-reports,CHROMA_BUCKET=ramp-bot-chroma-db,TOKENOMICS_DB_PATH=/mnt/state/tokenomics.db,VAULT_DB_PATH=/mnt/state/users_vault.db,REPORTING_CURRENCY=USD
+      # ADMIN_USER_IDS — Telegram IDs allowed to /grant test tokens.
+      # 148046720 is the owner's account; add more comma-separated as needed.
+      - --set-env-vars=REPORT_BUCKET_NAME=ramp-bot-reports,CHROMA_BUCKET=ramp-bot-chroma-db,TOKENOMICS_DB_PATH=/mnt/state/tokenomics.db,VAULT_DB_PATH=/mnt/state/users_vault.db,REPORTING_CURRENCY=USD,ADMIN_USER_IDS=148046720
 
   # ── Step 5: Deploy the RAG-ingest Cloud Function (M3) ──────────────────────
   # Listens to the DEDICATED, write-controlled ingest bucket (NOT the reports

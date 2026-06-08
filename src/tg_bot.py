@@ -2021,6 +2021,56 @@ async def cmd_topup(message: Message) -> None:
     )
 
 
+async def cmd_grant(message: Message) -> None:
+    """
+    Admin-only token grant for testing.
+
+    Usage:
+      /grant            → credit 10 tokens to YOURSELF
+      /grant 25         → credit 25 tokens to YOURSELF
+      /grant 25 <uid>   → credit 25 tokens to user <uid>
+
+    Restricted to IDs in the ADMIN_USER_IDS env var.  Anyone else gets a
+    generic "unknown command" so the command stays invisible to regular
+    users.
+    """
+    caller = message.from_user.id
+    if not _is_admin(caller):
+        # Stay invisible to non-admins.
+        await message.answer("Неизвестная команда. Доступные: /balance /topup /support")
+        return
+
+    parts = (message.text or "").split()
+    amount = 10
+    target = caller
+    try:
+        if len(parts) >= 2:
+            amount = int(parts[1])
+        if len(parts) >= 3:
+            target = int(parts[2])
+    except ValueError:
+        await message.answer("Формат: `/grant [кол-во] [user_id]`",
+                             parse_mode=ParseMode.MARKDOWN)
+        return
+
+    if amount <= 0 or amount > 10_000:
+        await message.answer("Количество должно быть 1…10000.")
+        return
+
+    # Make sure the target row exists (init_user is a no-op grant if already
+    # registered; it only seeds the welcome bonus on the very first call).
+    await init_user(target)
+    await credit_tokens(target, amount, reason=f"admin_grant_by_{caller}")
+    bal = await get_balance(target)
+    who = "вам" if target == caller else f"пользователю `{target}`"
+    logger.info("ADMIN %s granted %s tokens to %s", caller, amount, target)
+    await message.answer(
+        f"✅ Начислено *{amount}* токен(ов) {who}.\n"
+        f"Текущий баланс: *{bal}* токен(а).",
+        parse_mode=ParseMode.MARKDOWN,
+    )
+
+
 async def cmd_support(message: Message) -> None:
     await message.answer(
         "🛟 *Поддержка RAMP*\n\n"
@@ -2091,6 +2141,26 @@ def _allowed_users() -> set[int] | None:
     _ALLOWED_USERS_CACHE = out
     logger.info("Beta whitelist active: %d user(s)", len(out))
     return out
+
+
+def _admin_users() -> set[int]:
+    """
+    Parse ADMIN_USER_IDS (comma/semicolon-separated Telegram IDs).
+
+    Admins can self-credit tokens with /grant for testing.  Empty/unset →
+    no admins → /grant is refused for everyone (safe default in prod).
+    """
+    raw = (os.getenv("ADMIN_USER_IDS") or "").strip()
+    out: set[int] = set()
+    for token in raw.replace(";", ",").split(","):
+        token = token.strip()
+        if token.lstrip("-").isdigit():
+            out.add(int(token))
+    return out
+
+
+def _is_admin(user_id: int) -> bool:
+    return user_id in _admin_users()
 
 
 class WhitelistMiddleware(BaseMiddleware):
@@ -2168,6 +2238,8 @@ def build_dispatcher() -> Dispatcher:
     dp.message.register(cmd_balance,  F.text == "/balance")
     dp.message.register(cmd_topup,    F.text == "/topup")
     dp.message.register(cmd_support,  F.text == "/support")
+    # Admin-only token grant for testing (ADMIN_USER_IDS env gate).
+    dp.message.register(cmd_grant,    F.text.startswith("/grant"))
     dp.message.register(cmd_mandate,  F.text == "/mandate")
 
     # Analysis flow callbacks
