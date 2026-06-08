@@ -871,17 +871,17 @@ class SimulatorTest(unittest.TestCase):
 
     def test_composite_risk_score_matches_engine_formula(self) -> None:
         """
-        Default mandate = MODERATE (H4): w_cvar=0.4, w_vol=0.4, w_erc=0.2,
-        cvar_base = 0.05.
+        Default mandate = MODERATE (H1 recalibration in Phase-3 sprint-2):
+            w_cvar=0.4, w_vol=0.4, w_erc=0.2, cvar_base = 0.065.
             vol = 0.142, cvar = -0.052, max_erc = 22
-              s_vol  = 0.142/0.40 * 100 = 35.5
-              s_cvar = 0.052/0.05 * 100 = 104 → clip 100
-              s_conc = 22/50      * 100 = 44.0
-              score  = 0.4·35.5 + 0.4·100 + 0.2·44 = 14.2 + 40 + 8.8 = 63.0
-            → round = 63
+              s_vol  = 0.142/0.40  * 100 = 35.5
+              s_cvar = 0.052/0.065 * 100 = 80.0
+              s_conc = 22/50       * 100 = 44.0
+              score  = 0.4·35.5 + 0.4·80 + 0.2·44 = 14.2 + 32.0 + 8.8 = 55.0
+            → round = 55
         """
         from finance.simulate import _composite_risk_score
-        self.assertEqual(_composite_risk_score(0.142, -0.052, 22.0), 63)
+        self.assertEqual(_composite_risk_score(0.142, -0.052, 22.0), 55)
 
     def test_composite_risk_score_mandate_ordering(self) -> None:
         """H4: same portfolio → CONSERVATIVE ≥ MODERATE ≥ AGGRESSIVE score."""

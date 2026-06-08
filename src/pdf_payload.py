@@ -53,6 +53,18 @@ def _risk_score_label(score: int) -> str:
     return "Агрессивный"
 
 
+# H1: Russian display label for the risk-mandate badge next to the gauge.
+_MANDATE_RU = {
+    "CONSERVATIVE": "Консервативный",
+    "MODERATE":     "Умеренный",
+    "AGGRESSIVE":   "Агрессивный",
+}
+
+
+def _risk_mandate_label(mandate: str) -> str:
+    return _MANDATE_RU.get(str(mandate).strip().upper(), "Умеренный")
+
+
 def _model_display_name(model_id: str) -> str:
     """Convert internal model ID to short human-readable label for PDF."""
     _MAP = {
@@ -741,6 +753,12 @@ def build_payload(results: dict, tier: str,
         "risk_free_rate":    rfr_str,
         "risk_pct":          composite,
         "risk_label":        _risk_score_label(composite),
+        # H1: mandate label next to the gauge — the gauge is mandate-
+        # calibrated (different CVaR base per profile), and without showing
+        # which mandate produced the number the score looks arbitrary.
+        "risk_mandate":      results.get("risk_mandate", "MODERATE"),
+        "risk_mandate_label": _risk_mandate_label(
+                              results.get("risk_mandate", "MODERATE")),
         "kpi_extremes":      kpi_extremes,
         # Dollar impact
         "total_value_usd":   f"${total_val:,.0f}",

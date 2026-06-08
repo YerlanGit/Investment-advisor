@@ -102,7 +102,10 @@ steps:
       # gcsfuse volume — without this every redeploy wipes user balances.
       # REPORTING_CURRENCY=USD pins H2 base-currency to USD for the beta
       # cohort; FX-conversion auto-no-ops on USD-only portfolios.
-      - --set-env-vars=REPORT_BUCKET_NAME=ramp-bot-reports,CHROMA_BUCKET=ramp-bot-chroma-db,TOKENOMICS_DB_PATH=/mnt/state/tokenomics.db,REPORTING_CURRENCY=USD
+      # VAULT_DB_PATH points the SecureVault (Fernet-encrypted broker
+      # credentials) at the SAME persistent gcsfuse volume so users do NOT
+      # have to re-onboard after every redeploy (B1).
+      - --set-env-vars=REPORT_BUCKET_NAME=ramp-bot-reports,CHROMA_BUCKET=ramp-bot-chroma-db,TOKENOMICS_DB_PATH=/mnt/state/tokenomics.db,VAULT_DB_PATH=/mnt/state/users_vault.db,REPORTING_CURRENCY=USD
 
   # ── Step 5: Deploy the RAG-ingest Cloud Function (M3) ──────────────────────
   # Listens to the DEDICATED, write-controlled ingest bucket (NOT the reports
