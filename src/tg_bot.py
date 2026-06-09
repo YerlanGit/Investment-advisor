@@ -19,6 +19,7 @@ import logging
 import math
 import os
 import signal
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -50,8 +51,10 @@ from aiogram.types import (
 
 from db_tokenomics import (
     approve_mandate,
+    assert_persistent_state,
     credit_tokens,
     deduct_tokens,
+    InsufficientFundsError,
     get_balance,
     get_benchmark_ticker,
     get_connection_mode,
@@ -71,7 +74,7 @@ from finance.broker_api import (
     RealPortfolioRequired,
 )
 from finance.investment_logic import UniversalPortfolioManager
-from finance.security import SecureVault
+from finance.security import SecureVault, MasterKeyRotatedError
 from agent.gatekeeper import run_gatekeeper
 from html_renderer import MOCK_DATA, render_report_html, write_report_html
 from services.report_storage import upload_report
@@ -532,8 +535,11 @@ def _build_kpi_sparklines(results: dict) -> Optional[dict]:
             # not the headline number, which is wired separately to data.sharpe)
             std = float(win.std())
             sharpe_pts.append(float(win.mean()) / std * (252 ** 0.5) if std > 0 else 0.0)
-            # Max drawdown over the trailing window
-            eq   = (1 + win).cumprod()
+            # Max drawdown over the trailing window.
+            # M-8: `win` holds LOG returns — reconstruct the equity curve with
+            # exp(cumsum), not (1+r).cumprod() (which treats logs as simple
+            # returns and systematically understates the drawdown).
+            eq   = _np.exp(win.cumsum())
             dd   = (eq / eq.cummax() - 1).min()
             mdd_pts.append(float(dd))
 
@@ -1480,9 +1486,25 @@ async def _send_report(
 
     # Render Jinja → HTML string and write to /tmp.  Both ops are sync
     # and fast (<50 ms total); no need for executor offload.
-    html       = render_report_html(payload, user_id=user_id,
-                                     report_type=report_type, tier=tier)
-    local_path = write_report_html(html, user_id=user_id, tier=tier)
+    # M-1: a template/render failure must degrade gracefully — show the user a
+    # soft message with a support error-id (NOT a stack trace), log the full
+    # traceback under that id, and signal the caller so the token is refunded.
+    try:
+        html       = render_report_html(payload, user_id=user_id,
+                                         report_type=report_type, tier=tier)
+        local_path = write_report_html(html, user_id=user_id, tier=tier)
+    except Exception as exc:
+        error_id = uuid.uuid4().hex[:12]
+        logger.exception("Report generation failed [%s] user=%s tier=%s",
+                         error_id, user_id, tier)
+        await bot.send_message(
+            chat_id,
+            "😔 Извините, отчёт временно недоступен.\n\n"
+            f"Код ошибки для поддержки: `{error_id}`\n"
+            "✅ Токен *не списан* — попробуйте позже или напишите в /support.",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        raise RuntimeError("report_generation_failed") from exc
 
     # Push to GCS (or fall back to file:// in local-dev mode).
     url = upload_report(local_path, user_id=user_id, tier=tier)
@@ -1590,7 +1612,19 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
     conn_mode  = await get_connection_mode(user_id)
 
     if conn_mode == "freedom":
-        keys = await loop.run_in_executor(None, _get_keys_sync, user_id)
+        try:
+            keys = await loop.run_in_executor(None, _get_keys_sync, user_id)
+        except MasterKeyRotatedError as exc:
+            # H-7: stored creds can't be decrypted (key rotated/corrupt).
+            # Prompt clean re-onboarding instead of crashing — token NOT charged.
+            _release_user_slot(user_id)
+            await callback.message.answer(
+                f"🔐 {exc.user_message}\n\n"
+                "✅ Токен *не списан*.",
+                parse_mode=ParseMode.MARKDOWN,
+            )
+            await state.clear()
+            return
         if keys is None:
             api_key    = os.getenv("FREEDOM_API_KEY",    "demo")
             secret_key = os.getenv("FREEDOM_API_SECRET", "")
@@ -1719,18 +1753,18 @@ async def _run_analysis_background(
 
         # Wrap the heavy parts to detect WHERE we fail.
         def _stage_market_data():
-            tickers = [
-                t for t in df["Ticker"].astype(str).tolist()
-                if t.upper() not in manager.engine.NON_RISK_ASSETS
-            ] if "Ticker" in df.columns else [
-                t for t in df.index.astype(str).tolist()
-                if t.upper() not in manager.engine.NON_RISK_ASSETS
-            ]
-            data, history_result = manager.engine.get_market_data(tickers)
-            return data, tickers, history_result
+            # H-3: candidate tickers come from the portfolio frame; the engine
+            # FACADE (prefetch_market_data) does the NON_RISK filtering, the
+            # load, and the resolve/internal bookkeeping — the bot no longer
+            # reaches into manager.engine.* private config.
+            candidates = (
+                df["Ticker"].astype(str).tolist() if "Ticker" in df.columns
+                else df.index.astype(str).tolist()
+            )
+            return manager.prefetch_market_data(candidates)
 
         try:
-            all_data, risky_tickers, history_result = await loop.run_in_executor(None, _stage_market_data)
+            preview = await loop.run_in_executor(None, _stage_market_data)
         except Exception as exc:
             logger.exception("Stage 1 (market data) failed: %s", exc)
             await bot.send_message(
@@ -1742,24 +1776,15 @@ async def _run_analysis_background(
             await refund("market_data_error")
             raise
 
-        loaded_count = len([c for c in all_data.columns if not all_data[c].isna().all()]) if not all_data.empty else 0
-
-        # ── Separate portfolio tickers from internal infrastructure ─────────
-        # Factor ETFs (SPY, MTUM, VLUE, etc.) and BENCHMARK_EXTRA (QQQ, AGG, URTH)
-        # are internal MAC3 infrastructure — do NOT show to users.
-        # Users only care about THEIR portfolio tickers.
-        internal_tickers = set(
-            list(manager.engine.factor_tickers.values())
-            + manager.engine.BENCHMARK_EXTRA
-        )
-        resolved_portfolio = list(dict.fromkeys(
-            manager.engine.resolve_tickers(risky_tickers)
-        ))
-        portfolio_loaded = len([
-            t for t in resolved_portfolio
-            if t in all_data.columns and not all_data[t].isna().all()
-        ])
-        portfolio_total = len(resolved_portfolio)
+        # Unpack the facade summary — no engine internals touched in the bot.
+        all_data           = preview.data
+        risky_tickers      = preview.risky_tickers
+        history_result     = preview.history_result
+        loaded_count       = preview.loaded_count
+        internal_tickers   = preview.internal_tickers   # factor ETFs + benchmark infra
+        resolved_portfolio = preview.resolved_portfolio
+        portfolio_loaded   = preview.portfolio_loaded
+        portfolio_total    = preview.portfolio_total
 
         if loaded_count == 0:
             await bot.send_message(
@@ -1785,12 +1810,8 @@ async def _run_analysis_background(
         # Show only portfolio tickers (exclude factor ETFs + benchmark extras)
         lines = [f"✅ Загружено серий: *{portfolio_loaded}/{portfolio_total}*"]
 
-        # Show proxy-resolved tickers
-        proxy_lines = []
-        for t in risky_tickers:
-            resolved = manager.engine.resolve_tickers([t])
-            if resolved and resolved[0] != f"{t.upper()}.US" and resolved[0] != t.upper():
-                proxy_lines.append(f"  `{t}` → `{resolved[0]}`")
+        # Show proxy-resolved tickers (engine resolution exposed via the facade).
+        proxy_lines = [f"  `{orig}` → `{proxy}`" for orig, proxy in preview.proxy_map.items()]
         if proxy_lines:
             lines.append("\n📎 *Прокси-замены:*")
             lines.extend(proxy_lines)
@@ -1916,12 +1937,15 @@ async def _run_analysis_background(
         # This is the single charge point in the whole flow.  Any earlier
         # failure (broker / engine / render) never reaches here, so the user
         # is never charged for a report they didn't receive.
-        charged = await deduct_tokens(user_id, cost, reason=f"{tier}_analysis")
-        balance_after = await get_balance(user_id)
-        if not charged:
+        try:
+            await deduct_tokens(user_id, cost, reason=f"{tier}_analysis")
+            charged = True
+        except InsufficientFundsError:
             # Extremely unlikely (balance was pre-checked + single-flight),
             # but the report is already delivered — log and don't double-bill.
+            charged = False
             logger.error("Post-CP3 deduct failed for %s (report already sent).", user_id)
+        balance_after = await get_balance(user_id)
 
         # Persist this report's key metrics for future MoM comparison
         metrics = results.get("portfolio_metrics") or {}
@@ -1960,6 +1984,10 @@ async def _run_analysis_background(
         if str(exc) == "market_data_subscription_required":
             # Already reported + refunded above.
             pass
+        elif str(exc) == "report_generation_failed":
+            # M-1: _send_report already showed the user a soft message + error
+            # id.  Just refund here — no second message, no raw traceback.
+            await refund("report_generation_failed")
         elif str(exc) == "report_delivery_failed":
             logger.error("Report generated but upload/delivery failed for %s", user_id)
             await bot.send_message(
@@ -1972,18 +2000,27 @@ async def _run_analysis_background(
             )
             await refund("report_delivery_failed")
         else:
-            logger.exception("Background analysis runtime error: %s", exc)
+            # M-2: never echo a raw exception string to the user — log the full
+            # traceback under a support id and show only that id.
+            error_id = uuid.uuid4().hex[:12]
+            logger.exception("Background analysis runtime error [%s]: %s", error_id, exc)
             await bot.send_message(
                 chat_id,
-                f"⚠️ *Ошибка при анализе:*\n`{str(exc)[:200]}`",
+                "😔 Извините, отчёт временно недоступен.\n\n"
+                f"Код ошибки для поддержки: `{error_id}`\n"
+                "✅ Токен *не списан*.",
                 parse_mode=ParseMode.MARKDOWN,
             )
             await refund("runtime_error")
     except Exception as exc:
-        logger.exception("MAC3 анализ упал для %s: %s", user_id, exc)
+        # M-2: graceful catch-all — soft message + support id, full trace to log.
+        error_id = uuid.uuid4().hex[:12]
+        logger.exception("Unexpected analysis failure [%s] for %s: %s", error_id, user_id, exc)
         await bot.send_message(
             chat_id,
-            f"⚠️ *Непредвиденная ошибка:*\n`{str(exc)[:200]}`",
+            "😔 Извините, произошла непредвиденная ошибка.\n\n"
+            f"Код ошибки для поддержки: `{error_id}`\n"
+            "✅ Токен *не списан*.",
             parse_mode=ParseMode.MARKDOWN,
         )
         await refund("unexpected_error")
@@ -2288,6 +2325,9 @@ class _RetryingSession(AiohttpSession):
 
 
 async def main() -> None:
+    # M-9: refuse to boot if balances / broker creds would land on ephemeral
+    # storage in production — fail loud instead of silently losing money state.
+    assert_persistent_state()
     await init_db()
 
     # Bounded-timeout, auto-retrying transport for Telegram API calls.

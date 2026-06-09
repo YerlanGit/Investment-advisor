@@ -28,14 +28,92 @@ DB_PATH = Path(os.getenv("TOKENOMICS_DB_PATH", str(_DEFAULT_DB_PATH)))
 INITIAL_TOKENS = 10
 
 
+class InsufficientFundsError(Exception):
+    """Raised by `deduct_tokens` when the balance cannot cover the amount.
+
+    Carries no money side effects — it is raised *after* the guarded UPDATE
+    matched zero rows and the transaction was rolled back, so the balance is
+    guaranteed untouched.
+    """
+
+
+# Storage that does NOT survive a Cloud Run restart / scale-to-zero.
+_EPHEMERAL_PREFIXES = ("/tmp", "/app", "/var/tmp")
+
+
+def assert_persistent_state() -> None:
+    """Fail-fast if money/credential state would live on ephemeral storage (M-9).
+
+    On Cloud Run the container filesystem is wiped on every restart.  If
+    `TOKENOMICS_DB_PATH` / `VAULT_DB_PATH` are unset (or point at /tmp, /app,
+    or an in-memory DB) in a production runtime, user balances and encrypted
+    broker keys would silently vanish on the next deploy — so we refuse to
+    start rather than quietly create a throwaway DB.
+
+    Production is detected via Cloud Run's `K_SERVICE`; set
+    `REQUIRE_PERSISTENT_DB=1` to enforce the check in any environment.  Local
+    dev (no markers) keeps the repo-local fallback with a loud warning.
+    """
+    in_prod = bool(os.getenv("K_SERVICE") or os.getenv("REQUIRE_PERSISTENT_DB") == "1")
+    if not in_prod:
+        if "TOKENOMICS_DB_PATH" not in os.environ:
+            logger.warning(
+                "TOKENOMICS_DB_PATH unset — using repo-local fallback %s "
+                "(DEV ONLY; not safe for production).", DB_PATH)
+        return
+
+    problems = []
+    for name in ("TOKENOMICS_DB_PATH", "VAULT_DB_PATH"):
+        val = (os.getenv(name) or "").strip()
+        if not val:
+            problems.append(f"{name} is not defined")
+        elif val == ":memory:" or val.startswith(_EPHEMERAL_PREFIXES):
+            problems.append(f"{name}={val} points at ephemeral storage")
+    if problems:
+        raise RuntimeError(
+            "Persistent DB path is not defined — refusing to start on ephemeral "
+            "storage (user balances / broker credentials would be lost on every "
+            "restart): " + "; ".join(problems)
+        )
+    logger.info("Persistent state check passed (M-9): money/credential DBs on durable storage.")
+
+
 def _get_conn() -> aiosqlite.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     return aiosqlite.connect(DB_PATH)
 
 
+def _get_conn_tx() -> aiosqlite.Connection:
+    """Connection for money operations, opened in autocommit mode.
+
+    `isolation_level=None` disables the driver's implicit transaction handling
+    so we own the BEGIN/COMMIT/ROLLBACK boundaries explicitly.  It must be
+    passed at connect time — aiosqlite runs sqlite3 on a worker thread, so the
+    `isolation_level` *setter* can't be called from the event-loop thread.
+    """
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    return aiosqlite.connect(DB_PATH, isolation_level=None)
+
+
+async def _begin_immediate(db: aiosqlite.Connection) -> None:
+    """Open an explicit ``BEGIN IMMEDIATE`` write-transaction.
+
+    BLK-1: balance mutations must serialise.  ``IMMEDIATE`` grabs the SQLite
+    write lock up-front (instead of lazily on first write), so two concurrent
+    money operations on the same DB block each other deterministically rather
+    than racing across ``await`` boundaries.  The connection is already in
+    autocommit mode (`_get_conn_tx`), so these BEGIN/COMMIT boundaries are ours.
+    """
+    await db.execute("PRAGMA busy_timeout=5000")    # wait on the lock, don't fail
+    await db.execute("BEGIN IMMEDIATE")
+
+
 async def init_db() -> None:
     """Create schema if it does not exist. Call once at bot startup."""
     async with _get_conn() as db:
+        # WAL lets readers (balance checks) run concurrently with the single
+        # writer without blocking — pairs with BEGIN IMMEDIATE on writes.
+        await db.execute("PRAGMA journal_mode=WAL")
         # ── One-time purge: set env PURGE_DB_ON_START=1 to wipe all data ──
         import os
         if os.getenv("PURGE_DB_ON_START", "0") == "1":
@@ -108,26 +186,35 @@ async def init_user(telegram_id: int) -> bool:
     """
     Register user and credit INITIAL_TOKENS if first visit.
     Returns True if newly created, False if already existed.
-    """
-    async with _get_conn() as db:
-        cursor = await db.execute(
-            "SELECT telegram_id FROM users WHERE telegram_id = ?", (telegram_id,)
-        )
-        row = await cursor.fetchone()
-        if row:
-            return False
 
-        await db.execute(
-            "INSERT INTO users (telegram_id, balance) VALUES (?, ?)",
-            (telegram_id, INITIAL_TOKENS),
-        )
-        await db.execute(
-            "INSERT INTO transactions (telegram_id, delta, reason) VALUES (?, ?, ?)",
-            (telegram_id, INITIAL_TOKENS, "welcome_bonus"),
-        )
-        await db.commit()
+    BLK-1: `INSERT ... ON CONFLICT DO NOTHING` makes the welcome bonus
+    exactly-once.  Two concurrent /start calls both run the INSERT, but only
+    the one that actually inserts a row (`rowcount == 1`) logs the bonus
+    transaction — the loser is a silent no-op, so the user can never be
+    double-credited.
+    """
+    async with _get_conn_tx() as db:
+        await _begin_immediate(db)
+        try:
+            cursor = await db.execute(
+                "INSERT INTO users (telegram_id, balance) VALUES (?, ?) "
+                "ON CONFLICT(telegram_id) DO NOTHING",
+                (telegram_id, INITIAL_TOKENS),
+            )
+            created = cursor.rowcount == 1
+            if created:
+                await db.execute(
+                    "INSERT INTO transactions (telegram_id, delta, reason) VALUES (?, ?, ?)",
+                    (telegram_id, INITIAL_TOKENS, "welcome_bonus"),
+                )
+        except Exception:
+            await db.execute("ROLLBACK")
+            raise
+        await db.execute("COMMIT")
+
+    if created:
         logger.info("Новый пользователь %s зарегистрирован, начислено %s токенов.", telegram_id, INITIAL_TOKENS)
-        return True
+    return created
 
 
 async def get_balance(telegram_id: int) -> int:
@@ -143,45 +230,71 @@ async def get_balance(telegram_id: int) -> int:
 async def deduct_tokens(telegram_id: int, amount: int, reason: str = "analysis") -> bool:
     """
     Atomically deduct `amount` tokens.
-    Returns False without modifying balance if funds are insufficient.
+
+    BLK-1: the balance check and the decrement are a SINGLE guarded statement
+    (`UPDATE ... WHERE balance >= ?`) inside a BEGIN IMMEDIATE transaction.
+    There is no read-then-write window in Python, so concurrent deductions for
+    the same user cannot both pass a stale check and drive the balance
+    negative — the second writer either sees the decremented balance or waits
+    on the write lock.
+
+    Returns True on success.  Raises `InsufficientFundsError` when the balance
+    cannot cover `amount` (the guarded UPDATE matched zero rows); the
+    transaction is rolled back, so the balance is left untouched.
     """
     if amount <= 0:
         raise ValueError("amount must be positive")
 
-    async with _get_conn() as db:
-        cursor = await db.execute(
-            "SELECT balance FROM users WHERE telegram_id = ?", (telegram_id,)
-        )
-        row = await cursor.fetchone()
-        if not row or row[0] < amount:
-            return False
+    async with _get_conn_tx() as db:
+        await _begin_immediate(db)
+        try:
+            cursor = await db.execute(
+                "UPDATE users SET balance = balance - ? "
+                "WHERE telegram_id = ? AND balance >= ?",
+                (amount, telegram_id, amount),
+            )
+            if cursor.rowcount == 0:
+                # Unknown user OR insufficient balance — either way, no money moved.
+                raise InsufficientFundsError(
+                    f"user {telegram_id}: balance < {amount} (or user unknown)"
+                )
+            await db.execute(
+                "INSERT INTO transactions (telegram_id, delta, reason) VALUES (?, ?, ?)",
+                (telegram_id, -amount, reason),
+            )
+        except Exception:
+            await db.execute("ROLLBACK")
+            raise
+        await db.execute("COMMIT")
 
-        await db.execute(
-            "UPDATE users SET balance = balance - ? WHERE telegram_id = ?",
-            (amount, telegram_id),
-        )
-        await db.execute(
-            "INSERT INTO transactions (telegram_id, delta, reason) VALUES (?, ?, ?)",
-            (telegram_id, -amount, reason),
-        )
-        await db.commit()
-        logger.info("Пользователь %s: списано %s токен(ов) за '%s'.", telegram_id, amount, reason)
-        return True
+    logger.info("Пользователь %s: списано %s токен(ов) за '%s'.", telegram_id, amount, reason)
+    return True
 
 
 async def credit_tokens(telegram_id: int, amount: int, reason: str = "topup") -> None:
-    """Credit tokens (e.g. after a KZT purchase)."""
-    async with _get_conn() as db:
-        await db.execute(
-            "UPDATE users SET balance = balance + ? WHERE telegram_id = ?",
-            (amount, telegram_id),
-        )
-        await db.execute(
-            "INSERT INTO transactions (telegram_id, delta, reason) VALUES (?, ?, ?)",
-            (telegram_id, amount, reason),
-        )
-        await db.commit()
-        logger.info("Пользователь %s: зачислено %s токен(ов) за '%s'.", telegram_id, amount, reason)
+    """Credit tokens (e.g. after a KZT purchase).
+
+    BLK-1: the balance UPDATE and the ledger INSERT commit together inside one
+    BEGIN IMMEDIATE transaction, so a credit can never be half-applied (balance
+    moved but no audit row, or vice versa) even under concurrent access.
+    """
+    async with _get_conn_tx() as db:
+        await _begin_immediate(db)
+        try:
+            await db.execute(
+                "UPDATE users SET balance = balance + ? WHERE telegram_id = ?",
+                (amount, telegram_id),
+            )
+            await db.execute(
+                "INSERT INTO transactions (telegram_id, delta, reason) VALUES (?, ?, ?)",
+                (telegram_id, amount, reason),
+            )
+        except Exception:
+            await db.execute("ROLLBACK")
+            raise
+        await db.execute("COMMIT")
+
+    logger.info("Пользователь %s: зачислено %s токен(ов) за '%s'.", telegram_id, amount, reason)
 
 
 async def save_profile(

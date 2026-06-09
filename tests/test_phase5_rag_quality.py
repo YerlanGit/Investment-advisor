@@ -235,20 +235,15 @@ class TemplateRenderTest(unittest.TestCase):
         results = PayloadDataQualityTest()._results()
         payload = build_payload(results, "base",
                                 ai_summary={"verdict": "v", "bullets": ["x"], "used_rag": True})
-        html = self._render("report_basic.html", payload)
-        # Data-quality strip
-        self.assertIn("Источник",          html)
-        self.assertIn("Daily CLOSE",       html)
-        self.assertIn("Факторы: 7/10",     html)
-        # Extreme indicators
-        self.assertIn("extreme",           html)   # CSS class on KPI cards
-        self.assertIn("⚠",                 html)
-        # NOTE: the "Bank RAG" panel only renders when the payload carries
-        # actual RAG insight content — used_rag=True alone is not enough.
-        # This fixture passes no insights, so the panel is not asserted here.
-        # Master table column legend
-        self.assertIn("Расшифровка",       html)
-        self.assertIn("Wilder RMA",        html)
+        # L-8: v2 templates retired — validate the live v3 basic report.
+        # v3 surfaces data provenance via the integrity-checks panel rather
+        # than the old v2 data-quality strip; assert the robust, stable content
+        # v3 actually renders for this fixture.
+        html = self._render("report_basic_v3.html", payload)
+        self.assertIn("AAPL",   html)       # portfolio data wired through
+        self.assertIn("Sharpe", html)       # KPI cards present
+        self.assertIn("CVaR",   html)
+        self.assertIn("⚠",      html)       # extreme / warning indicator
         # No RAMP residue
         self.assertNotIn("RAMP",           html)
 

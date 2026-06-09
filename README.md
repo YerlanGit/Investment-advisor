@@ -1,185 +1,103 @@
-# Rewriting Project Claw Code
+# RAMP — Institutional Portfolio Risk-Analysis Telegram Bot
 
-<p align="center">
-  <strong>⭐ The fastest repo in history to surpass 50K stars, reaching the milestone in just 2 hours after publication ⭐</strong>
-</p>
+RAMP is a Telegram bot that runs an **institutional-grade, MAC3/Barra-style
+risk engine** over a user's real brokerage portfolio and returns a banker-grade
+HTML report — multi-factor risk decomposition, tail risk, stress tests, and an
+AI-written narrative — in Russian.
 
-<p align="center">
-  <a href="https://star-history.com/#ultraworkers/claw-code&Date">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=ultraworkers/claw-code&type=Date&theme=dark" />
-      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=ultraworkers/claw-code&type=Date" />
-      <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=ultraworkers/claw-code&type=Date" width="600" />
-    </picture>
-  </a>
-</p>
-
-<p align="center">
-  <img src="assets/clawd-hero.jpeg" alt="Claw" width="300" />
-</p>
-
-<p align="center">
-  <strong>Autonomously maintained by lobsters/claws — not by human hands</strong>
-</p>
-
-<p align="center">
-  <a href="https://github.com/Yeachan-Heo/clawhip">clawhip</a> ·
-  <a href="https://github.com/code-yeongyu/oh-my-openagent">oh-my-openagent</a> ·
-  <a href="https://github.com/Yeachan-Heo/oh-my-claudecode">oh-my-claudecode</a> ·
-  <a href="https://github.com/Yeachan-Heo/oh-my-codex">oh-my-codex</a> ·
-  <a href="https://discord.gg/6ztZB9jvWq">UltraWorkers Discord</a>
-</p>
-
-> [!IMPORTANT]
-> The active Rust workspace now lives in [`rust/`](./rust). Start with [`USAGE.md`](./USAGE.md) for build, auth, CLI, session, and parity-harness workflows, then use [`rust/README.md`](./rust/README.md) for crate-level details.
-
-> Want the bigger idea behind this repo? Read [`PHILOSOPHY.md`](./PHILOSOPHY.md) and Sigrid Jin's public explanation: https://x.com/realsigridjin/status/2039472968624185713
-
-> Shout-out to the UltraWorkers ecosystem powering this repo: [clawhip](https://github.com/Yeachan-Heo/clawhip), [oh-my-openagent](https://github.com/code-yeongyu/oh-my-openagent), [oh-my-claudecode](https://github.com/Yeachan-Heo/oh-my-claudecode), [oh-my-codex](https://github.com/Yeachan-Heo/oh-my-codex), and the [UltraWorkers Discord](https://discord.gg/6ztZB9jvWq).
+> Pipeline: **Engine (`src/finance/*`) → Adapter (`src/pdf_payload.py`) →
+> Jinja2 templates (`src/templates/report_*_v3.html`)**, with
+> `src/ai_narrative.py` (Claude) for the prose layer.
 
 ---
 
-## Backstory
+## What it does
 
-This repo is maintained by **lobsters/claws**, not by a conventional human-only dev team.
+1. **Connects to a portfolio** — Freedom Broker (Tradernet) API via encrypted
+   per-user credentials, or a template portfolio.
+2. **Runs the MAC3 risk engine** (`src/finance/investment_logic.py`):
+   - **Base Currency Approach** — every price is converted to the reporting
+     currency *before* returns/covariance, so FX risk flows into the matrix
+     correctly (`src/finance/currency.py`). Assets with no cross-rate are
+     dropped, never mixed into one covariance matrix.
+   - **Factor model + Euler decomposition** — Ledoit-Wolf/EWMA covariance,
+     marginal & component contribution to risk (TRC).
+   - **Geometric annualisation**, currency-matched **Sharpe / Sortino**, and a
+     dynamic risk-free rate (FRED).
+   - **Bootstrap CVaR** (deterministic, reproducible seed), **stress tests**
+     with a smooth convexity cap, **Black-Litterman** views, and a 4-pillar
+     composite score.
+3. **Adds context** — RAG over bank-analytic PDFs (ChromaDB) and macro/regime
+   signals.
+4. **Renders a report** — `pdf_payload.build_payload()` maps engine output to
+   the template schema; `html_renderer.render_report_html()` renders the v3
+   banker template and ships a signed Cloud Storage URL to the user.
+5. **Bills tokens** — atomic SQLite tokenomics; the user is charged only after
+   the report is delivered.
 
-The people behind the system are [Bellman / Yeachan Heo](https://github.com/Yeachan-Heo) and friends like [Yeongyu](https://github.com/code-yeongyu), but the repo itself is being pushed forward by autonomous claw workflows: parallel coding sessions, event-driven orchestration, recovery loops, and machine-readable lane state.
-
-In practice, that means this project is not just *about* coding agents — it is being **actively built by them**. Features, tests, telemetry, docs, and workflow hardening are landed through claw-driven loops using [clawhip](https://github.com/Yeachan-Heo/clawhip), [oh-my-openagent](https://github.com/code-yeongyu/oh-my-openagent), [oh-my-claudecode](https://github.com/Yeachan-Heo/oh-my-claudecode), and [oh-my-codex](https://github.com/Yeachan-Heo/oh-my-codex).
-
-This repository exists to prove that an open coding harness can be built **autonomously, in public, and at high velocity** — with humans setting direction and claws doing the grinding.
-
-See the public build story here:
-
-https://x.com/realsigridjin/status/2039472968624185713
-
-![Tweet screenshot](assets/tweet-screenshot.png)
-
----
-
-## Porting Status
-
-The main source tree is now Python-first.
-
-- `src/` contains the active Python porting workspace
-- `tests/` verifies the current Python workspace
-- the exposed snapshot is no longer part of the tracked repository state
-
-The current Python workspace is not yet a complete one-to-one replacement for the original system, but the primary implementation surface is now Python.
-
-## Why this rewrite exists
-
-I originally studied the exposed codebase to understand its harness, tool wiring, and agent workflow. After spending more time with the legal and ethical questions—and after reading the essay linked below—I did not want the exposed snapshot itself to remain the main tracked source tree.
-
-This repository now focuses on Python porting work instead.
-
-## Repository Layout
+## Repository layout
 
 ```text
-.
-├── src/                                # Python porting workspace
-│   ├── __init__.py
-│   ├── commands.py
-│   ├── main.py
-│   ├── models.py
-│   ├── port_manifest.py
-│   ├── query_engine.py
-│   ├── task.py
-│   └── tools.py
-├── tests/                              # Python verification
-├── assets/omx/                         # OmX workflow screenshots
-├── 2026-03-09-is-legal-the-same-as-legitimate-ai-reimplementation-and-the-erosion-of-copyleft.md
-└── README.md
+src/
+├── entrypoint.py            # Cloud Run entry: health server + bot polling + ChromaDB sync
+├── tg_bot.py                # aiogram 3.x bot: FSM onboarding, analysis flow, billing
+├── db_tokenomics.py         # async SQLite token ledger (atomic, WAL)
+├── pdf_payload.py           # ADAPTER: engine results -> template schema
+├── html_renderer.py         # Jinja2 env + template selection (v3)
+├── pdf_charts.py            # inline SVG charts (equity curve, sector donut, sparklines)
+├── ai_narrative.py          # Claude narrative (prompt-injection-fenced)
+├── profile_manager.py       # risk-mandate profiles & benchmarks
+├── history.py               # Tradernet price-history cache
+├── finance/                 # THE RISK ENGINE
+│   ├── investment_logic.py  #   MAC3 engine + UniversalPortfolioManager facade
+│   ├── currency.py          #   Base-currency FX transformation
+│   ├── scoring.py / scoring_orchestrator.py   # 4-pillar scoring
+│   ├── black_litterman.py / simulate.py / stress.py / regime.py
+│   ├── period_returns.py / technicals.py / action_plan.py
+│   ├── broker_api.py / security.py            # broker + Fernet vault
+│   └── ...
+├── freedom_portfolio/       # Tradernet client + history frame
+├── agent/                   # advisor bot, RAG engine, gatekeeper
+├── services/                # GCS report storage, FRED macro feed, FX feed
+└── templates/               # report_basic_v3.html · report_deep_v3.html
+cloud_function/              # RAG-ingest Cloud Function (bank PDFs -> ChromaDB)
+tests/                       # test_phase*.py — hermetic engine suite (deploy gate)
 ```
 
-## Python Workspace Overview
+## Running the tests
 
-The new Python `src/` tree currently provides:
-
-- **`port_manifest.py`** — summarizes the current Python workspace structure
-- **`models.py`** — dataclasses for subsystems, modules, and backlog state
-- **`commands.py`** — Python-side command port metadata
-- **`tools.py`** — Python-side tool port metadata
-- **`query_engine.py`** — renders a Python porting summary from the active workspace
-- **`main.py`** — a CLI entrypoint for manifest and summary output
-
-## Quickstart
-
-Render the Python porting summary:
+The hermetic engine suite (no network, mocks FRED/Anthropic/Tradernet) is the
+Cloud Build deploy gate:
 
 ```bash
-python3 -m src.main summary
+PYTHONPATH=src python -m unittest discover -s tests -p "test_phase*.py"
+# or
+PYTHONPATH=src python -m pytest tests/ -q
 ```
 
-Print the current Python workspace manifest:
+## Deployment
 
-```bash
-python3 -m src.main manifest
-```
+Containerised (`Dockerfile`, runs as a non-root user) and deployed to **Google
+Cloud Run** via `cloudbuild.yaml`:
 
-List the current Python modules:
+- **Build → hermetic test gate → push → deploy** (a red test blocks the deploy).
+- **Durable state** — `tokenomics.db` and the Fernet `users_vault.db` live on a
+  gcsfuse-mounted Cloud Storage volume (`/mnt/state`); the app refuses to boot
+  if these point at ephemeral storage (`assert_persistent_state`).
+- **Secrets** — `RAMP_BOT_TOKEN`, `FINTECH_MASTER_KEY`, `ANTHROPIC_API_KEY`,
+  `FREEDOM_API_KEY/SECRET`, `FRED_API_KEY` are injected from Secret Manager,
+  never baked into the image. `FINTECH_MASTER_KEY` supports `MultiFernet`
+  rotation (`NEW_KEY,OLD_KEY`).
+- **Single instance** (`max-instances=1`, `concurrency=1`) — SQLite is not a
+  multi-writer store.
 
-```bash
-python3 -m src.main subsystems --limit 16
-```
+### Required environment
 
-Run verification:
+See `.env.template`. Key variables: `RAMP_BOT_TOKEN`, `FINTECH_MASTER_KEY`,
+`ANTHROPIC_API_KEY`, `FREEDOM_API_KEY`, `FREEDOM_API_SECRET`, `FRED_API_KEY`,
+`TOKENOMICS_DB_PATH`, `VAULT_DB_PATH`, `REPORTING_CURRENCY`, `ADMIN_USER_IDS`.
 
-```bash
-python3 -m unittest discover -s tests -v
-```
+## Disclaimer
 
-Run the parity audit against the local ignored archive (when present):
-
-```bash
-python3 -m src.main parity-audit
-```
-
-Inspect mirrored command/tool inventories:
-
-```bash
-python3 -m src.main commands --limit 10
-python3 -m src.main tools --limit 10
-```
-
-## Current Parity Checkpoint
-
-The port now mirrors the archived root-entry file surface, top-level subsystem names, and command/tool inventories much more closely than before. However, it is **not yet** a full runtime-equivalent replacement for the original TypeScript system; the Python tree still contains fewer executable runtime slices than the archived source.
-
-
-## Built with `oh-my-codex`
-
-The restructuring and documentation work on this repository was AI-assisted and orchestrated with Yeachan Heo's [oh-my-codex (OmX)](https://github.com/Yeachan-Heo/oh-my-codex), layered on top of Codex.
-
-- **`$team` mode:** used for coordinated parallel review and architectural feedback
-- **`$ralph` mode:** used for persistent execution, verification, and completion discipline
-- **Codex-driven workflow:** used to turn the main `src/` tree into a Python-first porting workspace
-
-### OmX workflow screenshots
-
-![OmX workflow screenshot 1](assets/omx/omx-readme-review-1.png)
-
-*Ralph/team orchestration view while the README and essay context were being reviewed in terminal panes.*
-
-![OmX workflow screenshot 2](assets/omx/omx-readme-review-2.png)
-
-*Split-pane review and verification flow during the final README wording pass.*
-
-## Community
-
-<p align="center">
-  <a href="https://instruct.kr/"><img src="assets/instructkr.png" alt="instructkr" width="400" /></a>
-</p>
-
-Join the [**instructkr Discord**](https://instruct.kr/) — the best Korean language model community. Come chat about LLMs, harness engineering, agent workflows, and everything in between.
-
-[![Discord](https://img.shields.io/badge/Join%20Discord-instruct.kr-5865F2?logo=discord&style=for-the-badge)](https://instruct.kr/)
-
-## Star History
-
-See the chart at the top of this README.
-
-## Ownership / Affiliation Disclaimer
-
-- This repository does **not** claim ownership of the original Claude Code source material.
-- This repository is **not affiliated with, endorsed by, or maintained by Anthropic**.
+RAMP produces analytical reports for informational purposes only; it is not
+investment advice. Stress-test figures are illustrative (smooth convexity cap).

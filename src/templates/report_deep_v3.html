@@ -1912,13 +1912,13 @@
         </thead>
         <tbody>
           {# Top concentration rows — sorted by TRC (Euler) descending.
-             HOTSPOT pill when TRC > 20% (engine's hotspot threshold).
+             H-2: HOTSPOT is the engine's decision — render the `a.hotspot`
+             boolean directly; the template does NOT re-derive the >20% rule.
              Source: data.assets (already sorted by weight in build_payload).
              We surface the top 5 by TRC to keep the panel compact. #}
           {% set _sorted = (data.assets or []) | sort(attribute='euler_risk', reverse=true) %}
           {% for a in _sorted[:5] %}
-            {% set trc_num = a.euler_risk | replace('%','') | float if a.euler_risk else 0 %}
-            {% set is_hot  = a.hotspot or trc_num > 20 %}
+            {% set is_hot = a.hotspot %}
           <tr>
             <td>{{ a.ticker }}</td>
             <td>{{ a.weight | replace('%','') }}</td>

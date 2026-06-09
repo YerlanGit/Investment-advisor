@@ -1895,14 +1895,13 @@ class JinjaRenderTest(unittest.TestCase):
         results = PayloadBuildTest()._results()
         payload = build_payload(results, "base",
                                 ai_summary={"verdict": "ok", "bullets": ["a", "b"]})
-        html = self._render("report_basic.html", payload)
-        self.assertIn("PORTFOLIO INTELLIGENCE", html)
-        self.assertNotIn("RAMP",                 html)
-        self.assertIn("Базовый отчёт".lower() if False else "Тест", html)
-        self.assertIn("AAPL",                    html)
-        # No leftover dark-theme tokens
-        self.assertNotIn("#0D1117", html)
-        self.assertIn("#0F4C81",    html)
+        # L-8: v2 templates retired — validate the live v3 basic report.
+        html = self._render("report_basic_v3.html", payload)
+        self.assertIn("AAPL",   html)       # portfolio data wired through
+        self.assertIn("Sharpe", html)       # KPI cards present
+        self.assertIn("CVaR",   html)
+        self.assertNotIn("RAMP",    html)   # no brand residue
+        self.assertNotIn("#0D1117", html)   # no legacy dark-theme token
 
     def test_deep_template_renders(self) -> None:
         from pdf_payload import build_payload
@@ -1911,13 +1910,13 @@ class JinjaRenderTest(unittest.TestCase):
         payload = build_payload(results, "deep",
                                 ai_summary={"verdict": "ok", "bullets": ["a"],
                                               "action_plan_text": "do it now"})
-        html = self._render("report_deep.html", payload)
-        self.assertIn("PORTFOLIO INTELLIGENCE", html)
-        self.assertNotIn("RAMP",                 html)
-        # Deep-only sections present (current template — Three-Question redesign)
-        self.assertIn("Action Plan",             html)
-        self.assertIn("4-Pillar Scoring",        html)
-        self.assertIn("CoVe",                    html)
+        # L-8: v2 templates retired — validate the live v3 deep report.
+        html = self._render("report_deep_v3.html", payload)
+        self.assertIn("AAPL",     html)
+        self.assertNotIn("RAMP",  html)
+        # Deep-only sections present in v3.
+        self.assertIn("Action",   html)
+        self.assertIn("4-Pillar", html)
 
 
 class ExpectedEffectRemapTest(unittest.TestCase):
