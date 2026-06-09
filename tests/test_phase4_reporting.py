@@ -2676,14 +2676,37 @@ class RagSnippetCounterTest(unittest.TestCase):
         self.assertIn("отрывков", rag_pill["detail"])
         self.assertNotIn("~0 отрывков", rag_pill["detail"])
 
-    def test_counter_zero_when_rag_not_used(self) -> None:
+    def test_rag_status_three_state(self) -> None:
+        """RAG pill distinguishes used / queried-no-match / unavailable instead
+        of the misleading binary 'не использован' (Sprint-1 hotfix)."""
         from pdf_payload import _build_integrity_checks
-        checks = _build_integrity_checks(
-            results={}, ai_summary={"used_rag": False, "model_used": "fallback"},
-            data_quality={}, return_series_coverage={})
-        rag_pill = next(c for c in checks if "RAG" in c["label"])
-        self.assertEqual(rag_pill["status"], "—")
-        self.assertEqual(rag_pill["detail"], "не использован")
+
+        def _pill(summary: dict) -> dict:
+            checks = _build_integrity_checks(
+                results={}, ai_summary=summary,
+                data_quality={}, return_series_coverage={})
+            return next(c for c in checks if "RAG" in c["label"])
+
+        used = _pill({"rag_status": "used",
+                      "rag_context": "=== MACRO ===\nGoldman: rotation",
+                      "model_used": "claude-sonnet-4-6"})
+        self.assertEqual(used["status"], "✓")
+        self.assertIn("отрывков", used["detail"])
+
+        no_match = _pill({"rag_status": "no_match", "model_used": "m"})
+        self.assertEqual(no_match["status"], "—")
+        self.assertIn("релевантных отчётов не найдено", no_match["detail"])
+
+        unavailable = _pill({"rag_status": "unavailable", "model_used": "m"})
+        self.assertEqual(unavailable["status"], "✗")
+        self.assertIn("недоступна", unavailable["detail"])
+
+        # Back-compat: summaries that predate rag_status still resolve sanely.
+        legacy_off = _pill({"used_rag": False, "model_used": "fallback"})
+        self.assertEqual(legacy_off["status"], "—")
+        legacy_on = _pill({"used_rag": True,
+                           "rag_context": "=== X ===\nfoo", "model_used": "m"})
+        self.assertEqual(legacy_on["status"], "✓")
 
 
 class UsedRagTierAgnosticTest(unittest.TestCase):

@@ -674,8 +674,13 @@ def _fetch_rag_context(results: dict) -> tuple[str, list[str]]:
     Pull macro + micro RAG excerpts for the AI narrative (deep tier only).
     Also queries for regime confirmation from bank reports.
 
-    Returns (market_context_str, regime_rag_confirm_list).
-    Both are empty on ChromaDB unavailability.
+    Returns (market_context_str, regime_rag_confirm_list, rag_status).
+
+    rag_status is a 3-state flag so the UI can tell the user the truth instead
+    of a misleading binary "не использован":
+      • "unavailable" — ChromaDB empty or unreachable (RAG never queried)
+      • "no_match"    — queried, but no bank report cleared the similarity gate
+      • "used"        — relevant bank context was retrieved and fed to the model
     """
     try:
         from agent.rag_engine import FinancialRAG
@@ -683,7 +688,7 @@ def _fetch_rag_context(results: dict) -> tuple[str, list[str]]:
                                                    "/app/data/chroma_db"))
         if rag.collection.count() == 0:
             logger.info("RAG database empty — narrative will run without bank context.")
-            return "", []
+            return "", [], "unavailable"
 
         perf = results.get("performance_table")
         tickers: list[str] = []
@@ -723,10 +728,12 @@ def _fetch_rag_context(results: dict) -> tuple[str, list[str]]:
             sections.append("=== MACRO TRENDS ===\n" + macro_ctx)
         if micro_ctx and "NO PDF DATA" not in micro_ctx:
             sections.append("=== MICRO INSIGHTS ===\n" + micro_ctx)
-        return "\n\n".join(sections), regime_rag_confirm
+        ctx = "\n\n".join(sections)
+        # Queried successfully — "used" iff something cleared the gate.
+        return ctx, regime_rag_confirm, ("used" if ctx else "no_match")
     except Exception as exc:
         logger.info("RAG context fetch skipped: %s", exc)
-        return "", []
+        return "", [], "unavailable"
 
 
 def _build_pdf_payload(results: dict, tier: str,
@@ -747,7 +754,7 @@ def _build_pdf_payload(results: dict, tier: str,
         # Both tiers pull RAG context (macro + micro + regime confirmation).
         # Deep tier gets full 6000-char context; base tier gets 2000-char
         # version (truncated in ai_narrative) to keep latency reasonable.
-        market_context, regime_rag_confirm = _fetch_rag_context(results)
+        market_context, regime_rag_confirm, rag_status = _fetch_rag_context(results)
 
         ai_summary = generate_narrative(
             results,
@@ -755,6 +762,10 @@ def _build_pdf_payload(results: dict, tier: str,
             market_context=market_context,
             user_risk_profile=user_risk_profile,
         )
+        # Propagate the 3-state RAG status into the summary so the integrity
+        # panel shows the truth (used / queried-no-match / unavailable) for
+        # BOTH tiers — not just deep, and not the misleading binary.
+        ai_summary["rag_status"] = rag_status
         payload = _build_v2_payload(
             results, tier,
             ai_summary=ai_summary,
