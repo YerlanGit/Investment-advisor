@@ -353,18 +353,25 @@ def convert_price_matrix(
     fx_cache: dict[str, pd.Series] = {}
     fx_records: list[FxConversion] = []
     converted = prices.copy()                   # one allocation, sized once
+    # H-1: tickers whose currency has no cross-rate are DROPPED, never left in
+    # their native currency.  Mixing currencies inside one covariance matrix
+    # is mathematically invalid — a KZT/EUR/HKD column among USD columns would
+    # silently corrupt every covariance, beta and Euler contribution.
+    dropped: list[str] = []
 
     for ticker, asset_ccy in needs_conversion.items():
         if asset_ccy not in fx_cache:
             raw = fx_provider(asset_ccy, rep_ccy)
             if raw is None or len(raw) == 0:
-                logger.warning("FX %s→%s not available — leaving %s in native ccy",
-                               asset_ccy, rep_ccy, ticker)
+                logger.warning(
+                    "FX %s→%s not available — DROPPING %s from the risk matrix "
+                    "(H-1: no currency mixing).", asset_ccy, rep_ccy, ticker)
                 fx_cache[asset_ccy] = pd.Series(dtype=float)
                 fx_records.append(FxConversion(pair=f"{asset_ccy}{rep_ccy}",
                                                 coverage_pct=0.0,
                                                 last_value=float("nan"),
                                                 fallback_used=True))
+                dropped.append(ticker)
                 continue
             aligned, rec = align_fx_to_prices(raw, prices.index,
                                               lag_one_day=lag_one_day)
@@ -377,8 +384,18 @@ def convert_price_matrix(
 
         fx_aligned = fx_cache[asset_ccy]
         if fx_aligned.empty:
+            # Same currency as a ticker already found unconvertible above.
+            dropped.append(ticker)
             continue
         converted[ticker] = prices[ticker].astype(float) * fx_aligned.astype(float)
+
+    if dropped:
+        # Drop the unconvertible columns so they cannot enter the covariance
+        # matrix.  errors="ignore" tolerates a ticker listed twice (shared ccy).
+        converted = converted.drop(columns=dropped, errors="ignore")
+        logger.warning(
+            "H-1: excluded %d asset(s) with no FX cross-rate to %s: %s",
+            len(dropped), rep_ccy, ", ".join(dict.fromkeys(dropped)))
 
     return PriceTransformResult(prices_base=converted,
                                 asset_currencies=dict(asset_currencies),

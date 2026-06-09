@@ -395,8 +395,8 @@ class TradernetClient:
             "X-NtApi-Sig":       sig,
         }
         logger.info(
-            "Tradernet POST (v2 JSON) %s [cmd=%s ts=%s sig_prefix=%s…]",
-            url, cmd, timestamp, sig[:8],
+            "Tradernet POST (v2 JSON) %s [cmd=%s ts=%s signed=%s]",
+            url, cmd, timestamp, bool(sig),
         )
         resp = self._session.post(url, data=body, headers=headers, timeout=self.timeout)
         return self._decode(resp)
@@ -411,12 +411,12 @@ class TradernetClient:
         q_payload = json.dumps(body, separators=(",", ":"))
         url = self._url_with_override(base_override)
         logger.info(
-            "Tradernet POST (signed) %s [cmd=%s apiKey=%s… key_len=%d secret_len=%d sig_prefix=%s…]",
+            "Tradernet POST (signed) %s [cmd=%s key_present=%s key_len=%d "
+            "secret_present=%s secret_len=%d signed=%s]",
             url, cmd,
-            self.public_key[:12] if self.public_key else "EMPTY",
-            len(self.public_key),
-            len(self.secret_key),
-            body.get("sig", "")[:8],
+            bool(self.public_key), len(self.public_key or ""),
+            bool(self.secret_key), len(self.secret_key or ""),
+            bool(body.get("sig")),
         )
         resp = self._session.post(
             url,
@@ -430,10 +430,9 @@ class TradernetClient:
         q_payload = json.dumps({"cmd": cmd, "params": params_with_key}, separators=(",", ":"))
         url = self._url_with_override(base_override)
         logger.info(
-            "Tradernet POST (unsigned) %s [cmd=%s key_prefix=%s… key_len=%d]",
+            "Tradernet POST (unsigned) %s [cmd=%s key_present=%s key_len=%d]",
             url, cmd,
-            self.public_key[:8] if self.public_key else "EMPTY",
-            len(self.public_key),
+            bool(self.public_key), len(self.public_key or ""),
         )
         resp = self._session.post(
             url,

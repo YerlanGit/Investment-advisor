@@ -2,6 +2,7 @@ import os
 import pandas as pd
 import numpy as np
 import logging
+from dataclasses import dataclass, field
 from sklearn.linear_model import Ridge
 from sklearn.covariance import LedoitWolf
 
@@ -631,6 +632,12 @@ class MAC3RiskEngine:
             
         # 4. Риск портфеля
         port_variance = weights.T @ structural_cov_ann @ weights
+        # BLK-3: the blended factor covariance (EWMA + Ledoit-Wolf) is not
+        # guaranteed positive-semi-definite, so w'Σw can land marginally below
+        # zero from float noise / a non-PSD matrix.  Clamp at 0 before the
+        # sqrt so port_volatility is never NaN (a NaN here silently poisons
+        # Sharpe/Sortino and zeroes every Euler risk contribution).
+        port_variance = float(max(port_variance, 0.0))
         port_volatility = np.sqrt(port_variance)
         
         # 5. Декомпозиция Эйлера
@@ -664,8 +671,15 @@ class MAC3RiskEngine:
         risk_free_rate_daily = self.current_rfr_daily
 
         excess_returns = port_returns_daily - risk_free_rate_daily
-        downside_returns = excess_returns[excess_returns < 0]
-        downside_vol = np.std(downside_returns) * np.sqrt(self.trading_days)
+        # H-4: industry-standard downside deviation (Sortino/Satchell).
+        # Take the shortfalls min(excess, 0) against the MAR (=0), square them,
+        # and average over the TOTAL number of observations N — not just the
+        # losing days.  The previous `np.std(excess[excess<0])` used the wrong
+        # denominator (count of negatives) and de-meaned around the downside
+        # mean instead of the target, making the ratio non-comparable to the
+        # standard definition.
+        downside_shortfall = np.minimum(excess_returns, 0.0)
+        downside_vol = np.sqrt(np.mean(downside_shortfall ** 2)) * np.sqrt(self.trading_days)
 
         # H1: geometric annualisation of log-returns.
         # Arithmetic `mean·252` over-states annual return by ~σ²/2 (it
@@ -811,6 +825,25 @@ class MAC3RiskEngine:
 
 
 
+@dataclass
+class MarketDataPreview:
+    """Serialisable summary of the Step-1 market-data load (H-3 facade).
+
+    Lets the Telegram layer render its progress panel without reaching into
+    MAC3RiskEngine private config (NON_RISK_ASSETS / factor_tickers /
+    BENCHMARK_EXTRA / resolve_tickers / get_market_data).
+    """
+    data: pd.DataFrame                       # full price matrix incl. factors
+    history_result: object                   # HistoryResult (retried/failed/…)
+    risky_tickers: list                      # portfolio tickers minus cash
+    resolved_portfolio: list                 # resolved + de-duplicated
+    internal_tickers: set                    # factor ETFs + benchmark infra
+    loaded_count: int                        # non-all-NaN columns loaded
+    portfolio_loaded: int                    # portfolio tickers with data
+    portfolio_total: int                     # resolved portfolio size
+    proxy_map: dict = field(default_factory=dict)   # original → proxy ticker
+
+
 class UniversalPortfolioManager:
     COLUMN_ALIASES = {
         'Ticker': ['Symbol', 'Asset', 'Тикер', 'Name'],
@@ -820,6 +853,48 @@ class UniversalPortfolioManager:
 
     def __init__(self):
         self.engine = MAC3RiskEngine()
+
+    def prefetch_market_data(self, candidate_tickers) -> "MarketDataPreview":
+        """Public facade for the bot's Step-1 progress panel (H-3).
+
+        Encapsulates every engine-internal access the Telegram layer used to
+        reach for directly, returning a ready-to-render summary.  The bot must
+        call THIS instead of poking `manager.engine.*`.
+        """
+        eng = self.engine
+        risky_tickers = [t for t in (candidate_tickers or [])
+                         if str(t).upper() not in eng.NON_RISK_ASSETS]
+        data, history_result = eng.get_market_data(risky_tickers)
+
+        loaded_count = (
+            len([c for c in data.columns if not data[c].isna().all()])
+            if not data.empty else 0
+        )
+        internal_tickers = set(list(eng.factor_tickers.values()) + eng.BENCHMARK_EXTRA)
+        resolved_portfolio = list(dict.fromkeys(eng.resolve_tickers(risky_tickers)))
+        portfolio_loaded = len([
+            t for t in resolved_portfolio
+            if t in data.columns and not data[t].isna().all()
+        ])
+        # Proxy replacements (original → resolved) when the engine remapped a
+        # raw ticker to a tradable proxy.
+        proxy_map: dict = {}
+        for t in risky_tickers:
+            resolved = eng.resolve_tickers([t])
+            if resolved and resolved[0] != f"{str(t).upper()}.US" and resolved[0] != str(t).upper():
+                proxy_map[t] = resolved[0]
+
+        return MarketDataPreview(
+            data               = data,
+            history_result     = history_result,
+            risky_tickers      = risky_tickers,
+            resolved_portfolio = resolved_portfolio,
+            internal_tickers   = internal_tickers,
+            loaded_count       = loaded_count,
+            portfolio_loaded   = portfolio_loaded,
+            portfolio_total    = len(resolved_portfolio),
+            proxy_map          = proxy_map,
+        )
 
     def _standardize_columns(self, df):
         for standard, aliases in self.COLUMN_ALIASES.items():
@@ -952,7 +1027,12 @@ class UniversalPortfolioManager:
         df['Total_Cost'] = df['Quantity'] * df['Purchase_Price']
         df['Current_Value'] = df['Quantity'] * df['Current_Price']
         df['PnL'] = df['Current_Value'] - df['Total_Cost']
-        df['Return_Pct'] = (df['PnL'] / df['Total_Cost'])
+        # BLK-2: guard against Purchase_Price == 0 (gifted shares, corporate
+        # actions, broker data gaps).  A bare PnL/0 yields ±inf — and inf is
+        # NOT caught by a downstream .fillna(0) — so one zero-cost row would
+        # corrupt the whole portfolio return.  Replace the 0 denominator with
+        # NaN first, then fill the resulting NaN with 0.0 (flat return).
+        df['Return_Pct'] = df['PnL'].div(df['Total_Cost'].replace(0, np.nan)).fillna(0.0)
 
         total_portfolio_value = float(df['Current_Value'].sum())
         # Second guard: even with rows, if every Current_Price is 0 or all

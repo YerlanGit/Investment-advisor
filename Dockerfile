@@ -48,8 +48,17 @@ COPY tests/ ./tests/
 # (see entrypoint.py:_download_chroma_db) so RAG sees the freshest snapshot.
 RUN mkdir -p /app/data/chroma_db
 
+# ── Non-root runtime user (M-5: least privilege / CIS Docker Benchmark) ───────
+# Any RCE via a dependency then lands as an unprivileged uid, NOT root, and
+# cannot tamper with the read-only application code.  Only the writable data
+# dir is owned by appuser; the source under /app stays root-owned (immutable).
+RUN useradd --create-home --uid 10001 appuser \
+    && chown -R appuser:appuser /app/data
+USER appuser
+
 # Pre-bake the Chroma ONNX embedding model (79 MB) so it's in the image layer.
 # Without this every first ChromaDB query downloads it from S3, adding ~2s latency.
+# Runs AS appuser so the model cache lands in /home/appuser (readable at runtime).
 RUN python -c \
   "from chromadb.utils.embedding_functions import DefaultEmbeddingFunction; \
    DefaultEmbeddingFunction()([])" 2>/dev/null || true

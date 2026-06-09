@@ -1327,11 +1327,11 @@
         </thead>
         <tbody>
           {# Top 5 positions sorted by Euler TRC (engine output).
-             HOTSPOT pill when TRC > 20% (engine threshold). #}
+             H-2: HOTSPOT is decided by the engine — the template just renders
+             the boolean `a.hotspot` flag, it does NOT re-apply the >20% rule. #}
           {% set _sorted = (data.assets or []) | sort(attribute='euler_risk', reverse=true) %}
           {% for a in _sorted[:5] %}
-            {% set trc_num = a.euler_risk | replace('%','') | float if a.euler_risk else 0 %}
-            {% set is_hot  = a.hotspot or trc_num > 20 %}
+            {% set is_hot = a.hotspot %}
           <tr>
             <td>{{ a.ticker }}</td>
             <td>{{ a.weight | replace('%','') }}</td>

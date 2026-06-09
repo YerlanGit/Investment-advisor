@@ -514,34 +514,19 @@ BASIC_VERSION = os.getenv("REPORT_BASIC_VERSION", "v3").lower()
 
 def _select_template(tier: str) -> str:
     """
-    Pick the template name based on tier and feature flag.
+    Pick the template name based on tier.
 
-    Feature flag layering:
-      REPORT_VERSION       v1 → legacy dark theme (single file)
-                            v2 → light theme hybrid (snapshot-bar + q-blocks)
-      REPORT_DEEP_VERSION  v3 → prototype-grade banker design (DEFAULT)
-                                  cream theme, 5 pages, 8-axis radar,
-                                  banker-grade KPI cards, full data-driven
-                                  stress / effect / macro / regime panels
-                            v2 → legacy hybrid (fallback)
-      REPORT_BASIC_VERSION v3 → prototype-grade banker design (DEFAULT)
-                                  cream theme, 4 pages
-                            v2 → legacy hybrid (fallback)
-
-    Both v3 templates render against the same payload schema as v2 — no
-    payload changes needed for the switch.  Set REPORT_*_VERSION=v2 in
-    env to roll back without redeploying code.
+    L-8: the legacy v1 (`report.html`, dark theme) and v2
+    (`report_basic.html` / `report_deep.html`) designs were retired and
+    deleted.  v3 is now the single production design — it carries the RFR +
+    reporting-currency provenance panel (integrity checks) the older
+    templates lacked.  Selection is purely tier-based:
+        deep → report_deep_v3.html
+        base → report_basic_v3.html
     """
-    if REPORT_VERSION == "v1":
-        return "report.html"
     if (tier or "base").lower() == "deep":
-        if DEEP_VERSION == "v3":
-            return "report_deep_v3.html"
-        return "report_deep.html"
-    # BASE tier
-    if BASIC_VERSION == "v3":
-        return "report_basic_v3.html"
-    return "report_basic.html"
+        return "report_deep_v3.html"
+    return "report_basic_v3.html"
 
 
 def _jinja_env() -> Environment:

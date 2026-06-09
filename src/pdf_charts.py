@@ -53,11 +53,17 @@ def equity_curve_svg(port_daily_log_returns: Iterable[float],
     if p_arr.size == 0:
         return _empty_chart(width, height, "нет данных")
 
+    # M-4: one NaN/Inf log-return would make cumsum→exp all-NaN and every SVG
+    # coordinate "nan" (an invisible chart).  Replace non-finite values with 0
+    # (a flat step) so the curve always renders.
+    p_arr = np.where(np.isfinite(p_arr), p_arr, 0.0)
+
     p_eq = 100.0 * np.exp(np.cumsum(p_arr))
     p_eq = np.concatenate([[100.0], p_eq])
 
     if bm_daily_log_returns is not None:
         b_arr = np.asarray(list(bm_daily_log_returns), dtype=float)
+        b_arr = np.where(np.isfinite(b_arr), b_arr, 0.0)   # M-4: same guard
         if b_arr.size:
             b_eq = 100.0 * np.exp(np.cumsum(b_arr))
             b_eq = np.concatenate([[100.0], b_eq])
@@ -177,8 +183,12 @@ def sector_pie_svg(sectors: dict[str, float],
             f'{_xml_escape(name)} · {w*100:.0f}%</text>'
         )
     full_w = size + 160
+    # M-3: grow the canvas vertically so the legend never clips past the
+    # viewBox.  Each legend row is 16px tall starting at leg_y; with a fixed
+    # `size` height anything beyond ~13 sectors used to be cut off.
+    full_h = max(size, leg_y + len(weights) * 16 + 4)
     return (
-        f'<svg width="{full_w}" height="{size}" viewBox="0 0 {full_w} {size}" '
+        f'<svg width="{full_w}" height="{full_h}" viewBox="0 0 {full_w} {full_h}" '
         f'xmlns="http://www.w3.org/2000/svg">'
         f'{"".join(parts)}{"".join(legend_parts)}'
         f'</svg>'
