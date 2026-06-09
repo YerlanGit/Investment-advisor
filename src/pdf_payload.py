@@ -590,6 +590,14 @@ def build_payload(results: dict, tier: str,
     sector_concentration = _build_concentration(sector_pairs)
     sector_warnings      = _build_sector_warnings(sector_pairs, cap_pct=SECTOR_CAP_PCT)
 
+    # SSOT for combined-sector headlines (e.g. Tech+Semiconductors).  Compute the
+    # super-group rollup ONCE here and surface it as an explicit, labelled
+    # warning so the structured panel quotes the same number the AI prose is
+    # told to use — killing the BASE 55% vs DEEP 80.8% divergence.
+    sector_groups  = build_sector_groups(sector_pairs)
+    sector_complex = sector_groups[0] if sector_groups else None
+    sector_warnings = sector_warnings + _sector_group_warnings(sector_groups, cap_pct=SECTOR_CAP_PCT)
+
     asset_pairs = [(a["ticker"], a["weight_pct_num"] / 100.0) for a in assets
                    if a.get("weight_pct_num") is not None]
     asset_concentration = _build_concentration(asset_pairs)
@@ -802,6 +810,8 @@ def build_payload(results: dict, tier: str,
         # Concentration & waterfall (new — data ready for next-gen template)
         "sector_concentration": sector_concentration,
         "sector_warnings":      sector_warnings,
+        "sector_groups":        sector_groups,    # SSOT super-group rollups
+        "sector_complex":       sector_complex,   # top combined group (e.g. Tech-комплекс)
         "asset_concentration":  asset_concentration,
         "risk_waterfall":       risk_waterfall,
         # Multi-period performance table {bm_name: {periods: [...], window_*}}
@@ -1039,6 +1049,67 @@ def _fmt_int(v) -> str:
 # well — see e.g. Markowitz / Sharpe textbooks).
 HHI_BAND_THRESHOLDS = (1500, 2500)   # < 1500: diversified; 1500–2500: moderate; ≥ 2500: concentrated
 SECTOR_CAP_PCT      = 40.0           # warn when single sector > this share of portfolio
+
+# ── Sector super-groups (SINGLE SOURCE OF TRUTH for combined-sector headlines)
+# The engine intentionally keeps Technology and Semiconductors as DISTINCT
+# sectors (they carry a separate SOXX factor).  But the headline "tech
+# concentration" must be ONE authoritative number, not something the LLM
+# re-aggregates ad-hoc — that mismatch produced 55% in BASE (top granular
+# sector) vs 80.8% in DEEP (LLM-lumped Tech+Semi) for the same book.
+#
+# This map is imported by ai_narrative so the AI prose and the structured
+# panel quote the exact same combined figure.  Keep it here as the canonical
+# presentation grouping.
+SECTOR_SUPERGROUPS: dict[str, tuple[str, ...]] = {
+    "Tech-комплекс (Technology+Semiconductors)": ("Technology", "Semiconductors"),
+}
+
+
+def build_sector_groups(weight_pairs: list[tuple[str, float]]) -> list[dict]:
+    """Aggregate granular sectors into the canonical super-groups (SSOT).
+
+    `weight_pairs` are (sector, weight_decimal) on the share-of-long-book basis.
+    Returns [{name, weight_pct, members}] for every super-group with ≥2 member
+    sectors present (a single-member group adds nothing over the granular panel
+    and is skipped).  Sorted by combined weight descending.
+    """
+    wmap = {s: float(w) for s, w in weight_pairs}
+    groups: list[dict] = []
+    for name, members in SECTOR_SUPERGROUPS.items():
+        present = [m for m in members if m in wmap]
+        if len(present) < 2:
+            continue
+        total = sum(wmap[m] for m in present)
+        groups.append({
+            "name":       name,
+            "weight_pct": round(total * 100, 1),
+            "members":    {m: round(wmap[m] * 100, 1) for m in present},
+        })
+    groups.sort(key=lambda g: g["weight_pct"], reverse=True)
+    return groups
+
+
+def _sector_group_warnings(groups: list[dict], cap_pct: float = SECTOR_CAP_PCT) -> list[dict]:
+    """Warnings (same shape as `_build_sector_warnings`) for super-groups over cap.
+
+    Surfacing the combined figure here means BOTH templates render it via
+    `data.sector_warnings` → the 80.8% Tech-комплекс now appears, labelled, in
+    BASE and DEEP identically.
+    """
+    out: list[dict] = []
+    for g in groups:
+        w_pct = float(g["weight_pct"])
+        if w_pct > cap_pct:
+            out.append({
+                "sector":     g["name"],
+                "weight_pct": round(w_pct, 1),
+                "cap_pct":    cap_pct,
+                "overage_pp": round(w_pct - cap_pct, 1),
+                "is_group":   True,
+                "text":       (f"{g['name']}: {w_pct:.0f}% портфеля — превышен "
+                               f"мягкий лимит {cap_pct:.0f}% на {w_pct - cap_pct:.0f} п.п."),
+            })
+    return out
 
 
 def _hhi_band(points: float) -> str:
@@ -1300,18 +1371,27 @@ def _build_integrity_checks(results: dict,
                    if has_ci else "точечная оценка (мало данных)"),
     })
 
-    # 6. RAG (bank research retrieval)
-    rag_used    = bool((ai_summary or {}).get("used_rag"))
+    # 6. RAG (bank research retrieval) — 3-state status from the backend so the
+    # panel never shows the misleading binary "не использован" for a portfolio
+    # that simply had no matching bank report (or an empty knowledge base).
+    rag_status  = (ai_summary or {}).get("rag_status")
     rag_context = (ai_summary or {}).get("rag_context") or ""
     # _fetch_rag_context joins sections with "\n\n"; count non-blank
     # paragraphs as approximate snippet count (header lines included).
     snippets    = (sum(1 for p in rag_context.split("\n\n") if p.strip())
                    if rag_context else 0)
+    if rag_status is None:   # back-compat with summaries that predate rag_status
+        rag_status = "used" if (ai_summary or {}).get("used_rag") else "no_match"
+    if rag_status == "used":
+        _rag_icon, _rag_detail = "✓", f"ChromaDB · cosine ≥0.72 · ~{snippets} отрывков"
+    elif rag_status == "no_match":
+        _rag_icon, _rag_detail = "—", "запрошен — релевантных отчётов не найдено"
+    else:  # "unavailable"
+        _rag_icon, _rag_detail = "✗", "база недоступна / пуста"
     checks.append({
-        "status": "✓" if rag_used else "—",
+        "status": _rag_icon,
         "label":  "RAG: банк. отчёты",
-        "detail": (f"ChromaDB · cosine ≥0.72 · ~{snippets} отрывков"
-                   if rag_used else "не использован"),
+        "detail": _rag_detail,
     })
 
     # 7. AI model attribution

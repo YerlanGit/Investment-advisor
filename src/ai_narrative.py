@@ -114,6 +114,45 @@ def validate_stress_comment(text: str) -> str:
 MODEL_BASE = os.getenv("ANTHROPIC_MODEL_BASE", "claude-haiku-4-5-20251001")
 MODEL_DEEP = os.getenv("ANTHROPIC_MODEL_DEEP", "claude-sonnet-4-6")
 
+# ── Structured Outputs tool (Tools API) ──────────────────────────────────────
+# Forcing the narrative through a typed tool call makes the response a
+# GUARANTEED structured object the SDK parses for us — eliminating the
+# brace-finding + _repair_truncated_json hack on possibly-truncated free text.
+# The property names mirror exactly what the downstream extractor reads via
+# parsed.get(...), and the per-field CONTENT rules still come from the user
+# prompt (lengths, citation tags, anti-re-aggregation directives).
+_REPORT_TOOL: dict = {
+    "name": "emit_report",
+    "description": ("Вернуть институциональный нарратив строго в этой структуре. "
+                    "Заполни КАЖДОЕ поле по правилам из пользовательского запроса "
+                    "(лимиты длины, источники [Quant Engine]/[Regime]/[RAG], "
+                    "запрет на самостоятельную агрегацию секторов)."),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "verdict":                {"type": "string"},
+            "plain_summary":          {"type": "string"},
+            "bullets":                {"type": "array", "items": {"type": "string"}},
+            "action_plan_text":       {"type": "string"},
+            "ai_action_impact":       {"type": "string"},
+            "ai_sharpe_note":         {"type": "string"},
+            "ai_mdd_note":            {"type": "string"},
+            "ai_risk_comment":        {"type": "string"},
+            "ai_holdings_comment":    {"type": "string"},
+            "ai_sector_comment":      {"type": "string"},
+            "ai_factor_comment":      {"type": "string"},
+            "ai_benchmark_comment":   {"type": "string"},
+            "ai_performance_comment": {"type": "string"},
+            "ai_regime_comment":      {"type": "string"},
+            # Nested structures stay permissive — _normalise_stock_picks and
+            # _regime_confirmation() validate their shape downstream.
+            "stock_picks":            {"type": "object"},
+            "regime_confirmation":    {"type": "object"},
+        },
+        "required": ["verdict", "bullets"],
+    },
+}
+
 
 # ── System prompt ────────────────────────────────────────────────────────────
 
@@ -130,6 +169,35 @@ def _build_system_prompt() -> str:
             continue
     return ("You are an investment-advisory and risk-management assistant. "
             "Output advisory-only text in Russian. Never mention 'RAMP'.")
+
+
+# ── Sector figures fed to the LLM (SSOT — shared with the report panel) ──────
+
+def _sector_shares_long_book(results: dict) -> dict:
+    """Sector weights as share of the LONG book — the SAME basis the report
+    panel renders, so the AI prose and the panel agree."""
+    se = results.get("sector_exposure") or {}
+    long_only = [(s, float(w)) for s, w in se.items() if float(w) > 0]
+    lsum = sum(w for _, w in long_only) or 1.0
+    return {s: round(w / lsum * 100, 1) for s, w in long_only}
+
+
+def _sector_complex_figure(results: dict) -> dict | None:
+    """Authoritative combined super-group figure (e.g. Tech-комплекс).
+
+    Computed via the SAME grouping `pdf_payload.build_sector_groups` uses, so
+    the model cites one number instead of re-aggregating Tech+Semiconductors
+    ad-hoc (the BASE 55% vs DEEP 80.8% bug)."""
+    se = results.get("sector_exposure") or {}
+    long_only = [(s, float(w)) for s, w in se.items() if float(w) > 0]
+    lsum = sum(w for _, w in long_only) or 1.0
+    pairs = [(s, w / lsum) for s, w in long_only]
+    try:
+        from pdf_payload import build_sector_groups  # leaf import, no cycle
+        groups = build_sector_groups(pairs)
+    except Exception:
+        return None
+    return groups[0] if groups else None
 
 
 # ── Compact summary for LLM input ───────────────────────────────────────────
@@ -215,8 +283,11 @@ def _summarise_for_prompt(results: dict) -> dict:
         "total_value":  _safe_round(results.get("total_value"), 0),
         "regime":       results.get("regime"),
         "macro":        macro_summary,
-        "sectors":      {k: round(float(v) * 100, 1)
-                         for k, v in (results.get("sector_exposure") or {}).items()},
+        # Share-of-long-book basis (matches the report panel) + the authoritative
+        # combined super-group figure.  The prompt forbids re-aggregating sectors
+        # — the model must cite `sector_complex` for combined tech exposure.
+        "sectors":         _sector_shares_long_book(results),
+        "sector_complex":  _sector_complex_figure(results),
         "benchmarks":   bm,
         "holdings":     perf_rows,
         "action_plan":  (results.get("action_plan") or [])[:8],
@@ -407,8 +478,10 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
             '  "ai_holdings_comment": "≤170 знаков — hotspot-позиции с наибольшим вкладом в риск '
             '(→ TRC%). Объясни ПОЧЕМУ они опасны через их чувствительность к рынку (бета). '
             'Связь: высокий риск → высокий CVaR (→ см. риск-блок) [Quant Engine]",\n'
-            '  "ai_sector_comment": "≤140 знаков — сектор с перекосом + % → ПОЧЕМУ это опасно в режиме '
-            f'{regime_label} (→ из раздела режима). Назови сектор для докупки [Regime]",\n'
+            '  "ai_sector_comment": "≤140 знаков — используй ТОЛЬКО числа из раздела sectors; '
+            'НЕ суммируй сектора сам. Для совокупной техно-экспозиции бери sector_complex.weight_pct '
+            'ВЕРБАТИМ (напр. \\"Tech-комплекс 80.8%\\"). Сектор с перекосом + % → ПОЧЕМУ это опасно в режиме '
+            f'{regime_label}. Назови сектор для докупки [Regime]",\n'
             '  "ai_factor_comment": "≤220 знаков — (1) Value-фактор портфеля [Quant Engine]: '
             'если отрицательный — значит портфель против стоимостных акций, что ПРОТИВОРЕЧИТ режиму '
             f'{regime_label} (→ Barclays/Goldman рекомендуют Value в Recovery). '
@@ -805,41 +878,41 @@ def generate_narrative(results: dict, tier: str = "base",
             model       = model,
             max_tokens  = max_tok,
             temperature = 0.1,
-            system      = _build_system_prompt(),
+            # Prompt Caching — the ~25 KB system prompt is byte-identical on
+            # every request.  Caching it means repeated calls (base+deep, and
+            # many users within the 5-min TTL) read the prefix at ~0.1× instead
+            # of full input price.  (Cache is model-scoped: Haiku BASE and
+            # Sonnet DEEP keep separate caches — both still benefit at volume.)
+            system      = [{
+                "type": "text",
+                "text": _build_system_prompt(),
+                "cache_control": {"type": "ephemeral"},
+            }],
             messages    = [{
                 "role": "user",
                 "content": _user_prompt(summary, tier=tier,
                                         market_context=market_context,
                                         user_profile=user_risk_profile),
             }],
+            # Structured Outputs — force the report through a typed tool call so
+            # the SDK returns a GUARANTEED dict.  No brace-finding, no
+            # _repair_truncated_json: JSON parsing is now strictly deterministic.
+            tools       = [_REPORT_TOOL],
+            tool_choice = {"type": "tool", "name": "emit_report"},
         )
-        usage    = response.usage
-        raw      = response.content[0].text.strip()
-        logger.info("AI narrative: ответ от %s получен (input=%d tok, output=%d tok, len=%d chars)",
-                    model, usage.input_tokens, usage.output_tokens, len(raw))
-
-        first_brace = raw.find("{")
-        if first_brace == -1:
-            raise ValueError(f"JSON-объект не найден в ответе (raw[:200]={raw[:200]!r})")
-        last_brace = raw.rfind("}")
-        # Truncation by max_tokens can swallow the closing brace entirely —
-        # feed everything from the first '{' to the end into the repair pass.
-        json_str = raw[first_brace:last_brace + 1] if last_brace > first_brace else raw[first_brace:]
-        try:
-            parsed = json.loads(json_str)
-        except json.JSONDecodeError:
-            logger.info("AI narrative: JSON невалиден, пробуем repair (output=%d tok, "
-                        "closing_brace_found=%s)",
-                        usage.output_tokens, last_brace > first_brace)
-            repaired = _repair_truncated_json(json_str)
-            try:
-                parsed = json.loads(repaired)
-                logger.info("AI narrative: JSON repair УСПЕШЕН")
-            except json.JSONDecodeError as je:
-                raise ValueError(
-                    f"JSON repair не удался (output={usage.output_tokens} tok, "
-                    f"raw_tail={raw[-200:]!r}): {je}"
-                ) from je
+        usage      = response.usage
+        cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
+        # Deterministic extraction — the forced tool_use block's `input` IS the
+        # parsed object.  No text parsing path at all.
+        tool_blocks = [b for b in response.content
+                       if getattr(b, "type", None) == "tool_use"
+                       and getattr(b, "name", "") == "emit_report"]
+        if not tool_blocks:
+            raise ValueError("Модель не вернула структурированный tool_use (emit_report).")
+        parsed = dict(tool_blocks[0].input or {})
+        logger.info("AI narrative: structured tool_use OK model=%s (input=%d tok, "
+                    "output=%d tok, cache_read=%d tok, keys=%d)",
+                    model, usage.input_tokens, usage.output_tokens, cache_read, len(parsed))
 
         verdict       = str(parsed.get("verdict", "")).strip()
         plain_summary = str(parsed.get("plain_summary", "")).strip()
