@@ -1,1 +1,68 @@
+« name: Python CI
+
+# F-9: PR-merge gate.  Until this workflow existed the ONLY automated check
+# was the Cloud Build deploy-time test gate — a PR could merge to main with
+# zero verification.  Tests are BLOCKING; dependency / secret scans start as
+# advisory (continue-on-error) until a hash-locked requirements file lands,
+# then should be flipped to blocking.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: pytest + deploy-gate mirror
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pytest
+      - name: Hermetic engine suite (mirrors the Cloud Build deploy gate)
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p "test_phase*.py"
+      - name: Full pytest suite
+        env:
+          PYTHONPATH: src
+        run: python -m pytest tests/ -q
+
+  dependency-audit:
+    name: pip-audit (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true   # advisory until requirements are hash-pinned (F-8)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install --upgrade pip pip-audit
+      - name: Audit resolved dependency tree
+        run: pip-audit -r requirements.txt
+
+  secret-scan:
+    name: gitleaks (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true   # advisory-first; flip to blocking once tuned
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+»
 
