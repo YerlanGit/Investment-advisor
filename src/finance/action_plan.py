@@ -110,16 +110,27 @@ def compute_levels(*,
                 buy_hi = sma50 - 0.2 * atr
             out["buy_zone"] = (float(min(buy_lo, buy_hi)), float(max(buy_lo, buy_hi)))
 
-        # Take-profit target: 5% above SMA200 OR price + 3·ATR, whichever is higher.
-        candidates = []
+        # Take-profit target: 5% above SMA200 OR price + 3·ATR, whichever is
+        # higher — these are the ACTIONABLE trend/volatility targets.
+        # F-12: the 52w-high is no longer a max() candidate (for a beaten-down
+        # name that put the target 30-50% away — not actionable).  It only
+        # LIFTS the target when the primary lands inside the resistance band
+        # just below the high ("don't sell INTO the high"), and serves as the
+        # last-resort target when nothing else is available.
+        primary = []
         if sma200 is not None:
-            candidates.append(sma200 * 1.05)
+            primary.append(sma200 * 1.05)
         if atr is not None:
-            candidates.append(price + ATR_TAKE_MULT_BUY * atr)
+            primary.append(price + ATR_TAKE_MULT_BUY * atr)
+        take = max(primary) if primary else None
         if high_52w is not None:
-            candidates.append(high_52w * 1.02)   # don't sell INTO the high
-        if candidates:
-            out["take_target"] = float(max(candidates))
+            resistance = high_52w * 1.02
+            if take is None:
+                take = resistance                      # only signal available
+            elif high_52w * 0.98 <= take < resistance:
+                take = resistance                      # nudge above the high
+        if take is not None:
+            out["take_target"] = float(take)
 
         # Stop: -2 ATR or SMA200 (whichever is higher → tighter).
         stops = []

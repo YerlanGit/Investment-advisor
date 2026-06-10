@@ -131,10 +131,13 @@ def _sample_metrics(daily_log_matrix: np.ndarray,
     cvar_95 = float(tail.mean()) if tail.size else var_95
 
     # Sharpe — annualised, geometric-anchored mean / sample stdev.
+    # F-7: geometric annualisation (exp(mean·252)−1) to match the engine's
+    # headline Sharpe basis (H1) — arithmetic mean·252 overstated the
+    # before/after rebalance delta by ~σ²/2.
     # Threshold std at 1e-12 to avoid FP-noise blowing up Sharpe on
     # near-constant series (e.g. an all-cash portfolio or a unit-test
     # fixture).  Real portfolios have daily σ > 1e-3, never near zero.
-    ann_ret = float(np.mean(port_daily)) * trading_days
+    ann_ret = float(np.exp(float(np.mean(port_daily)) * trading_days) - 1.0)
     daily_std = float(np.std(port_daily, ddof=1))
     sharpe = (ann_ret - rfr_ann) / (daily_std * math.sqrt(trading_days)) \
              if daily_std > 1e-12 else float("nan")
@@ -158,6 +161,14 @@ def _expected_return_from_bl(target_w_by_ticker: dict[str, float],
     fall back to a realised-return estimator).
     """
     if not bl_records:
+        return None
+    # F-11: when BL folded in ZERO active views, posterior_mu is the raw
+    # equilibrium π = δΣw — a function of current weights and covariance,
+    # not a forward forecast.  Decline it so the caller falls back to the
+    # realised-return estimator instead of presenting circular "expected
+    # return" to the user.  (Old records without the key keep legacy
+    # behaviour.)
+    if all(r.get("n_views", 1) == 0 for r in bl_records):
         return None
     mu_by_t = {r["ticker"]: _safe_float(r.get("posterior_mu"), 0.0)
                for r in bl_records}

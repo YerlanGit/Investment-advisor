@@ -105,15 +105,24 @@ async def _begin_immediate(db: aiosqlite.Connection) -> None:
     autocommit mode (`_get_conn_tx`), so these BEGIN/COMMIT boundaries are ours.
     """
     await db.execute("PRAGMA busy_timeout=5000")    # wait on the lock, don't fail
+    await db.execute("PRAGMA synchronous=FULL")     # F-5: fsync on commit (per-connection)
     await db.execute("BEGIN IMMEDIATE")
 
 
 async def init_db() -> None:
     """Create schema if it does not exist. Call once at bot startup."""
     async with _get_conn() as db:
-        # WAL lets readers (balance checks) run concurrently with the single
-        # writer without blocking — pairs with BEGIN IMMEDIATE on writes.
-        await db.execute("PRAGMA journal_mode=WAL")
+        # F-5: NO WAL here.  In production this DB lives on a gcsfuse mount
+        # (TOKENOMICS_DB_PATH=/mnt/state/...), and WAL relies on shared-memory
+        # (-shm) mmap + byte-range locks that FUSE/object storage does not
+        # faithfully emulate — plus Cloud Run revisions briefly OVERLAP during
+        # a redeploy, so two processes can hold the same WAL file (checkpoint
+        # corruption window).  TRUNCATE is the safest rollback journal on FUSE;
+        # synchronous=FULL forces fsync on commit so a committed token
+        # deduction survives a SIGKILL.  journal_mode persists in the DB file,
+        # so this also migrates existing WAL databases back on next boot.
+        await db.execute("PRAGMA journal_mode=TRUNCATE")
+        await db.execute("PRAGMA synchronous=FULL")
         # ── One-time purge: set env PURGE_DB_ON_START=1 to wipe all data ──
         import os
         if os.getenv("PURGE_DB_ON_START", "0") == "1":

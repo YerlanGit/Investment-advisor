@@ -22,7 +22,17 @@ secret must not widen this function's attack surface.
       --trigger-event-filters="type=google.cloud.storage.object.v1.finalized" \
       --trigger-event-filters="bucket=ramp-bot-ingest" \
       --memory=1Gi \
-      --timeout=300s
+      --timeout=300s \
+      --max-instances=1 \
+      --concurrency=1
+
+F-4 (concurrency): --max-instances=1 --concurrency=1 are MANDATORY.  This
+function does a download → mutate → blob-by-blob overwrite of the whole
+ChromaDB prefix with no lock and no generation precondition.  Two concurrent
+invocations (two PDFs finalized close together) last-writer-wins each
+other's chunks, and interleaved uploads can pair chroma.sqlite3 from run A
+with an HNSW segment from run B — a structurally corrupt KB that the bot
+then syncs at boot.  Serializing instances closes the race.
 
 Как это работает:
   1. Куратор загружает банковский PDF в защищённый bucket 'ramp-bot-ingest'

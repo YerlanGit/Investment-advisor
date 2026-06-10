@@ -31,6 +31,11 @@ class BLResult:
     current_weights: np.ndarray
     delta_weights:  np.ndarray   # target - current
     posterior_mu:   np.ndarray   # implied annual expected returns
+    # F-11: number of active views folded into the posterior.  0 means
+    # posterior_mu is the raw reverse-optimised equilibrium π = δΣw — a
+    # function of current weights and covariance, NOT a forward forecast.
+    # Consumers (simulate's Expected-Effect panel) must not present it as one.
+    n_views:        int = 0
 
     def as_records(self) -> list[dict]:
         return [
@@ -40,6 +45,7 @@ class BLResult:
                 "target_w":     float(self.target_weights[i]),
                 "delta_w_pp":   float((self.target_weights[i] - self.current_weights[i]) * 100),
                 "posterior_mu": float(self.posterior_mu[i]),
+                "n_views":      int(self.n_views),
             }
             for i, t in enumerate(self.tickers)
         ]
@@ -112,6 +118,7 @@ def black_litterman(
     # Implied equilibrium returns: π = δ · Σ · w
     pi = risk_aversion * (sigma @ w_curr)
 
+    active_views = 0          # F-11: stays 0 whenever posterior_mu ends up = π
     if views_P is None or views_Q is None or len(views_Q) == 0:
         posterior_mu = pi.copy()
     else:
@@ -134,8 +141,9 @@ def black_litterman(
             posterior_cov_inv = tau_sigma_inv + P.T @ omega_inv @ P
             posterior_cov     = np.linalg.inv(posterior_cov_inv)
             posterior_mu      = posterior_cov @ (tau_sigma_inv @ pi + P.T @ omega_inv @ Q)
+            active_views      = int(len(Q))
         except np.linalg.LinAlgError:
-            # Singular; fall back to prior.
+            # Singular; fall back to prior (no views folded in → stays 0).
             posterior_mu = pi.copy()
 
     # Target weights: w* = (δ Σ)⁻¹ μ_BL  (long-only, normalised, capped turnover).
@@ -166,6 +174,7 @@ def black_litterman(
         current_weights = w_curr,
         delta_weights   = w_star - w_curr,
         posterior_mu    = posterior_mu,
+        n_views         = active_views,
     )
 
 
