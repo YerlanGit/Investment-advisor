@@ -6,6 +6,28 @@
 
 ---
 
+## −1. Follow-up 360° аудит (commit `32a3a55` / merge PR #48) — остаточные находки
+
+Полный повторный аудит пост-фикс состояния (два углублённых прохода: ядро + инфра). Критических блокеров **не осталось** (денежный путь атомарен, секреты чисты). Остаются HIGH (ядро + инфра) и хвост MEDIUM/LOW:
+
+| ID | Sev | Где | Суть | Фикс |
+|---|---|---|---|---|
+| F-1 | 🟡 HIGH | `investment_logic.py:329` | `_marginal_var` бампит вес ±h **без ренормировки** → плечевая, не бюджет-нейтральная чувствительность; тест проверяет только знак | Ренормировать остаток книги или фондировать из кэша |
+| F-2 | 🟡 HIGH | `investment_logic.py:1116/1134/1138` | Expected_Return складывает гео-simple факторы + арифм-лог alpha (рассинхрон единиц); `Alpha_Specific` наследует | Аннуализировать alpha геометрически |
+| F-3 | 🟡 HIGH | `investment_logic.py:576/610-624` | **НЕТ guard `N≥K`** перед Ridge(10 факт.)/LedoitWolf → на коротком окне переобученные беты + вырожденная ковариация | `if len(returns) < max(2*K, 30): skip` |
+| F-4 | 🟡 HIGH | `cloud_function/main.py:67-85` | ChromaDB ingest: download→ingest→overwrite **без лока, gen2 без max-instances** → гонка → потеря/коррупция KB | `--max-instances=1 --concurrency=1` / GCS-лок |
+| F-5 | 🟡 HIGH | `cloudbuild.yaml:96-110`, `db_tokenomics.py:116` | **SQLite WAL на gcsfuse** для денег/кредов небезопасен; окно перекрытия ревизий при редеплое | `journal_mode=TRUNCATE` или Cloud SQL/Firestore |
+| F-6 | 🟡 MED | `tg_bot.py:1681/1784/1869` | **`str(exc)` всё ещё льётся юзеру** в 3 catch-all; через `client.py:510/514` туда может попасть `resp.text` | error-UUID паттерн (уже есть в файле) |
+| F-7 | 🟡 MED | `simulate.py:137` | Sharpe арифметически аннуализирован вопреки комменту «geometric-anchored» | `exp(mean·252)−1` |
+| F-8 | 🟡 MED | `requirements.txt`, `Dockerfile:7` | Неприпиненные `>=` (вкл. `cryptography`), база без `@sha256` | `pip-compile --require-hashes`; digest-pin |
+| F-9 | 🟡 MED | `.github/workflows/` | **Нет PR-CI** (только deploy-gate); ни pip-audit/bandit/secret-scan | PR-workflow: pytest+pip-audit+gitleaks+Trivy |
+| F-10 | 🟢 LOW | `src/*.py` | **~36 модулей мёртвого Claude-Code-клона** (0 импортёров) в `src/`/образе (`batch_reports.py` — НЕ сюда) | Удалить мёртвый остров + `reference_data/` |
+| F-11 | 🟢 LOW | `scoring_orchestrator.py:386`, `black_litterman.py:116` | Мёртвый `if True:`; BL равновесная π подаётся как forward expected return | dedent; лейбл «equilibrium-implied» |
+
+**Дашборд (скорректирован):** Математика **84** · Архитектура **72** · Инфра/Безопасность **76** · UI/UX **84** · Готовность ≈ **82/100**.
+
+---
+
 ## 0-bis. Спринт модернизации (2026-06-09) — выполнено
 
 - ✅ **Sprint 1.1 — секторный SSOT.** Расхождение Tech 55% (BASE) vs 80.8% (DEEP) устранено: добавлен канонический super-group `Tech-комплекс (Technology+Semiconductors)` в `pdf_payload` (SSOT), который рендерится в **обоих** отчётах через `sector_warnings`, а `ai_narrative` получает `sector_complex` + директиву «не суммируй сектора сам, бери число ВЕРБАТИМ». §4.1 закрыта.
