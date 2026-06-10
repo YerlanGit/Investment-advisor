@@ -2375,7 +2375,23 @@ async def main() -> None:
 
     async def _watch_shutdown() -> None:
         await stop_event.wait()
-        await dp.stop_polling()
+        logger.info("Сигнал остановки — graceful shutdown (release getUpdates ≤3с).")
+        # 1) Ask the poller to stop — takes effect after the in-flight long-poll
+        #    returns (which can be many seconds on an idle bot).
+        try:
+            await dp.stop_polling()
+        except Exception:
+            pass
+        # 2) Cloud Run HARD rule: the getUpdates lock must be released within
+        #    2-3s or the incoming revision collides → 409 Conflict.  Closing the
+        #    aiohttp session ABORTS the in-flight getUpdates immediately, so
+        #    Telegram frees the lock now instead of waiting out the long-poll.
+        #    No long background work here — just stop + close.
+        try:
+            await asyncio.wait_for(bot.session.close(), timeout=2.5)
+            logger.info("Сессия Telegram закрыта (graceful, getUpdates освобождён).")
+        except Exception:
+            pass
 
     logger.info("RAMP Bot запущен.")
     watcher = asyncio.create_task(_watch_shutdown())
@@ -2407,6 +2423,13 @@ async def main() -> None:
                         _CONFLICT_MAX_RETRIES,
                     )
                     raise
+            except Exception:
+                # During graceful shutdown _watch_shutdown closes the session,
+                # which aborts the in-flight getUpdates — that surfaces here as a
+                # transport/closed-session error.  Expected: exit cleanly.
+                if stop_event.is_set():
+                    break
+                raise
     finally:
         watcher.cancel()
         await bot.session.close()

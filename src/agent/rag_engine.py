@@ -23,8 +23,14 @@ import time
 from datetime import datetime, timezone
 
 import chromadb
-import pymupdf4llm
 from chromadb.utils import embedding_functions
+
+# pymupdf4llm is needed ONLY for PDF ingestion (ingest_pdf).  The bot's hot
+# path only QUERIES ChromaDB, so it is imported LAZILY inside ingest_pdf — a
+# missing optional ingest dep must never crash module import and take the
+# whole RAG query path down with it (the `No module named 'pymupdf4llm'`
+# regression that broke RAG).  It is restored to requirements.txt as well;
+# this lazy import is belt-and-suspenders.
 
 logger = logging.getLogger("FinancialRAG")
 
@@ -167,7 +173,11 @@ class FinancialRAG:
         print(f"[RAG] Парсинг: {filename}")
 
         try:
+            import pymupdf4llm  # lazy: only needed for ingestion (see top)
             md_text = pymupdf4llm.to_markdown(file_path)
+        except ImportError as e:
+            logger.error("[RAG] pymupdf4llm не установлен — ingest пропущен: %s", e)
+            return 0
         except Exception as e:
             logger.error("[RAG] Ошибка чтения PDF %s: %s", filename, e)
             print(f"[RAG] Ошибка: {e}")

@@ -16,6 +16,7 @@ import aiosqlite
 import json
 import logging
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -78,21 +79,72 @@ def assert_persistent_state() -> None:
     logger.info("Persistent state check passed (M-9): money/credential DBs on durable storage.")
 
 
-def _get_conn() -> aiosqlite.Connection:
+def _cleanup_orphan_journal_files() -> None:
+    """Delete stale SQLite ``-wal`` / ``-shm`` sidecars next to the DB.
+
+    gcsfuse (the prod mount) physically cannot do the in-place random rewrites
+    SQLite needs for ``-shm`` / ``-wal`` (gcsfuse raises OutOfOrderError), so a
+    WAL-mode DB on it can corrupt outright.  We run exclusively in rollback-
+    journal (DELETE) mode where these files are NEVER used — so any ``-wal`` /
+    ``-shm`` left behind is an ORPHAN from a crashed WAL-mode process or a
+    pre-migration database.  Removing them before connecting prevents a stale
+    ``-wal`` from poisoning the next open.  (We never touch ``-journal``: in
+    DELETE mode that is the *active* rollback journal of a live transaction.)
+    """
+    try:
+        base = str(DB_PATH)
+        for suffix in ("-wal", "-shm"):
+            sidecar = Path(base + suffix)
+            if sidecar.exists():
+                sidecar.unlink()
+                logger.warning("Removed orphaned SQLite sidecar (gcsfuse-unsafe): %s",
+                               sidecar.name)
+    except Exception as exc:   # never block startup on cleanup
+        logger.warning("Orphan journal cleanup skipped: %s", exc)
+
+
+async def _harden(db: aiosqlite.Connection) -> None:
+    """Force gcsfuse-safe SQLite settings on EVERY connection.
+
+    WAL is categorically forbidden on the gcsfuse mount (it needs ``-shm``
+    mmap + byte-range locks GCS can't emulate → OutOfOrderError / corruption).
+    ``journal_mode=DELETE`` uses a plain rollback journal that is removed after
+    each transaction (no lingering sidecar) and rewrites the DB header off WAL,
+    migrating any legacy WAL database on first open.  ``synchronous=FULL``
+    fsyncs on commit so a committed token deduction survives a SIGKILL.
+    Re-applied on every connect (cheap) so WAL can never silently creep back.
+    """
+    await db.execute("PRAGMA journal_mode=DELETE")   # NEVER WAL on gcsfuse
+    await db.execute("PRAGMA synchronous=FULL")
+    await db.execute("PRAGMA busy_timeout=5000")     # wait on the lock, don't fail
+
+
+@asynccontextmanager
+async def _get_conn():
+    """Hardened read/write connection.  Cleans orphan WAL sidecars and forces
+    journal_mode=DELETE on every open — all 16 call sites use ``async with``,
+    so this protects every connection without touching them."""
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    return aiosqlite.connect(DB_PATH)
+    _cleanup_orphan_journal_files()
+    async with aiosqlite.connect(DB_PATH) as db:
+        await _harden(db)
+        yield db
 
 
-def _get_conn_tx() -> aiosqlite.Connection:
-    """Connection for money operations, opened in autocommit mode.
+@asynccontextmanager
+async def _get_conn_tx():
+    """Hardened autocommit connection for money operations.
 
-    `isolation_level=None` disables the driver's implicit transaction handling
-    so we own the BEGIN/COMMIT/ROLLBACK boundaries explicitly.  It must be
-    passed at connect time — aiosqlite runs sqlite3 on a worker thread, so the
-    `isolation_level` *setter* can't be called from the event-loop thread.
+    ``isolation_level=None`` disables the driver's implicit transaction
+    handling so we own BEGIN/COMMIT/ROLLBACK explicitly (must be passed at
+    connect time — aiosqlite runs sqlite3 on a worker thread, so the setter
+    can't be called from the event-loop thread).
     """
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    return aiosqlite.connect(DB_PATH, isolation_level=None)
+    _cleanup_orphan_journal_files()
+    async with aiosqlite.connect(DB_PATH, isolation_level=None) as db:
+        await _harden(db)
+        yield db
 
 
 async def _begin_immediate(db: aiosqlite.Connection) -> None:
@@ -101,28 +153,22 @@ async def _begin_immediate(db: aiosqlite.Connection) -> None:
     BLK-1: balance mutations must serialise.  ``IMMEDIATE`` grabs the SQLite
     write lock up-front (instead of lazily on first write), so two concurrent
     money operations on the same DB block each other deterministically rather
-    than racing across ``await`` boundaries.  The connection is already in
-    autocommit mode (`_get_conn_tx`), so these BEGIN/COMMIT boundaries are ours.
+    than racing across ``await`` boundaries.  Journal/sync pragmas are already
+    set by ``_harden`` at connect time (must precede BEGIN — journal_mode
+    can't change inside a transaction).
     """
-    await db.execute("PRAGMA busy_timeout=5000")    # wait on the lock, don't fail
-    await db.execute("PRAGMA synchronous=FULL")     # F-5: fsync on commit (per-connection)
     await db.execute("BEGIN IMMEDIATE")
 
 
 async def init_db() -> None:
-    """Create schema if it does not exist. Call once at bot startup."""
+    """Create schema if it does not exist. Call once at bot startup.
+
+    Orphan WAL-sidecar cleanup + journal_mode=DELETE are applied by
+    ``_get_conn`` on every connection (gcsfuse-safe), so this first connect
+    also migrates a legacy WAL database off WAL.
+    """
+    _cleanup_orphan_journal_files()   # explicit at boot, before the first open
     async with _get_conn() as db:
-        # F-5: NO WAL here.  In production this DB lives on a gcsfuse mount
-        # (TOKENOMICS_DB_PATH=/mnt/state/...), and WAL relies on shared-memory
-        # (-shm) mmap + byte-range locks that FUSE/object storage does not
-        # faithfully emulate — plus Cloud Run revisions briefly OVERLAP during
-        # a redeploy, so two processes can hold the same WAL file (checkpoint
-        # corruption window).  TRUNCATE is the safest rollback journal on FUSE;
-        # synchronous=FULL forces fsync on commit so a committed token
-        # deduction survives a SIGKILL.  journal_mode persists in the DB file,
-        # so this also migrates existing WAL databases back on next boot.
-        await db.execute("PRAGMA journal_mode=TRUNCATE")
-        await db.execute("PRAGMA synchronous=FULL")
         # ── One-time purge: set env PURGE_DB_ON_START=1 to wipe all data ──
         import os
         if os.getenv("PURGE_DB_ON_START", "0") == "1":

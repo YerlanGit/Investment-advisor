@@ -23,6 +23,20 @@ import logging
 logger = logging.getLogger("Gatekeeper")
 
 
+def _flag_critical(bucket: list, rule_id: str, subject: str, message: str) -> None:
+    """Record a critical (advisory) compliance breach AND emit a structured log
+    line carrying the RULE ID + the concrete reason.
+
+    Previously the gatekeeper only logged a bare COUNT of criticals, so a
+    production log told you *that* 4 rules fired but not *which* ones, on *which*
+    asset, or *why* — useless for forensics.  This makes every critical
+    traceable: rule id, subject (ticker / scope), and the human reason.
+    """
+    bucket.append(message)
+    logger.warning("[Gatekeeper][CRITICAL][%s] subject=%s | reason=%s",
+                   rule_id, subject, message)
+
+
 # Default limits (overridden by user profile)
 DEFAULT_LIMITS = {
     "max_euler_risk_pct": 20.0,        # Max single asset risk contribution
@@ -128,7 +142,8 @@ def run_gatekeeper(
             ticker = row.get("Ticker", "?")
             erc = row.get("Euler_Risk_Contribution_Pct", 0)
             if erc > limits["max_euler_risk_pct"]:
-                critical.append(
+                _flag_critical(
+                    critical, "GK-1-EULER", str(ticker),
                     f"⛔ EULER RISK: {ticker} генерирует {erc:.1f}% общего риска "
                     f"(лимит: {limits['max_euler_risk_pct']}%). "
                     f"Рекомендация: снизить позицию."
@@ -148,7 +163,8 @@ def run_gatekeeper(
     # ═══════════════ CHECK 3: CVaR (tail risk) ═══════════════
     cvar = metrics.get("CVaR_95_Daily", 0)
     if cvar < limits["max_cvar_daily"]:  # CVaR is negative
-        critical.append(
+        _flag_critical(
+            critical, "GK-3-CVAR", "portfolio",
             f"⛔ CVaR: Ожидаемый убыток в худшие 5% дней = {cvar:.2%} "
             f"(лимит: {limits['max_cvar_daily']:.2%}). Портфель сверхрискован."
         )
@@ -164,7 +180,8 @@ def run_gatekeeper(
     # ═══════════════ CHECK 5: Total volatility ═══════════════
     vol = metrics.get("Total_Volatility_Ann", 0)
     if vol > limits["max_portfolio_volatility"]:
-        critical.append(
+        _flag_critical(
+            critical, "GK-5-VOL", "portfolio",
             f"⛔ ВОЛАТИЛЬНОСТЬ: {vol:.1%} годовая "
             f"(лимит: {limits['max_portfolio_volatility']:.1%}). Активы разрушают портфель."
         )
@@ -217,7 +234,8 @@ def run_gatekeeper(
                 for asset_class, (lo, hi) in mandate_limits.items():
                     actual = actual_alloc.get(asset_class, 0)
                     if actual > hi + 2:  # 2% tolerance for rounding
-                        critical.append(
+                        _flag_critical(
+                            critical, "GK-8-MANDATE", str(asset_class),
                             f"⛔ МАНДАТ: {asset_class} = {actual:.0f}% "
                             f"(макс. по мандату: {hi}%). "
                             f"Портфель нарушает утверждённую стратегию."
