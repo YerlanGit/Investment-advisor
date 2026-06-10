@@ -383,95 +383,94 @@ def score_portfolio(
 def _score_one_asset(out, row, ticker, sector, perf, technicals,
                      regime, cds_lookup, hotspot_trc_pct) -> None:
     """Score a single asset and write the AssetScore into `out` (in place)."""
-    if True:
-        # Physical commodities (Gold/Silver/Oil) and sovereign-rate ETFs
-        # (TLT/IEF/…) have NO financial statements — the Fundamentals
-        # pillar ("Фундамент · отчётность") is conceptually N/A.  Without
-        # this guard, F collapsed to the regime tilt alone (macro_alignment)
-        # → GLD/SLV showed F = -0.4 purely because Gold/Silver are penalised
-        # in Expansion, which reads as a (non-existent) fundamental verdict.
-        # The SAME asset classes already have C (credit) marked N/A, so we
-        # reuse that guard for a consistent "no corporate financials" rule.
-        fundamentals_applicable = not _is_credit_not_applicable(ticker, sector)
+    # Physical commodities (Gold/Silver/Oil) and sovereign-rate ETFs
+    # (TLT/IEF/…) have NO financial statements — the Fundamentals
+    # pillar ("Фундамент · отчётность") is conceptually N/A.  Without
+    # this guard, F collapsed to the regime tilt alone (macro_alignment)
+    # → GLD/SLV showed F = -0.4 purely because Gold/Silver are penalised
+    # in Expansion, which reads as a (non-existent) fundamental verdict.
+    # The SAME asset classes already have C (credit) marked N/A, so we
+    # reuse that guard for a consistent "no corporate financials" rule.
+    fundamentals_applicable = not _is_credit_not_applicable(ticker, sector)
 
-        # Pillar A — Fundamentals (sector cross-sectional Z-scores)
-        roe_z = _sector_z(row.get("SEC_ROE"),                  sector, perf, "SEC_ROE")
-        opm_z = _sector_z(row.get("SEC_Op_Margin"),            sector, perf, "SEC_Op_Margin")
-        dta_z = _sector_z(row.get("SEC_Debt_to_Assets"),       sector, perf, "SEC_Debt_to_Assets")
-        rg_z  = _sector_z(row.get("SEC_Revenue_Growth_YoY"),   sector, perf, "SEC_Revenue_Growth_YoY")
-        fcf_z = _sector_z(row.get("SEC_FCF_Margin"),           sector, perf, "SEC_FCF_Margin")
-        if fundamentals_applicable:
-            macro_align = _macro_alignment(sector, regime)
-            f_score = fundamentals_score(
-                roe_z=roe_z, op_margin_z=opm_z,
-                debt_to_assets_z=dta_z, revenue_growth_z=rg_z,
-                fcf_margin_z=fcf_z, macro_alignment=macro_align,
-            )
-        else:
-            # No financial statements → neutral F; regime tilt is shown
-            # separately in the regime section, not smuggled into F.
-            f_score = 0.0
-
-        # Pillar B — Valuations.
-        # P/E and P/B z-scores: both vs absolute sector benchmarks
-        # (portfolio cohorts are typically <5 tickers — too small for
-        # robust_z which needs ≥5 samples).  Both contribute on the SAME
-        # ±1 scale in valuations_score, so neither signal double-counts.
-        pe_z = _absolute_valuation_z(
-            row.get("SEC_PE_Ratio"), sector, _SECTOR_PE_BENCHMARKS
+    # Pillar A — Fundamentals (sector cross-sectional Z-scores)
+    roe_z = _sector_z(row.get("SEC_ROE"),                  sector, perf, "SEC_ROE")
+    opm_z = _sector_z(row.get("SEC_Op_Margin"),            sector, perf, "SEC_Op_Margin")
+    dta_z = _sector_z(row.get("SEC_Debt_to_Assets"),       sector, perf, "SEC_Debt_to_Assets")
+    rg_z  = _sector_z(row.get("SEC_Revenue_Growth_YoY"),   sector, perf, "SEC_Revenue_Growth_YoY")
+    fcf_z = _sector_z(row.get("SEC_FCF_Margin"),           sector, perf, "SEC_FCF_Margin")
+    if fundamentals_applicable:
+        macro_align = _macro_alignment(sector, regime)
+        f_score = fundamentals_score(
+            roe_z=roe_z, op_margin_z=opm_z,
+            debt_to_assets_z=dta_z, revenue_growth_z=rg_z,
+            fcf_margin_z=fcf_z, macro_alignment=macro_align,
         )
-        pb_z = _absolute_valuation_z(
-            row.get("SEC_PB_Ratio"), sector, _SECTOR_PB_BENCHMARKS
+    else:
+        # No financial statements → neutral F; regime tilt is shown
+        # separately in the regime section, not smuggled into F.
+        f_score = 0.0
+
+    # Pillar B — Valuations.
+    # P/E and P/B z-scores: both vs absolute sector benchmarks
+    # (portfolio cohorts are typically <5 tickers — too small for
+    # robust_z which needs ≥5 samples).  Both contribute on the SAME
+    # ±1 scale in valuations_score, so neither signal double-counts.
+    pe_z = _absolute_valuation_z(
+        row.get("SEC_PE_Ratio"), sector, _SECTOR_PE_BENCHMARKS
+    )
+    pb_z = _absolute_valuation_z(
+        row.get("SEC_PB_Ratio"), sector, _SECTOR_PB_BENCHMARKS
+    )
+    v_score = valuations_score(pe_z=pe_z, pb_sector_z=pb_z, ev_ebitda_z=None)
+
+    # Pillar C — Technicals (already a -2..+2 reading)
+    t_reading = technicals.get(ticker)
+    t_score = technicals_score_from_reading(t_reading)
+
+    # Pillar D — Credit (SEC layer always; CDS layer when feed is wired)
+    # Asset-class guard: commodities and sovereign-rate ETFs have no
+    # corporate credit risk, so the C-pillar must stay neutral instead
+    # of inheriting a phantom -2.0 from a missing CDS lookup.  The
+    # `credit_applicable` flag is propagated to AssetScore so the
+    # downstream PDF can render an em-dash and exclude C from the
+    # denominator of the user-facing total.
+    credit_applicable = not _is_credit_not_applicable(ticker, sector)
+    if credit_applicable:
+        cds_info = cds_lookup(ticker) if cds_lookup else {}
+        bps      = cds_info.get("bps")
+        change7  = cds_info.get("change_7d")
+        c_score = credit_score(
+            cds_bps          = bps,
+            cds_change_7d    = change7,
+            altman_zone      = row.get("SEC_Altman_Zone"),
+            piotroski_f      = int(row.get("SEC_Piotroski_F")) if pd.notna(row.get("SEC_Piotroski_F")) else None,
+            interest_coverage= row.get("SEC_Interest_Coverage"),
         )
-        v_score = valuations_score(pe_z=pe_z, pb_sector_z=pb_z, ev_ebitda_z=None)
+    else:
+        c_score = 0.0
 
-        # Pillar C — Technicals (already a -2..+2 reading)
-        t_reading = technicals.get(ticker)
-        t_score = technicals_score_from_reading(t_reading)
+    # Hotspot override
+    trc      = float(row.get("Euler_Risk_Contribution_Pct") or 0.0)
+    hotspot  = trc > hotspot_trc_pct
 
-        # Pillar D — Credit (SEC layer always; CDS layer when feed is wired)
-        # Asset-class guard: commodities and sovereign-rate ETFs have no
-        # corporate credit risk, so the C-pillar must stay neutral instead
-        # of inheriting a phantom -2.0 from a missing CDS lookup.  The
-        # `credit_applicable` flag is propagated to AssetScore so the
-        # downstream PDF can render an em-dash and exclude C from the
-        # denominator of the user-facing total.
-        credit_applicable = not _is_credit_not_applicable(ticker, sector)
-        if credit_applicable:
-            cds_info = cds_lookup(ticker) if cds_lookup else {}
-            bps      = cds_info.get("bps")
-            change7  = cds_info.get("change_7d")
-            c_score = credit_score(
-                cds_bps          = bps,
-                cds_change_7d    = change7,
-                altman_zone      = row.get("SEC_Altman_Zone"),
-                piotroski_f      = int(row.get("SEC_Piotroski_F")) if pd.notna(row.get("SEC_Piotroski_F")) else None,
-                interest_coverage= row.get("SEC_Interest_Coverage"),
-            )
-        else:
-            c_score = 0.0
+    total = total_score(f_score, v_score, t_score, c_score)
+    action = action_from_total(total, hotspot=hotspot)
 
-        # Hotspot override
-        trc      = float(row.get("Euler_Risk_Contribution_Pct") or 0.0)
-        hotspot  = trc > hotspot_trc_pct
+    out[ticker] = AssetScore(
+        ticker                  = ticker,
+        fundamentals            = f_score,
+        valuations              = v_score,
+        technicals              = t_score,
+        credit                  = c_score,
+        total                   = total,
+        action                  = action,
+        hotspot                 = hotspot,
+        credit_applicable       = credit_applicable,
+        fundamentals_applicable = fundamentals_applicable,
+    )
 
-        total = total_score(f_score, v_score, t_score, c_score)
-        action = action_from_total(total, hotspot=hotspot)
-
-        out[ticker] = AssetScore(
-            ticker                  = ticker,
-            fundamentals            = f_score,
-            valuations              = v_score,
-            technicals              = t_score,
-            credit                  = c_score,
-            total                   = total,
-            action                  = action,
-            hotspot                 = hotspot,
-            credit_applicable       = credit_applicable,
-            fundamentals_applicable = fundamentals_applicable,
-        )
-
-    return out
+    # Mutates `out` in place; no return value (F-11 cleanup).
 
 
 __all__ = ["score_portfolio", "DEFAULT_HOTSPOT_TRC_PCT"]

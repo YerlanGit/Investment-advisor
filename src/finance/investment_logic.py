@@ -316,21 +316,41 @@ class MAC3RiskEngine:
     def _marginal_var(a_data: pd.DataFrame, weights: np.ndarray,
                       var_p: float = 0.05, h: float = 0.005) -> pd.Series:
         """
-        Symmetric finite-difference marginal VaR per asset.
-        dVaR/dw_i ≈ (VaR(w + h·e_i) − VaR(w − h·e_i)) / (2h)
+        Symmetric finite-difference marginal VaR per asset, BUDGET-NEUTRAL.
+        dVaR/dw_i ≈ (VaR(w⁺) − VaR(w⁻)) / (2h), where w± bumps w_i by ±h and
+        rescales the REST of the book so Σw stays constant — i.e. the +1%
+        is funded by selling the other names pro-rata, not by adding leverage.
+
+        (F-1 fix: the previous version bumped w_i alone, which changed gross
+        exposure and measured a leveraged sensitivity — systematically
+        inflating |M-VaR| versus the reallocation the report describes.)
 
         Result is in the same units as one-day return (decimal).  A negative
-        Marginal VaR for a long position means adding to that position would
-        REDUCE 1-day downside (rare, usually for negatively-correlated hedges).
+        Marginal VaR for a long position means reallocating INTO that position
+        would REDUCE 1-day downside (rare, usually negatively-correlated hedges).
         """
         cols = list(a_data.columns)
         ret_mat = a_data.values
+        total_w = float(weights.sum())
         out: dict[str, float] = {}
+
+        def _bumped(i: int, dh: float) -> np.ndarray:
+            w = weights.copy()
+            rest = total_w - w[i]
+            if rest > 1e-12:
+                # Fund the bump pro-rata from the rest of the book: Σw unchanged.
+                w_other_scale = (rest - dh) / rest
+                w *= w_other_scale
+                w[i] = weights[i] + dh
+            else:
+                # Single-asset book — nothing to fund from; fall back to the
+                # raw bump (documented leveraged sensitivity for this edge).
+                w[i] = weights[i] + dh
+            return w
+
         for i, ticker in enumerate(cols):
-            w_plus  = weights.copy(); w_plus[i]  += h
-            w_minus = weights.copy(); w_minus[i] -= h
-            v_plus  = float(np.percentile(ret_mat @ w_plus,  var_p * 100))
-            v_minus = float(np.percentile(ret_mat @ w_minus, var_p * 100))
+            v_plus  = float(np.percentile(ret_mat @ _bumped(i, +h), var_p * 100))
+            v_minus = float(np.percentile(ret_mat @ _bumped(i, -h), var_p * 100))
             out[ticker] = (v_plus - v_minus) / (2.0 * h)
         return pd.Series(out)
 
@@ -539,6 +559,23 @@ class MAC3RiskEngine:
             return pd.DataFrame(), pd.DataFrame(), {}
         f_data = returns[list(present_factors.values())]
         f_data.columns = list(present_factors.keys())
+
+        # F-3: underdetermined-regression guard.  Ridge fits K factor betas per
+        # asset and LedoitWolf/EWMA estimate a KxK factor covariance — with
+        # fewer observations than ~2K the betas are near-interpolating noise
+        # and the covariance is degenerate/rank-deficient, silently poisoning
+        # structural vol, every ERC% and the Black-Litterman prior.  Skip the
+        # structural model entirely (same graceful contract as the guards
+        # above); callers already tolerate the empty return.
+        k_factors = len(present_factors)
+        min_obs   = max(2 * k_factors, 30)
+        if len(returns) < min_obs:
+            logger.warning(
+                "Структурный риск пропущен: %d общих наблюдений < %d "
+                "(нужно ≥2×%d факторов; короткая общая история).",
+                len(returns), min_obs, k_factors,
+            )
+            return pd.DataFrame(), pd.DataFrame(), {}
         
         # Защита от отсутствующих тикеров:
         existing_resolved = [r for r in resolved_assets if r in returns.columns]
@@ -1111,31 +1148,35 @@ class UniversalPortfolioManager:
         if not f_data.empty:
             factor_daily_log = np.log(f_data / f_data.shift(1)).dropna()
             factor_mean_daily = factor_daily_log.mean()       # index = ETF tickers
-            # GEOMETRIC annualisation (correct for compounding):
-            # E[r_ann] = exp(mean_daily_log * 252) - 1
-            factor_ann = np.exp(factor_mean_daily * self.engine.trading_days) - 1
-            # Map to factor key names for label-safe matching against Beta_* columns
-            factor_ann_by_key = pd.Series({
-                k: factor_ann.get(v, 0.0)
+            # Keep the per-factor expectations in DAILY LOG space — the single
+            # geometric annualisation happens once, on the combined per-asset
+            # expected log return below (F-2 fix).
+            factor_mu_daily_by_key = pd.Series({
+                k: factor_mean_daily.get(v, 0.0)
                 for k, v in zip(present_factor_keys, present_factor_etfs)
             })
         else:
-            factor_ann_by_key = pd.Series(dtype=float)
+            factor_mu_daily_by_key = pd.Series(dtype=float)
 
         beta_cols = [c for c in df.columns if str(c).startswith('Beta_')]
-        if beta_cols and not factor_ann_by_key.empty:
+        if beta_cols and not factor_mu_daily_by_key.empty:
             beta_factor_keys = [c[len('Beta_'):] for c in beta_cols]
-            factor_vec = factor_ann_by_key.reindex(beta_factor_keys).fillna(0.0).values
-            # Factor-driven expected return
-            factor_component = df[beta_cols].fillna(0).values @ factor_vec
-            # Alpha intercept: annualised from daily alpha (stored by Ridge)
+            mu_vec = factor_mu_daily_by_key.reindex(beta_factor_keys).fillna(0.0).values
+            # F-2: assemble the WHOLE expectation in daily-log space first
+            # (alpha intercept + Σβ·μ are both Ridge log-return quantities),
+            # then geometric-annualise ONCE.  The previous version added an
+            # arithmetically-annualised log alpha (α·252) to geometric simple
+            # factor returns (exp(μ·252)−1) — a units mismatch inherited by
+            # Alpha_Specific.
+            factor_log_daily = df[beta_cols].fillna(0).values @ mu_vec
             alpha_col = 'Specific_Alpha_Daily'
             if alpha_col in df.columns:
-                alpha_ann = df[alpha_col].fillna(0).values * self.engine.trading_days
+                alpha_log_daily = df[alpha_col].fillna(0).values
             else:
-                alpha_ann = 0.0
-            # Total expected return = alpha + factor contribution
-            df['Expected_Return'] = alpha_ann + factor_component
+                alpha_log_daily = 0.0
+            expected_log_daily = alpha_log_daily + factor_log_daily
+            df['Expected_Return'] = np.exp(
+                expected_log_daily * self.engine.trading_days) - 1.0
             # Specific Alpha: actual holding-period return minus expected (in %)
             df['Alpha_Specific'] = (df['Return_Pct'] - df['Expected_Return']) * 100
 

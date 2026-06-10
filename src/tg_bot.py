@@ -1674,11 +1674,16 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
         await state.clear()
         return
     except Exception as exc:
-        logger.exception("Не удалось загрузить портфель для %s: %s", user_id, exc)
+        # F-6: never echo str(exc) to the user — arbitrary exception text can
+        # carry upstream response bodies (client.py wraps resp.text into
+        # BrokerAPIError).  Log under a support id; show only the id.
+        error_id = uuid.uuid4().hex[:12]
+        logger.exception("Не удалось загрузить портфель для %s [%s]: %s",
+                         user_id, error_id, exc)
         _release_user_slot(user_id)
         await callback.message.answer(
             "ℹ️ *Не удалось загрузить портфель прямо сейчас.*\n\n"
-            f"`{str(exc)[:160]}`\n\n"
+            f"Код ошибки для поддержки: `{error_id}`\n\n"
             "✅ Токен *не списан*. Попробуйте ещё раз через пару минут.",
             parse_mode=ParseMode.MARKDOWN,
         )
@@ -1777,11 +1782,13 @@ async def _run_analysis_background(
         try:
             preview = await loop.run_in_executor(None, _stage_market_data)
         except Exception as exc:
-            logger.exception("Stage 1 (market data) failed: %s", exc)
+            # F-6: support-id instead of raw exception text (info disclosure).
+            error_id = uuid.uuid4().hex[:12]
+            logger.exception("Stage 1 (market data) failed [%s]: %s", error_id, exc)
             await bot.send_message(
                 chat_id,
                 "❌ *Шаг 1 не удался:* не получилось загрузить исторические цены.\n\n"
-                f"Причина: `{str(exc)[:200]}`",
+                f"Код ошибки для поддержки: `{error_id}`",
                 parse_mode=ParseMode.MARKDOWN,
             )
             await refund("market_data_error")
@@ -1862,11 +1869,13 @@ async def _run_analysis_background(
                 None, _analyze_existing_portfolio_sync, df, bench_tick, _mandate_name,
             )
         except Exception as exc:
-            logger.exception("Stage 2 (MAC3) failed: %s", exc)
+            # F-6: support-id instead of raw exception text (info disclosure).
+            error_id = uuid.uuid4().hex[:12]
+            logger.exception("Stage 2 (MAC3) failed [%s]: %s", error_id, exc)
             await bot.send_message(
                 chat_id,
-                "❌ *Шаг 2 не удался:* MAC3 движок упал.\n\n"
-                f"Причина: `{str(exc)[:200]}`",
+                "❌ *Шаг 2 не удался:* движок риск-анализа упал.\n\n"
+                f"Код ошибки для поддержки: `{error_id}`",
                 parse_mode=ParseMode.MARKDOWN,
             )
             await refund("mac3_failure")
@@ -2249,9 +2258,10 @@ class WhitelistMiddleware(BaseMiddleware):
 
 # ── Per-user single-flight guard ─────────────────────────────────────────────
 # Prevents the same user from queuing multiple report jobs (intentional or
-# fat-finger).  Single-instance Cloud Run + concurrency=4 can chew through
-# 4 reports in parallel; without this guard, one user spamming "DEEP" would
-# block the worker pool for everyone else.
+# fat-finger).  The deployed service runs max-instances=1 / concurrency=1
+# (cloudbuild.yaml), but background analysis jobs run as asyncio tasks in the
+# polling process — without this guard one user spamming "DEEP" would stack
+# parallel jobs and starve everyone else.
 _IN_FLIGHT_USERS: set[int] = set()
 
 

@@ -4,7 +4,10 @@
 # Entry: src/entrypoint.py  (health probe + bot polling in one event loop)
 # ────────────────────────────────────────────────────────────────────────────
 
-FROM python:3.11-slim
+# F-8: digest-pinned base (multi-arch index digest of python:3.11-slim as of
+# 2026-06-09) — a floating tag let the OS/Python layer change silently between
+# builds.  Bump the digest deliberately when updating the base.
+FROM python:3.11-slim@sha256:a3ab0b966bc4e91546a033e22093cb840908979487a9fc0e6e38295747e49ac0
 
 # System packages
 #   gcc / libffi-dev / libssl-dev  — needed to compile cryptography wheel

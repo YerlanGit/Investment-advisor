@@ -145,6 +145,8 @@ steps:
           --set-env-vars CHROMA_BUCKET=ramp-bot-chroma-db \
           --memory 1Gi \
           --timeout 300s \
+          --max-instances 1 \
+          --concurrency 1 \
           --quiet \
           || echo "WARN: Cloud Function deploy skipped (likely 403). Grant the Cloud Build SA roles/cloudfunctions.developer + roles/iam.serviceAccountUser to enable. Main bot deploy is unaffected."
         exit 0
