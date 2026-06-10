@@ -132,14 +132,16 @@ class CopywritingAndCleanupTest(unittest.TestCase):
         self.assertFalse((src_dir / "parity_audit.py").exists())
         self.assertFalse((src_dir / "command_graph.py").exists())
 
-    def test_pymupdf_dropped_from_bot_requirements(self) -> None:
+    def test_pymupdf_present_in_bot_requirements(self) -> None:
+        # CORRECTED: the bot's src/agent/rag_engine.py imports pymupdf4llm — a
+        # prior "slimming" pass wrongly removed it, crashing RAG with
+        # "No module named 'pymupdf4llm'".  It MUST be an installable line,
+        # not just a comment.
         req = (Path(__file__).resolve().parent.parent / "requirements.txt").read_text()
-        # Allow it to be mentioned in a COMMENT, but not as an installable
-        # requirement line (i.e. no live `pymupdf4llm>=…` line).
         lines = [l.strip() for l in req.splitlines()
                  if l.strip() and not l.strip().startswith("#")]
-        self.assertFalse(any(l.startswith("pymupdf4llm") for l in lines),
-                         "pymupdf4llm must not appear as an installable line")
+        self.assertTrue(any(l.startswith("pymupdf4llm") for l in lines),
+                        "pymupdf4llm must be installable (bot RAG needs it)")
 
 
 # ── Concierge-tone step copy ──────────────────────────────────────────────
