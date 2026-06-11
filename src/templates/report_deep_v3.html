@@ -2972,6 +2972,21 @@
       </div>
     </div>
 
+    {# Sprint-5 R3 — DETERMINISTIC consistency flag (engine, no LLM): does the
+       momentum-derived regime label agree with the independent FRED macro
+       signals?  Complements the AI cross-check below. #}
+    {% set _rcon = data.regime_consistency or {} %}
+    {% if _rcon.status %}
+      {% set _rcon_div = _rcon.status == 'diverges' %}
+    <div style="margin-top:12px; padding:9px 13px; border-radius:4px;
+                background:{{ '#fff8e1' if _rcon_div else '#eef5ee' }};
+                border-left:3px solid {{ '#e65100' if _rcon_div else '#2e7d32' }};
+                font-size:10px; line-height:1.45; color:{{ '#7a3d00' if _rcon_div else '#2e5e36' }};">
+      <b>{{ '⚠ Расхождение макро-сигналов' if _rcon_div else '✓ Макро-сигналы согласованы' }}.</b>
+      {{ _rcon.note }}
+    </div>
+    {% endif %}
+
     {# AI cross-check: confirms / partial / diverges based on macro drivers
        (FRED yield curve, HY OAS, VIX), factor betas, and bank consensus. #}
     {% set _rc = data.regime_confirmation or {} %}

@@ -215,5 +215,36 @@ class BenchmarkActivationTest(unittest.TestCase):
         self.assertEqual(names, ["Профильный бенчмарк"])
 
 
+class RegimeConsistencyR3Test(unittest.TestCase):
+    def _macro(self, yc, hy, vix):
+        return {"yield_curve_10y2y": {"value": yc},
+                "hy_credit_spread":  {"value": hy},
+                "vix":               {"value": vix}}
+
+    def test_risk_on_label_with_recession_signals_diverges(self):
+        from pdf_payload import _build_regime_consistency
+        out = _build_regime_consistency({"regime": "Expansion"},
+                                        self._macro(-0.3, 6.5, 28))
+        self.assertEqual(out["status"], "diverges")
+        self.assertGreaterEqual(len(out["signals"]), 2)
+
+    def test_aligned_when_calm_and_risk_on(self):
+        from pdf_payload import _build_regime_consistency
+        out = _build_regime_consistency({"regime": "Expansion"},
+                                        self._macro(0.4, 3.0, 15))
+        self.assertEqual(out["status"], "aligned")
+
+    def test_risk_off_label_with_calm_macro_diverges(self):
+        from pdf_payload import _build_regime_consistency
+        out = _build_regime_consistency({"regime": "Recession"},
+                                        self._macro(0.5, 3.0, 14))
+        self.assertEqual(out["status"], "diverges")
+
+    def test_none_when_no_macro(self):
+        from pdf_payload import _build_regime_consistency
+        self.assertIsNone(_build_regime_consistency({"regime": "Expansion"}, None))
+        self.assertIsNone(_build_regime_consistency(None, self._macro(0, 3, 15)))
+
+
 if __name__ == "__main__":
     unittest.main()

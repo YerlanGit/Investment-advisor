@@ -162,6 +162,56 @@ def _build_mandate_compliance(perf_df, total_val: float,
     }
 
 
+def _build_regime_consistency(regime: Optional[dict],
+                              macro_raw: Optional[dict]) -> Optional[dict]:
+    """Sprint-5 R3 — deterministic cross-check between the MOMENTUM-derived
+    regime label (SPY/IEF, XLY/XLP, IWM/SPY, EEM) and the INDEPENDENT FRED
+    macro signals (yield curve, HY OAS, VIX).  These are different data sources
+    with no built-in reconciliation, so a risk-on "Expansion" label can sit
+    next to an inverted curve + wide credit spread.  This flag surfaces that
+    divergence deterministically (no LLM).  Returns None when nothing to
+    compare.  Thresholds mirror the DEEP prompt (HY > 550 bp = stress,
+    VIX > 25 = fear, 10Y−2Y < 0 = inversion).
+    """
+    if not regime or not macro_raw:
+        return None
+    label = str(regime.get("regime", ""))
+    if not label:
+        return None
+    risk_on = label in ("Expansion", "Recovery")
+
+    def _val(key: str) -> Optional[float]:
+        row = macro_raw.get(key) or {}
+        v = row.get("value")
+        try:
+            return float(v) if v is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    yc  = _val("yield_curve_10y2y")   # pp; < 0 = inverted (recessionary)
+    hy  = _val("hy_credit_spread")    # %  (5.5 == 550 bp); > 5.5 = stress
+    vix = _val("vix")                 # index; > 25 = fear
+
+    stress: list[str] = []
+    if yc is not None and yc < 0:    stress.append("инверсия кривой 10Y−2Y")
+    if hy is not None and hy > 5.5:  stress.append("широкий HY-спред (>550 б.п.)")
+    if vix is not None and vix > 25: stress.append("повышенный VIX (>25)")
+    have_any = any(x is not None for x in (yc, hy, vix))
+
+    if risk_on and len(stress) >= 2:
+        return {"status": "diverges", "signals": stress,
+                "note": ("Режим risk-on по моментуму, но FRED показывает стресс: "
+                         + ", ".join(stress)
+                         + ". Позиционирование стоит трактовать осторожно.")}
+    if (not risk_on) and have_any and not stress:
+        return {"status": "diverges", "signals": [],
+                "note": ("Режим risk-off по моментуму, но макро-сигналы FRED "
+                         "спокойны (кривая/спред/VIX в норме) — возможен ранний "
+                         "разворот.")}
+    return {"status": "aligned", "signals": stress,
+            "note": "Макро-сигналы FRED согласуются с моментум-режимом."}
+
+
 def _model_display_name(model_id: str) -> str:
     """Convert internal model ID to short human-readable label for PDF."""
     _MAP = {
@@ -939,6 +989,9 @@ def build_payload(results: dict, tier: str,
         "cove_lineage":         cove_lineage,
         # Regime
         "regime":            regime_block,
+        # Sprint-5 R3 — deterministic FRED-vs-momentum consistency flag.
+        "regime_consistency": _build_regime_consistency(
+                                regime, results.get("macro_drivers")),
         "regime_rag_confirm": regime_rag_confirm or [],
         # Data quality
         "data_quality":      data_quality,
