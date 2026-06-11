@@ -119,6 +119,7 @@ def valuations_score(*,
                      pe_z:         Optional[float] = None,
                      pb_sector_z:  Optional[float] = None,
                      ev_ebitda_z:  Optional[float] = None,
+                     fcf_yield_z:  Optional[float] = None,
                      # Back-compat: older callers used pe_history_z.  Treated
                      # as an alias so we don't break any external caller.
                      pe_history_z: Optional[float] = None) -> float:
@@ -128,12 +129,17 @@ def valuations_score(*,
       pe_z         : Z of P/E vs sector (or history, depending on the
                      orchestrator's choice — both use the SAME ±1 scale)
       pb_sector_z  : Z of P/B vs sector cross-section
-      ev_ebitda_z  : Z of EV/EBITDA vs sector cross-section
+      ev_ebitda_z  : Z of EV/EBITDA (or EV/EBIT proxy) vs sector
+      fcf_yield_z  : Z of FCF YIELD (fcf / market cap) vs sector.  Sprint-5
+                     Task 6 quality signal — note the INVERTED direction: a
+                     HIGH FCF yield is CHEAP/quality, so a positive z ADDS to
+                     the score (mirrors the cheap end of a price multiple).
 
-    Each metric contributes the SAME ±1 scale (Z < −1 → +1 cheap,
-    Z > +1 → −1 expensive), preventing one signal from dominating the
-    others.  Returns 0 (neutral) when all inputs are None.  Clipped to
-    [-2, +2].
+    "Price" metrics (P/E, P/B, EV/EBITDA) contribute +1 when CHEAP (Z < −1) and
+    −1 when EXPENSIVE (Z > +1).  The FCF-yield is a "yield" metric, so its sign
+    is flipped (high yield Z > +1 → +1).  Each metric is on the SAME ±1 scale
+    so none dominates.  Returns 0 (neutral) when all inputs are None.  Clipped
+    to [-2, +2].
     """
     pe = pe_z if pe_z is not None else pe_history_z
     s = 0.0
@@ -146,6 +152,10 @@ def valuations_score(*,
     if ev_ebitda_z is not None:
         if ev_ebitda_z < -1: s += 1.0
         if ev_ebitda_z >  1: s -= 1.0
+    if fcf_yield_z is not None:
+        # Yield metric — sign inverted vs price multiples (high yield = cheap).
+        if fcf_yield_z >  1: s += 1.0
+        if fcf_yield_z < -1: s -= 1.0
     return float(np.clip(s, -2.0, 2.0))
 
 

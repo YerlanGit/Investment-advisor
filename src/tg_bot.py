@@ -214,6 +214,24 @@ def _source_label(slug: str) -> str:
     return SOURCE_GREETING.get(slug, f"канала «{slug}»")
 
 
+def _resolve_bench_ticker(profile: dict | None) -> str | None:
+    """Sprint-5 Task 8 — honour the user's SAVED benchmark choice.
+
+    `get_profile` returns the full row (SELECT *), so the explicit
+    `benchmark_ticker` picked during onboarding is available.  Previously the
+    report always used PROFILE_BENCH_TICKER[profile_name], so the 12-option
+    benchmark picker was a dead control — a Conservative user always got AGG,
+    an Aggressive one always QQQ, whatever they chose.  Prefer the saved
+    selection; fall back to the profile default only when none was stored.
+    """
+    if not profile:
+        return None
+    saved = profile.get("benchmark_ticker")
+    if saved:
+        return saved
+    return PROFILE_BENCH_TICKER.get(profile.get("profile_name"))
+
+
 # Asset-class label — single source of truth in finance.scoring.  The old
 # bot-local version used substring `any(x in t)` matching which mis-classified
 # tickers (e.g. "BNB" inside other symbols, "BOND" false positives, bare
@@ -739,7 +757,8 @@ def _fetch_rag_context(results: dict) -> tuple[str, list[str]]:
 def _build_pdf_payload(results: dict, tier: str,
                        user_bench_ticker: str | None = None,
                        prev_snapshot: dict | None = None,
-                       user_risk_profile: str = "Moderate") -> dict:
+                       user_risk_profile: str = "Moderate",
+                       user_profile: dict | None = None) -> dict:
     """
     Build the PDF payload from analyze_all() output.
 
@@ -772,6 +791,7 @@ def _build_pdf_payload(results: dict, tier: str,
             user_bench_ticker=user_bench_ticker,
             prev_snapshot=prev_snapshot,
             regime_rag_confirm=regime_rag_confirm,
+            user_profile=user_profile,
         )
         if tier == TIER_DEEP:
             payload["equity_curve_svg"]    = _build_equity_curve_svg(results)
@@ -880,7 +900,7 @@ async def _build_analysis_payload(user_id: int, tier: str) -> dict:
     conn_mode = await get_connection_mode(user_id)
 
     profile    = await get_profile(user_id)
-    bench_tick = PROFILE_BENCH_TICKER.get(profile["profile_name"]) if profile else None
+    bench_tick = _resolve_bench_ticker(profile)
 
     if conn_mode == "freedom":
         keys = await loop.run_in_executor(None, _get_keys_sync, user_id)
@@ -966,8 +986,28 @@ def kb_universe(selected: set[str]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def kb_benchmark_compact(recommended: str | None) -> InlineKeyboardMarkup:
+    """Sprint-5 Task 2 — Progressive Disclosure benchmark menu.
+
+    Instead of dumping all 12 ETFs at once, show ONE confirm-with-recommended
+    button plus an "Изменить" button that expands the full catalogue on demand.
+    """
+    rec_name = BENCHMARK_LIST.get(recommended or "", recommended or "—")
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"✅ Продолжить с «{rec_name}»",
+                              callback_data="ob:bench:confirm")],
+        [InlineKeyboardButton(text="✏️ Изменить рекомендуемый бенчмарк",
+                              callback_data="ob:bench:expand")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="ob:back")],
+    ])
+
+
 def kb_benchmark(current: str | None = None) -> InlineKeyboardMarkup:
-    """Benchmark selection keyboard. Shows check mark on the currently selected one."""
+    """Full benchmark selection keyboard (expanded view).
+
+    Reached only after the user taps "Изменить" on the compact menu — so the
+    12-option list is opt-in, not dumped on every user.
+    """
     rows = []
     for ticker, display_name in BENCHMARK_LIST.items():
         prefix = "✅ " if ticker == current else ""
@@ -1252,11 +1292,29 @@ async def cb_universe_confirm(callback: CallbackQuery, state: FSMContext) -> Non
     await state.set_state(Onboarding.Benchmark)
     await _edit_or_answer(
         callback, state,
-        "📊 *Выберите бенчмарк для вашего портфеля*\n\n"
-        f"На основе вашего профиля *{profile['name']}* мы рекомендуем "
+        "📊 *Бенчмарк для вашего портфеля*\n\n"
+        f"На основе профиля *{profile['name']}* мы рекомендуем "
         f"*{BENCHMARK_LIST.get(default_bench, default_bench)}*.\n\n"
-        "Вы можете выбрать другой или продолжить с рекомендованным:",
-        kb_benchmark(current=default_bench),
+        "Продолжите с рекомендованным или измените его:",
+        kb_benchmark_compact(default_bench),
+    )
+
+
+# ── Benchmark expand (Progressive Disclosure) ─────────────────────────────────
+
+@onboarding_router.callback_query(
+    F.data == "ob:bench:expand",
+    StateFilter(Onboarding.Benchmark),
+)
+async def cb_benchmark_expand(callback: CallbackQuery, state: FSMContext) -> None:
+    """Sprint-5 Task 2 — reveal the full 12-ETF list only on explicit request."""
+    await callback.answer()
+    data    = await state.get_data()
+    current = data.get("benchmark_ticker")
+    await _edit_or_answer(
+        callback, state,
+        "📊 *Выберите бенчмарк*\n\nОтметьте предпочитаемый индекс/фактор:",
+        kb_benchmark(current=current),
     )
 
 
@@ -1265,6 +1323,7 @@ async def cb_universe_confirm(callback: CallbackQuery, state: FSMContext) -> Non
 @onboarding_router.callback_query(
     F.data.startswith("ob:bench:"),
     ~F.data.endswith("confirm"),
+    ~F.data.endswith("expand"),
     StateFilter(Onboarding.Benchmark),
 )
 async def cb_benchmark_toggle(callback: CallbackQuery, state: FSMContext) -> None:
@@ -1619,7 +1678,7 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
     # ── Шаг 1 — подгружаем портфель (быстрая часть) ──────────────────────
     loop = asyncio.get_running_loop()
     profile    = await get_profile(user_id)
-    bench_tick = PROFILE_BENCH_TICKER.get(profile["profile_name"]) if profile else None
+    bench_tick = _resolve_bench_ticker(profile)
     conn_mode  = await get_connection_mode(user_id)
 
     if conn_mode == "freedom":
@@ -1733,17 +1792,27 @@ async def _run_analysis_background(
     from finance.investment_logic import UniversalPortfolioManager
 
     loop = asyncio.get_running_loop()
-    progress_messages: list = []   # для последующего удаления/обновления
+    # Sprint-5 UX: ONE status message, edited in place across all 4 steps —
+    # replaces the old "Шаг 1…/Шаг 2…/Шаг 3…/Шаг 4…" message spam (6+ messages
+    # per run) with a single, calmly-updating concierge line.
+    status_msg = None
 
     async def step(emoji: str, text: str):
-        """Отправить сообщение прогресса и сохранить ссылку на него."""
+        """Update the single in-place status message (create it on first call)."""
+        nonlocal status_msg
+        body = f"{emoji} {text}"
         try:
-            msg = await bot.send_message(chat_id, f"{emoji} {text}", parse_mode=ParseMode.MARKDOWN)
-            progress_messages.append(msg)
-            return msg
+            if status_msg is None:
+                status_msg = await bot.send_message(
+                    chat_id, body, parse_mode=ParseMode.MARKDOWN)
+            else:
+                await status_msg.edit_text(body, parse_mode=ParseMode.MARKDOWN)
+            return status_msg
         except Exception as e:
-            logger.warning("Не удалось отправить прогресс: %s", e)
-            return None
+            # An "edit with identical text" or transient error must never break
+            # the pipeline — the status line is cosmetic.
+            logger.warning("Не удалось обновить статус-сообщение: %s", e)
+            return status_msg
 
     async def refund(reason: str) -> None:
         """
@@ -1824,38 +1893,22 @@ async def _run_analysis_background(
             await refund("no_market_data")
             raise RuntimeError("market_data_subscription_required")
 
-        # ── Build detailed ticker status message ──────────────────────────
-        # Show only portfolio tickers (exclude factor ETFs + benchmark extras)
-        lines = [f"✅ Загружено серий: *{portfolio_loaded}/{portfolio_total}*"]
-
-        # Show proxy-resolved tickers (engine resolution exposed via the facade).
-        proxy_lines = [f"  `{orig}` → `{proxy}`" for orig, proxy in preview.proxy_map.items()]
-        if proxy_lines:
-            lines.append("\n📎 *Прокси-замены:*")
-            lines.extend(proxy_lines)
-
-        # Show retried tickers (only portfolio, not internal)
-        if history_result.retried:
-            portfolio_retried = [t for t in history_result.retried if t not in internal_tickers]
-            if portfolio_retried:
-                lines.append(f"\n🔄 *Восстановлено retry:* {', '.join(portfolio_retried)}")
-
-        # Show failed tickers with reasons (only portfolio, not internal)
-        if history_result.failed:
-            portfolio_failed = {t: r for t, r in history_result.failed.items() if t not in internal_tickers}
-            if portfolio_failed:
-                lines.append(f"\n❌ *Не загружены ({len(portfolio_failed)}):*")
-                for t, reason in portfolio_failed.items():
-                    short = reason[:60] + "…" if len(reason) > 60 else reason
-                    lines.append(f"  `{t}` — {short}")
-                lines.append("\nℹ️ _Пропущенные оцениваются через факторные индексы_")
-        if portfolio_loaded == portfolio_total:
-            lines.append("\n✅ _Все тикеры загружены успешно_")
-
-        await bot.send_message(
-            chat_id,
-            "\n".join(lines),
-            parse_mode=ParseMode.MARKDOWN,
+        # Sprint-5 UX: the verbose per-ticker load diagnostics (proxy map,
+        # retries, per-ticker failures) used to be a SEPARATE chat message.
+        # That broke the "one calm status line" directive, so the detail now
+        # goes to the SERVER LOG only — the user just sees the status line move
+        # on to Step 2.  Hard failures (loaded_count == 0) are still surfaced
+        # above via the dedicated subscription-required message.
+        portfolio_failed = {
+            t: r for t, r in (history_result.failed or {}).items()
+            if t not in internal_tickers
+        }
+        logger.info(
+            "Load diagnostics user=%s: %d/%d series, proxies=%s, retried=%s, failed=%s",
+            user_id, portfolio_loaded, portfolio_total,
+            dict(preview.proxy_map),
+            [t for t in (history_result.retried or []) if t not in internal_tickers],
+            portfolio_failed,
         )
 
         # ── Step 2: full MAC3 analysis (includes SEC EDGAR) ────────────────
@@ -1901,30 +1954,16 @@ async def _run_analysis_background(
             gate_limits = {"max_portfolio_volatility": profile["target_volatility"] * 1.2}
             gate = run_gatekeeper(results, user_limits=gate_limits, user_profile=profile)
 
-        # Show gatekeeper results (advisory only — never blocks report)
+        # Sprint-5 (Task 3 — silent Gatekeeper): the loud ⛔/⚠️ risk-limit blasts
+        # in chat are gone.  Breaches are SERVER-LOGGED only here; the user sees
+        # the same findings inside the polished report (gatekeeper drives the
+        # mandate-compliance panel + risk hotspots), not as a scary chat dump.
         if gate["critical"] or gate["warnings"]:
-            alert_lines = []
-            if gate["critical"]:
-                alert_lines.append("⛔ *Нарушения риск-лимитов:*")
-                for c in gate["critical"][:3]:
-                    alert_lines.append(f"  {c}")
-            if gate["warnings"]:
-                alert_lines.append("⚠️ *Предупреждения:*")
-                for w in gate["warnings"][:3]:
-                    alert_lines.append(f"  {w}")
-            if len(gate["critical"]) + len(gate["warnings"]) > 6:
-                alert_lines.append(f"_…ещё {len(gate['critical']) + len(gate['warnings']) - 6} в отчёте_")
-
-            try:
-                await bot.send_message(
-                    chat_id,
-                    "\n".join(alert_lines),
-                    parse_mode=ParseMode.MARKDOWN,
-                )
-            except Exception:
-                pass  # Don't block on send failure
-        else:
-            await step("✅", "Все риск-проверки пройдены.")
+            logger.info(
+                "Gatekeeper (advisory) user=%s: %d critical, %d warnings | %s",
+                user_id, len(gate["critical"]), len(gate["warnings"]),
+                "; ".join(gate["critical"][:5] + gate["warnings"][:5]),
+            )
 
         # Concierge-tone redesign: the sector exposure used to render an
         # ASCII-bar chart in chat (`█████ Technology: 55%`).  The same data
@@ -1947,6 +1986,7 @@ async def _run_analysis_background(
             user_bench_ticker=bench_tick,
             prev_snapshot=prev_snapshot,
             user_risk_profile=profile_name,
+            user_profile=profile,
         )
         # CHECKPOINT 3 — render + upload.  `_send_report` raises
         # RuntimeError("report_delivery_failed") if the GCS upload fails, so
@@ -2137,6 +2177,26 @@ async def cmd_support(message: Message) -> None:
     )
 
 
+async def msg_text_fallback(message: Message, state: FSMContext) -> None:
+    """Sprint-5 Task 1 — hard text-input filter (registered LAST, StateFilter None).
+
+    The bot is fully button-driven.  Stray free-text (outside the Freedom
+    credential FSM, which carries an active state and is handled earlier) is
+    softly redirected to the inline-button menu rather than interpreted.  In a
+    1:1 chat Telegram forbids bots from deleting the USER's message, so the
+    delete is best-effort and the gentle nudge is the real mitigation.
+    """
+    try:
+        await message.delete()
+    except Exception:
+        pass
+    await message.answer(
+        "🔘 RAMP управляется кнопками — печатать ничего не нужно.\n\n"
+        "Нажмите /start, чтобы открыть меню анализа портфеля.",
+        parse_mode=ParseMode.MARKDOWN,
+    )
+
+
 async def cmd_mandate(message: Message, state: FSMContext) -> None:
     """Re-run onboarding questionnaire for returning users."""
     user_id = message.from_user.id
@@ -2304,6 +2364,19 @@ def build_dispatcher() -> Dispatcher:
     dp.callback_query.register(cb_analysis_choice, F.data.startswith("analysis:"))
     dp.callback_query.register(cb_confirm,          F.data.startswith("confirm:"))
     dp.callback_query.register(cb_cancel,           F.data == "cancel")
+
+    # Sprint-5 (Task 1 — hard text-input filter) MUST be LAST.  Bot navigation
+    # is button-driven; the ONLY legitimate free-text inputs are the Freedom
+    # broker credentials (portfolio_router FSM states Login/ApiKey/SecretKey) —
+    # those carry an active FSM state, so `StateFilter(None)` here never swallows
+    # them.  Any OTHER stray, non-command text (state is None) is softly bounced
+    # back to the inline-button flow instead of being mis-parsed as a command.
+    dp.message.register(
+        msg_text_fallback,
+        StateFilter(None),
+        F.text,
+        ~F.text.startswith("/"),
+    )
 
     return dp
 

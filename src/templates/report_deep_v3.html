@@ -2352,6 +2352,18 @@
     </div>
     {% endif %}
 
+    {# Sprint-5 (Task 5 — Margin-Call AI trigger): explicit leverage warning,
+       filled by the model only when the book is margin-funded. #}
+    {% if data.ai_leverage_warning %}
+    <div style="margin:0 14px 10px; padding:9px 12px; border-radius:4px;
+                background:#fdecea; border-left:3px solid #c62828;
+                font-size:10.5px; color:#8a1c1c; line-height:1.45;">
+      <b>⚠ Заёмные средства (маржа).</b> {{ data.ai_leverage_warning }}
+    </div>
+    {% endif %}
+
+    {% include "_mandate_compliance.html" ignore missing %}
+
     <div class="sp-body">
     <div class="pie-wrap">
       {# Inline conic-gradient — pie segments follow the real sector
@@ -2866,27 +2878,31 @@
             <text x="158" y="165" text-anchor="start">0</text>
           </g>
 
-          <!-- траектория последних 6 точек (90 дней) — путь через Recession → -->
-          <!-- Recovery → Expansion.  Координаты согласованы с шкалой:         -->
-          <!--   100 px ≈ 0.2 (см. метки +0.2 / −0.2 выше)                     -->
-          <polyline points="118,210 138,192 152,170 162,148 170,128 177,110"
-                    fill="none" stroke="rgba(42,46,51,0.30)" stroke-width="1"
-                    stroke-dasharray="3 2" stroke-linecap="round"/>
-          <g fill="rgba(42,46,51,0.45)">
-            <circle cx="118" cy="210" r="1.6"/>
-            <circle cx="138" cy="192" r="1.6"/>
-            <circle cx="152" cy="170" r="1.6"/>
-            <circle cx="162" cy="148" r="1.6"/>
-            <circle cx="170" cy="128" r="1.6"/>
-          </g>
-          <!-- актуальная точка: большая капля.  Координаты (177, 110) =        -->
-          <!-- Growth +0.08 (40 px выше центра), Cycle +0.04 (22 px правее).    -->
-          <circle cx="177" cy="110" r="14" fill="#3E83C9" fill-opacity="0.18"/>
-          <circle cx="177" cy="110" r="8"  fill="url(#regDot)" filter="url(#regDotShadow)"/>
-          <text x="193" y="106" font-family="IBM Plex Mono" font-size="9.5"
+          {# Sprint-5 (R1): the "current" dot is now DATA-DRIVEN.  Its position
+             is computed in pdf_payload._regime_dot_coords from the LIVE
+             growth/cycle scores (centre 155,155; 625 px per unit), so it lands
+             in the SAME quadrant as the regime label.  Previously it was a
+             hardcoded dot frozen at (177,110) — always in "Expansion" — which
+             visually contradicted a Recession/Slowdown label.  The old fake
+             6-point "trajectory" is dropped (it implied history we don't have);
+             a dashed leader from the origin shows the live displacement. #}
+          {% if data.regime and data.regime.dot_cx and data.regime.dot_cy %}
+          {% set _rcx = data.regime.dot_cx %}
+          {% set _rcy = data.regime.dot_cy %}
+          {% set _lx  = (_rcx - 16) if _rcx > 195 else (_rcx + 16) %}
+          {% set _anchor = 'end' if _rcx > 195 else 'start' %}
+          <line x1="155" y1="155" x2="{{ _rcx }}" y2="{{ _rcy }}"
+                stroke="rgba(62,131,201,0.35)" stroke-width="1"
+                stroke-dasharray="3 2" stroke-linecap="round"/>
+          <circle cx="{{ _rcx }}" cy="{{ _rcy }}" r="14" fill="#3E83C9" fill-opacity="0.18"/>
+          <circle cx="{{ _rcx }}" cy="{{ _rcy }}" r="8"  fill="url(#regDot)" filter="url(#regDotShadow)"/>
+          <text x="{{ _lx }}" y="{{ _rcy - 3 }}" text-anchor="{{ _anchor }}"
+                font-family="IBM Plex Mono" font-size="9.5"
                 font-weight="600" fill="#23588F">сейчас</text>
-          <text x="193" y="118" font-family="IBM Plex Mono" font-size="8.5"
-                fill="rgba(42,46,51,0.6)">Growth +0.08 · Cycle +0.04</text>
+          <text x="{{ _lx }}" y="{{ _rcy + 9 }}" text-anchor="{{ _anchor }}"
+                font-family="IBM Plex Mono" font-size="8.5"
+                fill="rgba(42,46,51,0.6)">{{ data.regime.dot_label }}</text>
+          {% endif %}
         </svg>
       </div>
 

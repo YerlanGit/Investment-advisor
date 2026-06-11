@@ -1,0 +1,38 @@
+{# Sprint-5 (Task 4) — Mandate compliance panel.
+   Shared partial included by report_basic_v3.html and report_deep_v3.html.
+   Renders ONLY when build_payload received an approved user_profile (so the
+   questionnaire result becomes visible): the investor's target profile plus
+   how the LIVE allocation sits against each asset-class limit.  Self-contained
+   inline styles (with CSS-var fallbacks) so it renders in either template. #}
+{% if data.mandate_compliance %}
+{% set _mc = data.mandate_compliance %}
+<div style="margin:0 14px 12px; padding:10px 12px;
+            border:1px solid var(--hairline, #e6e1d8); border-radius:6px; background:#fff;">
+  <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:5px;">
+    <div style="font-family:var(--font-mono, monospace); font-size:10px; letter-spacing:.04em;
+                color:var(--ink-60, #6b6256); text-transform:uppercase;">
+      Соответствие мандату · {{ _mc.profile_name }}
+    </div>
+    <div style="font-family:var(--font-mono, monospace); font-size:10px; font-weight:600;
+                color:{{ '#2e7d32' if _mc.compliant else '#c62828' }};">
+      {% if _mc.compliant %}✓ в рамках мандата{% else %}⚠ нарушений лимитов: {{ _mc.breaches }}{% endif %}
+    </div>
+  </div>
+  <div style="font-family:var(--font-mono, monospace); font-size:9px;
+              color:var(--ink-60, #6b6256); margin-bottom:8px;">
+    целевая волатильность ≈{{ _mc.target_vol_pct }}% · tracking error ≤{{ _mc.target_te_pct }}%
+  </div>
+  <table style="width:100%; border-collapse:collapse; font-size:10px;">
+    {% for r in _mc.rows %}
+    {% set _col = '#c62828' if r.status == 'over' else ('#b26a00' if r.status == 'under' else 'var(--ink-90, #2a2e33)') %}
+    <tr>
+      <td style="padding:2px 0; color:var(--ink-90, #2a2e33);">{{ r.label }}</td>
+      <td style="padding:2px 6px; text-align:right; font-family:var(--font-mono, monospace);
+                 font-weight:600; color:{{ _col }};">{{ '%.0f' % r.actual }}%</td>
+      <td style="padding:2px 0; text-align:right; font-family:var(--font-mono, monospace);
+                 color:var(--ink-60, #6b6256); font-size:9px;">лимит {{ r.lo|int }}–{{ r.hi|int }}%</td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endif %}

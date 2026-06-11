@@ -682,6 +682,11 @@ def batch_fundamental_scan(
                 "SEC_Net_Income":         ext.get("net_income"),
                 "SEC_Book_Equity":        ext.get("book_equity"),
                 "SEC_Shares_Outstanding": ext.get("shares_outstanding"),
+                # Sprint-5 Task 6 — absolute EBIT and Free Cash Flow exported so
+                # the V-pillar can add a price-aware FCF-yield quality signal
+                # (fcf / market cap) instead of relying on P/E + P/B alone.
+                "SEC_EBIT":               ext.get("ebit"),
+                "SEC_FCF":                ext.get("fcf"),
             }
             return row
         except Exception as e:

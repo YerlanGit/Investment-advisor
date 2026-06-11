@@ -86,9 +86,15 @@ def _classify_to_asset_key(ticker: str) -> str:
         return "Stocks_KZ"
     if t in _CLASS_ETF:
         return "GlobalETFs"
-    # Cash-like
+    # Cash / settlement balances (incl. a NEGATIVE margin-debt leg).  Sprint-5
+    # Task 5: cash is NOT a mandate asset class and must NOT be mislabelled
+    # "Bonds" — that let a negative margin-debt cash leg silently distort the
+    # Bonds allocation under leverage.  Return a dedicated "Cash" key (which is
+    # absent from limits_dict, so the Check-8 mandate sweep naturally skips it);
+    # gross exposure / leverage are reported separately via the engine's
+    # leverage_metrics.
     if t in ("USD", "EUR", "CASH", "RUB", "KZT"):
-        return "Bonds"  # treat cash as bond-like for allocation purposes
+        return "Cash"
     # Default: US stocks
     return "Stocks_US"
 
@@ -144,7 +150,7 @@ def run_gatekeeper(
             if erc > limits["max_euler_risk_pct"]:
                 _flag_critical(
                     critical, "GK-1-EULER", str(ticker),
-                    f"⛔ EULER RISK: {ticker} генерирует {erc:.1f}% общего риска "
+                    f"EULER RISK: {ticker} генерирует {erc:.1f}% общего риска "
                     f"(лимит: {limits['max_euler_risk_pct']}%). "
                     f"Рекомендация: снизить позицию."
                 )
@@ -156,7 +162,7 @@ def run_gatekeeper(
             weight = row.get("Weight_Pct", 0)
             if weight > limits["max_single_asset_weight_pct"]:
                 warnings.append(
-                    f"⚠️ КОНЦЕНТРАЦИЯ: {ticker} = {weight:.1f}% портфеля "
+                    f"КОНЦЕНТРАЦИЯ: {ticker} = {weight:.1f}% портфеля "
                     f"(лимит: {limits['max_single_asset_weight_pct']}%)."
                 )
 
@@ -165,7 +171,7 @@ def run_gatekeeper(
     if cvar < limits["max_cvar_daily"]:  # CVaR is negative
         _flag_critical(
             critical, "GK-3-CVAR", "portfolio",
-            f"⛔ CVaR: Ожидаемый убыток в худшие 5% дней = {cvar:.2%} "
+            f"CVaR: Ожидаемый убыток в худшие 5% дней = {cvar:.2%} "
             f"(лимит: {limits['max_cvar_daily']:.2%}). Портфель сверхрискован."
         )
 
@@ -173,7 +179,7 @@ def run_gatekeeper(
     sharpe = metrics.get("Sharpe_Ratio", 0)
     if sharpe is not None and sharpe < limits["min_sharpe"]:
         warnings.append(
-            f"⚠️ SHARPE: {sharpe:.2f} < {limits['min_sharpe']}. "
+            f"SHARPE: {sharpe:.2f} < {limits['min_sharpe']}. "
             f"Портфель неэффективен (доходность не компенсирует риск)."
         )
 
@@ -182,7 +188,7 @@ def run_gatekeeper(
     if vol > limits["max_portfolio_volatility"]:
         _flag_critical(
             critical, "GK-5-VOL", "portfolio",
-            f"⛔ ВОЛАТИЛЬНОСТЬ: {vol:.1%} годовая "
+            f"ВОЛАТИЛЬНОСТЬ: {vol:.1%} годовая "
             f"(лимит: {limits['max_portfolio_volatility']:.1%}). Активы разрушают портфель."
         )
 
@@ -193,7 +199,7 @@ def run_gatekeeper(
             atr_pct = row.get("ATR_Pct", 0)
             if isinstance(atr_pct, (int, float)) and atr_pct > 3.0:
                 warnings.append(
-                    f"⚠️ IMS/ATR: {ticker} ATR = {atr_pct:.2f}% от цены. "
+                    f"IMS/ATR: {ticker} ATR = {atr_pct:.2f}% от цены. "
                     f"Высокая внутридневная волатильность."
                 )
 
@@ -204,7 +210,7 @@ def run_gatekeeper(
             fscore = row.get("Fundamental_Score", 50)
             if isinstance(fscore, (int, float)) and fscore < 30:
                 warnings.append(
-                    f"⚠️ ФУНДАМЕНТАЛ: {ticker} SEC Score = {fscore:.0f}/100. "
+                    f"ФУНДАМЕНТАЛ: {ticker} SEC Score = {fscore:.0f}/100. "
                     f"Слабые финансы (маржа, долг или ROE)."
                 )
 
@@ -236,13 +242,13 @@ def run_gatekeeper(
                     if actual > hi + 2:  # 2% tolerance for rounding
                         _flag_critical(
                             critical, "GK-8-MANDATE", str(asset_class),
-                            f"⛔ МАНДАТ: {asset_class} = {actual:.0f}% "
+                            f"МАНДАТ: {asset_class} = {actual:.0f}% "
                             f"(макс. по мандату: {hi}%). "
                             f"Портфель нарушает утверждённую стратегию."
                         )
                     elif actual < lo - 2 and lo > 0:  # only flag if minimum is meaningful
                         warnings.append(
-                            f"⚠️ МАНДАТ: {asset_class} = {actual:.0f}% "
+                            f"МАНДАТ: {asset_class} = {actual:.0f}% "
                             f"(мин. по мандату: {lo}%). Недовес класса активов."
                         )
 
@@ -256,7 +262,7 @@ def run_gatekeeper(
         actual_te = profile_bm.get("Tracking_Error")
         if actual_te is not None and actual_te > target_te * 1.5:
             warnings.append(
-                f"⚠️ TRACKING ERROR: {actual_te:.1%} (целевой: {target_te:.0%}). "
+                f"TRACKING ERROR: {actual_te:.1%} (целевой: {target_te:.0%}). "
                 f"Портфель значительно отклоняется от бенчмарка мандата."
             )
 
@@ -265,13 +271,13 @@ def run_gatekeeper(
 
     summary_parts = []
     if critical:
-        summary_parts.append("⚠️ РЕКОМЕНДАЦИИ АУДИТОРА:")
+        summary_parts.append("РЕКОМЕНДАЦИИ АУДИТОРА:")
         summary_parts.extend(critical)
     if warnings:
         summary_parts.append("ПРЕДУПРЕЖДЕНИЯ:")
         summary_parts.extend(warnings)
     if passed and not warnings:
-        summary_parts.append("✅ Все проверки пройдены. Портфель в рамках лимитов.")
+        summary_parts.append("Все проверки пройдены. Портфель в рамках лимитов.")
 
     summary = "\n".join(summary_parts)
 

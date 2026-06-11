@@ -63,6 +63,39 @@ def _as_array(weights: pd.Series | dict | Sequence[float],
     return arr
 
 
+def _cap_and_redistribute(w: np.ndarray, cap: float, iters: int = 32) -> np.ndarray:
+    """Cap each long-only weight at ``cap`` and redistribute the excess across
+    the uncapped names (water-filling), keeping the vector summing to 1.
+
+    Soft constraint: when the cap is INFEASIBLE for the name count (n·cap ≤ 1 —
+    e.g. a 10% cap on a 4-name book, where the weights MUST sum to 100%), the
+    constraint cannot be honoured, so we leave the target unchanged rather than
+    forcing a meaningless equal-weight or oscillating.  The mandate's risk
+    aversion + turnover cap still differentiate the optimisation in that case.
+    """
+    w = np.clip(np.asarray(w, dtype=float), 0.0, None)
+    s = w.sum()
+    if s <= 0:
+        return w
+    w = w / s
+    n = w.size
+    if cap * n <= 1.0 + 1e-9:
+        return w                       # cap infeasible for this name count — no-op
+    for _ in range(iters):
+        over = w > cap + 1e-12
+        if not over.any():
+            break
+        excess = float((w[over] - cap).sum())
+        w[over] = cap
+        under = ~over
+        pool = float(w[under].sum())
+        if pool <= 1e-12:
+            break
+        w[under] += excess * (w[under] / pool)
+    total = w.sum()
+    return w / total if total > 0 else w
+
+
 def black_litterman(
     *,
     cov: pd.DataFrame | np.ndarray,
@@ -74,6 +107,7 @@ def black_litterman(
     risk_aversion: float = 2.5,
     tau: float = 0.05,
     max_active_share: float = 0.25,
+    max_single_weight: Optional[float] = None,
 ) -> BLResult:
     """
     Run Black-Litterman optimisation.
@@ -167,6 +201,15 @@ def black_litterman(
         w_star = np.clip(w_star, 0.0, 1.0)
         if w_star.sum() > 0:
             w_star = w_star / w_star.sum()
+
+    # Sprint-5 (Task 4 — mandate-aware optimisation): a per-name weight cap
+    # derived from the investor's mandate.  A Conservative mandate caps each
+    # risky position tighter (e.g. 10%) than an Aggressive one (30%), so the BL
+    # target actually respects the investor's risk appetite instead of being
+    # mandate-agnostic.  Applied AFTER the turnover blend so the cap is the
+    # binding final constraint.
+    if max_single_weight is not None and 0.0 < max_single_weight < 1.0:
+        w_star = _cap_and_redistribute(w_star, float(max_single_weight))
 
     return BLResult(
         tickers         = list(tickers),
