@@ -114,6 +114,23 @@ def validate_stress_comment(text: str) -> str:
 MODEL_BASE = os.getenv("ANTHROPIC_MODEL_BASE", "claude-haiku-4-5-20251001")
 MODEL_DEEP = os.getenv("ANTHROPIC_MODEL_DEEP", "claude-sonnet-4-6")
 
+# Sprint-5 (idea staleness): the narrative + stock-picks are produced by ONE
+# model call, and that call ran at temperature 0.1 — near-deterministic, so a
+# stable macro regime produced byte-identical "ideas" month after month.  Raise
+# to a moderate 0.5 (env-overridable, clamped to the 0.4–0.6 band) so the idea
+# generation EXPLORES, while Structured Outputs (forced tool_use) still
+# guarantee the JSON shape.  The risk NUMBERS are engine-computed (deterministic)
+# regardless of this temperature — only the prose / picks vary.
+def _resolve_temperature() -> float:
+    try:
+        t = float(os.getenv("ANTHROPIC_TEMPERATURE", "0.5"))
+    except (TypeError, ValueError):
+        t = 0.5
+    return min(0.6, max(0.4, t))
+
+
+NARRATIVE_TEMPERATURE = _resolve_temperature()
+
 # ── Structured Outputs tool (Tools API) ──────────────────────────────────────
 # Forcing the narrative through a typed tool call makes the response a
 # GUARANTEED structured object the SDK parses for us — eliminating the
@@ -144,6 +161,11 @@ _REPORT_TOOL: dict = {
             "ai_benchmark_comment":   {"type": "string"},
             "ai_performance_comment": {"type": "string"},
             "ai_regime_comment":      {"type": "string"},
+            # Sprint-5 (margin/leverage AI-trigger): when the book carries
+            # margin debt (cash leg < 0) the prompt sets has_leverage and
+            # REQUIRES this field — an explicit Margin-Call / exponential-risk
+            # warning.  Empty string when the book is unlevered.
+            "ai_leverage_warning":    {"type": "string"},
             # Nested structures stay permissive — _normalise_stock_picks and
             # _regime_confirmation() validate their shape downstream.
             "stock_picks":            {"type": "object"},
@@ -332,6 +354,28 @@ def _summarise_for_prompt(results: dict) -> dict:
         # (a conservative investor needs tail-risk framing; an aggressive one
         # growth framing).  Composite-risk score is already calibrated for it.
         "risk_mandate": results.get("risk_mandate", "MODERATE"),
+        # Sprint-5 (margin/leverage): surface the engine's leverage metrics so
+        # the model can quote the actual gross-exposure / leverage-ratio when
+        # warning about a margin-funded book (cash leg < 0 → is_leveraged).
+        "leverage": _leverage_for_prompt(results.get("leverage_metrics")),
+    }
+
+
+def _leverage_for_prompt(lm: Optional[dict]) -> dict:
+    """Compact, %-scaled leverage view for the LLM prompt.
+
+    `is_leveraged` is True only when the cash leg is negative (margin debt).
+    gross_exposure / long_weight / net_exposure are decimals from the engine
+    (1.0 == 100% of equity); we %-scale them so the model quotes them verbatim.
+    """
+    lm = lm or {}
+    return {
+        "is_leveraged":   bool(lm.get("is_leveraged")),
+        "gross_exposure_pct": _safe_round((lm.get("gross_exposure") or 0) * 100, 1),
+        "long_weight_pct":    _safe_round((lm.get("long_weight") or 0) * 100, 1),
+        "net_exposure_pct":   _safe_round((lm.get("net_exposure") or 0) * 100, 1),
+        "margin_debt_pct":    _safe_round(abs(min(0.0, lm.get("cash_weight") or 0)) * 100, 1),
+        "leverage_ratio":     _safe_round(lm.get("leverage_ratio"), 2),
     }
 
 
@@ -452,6 +496,22 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
             "Это противоречит сигналам Quant Engine.\n"
         )
 
+    # Sprint-5 — Margin/leverage AI-trigger.  When the engine flags a
+    # margin-funded book (cash leg < 0), the model is HARD-REQUIRED to fill
+    # `ai_leverage_warning` and to lead a bullet with the Margin-Call risk.
+    lev = summary.get("leverage") or {}
+    leverage_rule = ""
+    if lev.get("is_leveraged"):
+        leverage_rule = (
+            "⚠ ЗАЁМНЫЕ СРЕДСТВА (МАРЖА): портфель использует кредитное плечо — "
+            f"валовая экспозиция ≈{lev.get('gross_exposure_pct')}% капитала, "
+            f"плечо ≈{lev.get('leverage_ratio')}x, маржинальный долг ≈{lev.get('margin_debt_pct')}%. "
+            "ОБЯЗАТЕЛЬНО заполни поле ai_leverage_warning (≤240 знаков): объясни простыми словами, "
+            "что плечо УМНОЖАЕТ и прибыль, и убыток, и при просадке возможен Margin Call "
+            "(принудительное закрытие позиций брокером по худшим ценам). Также выдели это "
+            "ОТДЕЛЬНЫМ первым пунктом в bullets [Quant Engine].\n"
+        )
+
     # ── Base tier: compact prompt, 1 pick per scenario, 4 scenarios ──
     if tier != "deep":
         return (
@@ -525,6 +585,7 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
             "- Stock picks: РЕАЛЬНЫЕ АКЦИИ (PLTR, JNJ, KO, CRWD и т.п.), не только ETF. "
             "why — конкретные цифры (ROE, маржа, Бета) с тегом [Источник].\n"
             f"{contradiction_rule}"
+            f"{leverage_rule}"
             f"{rag_rule}\n"
             f"=== ДАННЫЕ ПОРТФЕЛЯ ===\n"
             f"{_wrap_untrusted('broker_portfolio_json', json.dumps(summary, ensure_ascii=False)[:7000])}"
@@ -656,6 +717,7 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
         "- РЕАЛЬНЫЕ АКЦИИ: PLTR, CRWD, JNJ, COST, KO, ANET, PANW и т.п. — не только ETF.\n"
         "- why: конкретные цифры (ROE, маржа, Beta, P/E, momentum) с тегом [источник].\n"
         f"{contradiction_rule}"
+        f"{leverage_rule}"
         f"{rag_rule}"
         f"\n=== ДАННЫЕ ПОРТФЕЛЯ ===\n"
         f"{_wrap_untrusted('broker_portfolio_json', json.dumps(summary, ensure_ascii=False)[:9000])}"
@@ -717,6 +779,22 @@ def _fallback_narrative(results: dict, tier: str) -> dict:
     regime_label = regime.get("regime", "")
     stock_picks  = _fallback_stock_picks(regime_label, tier)
 
+    # Sprint-5 — deterministic Margin-Call warning when the book is levered,
+    # so even the no-API fallback path surfaces the leverage risk.
+    lm = results.get("leverage_metrics") or {}
+    ai_leverage_warning = ""
+    if lm.get("is_leveraged"):
+        gross = (lm.get("gross_exposure") or 0) * 100
+        lev_x = lm.get("leverage_ratio") or 0
+        ai_leverage_warning = (
+            f"⚠️ Внимание: портфель использует заёмные средства (плечо ≈{lev_x:.2f}x, "
+            f"валовая экспозиция ≈{gross:.0f}% капитала). Плечо умножает и прибыль, и "
+            "убыток; при сильной просадке возможен Margin Call — принудительное "
+            "закрытие позиций брокером по невыгодным ценам [Quant Engine]."
+        )
+        # Lead the bullets with the leverage warning.
+        bullets.insert(0, ai_leverage_warning)
+
     action_plan_text = ""
     ai_action_impact = ""
     if tier == "deep":
@@ -751,6 +829,7 @@ def _fallback_narrative(results: dict, tier: str) -> dict:
         "ai_stress_comment":        "",
         "ai_action_comment":        "",
         "ai_effect_comment":        "",
+        "ai_leverage_warning":      ai_leverage_warning,
         "regime_confirmation":      {"stance": "", "summary": "", "signals": []},
         "rag_context":              "",
     }
@@ -877,7 +956,8 @@ def generate_narrative(results: dict, tier: str = "base",
         response = client.messages.create(
             model       = model,
             max_tokens  = max_tok,
-            temperature = 0.1,
+            # Sprint-5: was 0.1 (near-deterministic → stale, repeating ideas).
+            temperature = NARRATIVE_TEMPERATURE,
             # Prompt Caching — the ~25 KB system prompt is byte-identical on
             # every request.  Caching it means repeated calls (base+deep, and
             # many users within the 5-min TTL) read the prefix at ~0.1× instead
@@ -1005,6 +1085,9 @@ def generate_narrative(results: dict, tier: str = "base",
             "ai_stress_comment":        validate_stress_comment(_comment("ai_stress_comment")),
             "ai_action_comment":        _comment("ai_action_comment"),
             "ai_effect_comment":        _comment("ai_effect_comment"),
+            # Sprint-5 margin/leverage trigger output — only the AI fills this
+            # (empty when the book is unlevered; the template hides it then).
+            "ai_leverage_warning":      _comment("ai_leverage_warning", 260),
             "regime_confirmation":      _regime_confirmation(),
             # Surface the raw RAG context so integrity_checks can show the
             # actual snippet count.  Without this the integrity pill was

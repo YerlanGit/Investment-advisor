@@ -65,6 +65,153 @@ def _risk_mandate_label(mandate: str) -> str:
     return _MANDATE_RU.get(str(mandate).strip().upper(), "Умеренный")
 
 
+# Regime quadrant SVG geometry (must match templates/report_deep_v3.html).
+#   viewBox 0..310, centre (155,155), axis labels mark ±0.2 at the quadrant
+#   edges → 625 px per unit (verified: growth +0.08 → 50 px above centre).
+_REGIME_DOT_CENTRE = 155.0
+_REGIME_DOT_SCALE  = 625.0
+_REGIME_DOT_MIN    = 40.0     # keep the 8px dot fully inside the plot frame
+_REGIME_DOT_MAX    = 270.0
+
+
+def _regime_dot_coords(growth: float, cycle: float) -> tuple[float, float]:
+    """Map (growth, cycle) signed scores to SVG (cx, cy) on the regime quadrant.
+
+    cycle drives the X axis (→ right = +), growth drives the Y axis (↑ up = +,
+    so a positive growth yields a SMALLER y).  Scores are clamped to ±0.2 (the
+    labelled axis range) and the result clamped to the plot frame so an extreme
+    reading never paints the dot outside the chart.
+    """
+    def _clamp(v: float, lo: float, hi: float) -> float:
+        return max(lo, min(hi, v))
+
+    g = _clamp(float(growth), -0.2, 0.2)
+    c = _clamp(float(cycle),  -0.2, 0.2)
+    cx = _clamp(_REGIME_DOT_CENTRE + c * _REGIME_DOT_SCALE,
+                _REGIME_DOT_MIN, _REGIME_DOT_MAX)
+    cy = _clamp(_REGIME_DOT_CENTRE - g * _REGIME_DOT_SCALE,
+                _REGIME_DOT_MIN, _REGIME_DOT_MAX)
+    return round(cx, 1), round(cy, 1)
+
+
+def _build_mandate_compliance(perf_df, total_val: float,
+                              user_profile: Optional[dict]) -> Optional[dict]:
+    """Sprint-5 Task 4 — make the mandate visible in the report.
+
+    Compares the LIVE portfolio's asset-class allocation against the user's
+    approved ``limits_dict`` and returns a per-class table the templates render
+    so the investor sees BOTH their target profile AND how well the current
+    book matches it.  Returns None when there is no profile / no limits (the
+    template then hides the panel).  Pure, never raises.
+    """
+    if not user_profile:
+        return None
+    limits = user_profile.get("limits_dict") or {}
+    if not limits or perf_df is None or getattr(perf_df, "empty", True):
+        return None
+    try:
+        from agent.gatekeeper import _classify_to_asset_key
+        from profile_manager import ASSET_DISPLAY
+    except Exception:
+        return None
+
+    # Actual allocation by asset class (share of NAV, %).
+    actual: dict[str, float] = {}
+    if "Ticker" in perf_df.columns and total_val:
+        for _, row in perf_df.iterrows():
+            cv = _safe_float(row.get("Current_Value"), 0.0)
+            cls = _classify_to_asset_key(str(row.get("Ticker", "?")))
+            actual[cls] = actual.get(cls, 0.0) + (cv / total_val) * 100.0
+
+    rows: list[dict] = []
+    breaches = 0
+    for key, bounds in limits.items():
+        try:
+            lo, hi = float(bounds[0]), float(bounds[1])
+        except (TypeError, ValueError, IndexError):
+            continue
+        if lo == 0 and hi == 0:
+            continue   # asset class not part of this mandate — skip
+        act = round(actual.get(key, 0.0), 1)
+        if act > hi + 2:
+            status = "over"
+            breaches += 1
+        elif act < lo - 2:
+            status = "under"
+        else:
+            status = "ok"
+        rows.append({
+            "key":    key,
+            "label":  ASSET_DISPLAY.get(key, key),
+            "actual": act,
+            "lo":     lo,
+            "hi":     hi,
+            "status": status,
+        })
+
+    if not rows:
+        return None
+    rows.sort(key=lambda r: r["actual"], reverse=True)
+    return {
+        "profile_name": user_profile.get("profile_name", "—"),
+        "target_vol_pct": round(_safe_float(user_profile.get("target_volatility"), 0.0) * 100, 1),
+        "target_te_pct":  round(_safe_float(user_profile.get("target_te"), 0.0) * 100, 1),
+        "rows":     rows,
+        "breaches": breaches,
+        "compliant": breaches == 0,
+    }
+
+
+def _build_regime_consistency(regime: Optional[dict],
+                              macro_raw: Optional[dict]) -> Optional[dict]:
+    """Sprint-5 R3 — deterministic cross-check between the MOMENTUM-derived
+    regime label (SPY/IEF, XLY/XLP, IWM/SPY, EEM) and the INDEPENDENT FRED
+    macro signals (yield curve, HY OAS, VIX).  These are different data sources
+    with no built-in reconciliation, so a risk-on "Expansion" label can sit
+    next to an inverted curve + wide credit spread.  This flag surfaces that
+    divergence deterministically (no LLM).  Returns None when nothing to
+    compare.  Thresholds mirror the DEEP prompt (HY > 550 bp = stress,
+    VIX > 25 = fear, 10Y−2Y < 0 = inversion).
+    """
+    if not regime or not macro_raw:
+        return None
+    label = str(regime.get("regime", ""))
+    if not label:
+        return None
+    risk_on = label in ("Expansion", "Recovery")
+
+    def _val(key: str) -> Optional[float]:
+        row = macro_raw.get(key) or {}
+        v = row.get("value")
+        try:
+            return float(v) if v is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    yc  = _val("yield_curve_10y2y")   # pp; < 0 = inverted (recessionary)
+    hy  = _val("hy_credit_spread")    # %  (5.5 == 550 bp); > 5.5 = stress
+    vix = _val("vix")                 # index; > 25 = fear
+
+    stress: list[str] = []
+    if yc is not None and yc < 0:    stress.append("инверсия кривой 10Y−2Y")
+    if hy is not None and hy > 5.5:  stress.append("широкий HY-спред (>550 б.п.)")
+    if vix is not None and vix > 25: stress.append("повышенный VIX (>25)")
+    have_any = any(x is not None for x in (yc, hy, vix))
+
+    if risk_on and len(stress) >= 2:
+        return {"status": "diverges", "signals": stress,
+                "note": ("Режим risk-on по моментуму, но FRED показывает стресс: "
+                         + ", ".join(stress)
+                         + ". Позиционирование стоит трактовать осторожно.")}
+    if (not risk_on) and have_any and not stress:
+        return {"status": "diverges", "signals": [],
+                "note": ("Режим risk-off по моментуму, но макро-сигналы FRED "
+                         "спокойны (кривая/спред/VIX в норме) — возможен ранний "
+                         "разворот.")}
+    return {"status": "aligned", "signals": stress,
+            "note": "Макро-сигналы FRED согласуются с моментум-режимом."}
+
+
 def _model_display_name(model_id: str) -> str:
     """Convert internal model ID to short human-readable label for PDF."""
     _MAP = {
@@ -382,15 +529,20 @@ def build_payload(results: dict, tier: str,
                   ai_summary: Optional[dict] = None,
                   user_bench_ticker: Optional[str] = None,
                   prev_snapshot: Optional[dict] = None,
-                  regime_rag_confirm: Optional[list] = None) -> dict:
+                  regime_rag_confirm: Optional[list] = None,
+                  user_profile: Optional[dict] = None) -> dict:
     """
     Build the payload consumed by report_basic.html / report_deep.html.
 
     Args:
-        results    : The dict returned by UniversalPortfolioManager.analyze_all().
-        tier       : 'base' or 'deep' — controls which sections are populated.
-        ai_summary : Optional AI-narrative payload from advisor_bot:
-                     {'verdict': str, 'bullets': list[str], 'action_plan_text': str}
+        results      : The dict returned by UniversalPortfolioManager.analyze_all().
+        tier         : 'base' or 'deep' — controls which sections are populated.
+        ai_summary   : Optional AI-narrative payload from advisor_bot:
+                       {'verdict': str, 'bullets': list[str], 'action_plan_text': str}
+        user_profile : Optional approved-mandate dict from db_tokenomics.get_profile
+                       (profile_name, target_volatility, target_te, limits_dict, …).
+                       Sprint-5 Task 4: drives the in-report "соответствие мандату"
+                       panel so the questionnaire result is visible, not dead.
     """
     metrics    = results.get("portfolio_metrics") or {}
     perf_df    = results.get("performance_table")
@@ -660,12 +812,23 @@ def build_payload(results: dict, tier: str,
         if ev is not None:
             tone = "EM risk-on" if ev >= 0 else "EM risk-off"
             explainers.append(f"EEM 60д {ev*100:+.1f}% ({tone})")
+        # Sprint-5 (R1): the DEEP regime quadrant used to be a HARDCODED SVG dot
+        # at (177,110) — it always sat in "Expansion" regardless of the computed
+        # regime, visually contradicting the label.  Compute the REAL dot
+        # position from growth/cycle here and inject cx/cy into the template.
+        g_val = float(regime["growth_score"])
+        c_val = float(regime["cycle_score"])
+        dot_cx, dot_cy = _regime_dot_coords(g_val, c_val)
         regime_block = {
             "label":      regime["regime"],
             "confidence": int(round(regime["confidence"] * 100)),
-            "growth":     regime["growth_score"],
-            "cycle":      regime["cycle_score"],
+            "growth":     g_val,
+            "cycle":      c_val,
             "explainers": explainers,
+            # SVG dot position (viewBox 0..310; centre at 155,155; 625 px/unit).
+            "dot_cx":     dot_cx,
+            "dot_cy":     dot_cy,
+            "dot_label":  f"Growth {g_val:+.2f} · Cycle {c_val:+.2f}",
         }
 
     # ── Data quality (loaded factors / benchmarks / SEC) ──────────────────
@@ -826,6 +989,9 @@ def build_payload(results: dict, tier: str,
         "cove_lineage":         cove_lineage,
         # Regime
         "regime":            regime_block,
+        # Sprint-5 R3 — deterministic FRED-vs-momentum consistency flag.
+        "regime_consistency": _build_regime_consistency(
+                                regime, results.get("macro_drivers")),
         "regime_rag_confirm": regime_rag_confirm or [],
         # Data quality
         "data_quality":      data_quality,
@@ -864,6 +1030,13 @@ def build_payload(results: dict, tier: str,
         "ai_stress_comment":         (ai_summary or {}).get("ai_stress_comment", ""),
         "ai_action_comment":         (ai_summary or {}).get("ai_action_comment", ""),
         "ai_effect_comment":         (ai_summary or {}).get("ai_effect_comment", ""),
+        # Sprint-5 margin/leverage AI-trigger — non-empty only when the book is
+        # margin-funded; templates render it as a red Margin-Call warning card.
+        "ai_leverage_warning":       (ai_summary or {}).get("ai_leverage_warning", ""),
+        # Sprint-5 Task 4 — mandate compliance panel (target profile + actual
+        # allocation vs limits).  None when no approved profile is supplied.
+        "mandate_compliance":        _build_mandate_compliance(
+                                        perf_df, total_val, user_profile),
         # Structured cross-check of the engine's regime label — DEEP only.
         "regime_confirmation":       (ai_summary or {}).get("regime_confirmation",
                                        {"stance": "", "summary": "", "signals": []}),
@@ -901,10 +1074,19 @@ def build_payload(results: dict, tier: str,
             })
         return rows
 
-    user_bm_filter: Optional[str] = _BM_TICKER_TO_NAME.get(user_bench_ticker) if user_bench_ticker else None
-    payload["scenarios"] = _build_scenarios(
-        results.get("benchmark_comparison") or {}, user_bm_filter
-    )
+    # Sprint-5 (Task 8 — activate the user's benchmark): the engine always
+    # stores the user's chosen benchmark under the canonical name "Профильный
+    # бенчмарк" (investment_logic.py:1187).  Prefer that slot so the report's
+    # primary benchmark card reflects the ACTUAL selection — including custom
+    # tickers (Value/Quality/MSCI World) that are NOT in the standard 5-name
+    # comparison set, which the old `_BM_TICKER_TO_NAME` lookup silently
+    # dropped (returning an empty scenarios list).
+    bm_comparison = results.get("benchmark_comparison") or {}
+    if user_bench_ticker and "Профильный бенчмарк" in bm_comparison:
+        user_bm_filter: Optional[str] = "Профильный бенчмарк"
+    else:
+        user_bm_filter = _BM_TICKER_TO_NAME.get(user_bench_ticker) if user_bench_ticker else None
+    payload["scenarios"] = _build_scenarios(bm_comparison, user_bm_filter)
 
     # ── Deep-tier additions ────────────────────────────────────────────────
     if tier == TIER_DEEP:

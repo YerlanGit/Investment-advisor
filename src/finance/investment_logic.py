@@ -13,6 +13,16 @@ from freedom_portfolio import TradernetClient, get_history_frame
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger("Antigravity_RiskEngine")
 
+# Sprint-5 Task 4 — mandate → Black-Litterman constraint table.  Maps the
+# canonical 3-state risk mandate to the optimiser's risk-aversion (δ), turnover
+# cap (active share) and per-name weight cap.  Conservative ⇒ less aggressive
+# tilts, less turnover and tighter single-name caps; Aggressive ⇒ the reverse.
+_MANDATE_BL_CONSTRAINTS: dict[str, dict[str, float]] = {
+    "CONSERVATIVE": {"risk_aversion": 4.0, "max_active_share": 0.15, "max_single_weight": 0.10},
+    "MODERATE":     {"risk_aversion": 2.5, "max_active_share": 0.25, "max_single_weight": 0.20},
+    "AGGRESSIVE":   {"risk_aversion": 2.0, "max_active_share": 0.35, "max_single_weight": 0.30},
+}
+
 # Multi-period (1м / 3м / 6м / 12м / YTD) returns live in a separate module
 # so they can be unit-tested without pulling in sklearn / engine dependencies.
 from finance.period_returns import (
@@ -1450,6 +1460,15 @@ class UniversalPortfolioManager:
                          for t, s in asset_scores.items()},
                         bl_tickers,
                     )
+                    # Sprint-5 Task 4 — the investor mandate now CONSTRAINS the
+                    # optimiser (was fully mandate-agnostic): a Conservative
+                    # book gets a higher risk-aversion δ (smaller tilts), a
+                    # tighter turnover cap and a tighter single-name cap than an
+                    # Aggressive one, so BL targets respect the approved mandate
+                    # instead of being a one-size-fits-all output.
+                    _mandate = str(getattr(self.engine, "risk_mandate", "MODERATE")).upper()
+                    _bl_cfg = _MANDATE_BL_CONSTRAINTS.get(
+                        _mandate, _MANDATE_BL_CONSTRAINTS["MODERATE"])
                     bl_res = black_litterman(
                         cov              = cov_matrix,
                         tickers          = bl_tickers,
@@ -1457,6 +1476,9 @@ class UniversalPortfolioManager:
                         views_P          = P if P.size else None,
                         views_Q          = Q if Q.size else None,
                         view_confidence  = conf if conf.size else None,
+                        risk_aversion     = _bl_cfg["risk_aversion"],
+                        max_active_share  = _bl_cfg["max_active_share"],
+                        max_single_weight = _bl_cfg["max_single_weight"],
                     )
                     bl_records = bl_res.as_records()
         except Exception as exc:

@@ -130,6 +130,49 @@ _SECTOR_PB_BENCHMARKS: dict[str, tuple[float, float]] = {
     "default":        (3.0, 1.5),
 }
 
+# Sprint-5 Task 6 — sector FCF-yield benchmarks (fcf / market cap, decimals).
+# Higher yield = cheaper/higher-quality (the V-pillar flips the sign).  These
+# are deliberately conservative sector medians; the σ is a robust spread.
+_SECTOR_FCF_YIELD_BENCHMARKS: dict[str, tuple[float, float]] = {
+    # (median_FCF_yield, σ-equivalent)
+    "Technology":     (0.030, 0.020),
+    "Semiconductors": (0.030, 0.025),
+    "Finance":        (0.050, 0.030),
+    "Healthcare":     (0.050, 0.025),
+    "Energy":         (0.070, 0.040),
+    "Consumer":       (0.050, 0.025),
+    "Industrials":    (0.050, 0.025),
+    "Gold":           (0.030, 0.030),
+    "default":        (0.040, 0.030),
+}
+
+
+def _absolute_signed_z(
+    value: Optional[float],
+    sector: Optional[str],
+    benchmarks: dict[str, tuple[float, float]],
+    clip: float = 3.0,
+) -> Optional[float]:
+    """Z-score for a signed metric (e.g. FCF yield) that may legitimately be
+    NEGATIVE — unlike `_absolute_valuation_z`, which rejects ratios ≤ 0 (right
+    for P/E and P/B, wrong for a yield that can go negative when a firm burns
+    cash).  Returns None only when the value is missing / non-finite.
+    z > 0 → richer than the sector median (good for a yield); z < 0 → poorer.
+    """
+    if value is None:
+        return None
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(v):
+        return None
+    key = sector if sector in benchmarks else "default"
+    median, sigma = benchmarks[key]
+    if sigma <= 0:
+        return None
+    return float(np.clip((v - median) / sigma, -clip, clip))
+
 
 def _absolute_valuation_z(
     ratio: Optional[float],
@@ -162,7 +205,7 @@ def _absolute_valuation_z(
 
 def _compute_valuation_ratios(perf: pd.DataFrame) -> None:
     """
-    Pre-compute SEC_PE_Ratio and SEC_PB_Ratio columns in-place.
+    Pre-compute SEC_PE_Ratio, SEC_PB_Ratio and SEC_FCF_Yield columns in-place.
 
     P/E = Current_Price / EPS   where EPS = SEC_Net_Income / SEC_Shares_Outstanding
           Only computed when net income is positive (loss companies → no P/E).
@@ -171,16 +214,23 @@ def _compute_valuation_ratios(perf: pd.DataFrame) -> None:
           Only computed when book equity is strictly positive
           (buyback-heavy firms like AAPL/MSFT may carry negative equity).
 
-    Both ratios set to NaN when any input is missing or invalid.
+    FCF Yield = SEC_FCF / market cap   where market cap = Price * Shares.
+          Sprint-5 Task 6 price-aware quality signal.  CAN be negative (a
+          cash-burning firm → negative yield → "expensive"); only None when an
+          input is missing or the market cap is non-positive.
+
+    Ratios set to None when any input is missing or invalid.
     """
     pe_col: list[Optional[float]] = []
     pb_col: list[Optional[float]] = []
+    fcfy_col: list[Optional[float]] = []
 
     for _, row in perf.iterrows():
         price  = row.get("Current_Price")
         ni     = row.get("SEC_Net_Income")
         shares = row.get("SEC_Shares_Outstanding")
         bkeq   = row.get("SEC_Book_Equity")
+        fcf    = row.get("SEC_FCF")
 
         # P/E
         pe: Optional[float] = None
@@ -208,8 +258,22 @@ def _compute_valuation_ratios(perf: pd.DataFrame) -> None:
             pass
         pb_col.append(pb)
 
+        # FCF Yield = FCF / market cap (can be negative; needs a positive mcap).
+        fcfy: Optional[float] = None
+        try:
+            p  = float(price)
+            sh = float(shares)
+            fc = float(fcf)
+            mcap = p * sh
+            if mcap > 0 and np.isfinite(fc):
+                fcfy = fc / mcap
+        except (TypeError, ValueError):
+            pass
+        fcfy_col.append(fcfy)
+
     perf["SEC_PE_Ratio"] = pe_col
     perf["SEC_PB_Ratio"] = pb_col
+    perf["SEC_FCF_Yield"] = fcfy_col
 
 
 def _macro_alignment(sector: Optional[str],
@@ -414,15 +478,21 @@ def _score_one_asset(out, row, ticker, sector, perf, technicals,
     # Pillar B — Valuations.
     # P/E and P/B z-scores: both vs absolute sector benchmarks
     # (portfolio cohorts are typically <5 tickers — too small for
-    # robust_z which needs ≥5 samples).  Both contribute on the SAME
-    # ±1 scale in valuations_score, so neither signal double-counts.
+    # robust_z which needs ≥5 samples).  All three signals contribute on the
+    # SAME ±1 scale in valuations_score, so none double-counts.
     pe_z = _absolute_valuation_z(
         row.get("SEC_PE_Ratio"), sector, _SECTOR_PE_BENCHMARKS
     )
     pb_z = _absolute_valuation_z(
         row.get("SEC_PB_Ratio"), sector, _SECTOR_PB_BENCHMARKS
     )
-    v_score = valuations_score(pe_z=pe_z, pb_sector_z=pb_z, ev_ebitda_z=None)
+    # Sprint-5 Task 6 — add a price-aware FCF-yield quality signal so the V
+    # pillar no longer rests on two correlated multiples (P/E + P/B) alone.
+    fcf_yield_z = _absolute_signed_z(
+        row.get("SEC_FCF_Yield"), sector, _SECTOR_FCF_YIELD_BENCHMARKS
+    )
+    v_score = valuations_score(pe_z=pe_z, pb_sector_z=pb_z,
+                               ev_ebitda_z=None, fcf_yield_z=fcf_yield_z)
 
     # Pillar C — Technicals (already a -2..+2 reading)
     t_reading = technicals.get(ticker)
