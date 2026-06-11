@@ -32,6 +32,51 @@
 
 ---
 
+## −0.5. Прод-хотфиксы (commit `dfd908b` / merge PR #51) + Mathematical Inventory
+
+**Хотфиксы из логов прода (все закрыты, 355 тестов зелёные):**
+- ✅ `pymupdf4llm` восстановлен в `requirements.txt` (был ошибочно удалён → `No module named 'pymupdf4llm'`); импорт в `rag_engine` сделан ленивым (query-путь бота не падает без ingest-зависимости).
+- ✅ SQLite на gcsfuse: `journal_mode=DELETE` форсится на **каждом** соединении (`_get_conn`/`_get_conn_tx` → hardened asynccontextmanager), `synchronous=FULL`, очистка осиротевших `-wal/-shm` перед коннектом и на старте. WAL категорически устранён (vault уже на дефолтном DELETE).
+- ✅ Graceful shutdown: SIGTERM/SIGINT → `dp.stop_polling()` + `bot.session.close()` в пределах **2.5с** (abort in-flight getUpdates → нет 409 при редеплое); никаких долгих фоновых задач.
+- ✅ Gatekeeper-телеметрия: каждое критическое нарушение логируется с **ID правила + причиной** (`GK-1-EULER`/`GK-3-CVAR`/`GK-5-VOL`/`GK-8-MANDATE`).
+
+### 📐 Mathematical Inventory — что движок РЕАЛЬНО считает (верифицировано построчно)
+
+| # | Модель / формула | Реализация (file:line) | Статус |
+|---|---|---|---|
+| 1 | Лог-доходности `ln(Pₜ/Pₜ₋₁)` | `investment_logic.py:549,1149` | ✓ |
+| 2 | **Геометрическая аннуализация** `exp(μ_log·252)−1` | `:726`, `period_returns:238`, `simulate:137` (F-7) | ✓ |
+| 3 | Аннуализация vol `σ·√252`, var `·252` | `:628,662,719` | ✓ |
+| 4 | **Факторная Ridge-регрессия** `r=α+Σβₖfₖ+ε` (α=0.001) | `:613`; **guard N≥max(2K,30)** `:563` (F-3) | ✓ |
+| 5 | **Факторная ковариация**: EWMA(halflife=63, λ=0.94) ⊕ 70/30 Ledoit-Wolf | `:647,654` | ✓ |
+| 6 | **Структурная ковариация** `Σ=B·F·Bᵀ+D` | `:661` | ✓ |
+| 7 | **PSD-floor** `max(w'Σw,0)` перед √ | `:677` (BLK-3) | ✓ |
+| 8 | Портфельная vol `√(w'Σw·252)` | `:678` | ✓ |
+| 9 | **Декомпозиция Эйлера** `MCTR=Σw/σₚ`, `ERC%=w·MCTR/σₚ` | `:682-687` | ✓ |
+| 10 | Sharpe `(r_ann−rfr)/σ_ann` | `:730` | ✓ |
+| 11 | **Sortino** `√(mean(min(excess,0)²))·√252` (стандарт) | `:718-719` (H-4) | ✓ |
+| 12 | CVaR-95 историч.: среднее нижних 5% | `:728-729` | ✓ |
+| 13 | **Bootstrap-CVaR**: stationary block (Politis-Romano), blk=√N, 2000, **детерм. seed из hash данных** | `:258,287,305` | ✓ |
+| 14 | **Marginal VaR** (budget-neutral, fund pro-rata) | `:316,341-353` (F-1) | ✓ |
+| 15 | Max Drawdown `min(eq/cummax−1)` | `:744` | ✓ |
+| 16 | **Base Currency / FX** `P_base=P_local·FX` (мультипл., до returns), неконвертируемые **дропаются**, T-1 lag+ffill | `currency.py:381,262`; H-1 | ✓ нет утечки валют |
+| 17 | Динамический **RFR** (валютно-сопоставлен, гео-daily `(1+r)^(1/252)−1`) | `currency.py:104,123` | ✓ |
+| 18 | **Black-Litterman**: prior `π=δΣw`; posterior `μ=[(τΣ)⁻¹+PᵀΩ⁻¹P]⁻¹[(τΣ)⁻¹π+PᵀΩ⁻¹Q]`; `w*=(δΣ)⁻¹μ`; δ=2.5,τ=0.05; **n_views=0 → realised fallback** | `black_litterman.py:119,136,149`; F-11 | ✓ |
+| 19 | **Expected return** `exp((α+Σβₖμₖ)·252)−1` (единое лог-пространство) | `:1134-1138` (F-2) | ✓ |
+| 20 | **Convexity-cap стресса** `x'=sgn·(T+(C−T)(1−e^(−(|x|−T)/(C−T))))`, T=0.20,C=0.35 | `stress.py:98-117` | ✓ монотонно, C¹, ≤−100% |
+| 21 | Composite risk (mandate-weighted CVaR/vol/concentr.) | `scoring.py:_crs` | ✓ |
+| 22 | **4-pillar scoring**: robust-z `(x−median)/(1.4826·MAD)` | `scoring.py:37-62` | ✓ |
+| 23 | HHI концентрация `Σw²·10000`, DOJ-полосы | `pdf_payload.py:_build_concentration` | ✓ |
+| 24 | TE `std(rₚ−r_b)·√252`, IR `Δr_ann/TE` | `period_returns.py:237,243` | ✓ |
+| 25 | Technicals: RSI/ATR (Wilder RMA), Bollinger, SMA, MACD, 12-1 momentum | `technicals.py` | ✓ |
+| 26 | Regime: growth/cycle квадрант, confidence=magnitude×directional-agreement | `regime.py` | ✓ |
+| 27 | Altman-Z (банкротство) | `scoring_orchestrator/sec_edgar` | ✓ |
+| 28 | Sector super-group SSOT (Tech-комплекс) | `pdf_payload.build_sector_groups` | ✓ |
+
+**Дашборд (текущий, dfd908b):** Математика **90** · Архитектура **82** · Инфра/Безопасность **88** · UI/UX **86** · **Готовность ≈ 87/100**. Регрессий и ошибок размерности в матричных операциях **не выявлено**.
+
+
+
 ## 0-bis. Спринт модернизации (2026-06-09) — выполнено
 
 - ✅ **Sprint 1.1 — секторный SSOT.** Расхождение Tech 55% (BASE) vs 80.8% (DEEP) устранено: добавлен канонический super-group `Tech-комплекс (Technology+Semiconductors)` в `pdf_payload` (SSOT), который рендерится в **обоих** отчётах через `sector_warnings`, а `ai_narrative` получает `sector_complex` + директиву «не суммируй сектора сам, бери число ВЕРБАТИМ». §4.1 закрыта.
