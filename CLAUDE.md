@@ -3,17 +3,21 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Detected stack
-- Languages: Rust.
-- Frameworks: none detected from the supported starter markers.
+- Languages: Python 3.11 (aiogram 3.x Telegram bot + quant engine: numpy / pandas / scikit-learn).
+- LLM: Anthropic API (Haiku 4.5 base tier / Sonnet 4.6 deep tier) via `src/ai_narrative.py`.
+- Infra: GCP Cloud Run (long-polling bot), Cloud Function (RAG ingest), ChromaDB, SQLite on gcsfuse.
 
 ## Verification
-- Run Rust verification from `rust/`: `cargo fmt`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`
+- Run the Python suite from the repo root: `python -m pytest tests/ -q`
+  (CI mirrors this in `.github/workflows/python-ci.yml`; the deploy gate re-runs it in Cloud Build).
 - `src/` and `tests/` are both present; update both surfaces together when behavior changes.
+- Report templates live in `src/templates/` — smoke-render via `html_renderer.render_report_html(None, ...)` when touching them.
 
 ## Repository shape
-- `rust/` contains the Rust workspace and active CLI/runtime implementation.
-- `src/` contains source files that should stay consistent with generated guidance and tests.
-- `tests/` contains validation surfaces that should be reviewed alongside code changes.
+- `src/` — bot (`tg_bot.py`, `entrypoint.py`), quant engine (`finance/`), report layer (`pdf_payload.py`, `html_renderer.py`, `templates/`), LLM narrative (`ai_narrative.py`), advisory audit (`agent/gatekeeper.py`).
+- `tests/` — pytest/unittest suites (`test_phase*.py`); validation surfaces reviewed alongside code changes.
+- `cloud_function/` — GCS-triggered RAG ingest (ChromaDB build from bank PDFs).
+- `AUDIT.md` — living institutional audit (findings, Было/Стало, dashboard). `MCP_STRATEGY.md` — MCP/LLM strategy. `REPORT_SECTIONS.md` — map of report sections → builders → templates.
 
 ## Working agreement
 - Prefer small, reviewable changes and keep generated bootstrap files aligned with actual repo workflows.

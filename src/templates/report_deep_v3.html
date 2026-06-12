@@ -2344,8 +2344,10 @@
                 font-size:10px; color:#e65100; line-height:1.4;
                 font-family:var(--font-mono);">
       Gross Exposure: <b>{{ '%.0f' % (data.leverage_metrics.gross_exposure * 100) }}%</b>
+      <span style="font-family:var(--font-ui); font-weight:400; color:#7a4a00;">(лонг + |маржа| к капиталу)</span>
       &nbsp;·&nbsp;
-      Leverage: <b>{{ '%.2f' % data.leverage_metrics.leverage_ratio }}x</b>
+      Плечо: <b>{{ '%.2f' % data.leverage_metrics.leverage_ratio }}x</b>
+      <span style="font-family:var(--font-ui); font-weight:400; color:#7a4a00;">(лонг ÷ капитал)</span>
       <span style="font-family:var(--font-ui); font-weight:400; color:#7a4a00;">
         — пирог нормализован к 100% (только лонг)
       </span>
@@ -3316,7 +3318,10 @@
               {%- endif -%}
             </span>
           </div>
-          <div class="ef-delta {% if fav %}pos{% else %}neg{% endif %}">
+          {# fav=None → НЕЙТРАЛЬНО (Sprint-5.1/A2: it_share информативен, его
+             направление зависит от мандата; нулевая дельта — тоже нейтральна).
+             Раньше None проваливался в красный neg. #}
+          <div class="ef-delta {% if fav %}pos{% elif fav is not none %}neg{% endif %}">
             {%- if d is not none -%}
               {# Sharpe is a ratio — show its delta with 2 dp and no "пп" #}
               {%- if fmt == 'raw' -%}{{ '%+.2f' % d }}{% if unit_lbl and unit_lbl != 'пп' %} {{ unit_lbl }}{% endif %}

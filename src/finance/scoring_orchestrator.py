@@ -11,6 +11,7 @@ and can be unit-tested in isolation.
 """
 from __future__ import annotations
 
+import functools
 from typing import Callable, Optional
 
 import numpy as np
@@ -22,6 +23,7 @@ from finance.regime import (
     REGIME_PENALISED_SECTORS,
 )
 from finance.scoring import (
+    HOTSPOT_TRC_PCT,
     AssetScore,
     action_from_total,
     credit_score,
@@ -34,8 +36,10 @@ from finance.scoring import (
 from finance.technicals import TechnicalReading
 
 
-# Hotspot threshold — must match Gatekeeper Check 1.
-DEFAULT_HOTSPOT_TRC_PCT = 20.0
+# Hotspot threshold — re-exported under the legacy name; the VALUE lives in
+# finance.scoring.HOTSPOT_TRC_PCT (single source of truth shared with the
+# Gatekeeper's GK-1 rule, Sprint-5.1 / S4).
+DEFAULT_HOTSPOT_TRC_PCT = HOTSPOT_TRC_PCT
 
 
 # ── Asset-class filter for the Credit pillar (D) ─────────────────────────────
@@ -348,23 +352,103 @@ def _absolute_fundamental_z(value: float, sector: str, column: str,
     return float(np.clip(z, -clip, clip))
 
 
+# ── Sprint-5.1 (S2): dynamic sector cohort from LIVE SEC filings ────────────
+# The static `_SECTOR_FUNDAMENTAL_BENCHMARKS` are "2020-2025 best-effort"
+# constants that silently go stale — and because retail books almost never
+# hold ≥5 same-sector names, the static table was effectively the ONLY path.
+# This block builds a REAL cross-sectional cohort instead: the sector's
+# largest US constituents (a static membership list — like an index — whose
+# DATA is fetched live from SEC EDGAR CompanyFacts and lru-cached per
+# process).  robust_z against this cohort replaces the stale constants;
+# the static table remains the LAST resort (logged once per pair).
+#
+# Cost: ≤7 cached HTTP calls per sector on the first report after boot
+# (`_fetch_company_facts` is shared with the portfolio's own SEC scan).
+# Kill-switch: env SECTOR_COHORT_DISABLED=1.  The production engine opts in
+# via `score_portfolio(dynamic_benchmarks=True)`; library/test callers keep
+# the old static behaviour by default (no network in unit tests).
+_SECTOR_REPRESENTATIVES: dict[str, tuple[str, ...]] = {
+    "Technology":     ("AAPL", "MSFT", "GOOGL", "META", "ORCL", "ADBE", "CRM"),
+    "Semiconductors": ("NVDA", "AVGO", "AMD", "TXN", "QCOM", "MU", "INTC"),
+    "Finance":        ("JPM", "BAC", "WFC", "GS", "MS", "C"),
+    "Healthcare":     ("LLY", "UNH", "JNJ", "ABBV", "MRK", "PFE"),
+    "Energy":         ("XOM", "CVX", "COP", "EOG", "SLB", "PSX"),
+    "Consumer":       ("PG", "KO", "PEP", "COST", "WMT", "MDLZ"),
+    "Industrials":    ("GE", "CAT", "RTX", "UNP", "HON", "DE"),
+}
+
+# perf-table column → (which SEC fetcher, dict key in its result)
+_COLUMN_TO_SEC_FIELD: dict[str, tuple[str, str]] = {
+    "SEC_ROE":                ("crit", "roe"),
+    "SEC_Op_Margin":          ("crit", "operating_margin"),
+    "SEC_Debt_to_Assets":     ("crit", "debt_to_assets"),
+    "SEC_Revenue_Growth_YoY": ("crit", "revenue_growth_yoy"),
+    "SEC_FCF_Margin":         ("ext",  "fcf_margin"),
+}
+
+# Log the stale-constant fallback only once per (sector, column) pair.
+_STATIC_FALLBACK_LOGGED: set[tuple[str, str]] = set()
+
+
+def _dynamic_sector_cohort(sector: Optional[str],
+                           column: str) -> tuple[float, ...]:
+    """Live SEC cohort values for (sector, column); () when unavailable.
+
+    Env kill-switch is checked OUTSIDE the cache so flipping
+    SECTOR_COHORT_DISABLED at runtime cannot poison cached results.
+    """
+    import os
+    if os.getenv("SECTOR_COHORT_DISABLED") == "1":
+        return ()
+    if not sector or sector not in _SECTOR_REPRESENTATIVES:
+        return ()
+    if column not in _COLUMN_TO_SEC_FIELD:
+        return ()
+    return _dynamic_sector_cohort_cached(sector, column)
+
+
+@functools.lru_cache(maxsize=64)
+def _dynamic_sector_cohort_cached(sector: str, column: str) -> tuple[float, ...]:
+    source, field = _COLUMN_TO_SEC_FIELD[column]
+    values: list[float] = []
+    try:
+        from finance import sec_edgar
+    except Exception:
+        return ()
+    for rep in _SECTOR_REPRESENTATIVES[sector]:
+        try:
+            data = (sec_edgar.get_critical_fundamentals(rep) if source == "crit"
+                    else sec_edgar.get_extended_fundamentals(rep))
+            v = (data or {}).get(field)
+            if v is not None and np.isfinite(float(v)):
+                values.append(float(v))
+        except Exception as exc:                       # noqa: BLE001
+            import logging as _lg
+            _lg.getLogger("ScoringOrchestrator").debug(
+                "dynamic cohort: %s/%s skipped (%s)", rep, column, exc)
+    return tuple(values)
+
+
 def _sector_z(value: Optional[float],
               ticker_sector: Optional[str],
               perf_table: pd.DataFrame,
-              column: str) -> Optional[float]:
+              column: str,
+              *, dynamic: bool = False) -> Optional[float]:
     """
-    Sector-relative z-score with TWO fallbacks:
+    Sector-relative z-score with THREE fallbacks:
 
-      1. Try cross-sectional robust_z on the in-portfolio cohort.  When
-         the cohort has ≥5 finite samples this is the most accurate signal.
-      2. If the cohort is too small (<5 — the usual case for retail
-         portfolios), fall back to an ABSOLUTE sector benchmark keyed by
-         long-run sector medians (`_SECTOR_FUNDAMENTAL_BENCHMARKS`).
-         Without this fallback every single-name Tech holding got the
-         same F-score from `macro_alignment` alone — visible in production
-         as 8 of 11 stocks reading "F=+0.4".
-      3. If neither path works (no value, no benchmark for the sector),
-         return None so the pillar reads "no data" instead of fabricating.
+      1. Cross-sectional robust_z on the IN-PORTFOLIO cohort.  When the
+         cohort has ≥5 finite samples this is the most accurate signal.
+      2. (Sprint-5.1, when `dynamic=True`) robust_z against the LIVE SEC
+         cohort of the sector's largest US constituents
+         (`_dynamic_sector_cohort`) — real, current filings instead of
+         frozen constants.  Retail books rarely have ≥5 same-sector names,
+         so in production this is the path that usually runs.
+      3. The ABSOLUTE static benchmark (`_SECTOR_FUNDAMENTAL_BENCHMARKS`,
+         2020-2025 medians) — LAST resort only, logged once per pair so a
+         stale-constant verdict is никогда не silent.
+      4. None when nothing works — the pillar reads "no data" instead of
+         fabricating.
     """
     if value is None or not np.isfinite(float(value)):
         return None
@@ -376,9 +460,30 @@ def _sector_z(value: Optional[float],
         z_rel = robust_z(value, cohort)
         if z_rel is not None:
             return z_rel
-    # Cohort too small — try the absolute sector benchmark.
+    # In-portfolio cohort too small — try the LIVE SEC sector cohort.
+    if dynamic and ticker_sector:
+        try:
+            live = _dynamic_sector_cohort(ticker_sector, column)
+            z_live = robust_z(value, live)
+            if z_live is not None:
+                return z_live
+        except Exception as exc:                       # noqa: BLE001
+            import logging as _lg
+            _lg.getLogger("ScoringOrchestrator").debug(
+                "dynamic cohort failed for %s/%s: %s",
+                ticker_sector, column, exc)
+    # Last resort — static table (provenance-logged once per pair).
     if ticker_sector:
-        return _absolute_fundamental_z(value, ticker_sector, column)
+        z_static = _absolute_fundamental_z(value, ticker_sector, column)
+        if z_static is not None and dynamic:
+            key = (str(ticker_sector), column)
+            if key not in _STATIC_FALLBACK_LOGGED:
+                _STATIC_FALLBACK_LOGGED.add(key)
+                import logging as _lg
+                _lg.getLogger("ScoringOrchestrator").info(
+                    "F-pillar: static 2020-25 benchmark used for %s/%s "
+                    "(live SEC cohort unavailable)", ticker_sector, column)
+        return z_static
     return None
 
 
@@ -389,6 +494,7 @@ def score_portfolio(
     regime: Optional[RegimeReading] = None,
     cds_lookup: Optional[CDSLookup] = None,
     hotspot_trc_pct: float = DEFAULT_HOTSPOT_TRC_PCT,
+    dynamic_benchmarks: bool = False,
 ) -> dict[str, AssetScore]:
     """
     Compute AssetScore for every row in `perf_table`.
@@ -405,6 +511,11 @@ def score_portfolio(
                        When None, the Credit pillar uses only SEC signals
                        (Altman / Piotroski / IntCov).
         hotspot_trc_pct : Cut-off above which an asset is forced to Trim.
+        dynamic_benchmarks : Sprint-5.1 — when True, small-sector F-pillar
+                       z-scores fall back to the LIVE SEC cohort of sector
+                       leaders before touching the static 2020-25 constants.
+                       Off by default (no network in library/unit-test use);
+                       the production engine opts in.
 
     Returns:
         {ticker: AssetScore}
@@ -436,7 +547,8 @@ def score_portfolio(
       # Wrap the body; on failure log and skip just that asset.
         try:
             _score_one_asset(out, row, ticker, sector, perf, technicals,
-                             regime, cds_lookup, hotspot_trc_pct)
+                             regime, cds_lookup, hotspot_trc_pct,
+                             dynamic_benchmarks)
         except Exception as exc:                       # noqa: BLE001
             import logging as _lg
             _lg.getLogger("ScoringOrchestrator").warning(
@@ -445,7 +557,8 @@ def score_portfolio(
 
 
 def _score_one_asset(out, row, ticker, sector, perf, technicals,
-                     regime, cds_lookup, hotspot_trc_pct) -> None:
+                     regime, cds_lookup, hotspot_trc_pct,
+                     dynamic_benchmarks: bool = False) -> None:
     """Score a single asset and write the AssetScore into `out` (in place)."""
     # Physical commodities (Gold/Silver/Oil) and sovereign-rate ETFs
     # (TLT/IEF/…) have NO financial statements — the Fundamentals
@@ -457,12 +570,14 @@ def _score_one_asset(out, row, ticker, sector, perf, technicals,
     # reuse that guard for a consistent "no corporate financials" rule.
     fundamentals_applicable = not _is_credit_not_applicable(ticker, sector)
 
-    # Pillar A — Fundamentals (sector cross-sectional Z-scores)
-    roe_z = _sector_z(row.get("SEC_ROE"),                  sector, perf, "SEC_ROE")
-    opm_z = _sector_z(row.get("SEC_Op_Margin"),            sector, perf, "SEC_Op_Margin")
-    dta_z = _sector_z(row.get("SEC_Debt_to_Assets"),       sector, perf, "SEC_Debt_to_Assets")
-    rg_z  = _sector_z(row.get("SEC_Revenue_Growth_YoY"),   sector, perf, "SEC_Revenue_Growth_YoY")
-    fcf_z = _sector_z(row.get("SEC_FCF_Margin"),           sector, perf, "SEC_FCF_Margin")
+    # Pillar A — Fundamentals (sector cross-sectional Z-scores; live SEC
+    # cohort fallback when dynamic_benchmarks is on — Sprint-5.1 / S2).
+    _dyn = dynamic_benchmarks
+    roe_z = _sector_z(row.get("SEC_ROE"),                  sector, perf, "SEC_ROE",                dynamic=_dyn)
+    opm_z = _sector_z(row.get("SEC_Op_Margin"),            sector, perf, "SEC_Op_Margin",          dynamic=_dyn)
+    dta_z = _sector_z(row.get("SEC_Debt_to_Assets"),       sector, perf, "SEC_Debt_to_Assets",     dynamic=_dyn)
+    rg_z  = _sector_z(row.get("SEC_Revenue_Growth_YoY"),   sector, perf, "SEC_Revenue_Growth_YoY", dynamic=_dyn)
+    fcf_z = _sector_z(row.get("SEC_FCF_Margin"),           sector, perf, "SEC_FCF_Margin",         dynamic=_dyn)
     if fundamentals_applicable:
         macro_align = _macro_alignment(sector, regime)
         f_score = fundamentals_score(

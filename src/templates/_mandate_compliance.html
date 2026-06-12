@@ -33,6 +33,17 @@
                  color:var(--ink-60, #6b6256); font-size:9px;">лимит {{ r.lo|int }}–{{ r.hi|int }}%</td>
     </tr>
     {% endfor %}
+    {# Sprint-5.1 (L2): margin debt sits OUTSIDE the asset-class limits —
+       show it explicitly so a leveraged book can't look "compliant". #}
+    {% if _mc.leveraged %}
+    <tr>
+      <td style="padding:3px 0 1px; color:#c62828; font-weight:600;">Маржинальный долг</td>
+      <td style="padding:3px 6px 1px; text-align:right; font-family:var(--font-mono, monospace);
+                 font-weight:700; color:#c62828;">−{{ '%.0f' % _mc.margin_debt_pct }}%</td>
+      <td style="padding:3px 0 1px; text-align:right; font-family:var(--font-mono, monospace);
+                 color:#c62828; font-size:9px;">вне лимитов классов</td>
+    </tr>
+    {% endif %}
   </table>
 </div>
 {% endif %}

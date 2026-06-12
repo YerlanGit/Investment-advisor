@@ -37,13 +37,25 @@ def _flag_critical(bucket: list, rule_id: str, subject: str, message: str) -> No
                    rule_id, subject, message)
 
 
+# Sprint-5.1 (S4): the Euler hotspot cut-off is shared with the 🔥-flag in
+# the report (scoring_orchestrator) — SINGLE SOURCE OF TRUTH lives in
+# finance.scoring.HOTSPOT_TRC_PCT.  Guarded import keeps this module
+# import-safe even in stripped environments.
+try:
+    from finance.scoring import HOTSPOT_TRC_PCT as _HOTSPOT_TRC_PCT
+except Exception:                                      # pragma: no cover
+    _HOTSPOT_TRC_PCT = 20.0
+
 # Default limits (overridden by user profile)
 DEFAULT_LIMITS = {
-    "max_euler_risk_pct": 20.0,        # Max single asset risk contribution
+    "max_euler_risk_pct": _HOTSPOT_TRC_PCT,  # Max single asset risk contribution (SSOT)
     "max_single_asset_weight_pct": 15.0, # Max single asset weight
     "max_cvar_daily": -0.05,            # Max acceptable CVaR (-5%)
     "min_sharpe": 0.3,                  # Min acceptable Sharpe
     "max_portfolio_volatility": 0.40,   # Max annual volatility (40%)
+    # Sprint-5.1 (L2): gross exposure cap — leverage was computed by the
+    # engine but never risk-checked.  1.50 = 150% of equity.
+    "max_gross_exposure": 1.50,
 }
 
 # ── Asset-class classifier for Mandate Compliance (Check 8) ──────────────────
@@ -264,6 +276,30 @@ def run_gatekeeper(
             warnings.append(
                 f"TRACKING ERROR: {actual_te:.1%} (целевой: {target_te:.0%}). "
                 f"Портфель значительно отклоняется от бенчмарка мандата."
+            )
+
+    # ═══════════════ CHECK 10: Leverage / Gross Exposure ═══════════════
+    # Sprint-5.1 (L2): the engine computes leverage_metrics (margin debt =
+    # negative cash leg) but nothing risk-checked it.  A leveraged book is
+    # ALWAYS at least a warning (losses scale by the leverage ratio, margin
+    # call possible); gross exposure above the limit is critical.
+    lev = report.get("leverage_metrics") or {}
+    if lev.get("is_leveraged"):
+        gross = float(lev.get("gross_exposure") or 1.0)
+        ratio = float(lev.get("leverage_ratio") or 1.0)
+        margin_pct = abs(min(0.0, float(lev.get("cash_weight") or 0.0))) * 100
+        if gross > limits["max_gross_exposure"]:
+            _flag_critical(
+                critical, "GK-10-LEVERAGE", "portfolio",
+                f"ПЛЕЧО: валовая экспозиция {gross:.0%} превышает лимит "
+                f"{limits['max_gross_exposure']:.0%} (маржинальный долг "
+                f"{margin_pct:.0f}% капитала). Риск Margin Call."
+            )
+        else:
+            warnings.append(
+                f"ПЛЕЧО: портфель использует маржу — gross {gross:.0%}, "
+                f"плечо {ratio:.2f}x, долг {margin_pct:.0f}% капитала. "
+                f"Убытки масштабируются на коэффициент плеча."
             )
 
     # ═══════════════ RESULT (non-blocking) ═══════════════

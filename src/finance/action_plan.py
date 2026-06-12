@@ -32,6 +32,19 @@ ATR_HOLD_STOP_MULT   = 2.5     # Hold stop            = price - 2.5·ATR (or SMA
 
 MAX_TRADE_BLOCK_PORTFOLIO_PCT = 0.25   # Δw rebalance cap per single report
 
+# Sprint-5.1 (A3) — mandate-aware ATR scale.  Levels used to be one-size-
+# fits-all: a Conservative and an Aggressive investor got IDENTICAL stop
+# distances.  The scale multiplies the ATR-based stop/take distances ONLY
+# (structure anchors — SMA50/SMA200/52w-high — stay untouched):
+#   Conservative → tighter stops & nearer take-profits (×0.75)
+#   Moderate     → the historical defaults (×1.00, golden behaviour)
+#   Aggressive   → wider stops & farther take-profits (×1.25)
+MANDATE_LEVEL_SCALE: dict[str, float] = {
+    "CONSERVATIVE": 0.75,
+    "MODERATE":     1.00,
+    "AGGRESSIVE":   1.25,
+}
+
 
 # ── Public dataclass ─────────────────────────────────────────────────────────
 
@@ -76,15 +89,24 @@ def compute_levels(*,
                    sma200:  Optional[float],
                    high_52w: Optional[float],
                    rsi:     Optional[float],
-                   macd_below_zero: Optional[bool] = None) -> dict:
+                   macd_below_zero: Optional[bool] = None,
+                   mandate_scale: float = 1.0) -> dict:
     """
     Compute Buy zone / Sell zone / Take target / Stop loss for one asset.
 
     Falls back gracefully when an indicator is missing — never returns
     a fabricated price level.
+
+    ``mandate_scale`` (Sprint-5.1 / A3) multiplies the ATR-based STOP and
+    TAKE distances so risk distances follow the investor's mandate
+    (Conservative 0.75 / Moderate 1.0 / Aggressive 1.25).  Entry-zone
+    anchors (SMA-based) and the 52w-high resistance logic are untouched —
+    they describe price STRUCTURE, not risk appetite.  Default 1.0
+    reproduces the historical levels exactly.
     """
     # If no ATR we can't anchor risk; produce only price-based stop.
     atr = float(atr_abs) if atr_abs is not None and atr_abs > 0 else None
+    ms = float(mandate_scale) if mandate_scale and mandate_scale > 0 else 1.0
 
     # RSI-based buy-zone shift: hot tape → require deeper pullback.
     rsi_hot = rsi is not None and rsi > 75
@@ -121,7 +143,7 @@ def compute_levels(*,
         if sma200 is not None:
             primary.append(sma200 * 1.05)
         if atr is not None:
-            primary.append(price + ATR_TAKE_MULT_BUY * atr)
+            primary.append(price + ATR_TAKE_MULT_BUY * ms * atr)
         take = max(primary) if primary else None
         if high_52w is not None:
             resistance = high_52w * 1.02
@@ -132,10 +154,10 @@ def compute_levels(*,
         if take is not None:
             out["take_target"] = float(take)
 
-        # Stop: -2 ATR or SMA200 (whichever is higher → tighter).
+        # Stop: -2 ATR (mandate-scaled) or SMA200 (whichever is higher → tighter).
         stops = []
         if atr is not None:
-            stops.append(price - ATR_STOP_MULT_BUY * atr)
+            stops.append(price - ATR_STOP_MULT_BUY * ms * atr)
         if sma200 is not None:
             stops.append(sma200)
         if stops:
@@ -151,13 +173,13 @@ def compute_levels(*,
                 sell_hi = max(sell_hi, min(price * 1.02, high_52w))
             out["sell_zone"] = (float(sell_lo), float(sell_hi))
         if atr is not None:
-            out["stop_loss"] = float(price - ATR_STOP_MULT_SELL * atr)
+            out["stop_loss"] = float(price - ATR_STOP_MULT_SELL * ms * atr)
         return out
 
     # Hold — only protective stop.
     stops = []
     if atr is not None:
-        stops.append(price - ATR_HOLD_STOP_MULT * atr)
+        stops.append(price - ATR_HOLD_STOP_MULT * ms * atr)
     if sma100 is not None:
         stops.append(sma100)
     if stops:
@@ -173,6 +195,7 @@ def build_action_plan(*,
                       technicals_map: dict,         # {ticker: TechnicalReading}
                       bl_records: Optional[list[dict]] = None,
                       portfolio_value: float = 0.0,
+                      risk_mandate: str = "MODERATE",
                       ) -> list[AssetActionRow]:
     """
     Stitch per-asset action with quantitative levels.
@@ -196,6 +219,17 @@ def build_action_plan(*,
     bl_by_ticker: dict[str, dict] = {}
     if bl_records:
         bl_by_ticker = {r["ticker"]: r for r in bl_records}
+
+    # Sprint-5.1 (A3): resolve the mandate → ATR scale once per plan.
+    # normalize_risk_mandate maps any RU/EN profile name (or score) to the
+    # canonical 3-state mandate; unknown input degrades to MODERATE = the
+    # historical behaviour.
+    try:
+        from finance.scoring import normalize_risk_mandate
+        _scale = MANDATE_LEVEL_SCALE.get(
+            normalize_risk_mandate(risk_mandate), 1.0)
+    except Exception:
+        _scale = 1.0
 
     if perf_table is None or perf_table.empty:
         return rows
@@ -239,6 +273,7 @@ def build_action_plan(*,
             action=action, price=price, atr_abs=atr_abs,
             sma50=sma50, sma100=sma100, sma200=sma200,
             high_52w=hi52, rsi=rsi, macd_below_zero=macd_neg,
+            mandate_scale=_scale,
         )
 
         bl = bl_by_ticker.get(ticker)
@@ -297,4 +332,4 @@ def build_action_plan(*,
 
 
 __all__ = ["AssetActionRow", "compute_levels", "build_action_plan",
-           "MAX_TRADE_BLOCK_PORTFOLIO_PCT"]
+           "MAX_TRADE_BLOCK_PORTFOLIO_PCT", "MANDATE_LEVEL_SCALE"]

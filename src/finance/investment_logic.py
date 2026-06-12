@@ -194,7 +194,11 @@ class MAC3RiskEngine:
                  reporting_currency: ReportingCurrency | str | None = None,
                  fx_provider=None, risk_mandate: str = "MODERATE"):
         self.trading_days = trading_days
-        self.ewma_halflife = ewma_halflife  # 63 дней ≈ λ=0.94 (RiskMetrics)
+        # halflife=63 торговых дня (~3 мес) ⇒ дневной decay λ = 0.5^(1/63) ≈ 0.989.
+        # Это СОЗНАТЕЛЬНО плавнее RiskMetrics λ=0.94 (что соответствовало бы
+        # halflife ≈ 11 дн): факторная ковариация стабильнее, меньше шумовых
+        # разворотов весов. (Sprint-5.1: прежний коммент «≈ λ=0.94» был неверен.)
+        self.ewma_halflife = ewma_halflife
         # H4: investor risk mandate (CONSERVATIVE/MODERATE/AGGRESSIVE) — drives
         # the composite-risk-score weighting + CVaR base divisor.
         from finance.scoring import normalize_risk_mandate as _nrm
@@ -652,8 +656,9 @@ class MAC3RiskEngine:
         D = np.diag(specific_variances) # (N_assets, N_assets)
         
         # 3. Структурная Ковариационная Матрица
-        # EWMA коварация (стандарт RiskMetrics: λ=0.94, halflife=63)
-        # Недавние дни влияют сильнее, чем старые
+        # EWMA-ковариация: halflife=63 дн ⇒ λ_daily ≈ 0.989 (плавнее
+        # RiskMetrics λ=0.94 ≈ hl 11 дн — выбрано для стабильности факторной
+        # матрицы).  Недавние дни влияют сильнее, чем старые.
         ewma_cov = f_data.ewm(halflife=self.ewma_halflife).cov()
         # Берём последний срез (самый актуальный)
         last_date = f_data.index[-1]
@@ -1409,6 +1414,10 @@ class UniversalPortfolioManager:
                 technicals = technicals_map,
                 regime     = regime_reading,
                 cds_lookup = cds_lookup,
+                # Sprint-5.1 (S2): in production, small-sector F-pillar
+                # z-scores use the LIVE SEC cohort of sector leaders before
+                # falling back to the static 2020-25 constants.
+                dynamic_benchmarks = os.getenv("SECTOR_COHORT_DISABLED") != "1",
             )
             # Materialise the score columns into the perf table for downstream
             # PDF rendering — this is purely additive, no existing column is
@@ -1551,6 +1560,10 @@ class UniversalPortfolioManager:
                 technicals_map  = technicals_map,
                 bl_records      = bl_records,
                 portfolio_value = total_portfolio_value,
+                # Sprint-5.1 (A3): stop/take distances scale with the mandate
+                # (Conservative tighter, Aggressive wider) — levels are no
+                # longer one-size-fits-all.
+                risk_mandate    = self.engine.risk_mandate,
             )
             action_plan_rows = [r.as_dict() for r in rows]
         except Exception as exc:
