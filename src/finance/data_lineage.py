@@ -345,9 +345,17 @@ def _ai_status(ai_summary: Optional[dict]) -> dict:
             status = "missing",
             note   = "ANTHROPIC_API_KEY missing or AI call failed",
         )
+    # Sprint-5.2: prefixing the RAW model id produced "Anthropic Claude
+    # claude-sonnet-4-6" in the prod CoVe panel — use the display name.
+    model_id = a.get("model_used") or ""
+    try:
+        from pdf_payload import _model_display_name
+        model_disp = _model_display_name(model_id) or model_id
+    except Exception:
+        model_disp = model_id
     return _row(
         name   = "AI verdict · bullets",
-        source = "Anthropic Claude " + (a.get("model_used") or ""),
+        source = ("Anthropic · " + model_disp) if model_disp else "Anthropic Claude",
         method = "advisory only; verdict + plain summary + bullets",
         status = "ok",
         note   = "не является ИИР (индивидуальной инвест. рекомендацией)",

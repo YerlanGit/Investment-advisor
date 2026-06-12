@@ -507,6 +507,24 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
             "Это противоречит сигналам Quant Engine.\n"
         )
 
+    # Sprint-5.2 (live-report audit) — held-tickers rule.  The 2026-06-12 BASE
+    # report showed pure catalogue picks: Haiku spent its picks on HELD names,
+    # the held-filter drained them, and the deterministic backfill took over.
+    # Telling the model UP FRONT which tickers are already owned prevents the
+    # drain at the source (the post-filter stays as defence in depth).
+    held_tickers = sorted({
+        str(h.get("ticker", "")).upper().split(".")[0]
+        for h in (summary.get("holdings") or [])
+        if str(h.get("ticker", "")).strip() not in ("", "?")
+    } - {"USD", "EUR", "RUB", "KZT", "CASH"})
+    held_rule = ""
+    if held_tickers:
+        held_rule = (
+            f"УЖЕ В ПОРТФЕЛЕ: {', '.join(held_tickers[:20])}. "
+            "НЕ предлагай эти тикеры в stock_picks — только НОВЫЕ имена "
+            "вне портфеля.\n"
+        )
+
     # Sprint-5.1 — data-driven ideas rule.  Temperature alone (Sprint-5) gave
     # variety, but the model could still parrot its training-set "favourites"
     # (PLTR/CRWD/JNJ/KO/COST).  Require every pick to be ANCHORED to data
@@ -535,7 +553,8 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
             f"валовая экспозиция ≈{lev.get('gross_exposure_pct')}% капитала, "
             f"плечо ≈{lev.get('leverage_ratio')}x, маржинальный долг ≈{lev.get('margin_debt_pct')}%. "
             "ОБЯЗАТЕЛЬНО заполни поле ai_leverage_warning (≤240 знаков): объясни простыми словами, "
-            "что плечо УМНОЖАЕТ и прибыль, и убыток, и при просадке возможен Margin Call "
+            f"что и прибыль, и убыток умножаются на коэффициент плеча ≈{lev.get('leverage_ratio')}x "
+            f"(НЕ пиши «удваивается», если плечо не ≈2x), и при просадке возможен Margin Call "
             "(принудительное закрытие позиций брокером по худшим ценам). Также выдели это "
             "ОТДЕЛЬНЫМ первым пунктом в bullets [Quant Engine].\n"
         )
@@ -614,6 +633,7 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
             "отчёта (см. правило DATA-DRIVEN ниже). "
             "why — конкретные цифры (ROE, маржа, Бета) с тегом [Источник].\n"
             f"{contradiction_rule}"
+            f"{held_rule}"
             f"{leverage_rule}"
             f"{ideas_rule}"
             f"{rag_rule}\n"
@@ -748,6 +768,7 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
         "(см. правило DATA-DRIVEN ниже).\n"
         "- why: конкретные цифры (ROE, маржа, Beta, P/E, momentum) с тегом [источник].\n"
         f"{contradiction_rule}"
+        f"{held_rule}"
         f"{leverage_rule}"
         f"{ideas_rule}"
         f"{rag_rule}"
@@ -1323,9 +1344,21 @@ def _backfill_empty_scenarios(stock_picks: dict, regime_label: str, tier: str,
         fb = fallback.get(key) or {}
         if fb.get("picks"):
             # Preserve the AI's label/desc if present, else take the fallback's.
+            # Sprint-5.2: a label equal to the RAW key (normaliser default when
+            # the model omitted it) is NOT a real label — prefer the fallback's
+            # human-readable one (the 2026-06-12 BASE report showed card titles
+            # "boost_alpha"/"rebalance").
+            ai_label = str(scenario.get("label") or "").strip()
+            if not ai_label or ai_label == key:
+                ai_label = fb.get("label", key)
+            desc = scenario.get("desc") or fb.get("desc", "")
+            # Sprint-5.2 honesty marker: catalogue picks must not masquerade
+            # as the AI's own analysis.
+            if "резервный каталог" not in desc:
+                desc = (desc + " · резервный каталог").strip(" ·")
             stock_picks[key] = {
-                "label": scenario.get("label") or fb.get("label", key),
-                "desc":  scenario.get("desc")  or fb.get("desc", ""),
+                "label": ai_label,
+                "desc":  desc,
                 "picks": fb["picks"],
             }
             logger.info("Idea backfill: scenario '%s' was empty → filled from "

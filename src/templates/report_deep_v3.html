@@ -1683,9 +1683,16 @@
   <section class="cover">
     <div class="cover-main">
       <div class="block-label">Вердикт по портфелю</div>
+      {# Sprint-5.2 (live-report audit): the DEEP cover headline was a
+         HARDCODED prototype sentence and ai_verdict was rendered NOWHERE in
+         this tier.  Bind it; static text survives only as no-AI fallback. #}
       <h1 class="verdict">
-        Портфель в зоне <span class="hl">умеренного риска</span> —
-        держать можно, но почти весь риск собран в двух позициях.
+        {% if data.ai_verdict %}
+          {{ data.ai_verdict }}
+        {% else %}
+          Портфель в зоне <span class="hl">{{ (data.risk_label or 'умеренного') | lower }} риска</span> —
+          ключевые метрики и концентрация риска ниже.
+        {% endif %}
       </h1>
 
       <div class="ai-box">
@@ -1702,6 +1709,20 @@
           {% endif %}
         </div>
       </div>
+
+      {# Sprint-5.2: ai_bullets (5-7 Sonnet insights) were generated on every
+         DEEP report but never rendered.  Compact insight list on the cover. #}
+      {% if data.ai_bullets %}
+      <ul style="margin:10px 0 0; padding:0 0 0 2px; list-style:none;">
+        {% for b in data.ai_bullets[:5] %}
+        <li style="display:flex; gap:7px; margin-top:5px; font-size:10.5px;
+                   line-height:1.5; color:var(--ink-90);">
+          <span style="color:var(--tech-blue); font-weight:700;">›</span>
+          <span>{{ b }}</span>
+        </li>
+        {% endfor %}
+      </ul>
+      {% endif %}
     </div>
 
     <!-- RISK GAUGE 0–100 -->

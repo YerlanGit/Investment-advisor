@@ -23,7 +23,8 @@
 
 | Секция | Ключи | Builder | Движок |
 |---|---|---|---|
-| Риск-гейдж 0–100 + мандат-бейдж | `risk_pct`, `risk_label`, `risk_mandate_label` | `build_payload` (верх), `_risk_mandate_label` | `scoring.composite_risk_score` (веса по мандату `_RISK_MANDATE_MATRIX`) |
+| Вердикт на обложке + инсайты | `ai_verdict`, `ai_bullets[]`, `ai_plain_summary` | прокидка из `ai_summary` | Sprint 5.2: H1 обложки привязан к `ai_verdict` (был захардкожен), `ai_bullets` рендерятся (top-4 BASE / top-5 DEEP) |
+| Риск-гейдж 0–100 + мандат-бейдж | `risk_pct`, `risk_label`, `risk_mandate_label` | `build_payload` (верх), `_risk_mandate_label` | `scoring.composite_risk_score` (веса по мандату `_RISK_MANDATE_MATRIX`); бейдж показывает реальное имя профиля при наличии `user_profile` (5.2) |
 | KPI-карточки CVaR / Sharpe / MaxDD | `cvar`, `cvar_ci`, `sharpe`, `sortino`, `max_drawdown`, `volatility`, `*_dollar` | `build_payload` (KPI-блок) | `investment_logic` (bootstrap-CVaR Politis-Romano, Sortino H-4) |
 | AI-комментарии к KPI | `ai_cvar_note`, `ai_sharpe_note`, `ai_mdd_note` | прокидка из `ai_summary` | `ai_narrative` (структурированный tool `emit_report`) |
 | MoM-дельта риска | `prev_risk_score`, `risk_score_delta` | `build_payload` + `prev_snapshot` | `db_tokenomics.get_last_report_snapshot` |

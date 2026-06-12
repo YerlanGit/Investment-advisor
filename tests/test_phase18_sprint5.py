@@ -212,7 +212,11 @@ class BenchmarkActivationTest(unittest.TestCase):
         }
         pl = build_payload(results, "base", user_bench_ticker="VLUE.US")  # custom, not in std-5
         names = [s["name"] for s in pl["scenarios"]]
-        self.assertEqual(names, ["Профильный бенчмарк"])
+        self.assertEqual(len(names), 1)
+        # Sprint-5.2: the slot is renamed with the actual ETF display name so
+        # the card is not an opaque «Профильный бенчмарк».
+        self.assertTrue(names[0].startswith("Профильный бенчмарк"))
+        self.assertIn("VLUE", names[0])
 
 
 # ═══════════════ Sprint 5.1 — закрытие остаточных находок секций ═══════════════
@@ -406,6 +410,109 @@ class TemperatureGuardTest(unittest.TestCase):
         self.assertFalse(_model_supports_temperature("claude-opus-4-7-20260115"))
         self.assertTrue(_model_supports_temperature("claude-sonnet-4-6"))
         self.assertTrue(_model_supports_temperature("claude-haiku-4-5-20251001"))
+
+
+# ═══════════════ Sprint 5.2 — фиксы по живым прод-отчётам 2026-06-12 ═══════════
+
+class MandateBadgeConsistencyTest(unittest.TestCase):
+    """Live-audit: gauge badge said «Умеренный» while the mandate panel said
+    «Умеренно-агрессивный» — the badge must show the user's real profile."""
+
+    def _results(self):
+        return {"performance_table": pd.DataFrame([
+                    {"Ticker": "AAPL", "Current_Value": 1000.0, "Total_Cost": 800.0,
+                     "PnL": 200.0, "Return_Pct": 0.25,
+                     "Euler_Risk_Contribution_Pct": 10.0}]),
+                "total_value": 1000.0, "portfolio_metrics": {},
+                "benchmark_comparison": {}, "sector_exposure": {"Technology": 1.0},
+                "risk_mandate": "MODERATE"}
+
+    def test_badge_uses_real_profile_name(self):
+        from pdf_payload import build_payload
+        p = build_payload(self._results(), "base",
+                          user_profile={"profile_name": "Умеренно-агрессивный",
+                                        "target_volatility": 0.14, "target_te": 0.06,
+                                        "limits_dict": {"Stocks_US": [30, 60]}})
+        self.assertEqual(p["risk_mandate_label"], "Умеренно-агрессивный")
+
+    def test_badge_falls_back_to_bucket_without_profile(self):
+        from pdf_payload import build_payload
+        p = build_payload(self._results(), "base")
+        self.assertEqual(p["risk_mandate_label"], "Умеренный")
+
+
+class RoundedZeroDeltaNeutralTest(unittest.TestCase):
+    """Live-audit: «+0.0 пп» rendered green — displayed-zero must be neutral."""
+
+    def test_tiny_delta_pp_is_neutral(self):
+        from pdf_payload import _build_expected_effect
+        ee = _build_expected_effect({"metrics": {"expected_return": {
+            "before": 0.05, "after": 0.0504, "delta": 0.0004,
+            "delta_pp": 0.04, "improved": True}}})
+        self.assertIsNone(ee["expected_return"]["favourable"])
+
+    def test_real_delta_keeps_flag(self):
+        from pdf_payload import _build_expected_effect
+        ee = _build_expected_effect({"metrics": {"volatility_ann": {
+            "before": 0.20, "after": 0.16, "delta": -0.04,
+            "delta_pp": -4.0, "improved": True}}})
+        self.assertIs(ee["vol"]["favourable"], True)
+
+
+class IdeaTitleRawKeyLeakTest(unittest.TestCase):
+    """Live-audit: BASE idea cards were titled 'boost_alpha'/'rebalance'."""
+
+    def test_key_equal_label_replaced_by_category(self):
+        from pdf_payload import _build_ai_ideas
+        ideas = _build_ai_ideas({"rebalance": {"label": "rebalance", "desc": "",
+                                               "picks": [{"ticker": "X", "name": "X",
+                                                          "why": "w"}]}}, tier="base")
+        self.assertEqual(ideas["diversification"][0]["title"], "Ребалансировка")
+
+
+class HeldRuleInPromptTest(unittest.TestCase):
+    """Live-audit: Haiku spent picks on held names → drained → catalogue.
+    The prompt must list held tickers up front."""
+
+    def test_held_tickers_listed(self):
+        from ai_narrative import _user_prompt
+        pr = _user_prompt({"holdings": [{"ticker": "NVDA"}, {"ticker": "ORCL"},
+                                        {"ticker": "USD"}],
+                           "regime": {"regime": "Expansion"}}, tier="base")
+        self.assertIn("УЖЕ В ПОРТФЕЛЕ: NVDA, ORCL", pr)
+        self.assertNotIn("УЖЕ В ПОРТФЕЛЕ: NVDA, ORCL, USD", pr)  # cash excluded
+
+    def test_backfill_marks_catalogue_provenance(self):
+        from ai_narrative import _backfill_empty_scenarios
+        out = _backfill_empty_scenarios(
+            {"boost_alpha": {"label": "boost_alpha", "desc": "", "picks": []}},
+            "Expansion", "base", "", {})
+        self.assertIn("резервный каталог", out["boost_alpha"]["desc"])
+        self.assertNotEqual(out["boost_alpha"]["label"], "boost_alpha")
+
+
+class LineageModelDisplayTest(unittest.TestCase):
+    """Live-audit: CoVe showed 'Anthropic Claude claude-sonnet-4-6'."""
+
+    def test_display_name_used(self):
+        from finance.data_lineage import _ai_status
+        row = _ai_status({"verdict": "v", "bullets": ["b"],
+                          "model_used": "claude-sonnet-4-6"})
+        self.assertEqual(row["source"], "Anthropic · Claude Sonnet 4.6")
+        self.assertNotIn("claude-sonnet", row["source"])
+
+
+class CoverVerdictBindingTest(unittest.TestCase):
+    """Live-audit: cover H1 was a hardcoded prototype sentence; ai_verdict and
+    ai_bullets must actually render in BOTH templates."""
+
+    def test_templates_bind_verdict_and_bullets(self):
+        root = Path(__file__).resolve().parent.parent / "src" / "templates"
+        for tpl in ("report_basic_v3.html", "report_deep_v3.html"):
+            src = (root / tpl).read_text(encoding="utf-8")
+            self.assertIn("data.ai_verdict", src, tpl)
+            self.assertIn("data.ai_bullets", src, tpl)
+            self.assertNotIn("почти весь риск собран в двух позициях", src, tpl)
 
 
 class RegimeConsistencyR3Test(unittest.TestCase):
