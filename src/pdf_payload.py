@@ -312,11 +312,19 @@ def _build_ai_ideas(stock_picks: dict, tier: str = "base") -> dict:
              "scenario": str(p.get("why", ""))}
             for p in picks
         ]
+        # Sprint-5.2 (live-report audit): when the model omits `label`,
+        # _normalise_stock_picks defaults it to the RAW scenario key — the
+        # 2026-06-12 BASE report showed card titles "boost_alpha"/"rebalance".
+        # Treat a key-equal label as missing and fall back to the canonical
+        # Russian category name.
+        label = str(scenario.get("label") or "").strip()
+        if not label or label == src_key:
+            label = category
         ideas[bucket].append({
             "idea_num":   f"{num:02d}",
             "category":   category,
             "priority":   priority,
-            "title":      str(scenario.get("label") or category),
+            "title":      label,
             "rationale":  str(scenario.get("desc") or ""),
             "pipeline":   pipeline_map.get(src_key, []),
             "candidates": candidates,
@@ -426,11 +434,18 @@ def _build_expected_effect(raw: Optional[dict]) -> dict:
             # risk_index (points) and sharpe (raw) have no as_pp delta_pp —
             # fall back to the raw delta in its own display unit.
             delta_pp = cell.get("delta")
+        favourable = cell.get("improved")
+        # Sprint-5.2 (live-report audit): the card displays delta with ONE
+        # decimal — a +0.04пп delta rendered as "+0.0 пп" yet was coloured
+        # green.  If the DISPLAYED delta rounds to zero, the colour must be
+        # neutral too (display honesty, engine semantics untouched).
+        if delta_pp is not None and abs(float(delta_pp)) < 0.05:
+            favourable = None
         out[tpl_key] = {
             "before":     before,
             "after":      after,
             "delta_pp":   delta_pp,
-            "favourable": cell.get("improved"),
+            "favourable": favourable,
         }
     # Pass-through the composite verdict computed by simulate_after_plan
     # (improvement / tradeoff / degradation / neutral) — the template
@@ -937,9 +952,14 @@ def build_payload(results: dict, tier: str,
         # H1: mandate label next to the gauge — the gauge is mandate-
         # calibrated (different CVaR base per profile), and without showing
         # which mandate produced the number the score looks arbitrary.
+        # Sprint-5.2 (live-report audit): when the approved profile is known,
+        # show the USER'S OWN profile name — the 3-bucket calibration label
+        # («Умеренный») next to a mandate panel saying «Умеренно-агрессивный»
+        # read as a contradiction in the 2026-06-12 production report.
         "risk_mandate":      results.get("risk_mandate", "MODERATE"),
-        "risk_mandate_label": _risk_mandate_label(
-                              results.get("risk_mandate", "MODERATE")),
+        "risk_mandate_label": ((user_profile or {}).get("profile_name")
+                               or _risk_mandate_label(
+                                   results.get("risk_mandate", "MODERATE"))),
         "kpi_extremes":      kpi_extremes,
         # Dollar impact
         "total_value_usd":   f"${total_val:,.0f}",
@@ -1100,6 +1120,20 @@ def build_payload(results: dict, tier: str,
     else:
         user_bm_filter = _BM_TICKER_TO_NAME.get(user_bench_ticker) if user_bench_ticker else None
     payload["scenarios"] = _build_scenarios(bm_comparison, user_bm_filter)
+    # Sprint-5.2 (live-report audit): the primary card rendered the literal
+    # slot name «Профильный бенчмарк» — opaque to the user.  Append the actual
+    # ETF display name (e.g. «Профильный бенчмарк · Nasdaq 100»).
+    if user_bench_ticker:
+        try:
+            from profile_manager import BENCHMARK_LIST as _BML
+            bm_disp = (_BML.get(user_bench_ticker)
+                       or _BM_TICKER_TO_NAME.get(user_bench_ticker))
+        except Exception:
+            bm_disp = _BM_TICKER_TO_NAME.get(user_bench_ticker)
+        if bm_disp:
+            for row in payload["scenarios"]:
+                if row.get("name") == "Профильный бенчмарк":
+                    row["name"] = f"Профильный бенчмарк · {bm_disp}"
 
     # ── Deep-tier additions ────────────────────────────────────────────────
     if tier == TIER_DEEP:
