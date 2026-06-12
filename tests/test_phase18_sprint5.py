@@ -215,6 +215,199 @@ class BenchmarkActivationTest(unittest.TestCase):
         self.assertEqual(names, ["Профильный бенчмарк"])
 
 
+# ═══════════════ Sprint 5.1 — закрытие остаточных находок секций ═══════════════
+
+class HotspotThresholdSSOTTest(unittest.TestCase):
+    """S4: the 20% TRC cut-off must come from ONE constant everywhere."""
+
+    def test_orchestrator_and_gatekeeper_share_value(self):
+        from finance.scoring import HOTSPOT_TRC_PCT
+        from finance.scoring_orchestrator import DEFAULT_HOTSPOT_TRC_PCT
+        from agent.gatekeeper import DEFAULT_LIMITS
+        self.assertEqual(DEFAULT_HOTSPOT_TRC_PCT, HOTSPOT_TRC_PCT)
+        self.assertEqual(DEFAULT_LIMITS["max_euler_risk_pct"], HOTSPOT_TRC_PCT)
+
+
+class ItShareNeutralTest(unittest.TestCase):
+    """A2: it_share is informational — improved must be None, not red/green."""
+
+    def test_it_share_delta_is_neutral(self):
+        from finance.simulate import _delta_row
+        cell = _delta_row(0.62, 0.50, "it_share", as_pp=True)
+        self.assertIsNone(cell["improved"])
+        self.assertAlmostEqual(cell["delta_pp"], -12.0, places=2)
+
+    def test_zero_delta_is_neutral(self):
+        from finance.simulate import _delta_row
+        cell = _delta_row(0.20, 0.20, "volatility_ann")
+        self.assertIsNone(cell["improved"])
+
+    def test_directional_metrics_unchanged(self):
+        from finance.simulate import _delta_row
+        self.assertTrue(_delta_row(0.20, 0.15, "volatility_ann")["improved"])
+        self.assertTrue(_delta_row(1.0, 1.4, "sharpe")["improved"])
+        self.assertFalse(_delta_row(1.0, 0.5, "sharpe")["improved"])
+
+
+class MandateAwareLevelsTest(unittest.TestCase):
+    """A3: ATR stop/take distances scale with the mandate; MODERATE = legacy."""
+
+    def _levels(self, scale):
+        from finance.action_plan import compute_levels
+        return compute_levels(action="Buy", price=100.0, atr_abs=4.0,
+                              sma50=98.0, sma100=95.0, sma200=90.0,
+                              high_52w=None, rsi=50.0, mandate_scale=scale)
+
+    def test_moderate_reproduces_legacy_levels(self):
+        from finance.action_plan import compute_levels
+        legacy = compute_levels(action="Buy", price=100.0, atr_abs=4.0,
+                                sma50=98.0, sma100=95.0, sma200=90.0,
+                                high_52w=None, rsi=50.0)
+        self.assertEqual(self._levels(1.0), legacy)
+
+    def test_conservative_tighter_than_aggressive(self):
+        cons, aggr = self._levels(0.75), self._levels(1.25)
+        # Conservative stop is CLOSER to price (higher), take is NEARER (lower).
+        self.assertGreater(cons["stop_loss"], aggr["stop_loss"])
+        self.assertLess(cons["take_target"], aggr["take_target"])
+
+    def test_build_plan_resolves_mandate_name(self):
+        from finance.action_plan import build_action_plan
+        df = pd.DataFrame([{"Ticker": "AAPL", "Current_Price": 100.0,
+                            "Quantity": 10, "ATR_Absolute": 4.0}])
+        rows_c = build_action_plan(perf_table=df, asset_scores={}, technicals_map={},
+                                   risk_mandate="Консервативный")
+        rows_a = build_action_plan(perf_table=df, asset_scores={}, technicals_map={},
+                                   risk_mandate="Агрессивный")
+        # Hold-stop: price − 2.5·scale·ATR → conservative stop is higher.
+        self.assertGreater(rows_c[0].stop_loss, rows_a[0].stop_loss)
+
+
+class GatekeeperLeverageCheckTest(unittest.TestCase):
+    """L2: leveraged book → warning; gross over the cap → critical GK-10."""
+
+    def _report(self, gross, cash_w):
+        return {
+            "performance_table": pd.DataFrame([
+                {"Ticker": "AAPL", "Current_Value": 1000.0}]),
+            "portfolio_metrics": {"CVaR_95_Daily": -0.01, "Sharpe_Ratio": 1.0,
+                                  "Total_Volatility_Ann": 0.10},
+            "leverage_metrics": {"is_leveraged": True, "gross_exposure": gross,
+                                 "leverage_ratio": gross, "cash_weight": cash_w},
+        }
+
+    def test_moderate_leverage_is_warning(self):
+        from agent.gatekeeper import run_gatekeeper
+        gate = run_gatekeeper(self._report(1.20, -0.20))
+        self.assertTrue(any("ПЛЕЧО" in w for w in gate["warnings"]))
+        self.assertFalse(any("ПЛЕЧО" in c for c in gate["critical"]))
+
+    def test_excessive_gross_is_critical(self):
+        from agent.gatekeeper import run_gatekeeper
+        gate = run_gatekeeper(self._report(1.60, -0.60))
+        self.assertTrue(any("ПЛЕЧО" in c for c in gate["critical"]))
+
+    def test_unlevered_book_silent(self):
+        from agent.gatekeeper import run_gatekeeper
+        rep = self._report(1.0, 0.05)
+        rep["leverage_metrics"]["is_leveraged"] = False
+        gate = run_gatekeeper(rep)
+        self.assertFalse(any("ПЛЕЧО" in x
+                             for x in gate["warnings"] + gate["critical"]))
+
+
+class MandatePanelMarginTest(unittest.TestCase):
+    """L2: margin debt surfaces in the mandate panel; leveraged ≠ compliant."""
+
+    def test_margin_row_and_compliance(self):
+        from pdf_payload import _build_mandate_compliance
+        perf = pd.DataFrame([{"Ticker": "AAPL", "Current_Value": 1200.0},
+                             {"Ticker": "USD", "Current_Value": -200.0}])
+        profile = {"profile_name": "Умеренный", "target_volatility": 0.10,
+                   "target_te": 0.04,
+                   "limits_dict": {"Stocks_US": [20, 100]}}
+        lev = {"is_leveraged": True, "cash_weight": -0.20}
+        mc = _build_mandate_compliance(perf, 1000.0, profile, leverage=lev)
+        self.assertTrue(mc["leveraged"])
+        self.assertAlmostEqual(mc["margin_debt_pct"], 20.0, places=1)
+        self.assertFalse(mc["compliant"])     # leveraged ⇒ never "compliant"
+
+
+class DynamicSectorCohortTest(unittest.TestCase):
+    """S2: live SEC cohort replaces static constants when enabled."""
+
+    def test_dynamic_cohort_used_when_enabled(self):
+        import finance.scoring_orchestrator as so
+        # Stub the live cohort: 6 sector leaders with known median/MAD.
+        original = so._dynamic_sector_cohort
+        so._dynamic_sector_cohort = lambda sector, column: (
+            (0.10, 0.12, 0.14, 0.16, 0.18, 0.20)
+            if sector == "Technology" and column == "SEC_ROE" else ())
+        try:
+            perf = pd.DataFrame([{"Ticker": "AAPL",
+                                  "Fundamental_Sector": "Technology",
+                                  "SEC_ROE": 0.50}])
+            z = so._sector_z(0.50, "Technology", perf, "SEC_ROE", dynamic=True)
+            # vs live cohort (median 0.15) z is strongly positive and CLIPPED
+            # at +3 — the static table (median 0.30, σ 0.15) would give ≈1.33.
+            self.assertIsNotNone(z)
+            self.assertGreater(z, 2.5)
+        finally:
+            so._dynamic_sector_cohort = original
+
+    def test_static_fallback_when_cohort_empty(self):
+        import finance.scoring_orchestrator as so
+        original = so._dynamic_sector_cohort
+        so._dynamic_sector_cohort = lambda sector, column: ()
+        try:
+            perf = pd.DataFrame([{"Ticker": "AAPL",
+                                  "Fundamental_Sector": "Technology",
+                                  "SEC_ROE": 0.50}])
+            z_dyn = so._sector_z(0.50, "Technology", perf, "SEC_ROE", dynamic=True)
+            z_sta = so._sector_z(0.50, "Technology", perf, "SEC_ROE", dynamic=False)
+            self.assertEqual(z_dyn, z_sta)    # graceful degrade to static
+        finally:
+            so._dynamic_sector_cohort = original
+
+    def test_kill_switch_disables_network_path(self):
+        import os
+        import finance.scoring_orchestrator as so
+        os.environ["SECTOR_COHORT_DISABLED"] = "1"
+        try:
+            self.assertEqual(so._dynamic_sector_cohort("Technology", "SEC_ROE"), ())
+        finally:
+            os.environ.pop("SECTOR_COHORT_DISABLED", None)
+
+
+class FallbackIdeasRotationTest(unittest.TestCase):
+    """Sprint 5.1: the no-API idea catalogue rotates by month (no frozen picks)."""
+
+    def test_all_scenarios_filled_and_deterministic(self):
+        from ai_narrative import _fallback_stock_picks
+        a = _fallback_stock_picks("Expansion", "deep")
+        b = _fallback_stock_picks("Expansion", "deep")
+        self.assertEqual(a, b)                 # deterministic within a month
+        for key in ("boost_alpha", "rebalance", "protect_capital", "regime_play"):
+            self.assertTrue(a[key]["picks"], f"{key} must have picks")
+
+    def test_defensive_regime_uses_defensive_catalogue(self):
+        from ai_narrative import _fallback_stock_picks
+        out = _fallback_stock_picks("Recession", "base")
+        boost = out["boost_alpha"]["picks"][0]["ticker"]
+        self.assertIn(boost, {"DBC", "XLE", "XLU"})
+
+
+class TemperatureGuardTest(unittest.TestCase):
+    """§4.2: Opus 4.7/4.8 reject `temperature` — the param must be omitted."""
+
+    def test_opus_models_skip_temperature(self):
+        from ai_narrative import _model_supports_temperature
+        self.assertFalse(_model_supports_temperature("claude-opus-4-8"))
+        self.assertFalse(_model_supports_temperature("claude-opus-4-7-20260115"))
+        self.assertTrue(_model_supports_temperature("claude-sonnet-4-6"))
+        self.assertTrue(_model_supports_temperature("claude-haiku-4-5-20251001"))
+
+
 class RegimeConsistencyR3Test(unittest.TestCase):
     def _macro(self, yc, hy, vix):
         return {"yield_curve_10y2y": {"value": yc},

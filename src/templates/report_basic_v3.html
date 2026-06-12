@@ -1745,8 +1745,10 @@
                 font-size:10px; color:#e65100; line-height:1.4;
                 font-family:var(--font-mono);">
       Gross Exposure: <b>{{ '%.0f' % (data.leverage_metrics.gross_exposure * 100) }}%</b>
+      <span style="font-family:var(--font-ui); font-weight:400; color:#7a4a00;">(лонг + |маржа| к капиталу)</span>
       &nbsp;·&nbsp;
-      Leverage: <b>{{ '%.2f' % data.leverage_metrics.leverage_ratio }}x</b>
+      Плечо: <b>{{ '%.2f' % data.leverage_metrics.leverage_ratio }}x</b>
+      <span style="font-family:var(--font-ui); font-weight:400; color:#7a4a00;">(лонг ÷ капитал)</span>
       <span style="font-family:var(--font-ui); font-weight:400; color:#7a4a00;">
         — пирог нормализован к 100% (только лонг)
       </span>

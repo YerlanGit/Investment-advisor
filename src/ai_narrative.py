@@ -131,6 +131,17 @@ def _resolve_temperature() -> float:
 
 NARRATIVE_TEMPERATURE = _resolve_temperature()
 
+# Sprint-5.1 (§4.2): Opus 4.7/4.8 REJECT the `temperature` param (HTTP 400).
+# The DEEP tier is slated for an Opus upgrade — guard the param by model
+# family so flipping ANTHROPIC_MODEL_DEEP=claude-opus-4-8 does not break
+# every narrative call.
+_TEMPERATURE_UNSUPPORTED_PREFIXES = ("claude-opus-4-7", "claude-opus-4-8")
+
+
+def _model_supports_temperature(model: str) -> bool:
+    m = str(model or "")
+    return not any(m.startswith(p) for p in _TEMPERATURE_UNSUPPORTED_PREFIXES)
+
 # ── Structured Outputs tool (Tools API) ──────────────────────────────────────
 # Forcing the narrative through a typed tool call makes the response a
 # GUARANTEED structured object the SDK parses for us — eliminating the
@@ -496,6 +507,23 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
             "Это противоречит сигналам Quant Engine.\n"
         )
 
+    # Sprint-5.1 — data-driven ideas rule.  Temperature alone (Sprint-5) gave
+    # variety, but the model could still parrot its training-set "favourites"
+    # (PLTR/CRWD/JNJ/KO/COST).  Require every pick to be ANCHORED to data
+    # from THIS report (regime, sector gaps, 4-pillar, RAG) and ban the
+    # template names unless the data of the current report supports them.
+    ideas_rule = (
+        "ИДЕИ — СТРОГО DATA-DRIVEN: каждая идея в stock_picks обязана "
+        "опираться на данные ЭТОГО отчёта: текущий режим "
+        f"{regime_label} и его благоприятные сектора, недовесы/перекосы из "
+        "sectors, сигналы 4-Pillar и/или АНАЛИТИКУ БАНКОВ (RAG). В поле why — "
+        "явная привязка к этим данным (что именно в портфеле/режиме делает "
+        "идею уместной СЕЙЧАС). НЕ предлагай «дежурные» имена (PLTR, CRWD, "
+        "JNJ, KO, COST, MTUM, DBC), если их преимущество не следует из данных "
+        "текущего отчёта — предпочитай менее очевидные имена с тем же "
+        "профилем риска/качества.\n"
+    )
+
     # Sprint-5 — Margin/leverage AI-trigger.  When the engine flags a
     # margin-funded book (cash leg < 0), the model is HARD-REQUIRED to fill
     # `ai_leverage_warning` and to lead a bullet with the Margin-Call risk.
@@ -582,10 +610,12 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
             "Goldman Sachs, Barclays, JPMorgan, Morgan Stanley по текущему режиму и секторам.\n"
             "- Каждое число — [Quant Engine]/[SEC EDGAR]/[Regime]/[RAG] или [GS]/[Barclays]/[JPM].\n"
             f"- Риск-профиль: {user_profile}. Режим: {regime_label}.\n"
-            "- Stock picks: РЕАЛЬНЫЕ АКЦИИ (PLTR, JNJ, KO, CRWD и т.п.), не только ETF. "
+            "- Stock picks: РЕАЛЬНЫЕ АКЦИИ, не только ETF; имена выводи из данных "
+            "отчёта (см. правило DATA-DRIVEN ниже). "
             "why — конкретные цифры (ROE, маржа, Бета) с тегом [Источник].\n"
             f"{contradiction_rule}"
             f"{leverage_rule}"
+            f"{ideas_rule}"
             f"{rag_rule}\n"
             f"=== ДАННЫЕ ПОРТФЕЛЯ ===\n"
             f"{_wrap_untrusted('broker_portfolio_json', json.dumps(summary, ensure_ascii=False)[:7000])}"
@@ -714,10 +744,12 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
         "- 3-step reasoning: взаимосвязи → риски → рекомендации с числами.\n"
         "- Каждое число — [Quant Engine], [SEC EDGAR], [Regime] или [RAG: файл].\n"
         f"- Риск-профиль: {user_profile}. Режим: {regime_label}.\n"
-        "- РЕАЛЬНЫЕ АКЦИИ: PLTR, CRWD, JNJ, COST, KO, ANET, PANW и т.п. — не только ETF.\n"
+        "- РЕАЛЬНЫЕ АКЦИИ, не только ETF; имена выводи из данных отчёта "
+        "(см. правило DATA-DRIVEN ниже).\n"
         "- why: конкретные цифры (ROE, маржа, Beta, P/E, momentum) с тегом [источник].\n"
         f"{contradiction_rule}"
         f"{leverage_rule}"
+        f"{ideas_rule}"
         f"{rag_rule}"
         f"\n=== ДАННЫЕ ПОРТФЕЛЯ ===\n"
         f"{_wrap_untrusted('broker_portfolio_json', json.dumps(summary, ensure_ascii=False)[:9000])}"
@@ -839,66 +871,129 @@ def _fallback_stock_picks(regime_label: str, tier: str) -> dict:
     """Rule-based stock picks when Claude is unavailable — includes real stocks."""
     expansion = regime_label in ("Recovery", "Expansion", "")
 
-    if expansion:
-        picks_boost = [
-            {"ticker": "PLTR", "name": "Palantir Technologies",
-             "why": "Рост выручки >30% г/г, высокий momentum 12м, "
-                    "бета к рынку ~1.8 — подходит для режима Expansion [SEC EDGAR] [Regime]",
-             "type": "Stock"},
-        ]
-    else:
-        picks_boost = [
-            {"ticker": "DBC", "name": "Invesco DB Commodity Index ETF",
-             "why": "Товарная экспозиция защищает при стагфляции и Slowdown-режимах. "
-                    "Низкая корреляция с техно-позициями [Quant Engine] [Regime]",
-             "type": "ETF"},
-        ]
+    # Sprint-5.1 — the fallback used to be a FROZEN 1-candidate catalogue
+    # (always PLTR/JNJ/KO/MTUM in expansion), so no-API users saw byte-
+    # identical "ideas" forever.  Each slot now carries 3 candidates and the
+    # selection rotates DETERMINISTICALLY by calendar month (stable within a
+    # month — reproducible reports; different across months — no more
+    # year-long loops).  All candidates are conservative, liquid US names.
+    from datetime import date
+    _rot = date.today().month
 
-    picks_balance = [
+    def _pick(candidates: list[dict], offset: int = 0) -> dict:
+        return candidates[(_rot + offset) % len(candidates)]
+
+    _BOOST_EXPANSION = [
+        {"ticker": "PLTR", "name": "Palantir Technologies",
+         "why": "Рост выручки >30% г/г, высокий momentum 12м, бета ~1.8 — "
+                "ставка на режим Expansion [SEC EDGAR] [Regime]", "type": "Stock"},
+        {"ticker": "NOW", "name": "ServiceNow",
+         "why": "Подписочная выручка +22% г/г, Op. маржа растёт, лидер "
+                "enterprise-софта — циклический рост [SEC EDGAR] [Regime]", "type": "Stock"},
+        {"ticker": "ANET", "name": "Arista Networks",
+         "why": "Сетевая инфраструктура ИИ-ЦОД, выручка +20% г/г, без долга, "
+                "ROE >30% — бенефициар capex-цикла [SEC EDGAR] [Regime]", "type": "Stock"},
+    ]
+    _BOOST_DEFENSIVE = [
+        {"ticker": "DBC", "name": "Invesco DB Commodity Index ETF",
+         "why": "Товарная экспозиция защищает при стагфляции и Slowdown; низкая "
+                "корреляция с техно-позициями [Quant Engine] [Regime]", "type": "ETF"},
+        {"ticker": "XLE", "name": "Energy Select Sector SPDR",
+         "why": "Энергетика — исторический лидер в позднем цикле/Slowdown; "
+                "дивидендная доходность сектора >3% [Regime]", "type": "ETF"},
+        {"ticker": "XLU", "name": "Utilities Select Sector SPDR",
+         "why": "Коммунальный сектор: низкая бета ~0.5, устойчивые денежные "
+                "потоки при замедлении экономики [Regime]", "type": "ETF"},
+    ]
+    _BALANCE = [
         {"ticker": "JNJ", "name": "Johnson & Johnson",
-         "why": "ROE ~25%, Op. маржа ~25%, Debt/Assets <0.4, "
-                "дивиденд-аристократ 62 года подряд — режимо-устойчивый [SEC EDGAR]",
-         "type": "Stock"},
+         "why": "ROE ~25%, Op. маржа ~25%, Debt/Assets <0.4, дивиденд-аристократ "
+                "62 года — режимо-устойчивый [SEC EDGAR]", "type": "Stock"},
+        {"ticker": "PG", "name": "Procter & Gamble",
+         "why": "Op. маржа ~24%, стабильный FCF, 68 лет роста дивиденда — "
+                "качество вне цикла [SEC EDGAR]", "type": "Stock"},
+        {"ticker": "AVGO", "name": "Broadcom",
+         "why": "FCF-маржа >45%, диверсификация чипы+софт, растущий дивиденд — "
+                "качество с ростом [SEC EDGAR]", "type": "Stock"},
+    ]
+    _PROTECT = [
+        {"ticker": "KO", "name": "The Coca-Cola Company",
+         "why": "Дивиденд-аристократ 61+ лет, Beta ~0.6, маржа >28% — защитный "
+                "актив при любом режиме [SEC EDGAR] [Quant Engine]", "type": "Stock"},
+        {"ticker": "PEP", "name": "PepsiCo",
+         "why": "Beta ~0.55, 52 года роста дивиденда, диверсификация снеки+напитки "
+                "— защита с ростом [SEC EDGAR]", "type": "Stock"},
+        {"ticker": "AGG", "name": "iShares Core US Aggregate Bond ETF",
+         "why": "Инвест-грейд облигации: отрицательная корреляция с акциями в "
+                "risk-off, дюрация ~6 лет [Quant Engine]", "type": "ETF"},
+    ]
+    _BALANCE_DEEP_EXTRA = [
+        {"ticker": "COST", "name": "Costco Wholesale",
+         "why": "ROE ~30%, стабильная подписочная модель, Revenue Growth ~7% г/г, "
+                "низкий долг [SEC EDGAR]", "type": "Stock"},
+        {"ticker": "V", "name": "Visa",
+         "why": "Op. маржа ~67%, asset-light модель, рост объёмов платежей — "
+                "качество-компаундер [SEC EDGAR]", "type": "Stock"},
+        {"ticker": "UNH", "name": "UnitedHealth Group",
+         "why": "ROE ~25%, защитный health-сектор, стабильный двузначный рост "
+                "EPS [SEC EDGAR]", "type": "Stock"},
+    ]
+    _BOOST_DEEP_EXP_EXTRA = [
+        {"ticker": "CRWD", "name": "CrowdStrike Holdings",
+         "why": "Лидер кибербезопасности, выручка +33% г/г, переход на "
+                "прибыльность, momentum 12м [SEC EDGAR] [Quant Engine]", "type": "Stock"},
+        {"ticker": "PANW", "name": "Palo Alto Networks",
+         "why": "Платформенная консолидация кибербеза, FCF-маржа ~38%, "
+                "рост ARR >15% [SEC EDGAR]", "type": "Stock"},
+        {"ticker": "AMAT", "name": "Applied Materials",
+         "why": "Полупроводниковое оборудование — рычаг на capex-цикл чипов, "
+                "ROE ~45% [SEC EDGAR] [Regime]", "type": "Stock"},
+    ]
+    _BOOST_DEEP_DEF_EXTRA = [
+        {"ticker": "GLD", "name": "SPDR Gold Shares",
+         "why": "Золото как хедж в Slowdown/Recession, ~нулевая корреляция "
+                "с S&P 500 [Quant Engine] [Regime]", "type": "ETF"},
+        {"ticker": "IAU", "name": "iShares Gold Trust",
+         "why": "Золото с низкой комиссией (0.25%) — хедж хвостового риска "
+                "[Quant Engine] [Regime]", "type": "ETF"},
+        {"ticker": "TLT", "name": "iShares 20+ Year Treasury",
+         "why": "Длинные трежерис — классический risk-off хедж при рецессии "
+                "[Quant Engine] [Regime]", "type": "ETF"},
+    ]
+    _REGIME_EXPANSION = [
+        {"ticker": "MTUM", "name": "iShares MSCI USA Momentum ETF",
+         "why": "Momentum-фактор лидирует в Expansion-режиме [Regime] [Quant Engine]",
+         "type": "ETF"},
+        {"ticker": "IWM", "name": "iShares Russell 2000",
+         "why": "Малые капитализации — ранне-цикличная ставка при росте "
+                "аппетита к риску [Regime]", "type": "ETF"},
+        {"ticker": "XLF", "name": "Financial Select Sector SPDR",
+         "why": "Финансы выигрывают от крутой кривой доходности в "
+                "Recovery/Expansion [Regime]", "type": "ETF"},
+    ]
+    _REGIME_DEFENSIVE = [
+        {"ticker": "DBC", "name": "Invesco DB Commodity Index ETF",
+         "why": "Товарная экспозиция защищает при Slowdown-режиме [Regime]", "type": "ETF"},
+        {"ticker": "XLV", "name": "Health Care Select Sector SPDR",
+         "why": "Healthcare — защитный сектор позднего цикла со стабильным "
+                "спросом [Regime]", "type": "ETF"},
+        {"ticker": "USMV", "name": "iShares MSCI USA Min Vol ETF",
+         "why": "Min-vol фактор исторически опережает в risk-off фазах "
+                "[Regime] [Quant Engine]", "type": "ETF"},
     ]
 
-    picks_protect = [
-        {"ticker": "KO", "name": "The Coca-Cola Company",
-         "why": "Дивиденд-аристократ 61+ лет, Beta ~0.6, "
-                "стабильная маржа >28% — защитный актив при любом режиме [SEC EDGAR] [Quant Engine]",
-         "type": "Stock"},
-    ]
+    picks_boost   = [_pick(_BOOST_EXPANSION if expansion else _BOOST_DEFENSIVE)]
+    picks_balance = [_pick(_BALANCE)]
+    picks_protect = [_pick(_PROTECT)]
 
     if tier == "deep":
-        if expansion:
-            picks_boost.append(
-                {"ticker": "CRWD", "name": "CrowdStrike Holdings",
-                 "why": "Лидер кибербезопасности, выручка +33% г/г, "
-                        "переход на прибыльность, momentum 12м +45% [SEC EDGAR] [Quant Engine]",
-                 "type": "Stock"}
-            )
-        else:
-            picks_boost.append(
-                {"ticker": "GLD", "name": "SPDR Gold Shares",
-                 "why": "Золото как хедж в Slowdown/Recession, "
-                        "нулевая корреляция с S&P 500 [Quant Engine] [Regime]",
-                 "type": "ETF"}
-            )
-        picks_balance.append(
-            {"ticker": "COST", "name": "Costco Wholesale",
-             "why": "ROE ~30%, Op. маржа ~3.5% (стабильная бизнес-модель), "
-                    "Revenue Growth ~7% г/г, низкий долг [SEC EDGAR]",
-             "type": "Stock"}
-        )
+        picks_boost.append(_pick(
+            _BOOST_DEEP_EXP_EXTRA if expansion else _BOOST_DEEP_DEF_EXTRA,
+            offset=1))
+        picks_balance.append(_pick(_BALANCE_DEEP_EXTRA, offset=1))
 
-    # regime_play: a basic regime-aligned pick
-    picks_regime = [
-        {"ticker": "DBC" if not expansion else "MTUM",
-         "name":   "Invesco DB Commodity Index ETF" if not expansion else "iShares MSCI USA Momentum ETF",
-         "why":    ("Товарная экспозиция защищает при Slowdown-режиме [Regime]"
-                    if not expansion else
-                    "Momentum-фактор лидирует в Expansion-режиме [Regime] [Quant Engine]"),
-         "type":   "ETF"},
-    ]
+    # regime_play: a regime-aligned pick (rotates monthly like the rest)
+    picks_regime = [_pick(_REGIME_EXPANSION if expansion else _REGIME_DEFENSIVE)]
     return {
         "boost_alpha":     {"label": "Повышение доходности — повышенный риск",
                             "desc":  "Увеличение потенциальной доходности за счёт акций роста и momentum.",
@@ -953,11 +1048,16 @@ def generate_narrative(results: dict, tier: str = "base",
     try:
         import anthropic
         client   = anthropic.Anthropic(api_key=api_key)
+        # Sprint-5: temperature raised from 0.1 (near-deterministic → stale,
+        # repeating ideas).  Sprint-5.1: omitted entirely on Opus 4.7/4.8 —
+        # those models reject the param with HTTP 400 (§4.2 migration prep).
+        _sampling_kwargs: dict = {}
+        if _model_supports_temperature(model):
+            _sampling_kwargs["temperature"] = NARRATIVE_TEMPERATURE
         response = client.messages.create(
             model       = model,
             max_tokens  = max_tok,
-            # Sprint-5: was 0.1 (near-deterministic → stale, repeating ideas).
-            temperature = NARRATIVE_TEMPERATURE,
+            **_sampling_kwargs,
             # Prompt Caching — the ~25 KB system prompt is byte-identical on
             # every request.  Caching it means repeated calls (base+deep, and
             # many users within the 5-min TTL) read the prefix at ~0.1× instead

@@ -224,24 +224,40 @@ def _it_share(tickers: list[str],
 # raw delta.  _delta_row compares raw values, not magnitudes — listing them
 # as "lower is better" inverted the favourable flag (a worse drawdown showed
 # green, an improved CVaR showed red).
-_RISK_METRICS_LOWER_IS_BETTER = {"volatility_ann", "max_trc",
-                                  "it_share", "risk_index"}
+_RISK_METRICS_LOWER_IS_BETTER = {"volatility_ann", "max_trc", "risk_index"}
+
+# Sprint-5.1 (A2): metrics whose direction is NOT a universal value judgment.
+# `it_share` used to sit in LOWER_IS_BETTER, so ANY cut of tech exposure
+# rendered green ("improved") — backwards for an Aggressive growth mandate.
+# The sector share is INFORMATIONAL: we report the delta, but improved=None
+# (the template renders it neutral, neither green nor red).
+_NEUTRAL_METRICS = {"it_share"}
 
 
 def _delta_row(before: Optional[float], after: Optional[float],
                 metric_name: str,
                 *, as_pp: bool = False) -> dict:
-    """Build a {before, after, delta, improved} cell for one metric."""
+    """Build a {before, after, delta, improved} cell for one metric.
+
+    `improved` is None (neutral) when: an input is missing, the metric is
+    direction-neutral (`_NEUTRAL_METRICS`), or the delta is exactly zero
+    (a no-op must not render as red "not improved").
+    """
     if before is None or after is None or \
        (isinstance(before, float) and math.isnan(before)) or \
        (isinstance(after,  float) and math.isnan(after)):
         return {"before": before, "after": after,
                 "delta": None, "improved": None}
     delta = after - before
-    lower_better = metric_name in _RISK_METRICS_LOWER_IS_BETTER
-    improved = (delta < 0) if lower_better else (delta > 0)
+    improved: Optional[bool]
+    if metric_name in _NEUTRAL_METRICS or abs(delta) < 1e-12:
+        improved = None
+    elif metric_name in _RISK_METRICS_LOWER_IS_BETTER:
+        improved = delta < 0
+    else:
+        improved = delta > 0
     out = {"before": before, "after": after,
-           "delta": float(delta), "improved": bool(improved)}
+           "delta": float(delta), "improved": improved}
     if as_pp:
         out["delta_pp"] = round(float(delta) * 100, 2)
     return out

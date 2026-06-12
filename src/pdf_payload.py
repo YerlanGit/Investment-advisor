@@ -95,7 +95,8 @@ def _regime_dot_coords(growth: float, cycle: float) -> tuple[float, float]:
 
 
 def _build_mandate_compliance(perf_df, total_val: float,
-                              user_profile: Optional[dict]) -> Optional[dict]:
+                              user_profile: Optional[dict],
+                              leverage: Optional[dict] = None) -> Optional[dict]:
     """Sprint-5 Task 4 — make the mandate visible in the report.
 
     Compares the LIVE portfolio's asset-class allocation against the user's
@@ -152,13 +153,22 @@ def _build_mandate_compliance(perf_df, total_val: float,
     if not rows:
         return None
     rows.sort(key=lambda r: r["actual"], reverse=True)
+    # Sprint-5.1 (L2): a margin-funded book is OUTSIDE the class limits by
+    # construction — surface the margin debt explicitly in the panel so the
+    # mandate verdict can't read "compliant" while hiding 20% borrowed money.
+    lev = leverage or {}
+    leveraged = bool(lev.get("is_leveraged"))
+    margin_debt_pct = round(
+        abs(min(0.0, _safe_float(lev.get("cash_weight"), 0.0))) * 100, 1)
     return {
         "profile_name": user_profile.get("profile_name", "—"),
         "target_vol_pct": round(_safe_float(user_profile.get("target_volatility"), 0.0) * 100, 1),
         "target_te_pct":  round(_safe_float(user_profile.get("target_te"), 0.0) * 100, 1),
         "rows":     rows,
         "breaches": breaches,
-        "compliant": breaches == 0,
+        "compliant": breaches == 0 and not leveraged,
+        "leveraged": leveraged,
+        "margin_debt_pct": margin_debt_pct,
     }
 
 
@@ -1035,8 +1045,11 @@ def build_payload(results: dict, tier: str,
         "ai_leverage_warning":       (ai_summary or {}).get("ai_leverage_warning", ""),
         # Sprint-5 Task 4 — mandate compliance panel (target profile + actual
         # allocation vs limits).  None when no approved profile is supplied.
+        # Sprint-5.1 (L2): the engine's leverage metrics feed a margin-debt
+        # line so a leveraged book is never reported as "compliant" silently.
         "mandate_compliance":        _build_mandate_compliance(
-                                        perf_df, total_val, user_profile),
+                                        perf_df, total_val, user_profile,
+                                        leverage=results.get("leverage_metrics")),
         # Structured cross-check of the engine's regime label — DEEP only.
         "regime_confirmation":       (ai_summary or {}).get("regime_confirmation",
                                        {"stance": "", "summary": "", "signals": []}),

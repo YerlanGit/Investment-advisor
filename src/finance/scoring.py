@@ -32,6 +32,15 @@ from typing import Optional, Sequence
 import numpy as np
 
 
+# ── Hotspot threshold — SINGLE SOURCE OF TRUTH ──────────────────────────────
+# Sprint-5.1 (S4): this 20% Euler-TRC cut-off used to live as TWO independent
+# literals (scoring_orchestrator.DEFAULT_HOTSPOT_TRC_PCT and gatekeeper
+# DEFAULT_LIMITS["max_euler_risk_pct"]) — tuning one silently desynced the
+# other (the 🔥 flag in the report vs the GK-1 audit rule).  Both now import
+# THIS constant.
+HOTSPOT_TRC_PCT: float = 20.0
+
+
 # ── Z-score utility ──────────────────────────────────────────────────────────
 
 def robust_z(value: Optional[float],
