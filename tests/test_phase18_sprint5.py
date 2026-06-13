@@ -607,6 +607,88 @@ class MandatePanelMovedToCoverTest(unittest.TestCase):
                             html.find("Ключевые показатели риска"))
 
 
+# ═══════════════ Sprint 5.4 — mandate-panel placement + CoVe FX row ══════════
+
+class MandatePanelCoverPlacementTest(unittest.TestCase):
+    """Замечание 1: panel sits AFTER the AI comments (cover), polished + mobile."""
+
+    def _render(self, tier):
+        from html_renderer import render_report_html, _mock_payload
+        p = _mock_payload(tier)
+        p["ai_bullets"] = ["Инсайт A", "Инсайт B"]
+        p["mandate_compliance"] = {
+            "profile_name": "Умеренно-агрессивный", "target_vol_pct": 14.0,
+            "target_te_pct": 6.0, "breaches": 1, "compliant": False,
+            "leveraged": True, "margin_debt_pct": 16.0,
+            "rows": [{"key": "Stocks_US", "label": "Акции США", "actual": 80.0,
+                      "lo": 30, "hi": 60, "status": "over"}]}
+        return render_report_html(p, user_id=1, report_type="T", tier=tier)
+
+    def test_panel_after_bullets_before_kpi_once(self):
+        for tier in ("base", "deep"):
+            html = self._render(tier)
+            self.assertEqual(html.count('class="mc-card"'), 1, tier)
+            i_bullet = html.rfind("Инсайт B")
+            i_panel  = html.find('class="mc-card"')
+            i_kpi    = html.find("Ключевые показатели риска")
+            self.assertLess(i_bullet, i_panel, f"{tier}: panel must follow AI comments")
+            self.assertLess(i_panel, i_kpi, f"{tier}: panel must precede the KPI strip")
+
+    def test_panel_is_responsive_and_plain(self):
+        for tier in ("base", "deep"):
+            html = self._render(tier)
+            self.assertIn("@media (max-width:480px)", html, tier)   # mobile
+            self.assertIn("mc-track", html, tier)                   # compliance bar
+            self.assertIn("допустимое отклонение от ориентира", html, tier)  # no "tracking error"
+            self.assertNotIn("tracking error", html, tier)
+
+    def test_panel_removed_from_sector_section(self):
+        root = Path(__file__).resolve().parent.parent / "src" / "templates"
+        for tpl in ("report_basic_v3.html", "report_deep_v3.html"):
+            src = (root / tpl).read_text(encoding="utf-8")
+            # include appears exactly once, inside cover-main (before the gauge)
+            self.assertEqual(src.count('_mandate_compliance.html'), 1, tpl)
+            i_inc   = src.find('_mandate_compliance.html')
+            i_gauge = src.find("RISK GAUGE 0–100")
+            self.assertLess(i_inc, i_gauge, f"{tpl}: panel must be in cover-main")
+
+
+class CoVeFxRowTest(unittest.TestCase):
+    """Замечание 2: currency layer (FX + risk-free rate) added to CoVe."""
+
+    def test_usd_only_no_conversion(self):
+        from finance.data_lineage import build_lineage
+        rows = build_lineage({"portfolio_metrics": {
+            "reporting_currency": "USD", "risk_free_rate_source": "FRED DGS3MO",
+            "risk_free_rate_annual": 0.045, "fx_conversion": []}})
+        fx = [r for r in rows if "Валютный слой" in r["name"]]
+        self.assertEqual(len(fx), 1)
+        self.assertEqual(fx[0]["status"], "ok")
+        self.assertIn("конверсия не требуется", fx[0]["method"])
+
+    def test_multi_currency_fallback_warns(self):
+        from finance.data_lineage import build_lineage
+        rows = build_lineage({"portfolio_metrics": {
+            "reporting_currency": "KZT", "risk_free_rate_source": "NBK base",
+            "risk_free_rate_annual": 0.14,
+            "fx_conversion": [{"pair": "USDKZT", "coverage_pct": 97.0,
+                               "fallback_used": True}]}})
+        fx = [r for r in rows if "Валютный слой" in r["name"]][0]
+        self.assertEqual(fx["status"], "warn")
+        self.assertIn("KZT", fx["source"])
+        self.assertIn("T-1", fx["note"])
+
+    def test_fx_row_positioned_after_prices(self):
+        from finance.data_lineage import build_lineage
+        rows = build_lineage({"portfolio_metrics": {"reporting_currency": "USD",
+                                                    "fx_conversion": []}})
+        names = [r["name"] for r in rows]
+        self.assertIn("Валютный слой (конверсия + ставка)", names)
+        i_price = names.index("Цены и история активов")
+        i_fx    = names.index("Валютный слой (конверсия + ставка)")
+        self.assertEqual(i_fx, i_price + 1)   # right after the price source
+
+
 class RegimeConsistencyR3Test(unittest.TestCase):
     def _macro(self, yc, hy, vix):
         return {"yield_curve_10y2y": {"value": yc},

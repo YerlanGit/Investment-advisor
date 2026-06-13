@@ -23,7 +23,8 @@
 
 | Секция | Ключи | Builder | Движок |
 |---|---|---|---|
-| Вердикт на обложке + инсайты | `ai_verdict`, `ai_bullets[]`, `ai_plain_summary` | прокидка из `ai_summary` | Sprint 5.2: H1 обложки привязан к `ai_verdict` (был захардкожен), `ai_bullets` рендерятся (top-4 BASE / top-5 DEEP) |
+| Вердикт на обложке + инсайты | `ai_verdict`, `ai_bullets[]`, `ai_plain_summary` | прокидка из `ai_summary` | Sprint 5.2: H1 ← `ai_verdict`, `ai_bullets` рендерятся. Sprint 5.3: вердикт ≤1 предложения / summary ≤2, простой язык (soft-trim 150/230) |
+| **Соответствие мандату** (в блоке вердикта) | `mandate_compliance{rows,breaches,compliant,leveraged,margin_debt_pct}` | `_build_mandate_compliance` + партиал `_mandate_compliance.html` | Sprint 5.4: панель стоит ПОСЛЕ комментариев ИИ (в `cover-main`); адаптивная карточка с мини-барами (полоса лимита + маркер факта), мобильный `@media`, «допустимое отклонение» вместо «tracking error» |
 | Риск-гейдж 0–100 + мандат-бейдж | `risk_pct`, `risk_label`, `risk_mandate_label` | `build_payload` (верх), `_risk_mandate_label` | `scoring.composite_risk_score` (веса по мандату `_RISK_MANDATE_MATRIX`); бейдж показывает реальное имя профиля при наличии `user_profile` (5.2) |
 | KPI-карточки CVaR / Sharpe / MaxDD | `cvar`, `cvar_ci`, `sharpe`, `sortino`, `max_drawdown`, `volatility`, `*_dollar` | `build_payload` (KPI-блок) | `investment_logic` (bootstrap-CVaR Politis-Romano, Sortino H-4) |
 | AI-комментарии к KPI | `ai_cvar_note`, `ai_sharpe_note`, `ai_mdd_note` | прокидка из `ai_summary` | `ai_narrative` (структурированный tool `emit_report`) |
@@ -141,7 +142,7 @@
 | Элемент | Ключи | Builder |
 |---|---|---|
 | Integrity-панель ✓/⚠ | `integrity_checks[]` | `_build_integrity_checks` (RAG 3-state: used/no_match/unavailable) |
-| CoVe data-lineage | `cove_lineage[]` | `finance/data_lineage.build_lineage` |
+| CoVe data-lineage (14 строк) | `cove_lineage[]` | `finance/data_lineage.build_lineage` — источники: Quant Engine, TRC-Euler, Tradernet-цены, **валютный слой FX+ставка** (Sprint 5.4, `_fx_status`), SEC (Z-scores + Altman/Piotroski), CDS, FRED-макро, Action levels, Black-Litterman, режим, стресс, Bank RAG, AI |
 | Data quality | `data_quality` | `build_payload` (факторы N/10, SEC-пропуски) |
 | AI-вердикт/буллеты | `ai_verdict`, `ai_plain_summary`, `ai_bullets` | прокидка из `ai_summary` |
 
