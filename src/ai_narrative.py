@@ -142,6 +142,22 @@ def _model_supports_temperature(model: str) -> bool:
     m = str(model or "")
     return not any(m.startswith(p) for p in _TEMPERATURE_UNSUPPORTED_PREFIXES)
 
+
+# Sprint-5.3 (замечание 2): plain-Russian regime names.  The engine's labels
+# (Expansion/Recovery/Slowdown/Recession) are finance jargon — feed the model
+# a human phrase so the verdict/comments read naturally for a retail user.
+_REGIME_RU: dict[str, str] = {
+    "Expansion": "экономика растёт",
+    "Recovery":  "рынок восстанавливается после спада",
+    "Slowdown":  "экономика замедляется",
+    "Recession": "экономический спад",
+}
+
+
+def _regime_ru(label: str) -> str:
+    return _REGIME_RU.get(str(label or "").strip(), "режим рынка не определён")
+
+
 # ── Structured Outputs tool (Tools API) ──────────────────────────────────────
 # Forcing the narrative through a typed tool call makes the response a
 # GUARANTEED structured object the SDK parses for us — eliminating the
@@ -468,6 +484,27 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
                  user_profile: str = "Moderate") -> str:
     regime = (summary.get("regime") or {})
     regime_label = regime.get("regime", "unknown")
+    regime_ru    = _regime_ru(regime_label)   # Sprint-5.3: plain-Russian phrase
+
+    # Sprint-5.3 (замечание 2) — shared hard rule banning jargon the retail
+    # reader can't parse.  Injected into BOTH the base and deep prompts.
+    plain_rule = (
+        "ЯЗЫК — СТРОГО ДЛЯ НЕСПЕЦИАЛИСТА:\n"
+        f"- Режим рынка называй ТОЛЬКО по-русски: «{regime_ru}». НЕ пиши "
+        "Expansion/Recovery/Slowdown/Recession.\n"
+        "- ЗАПРЕЩЕНЫ слова: trailing, trailing 12M, ДИ, CI, CVaR, TRC, Hotspot, "
+        "Sharpe, Sortino, Beta, IR, HHI, Value, Growth, Financials — как "
+        "голые термины. Пиши простыми словами:\n"
+        "  trailing / trailing 12M → «за последние 12 месяцев»\n"
+        "  ДИ / доверительный интервал → «разброс оценки» или просто диапазон без аббревиатуры\n"
+        "  CVaR → «потери в худший день из 20»\n"
+        "  Sharpe → «отдача на единицу риска» (можно «коэффициент Шарпа X» в скобках ОДИН раз)\n"
+        "  TRC / доля в риске → «сколько процентов риска даёт эта позиция»\n"
+        "  Beta → «во сколько раз сильнее рынка двигается»\n"
+        "  Value/Growth/Financials → «недооценённые акции» / «акции роста» / «банки и финансы»\n"
+        "- Если без термина никак — добавь короткое пояснение в скобках ОДИН раз, "
+        "дальше используй простое слово.\n"
+    )
 
     rag_block = ""
     rag_rule  = ""
@@ -571,8 +608,8 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
             "  который противоречит/поддерживает → текущий режим рынка →\n"
             "  что подтверждается/опровергается → аналитикой инвестбанков → итог: Action Plan.\n\n"
             '{\n'
-            '  "verdict": "≤150 знаков — один вердикт: главный риск + причина + неотложное действие",\n'
-            '  "plain_summary": "≤250 знаков — простыми словами: что не так, почему, что делать",\n'
+            '  "verdict": "ОДНО короткое предложение ≤110 знаков — главный риск простыми словами + что делать. БЕЗ терминов, аббревиатур и нагромождения чисел",\n'
+            '  "plain_summary": "МАКСИМУМ 2 коротких предложения ≤170 знаков — что не так и что делать, простым языком. Без перечисления метрик",\n'
             '  "bullets": ["4 пункта ≤120 знаков — КАЖДЫЙ связывает 2 разных раздела отчёта [Источник]"],\n'
             '  "ai_cvar_note": "≤120 знаков — простыми словами: в 5% худших дней теряется ≈X$ (≈Y% портфеля). '
             'Это [нормально/высоко] потому что [причина в 3-5 словах]",\n'
@@ -632,6 +669,7 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
             "- Stock picks: РЕАЛЬНЫЕ АКЦИИ, не только ETF; имена выводи из данных "
             "отчёта (см. правило DATA-DRIVEN ниже). "
             "why — конкретные цифры (ROE, маржа, Бета) с тегом [Источник].\n"
+            f"{plain_rule}"
             f"{contradiction_rule}"
             f"{held_rule}"
             f"{leverage_rule}"
@@ -681,8 +719,8 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
         "  Банки (Goldman/Barclays/JPM) → 4-Pillar (F+V+T+C) → Action Plan.\n"
         "Каждый комментарий должен явно указывать, откуда взяты данные И как это связано с соседними разделами.\n\n"
         '{\n'
-        '  "verdict": "≤200 знаков — причинно-следственный вердикт: что СЕЙЧАС и ПОЧЕМУ",\n'
-        '  "plain_summary": "≤300 знаков — Executive Summary: позиция + главный риск + приоритет",\n'
+        '  "verdict": "ОДНО короткое предложение ≤130 знаков — главный риск простыми словами + что делать. БЕЗ нагромождения терминов и чисел",\n'
+        '  "plain_summary": "МАКСИМУМ 2 коротких предложения ≤200 знаков — позиция + главный риск + что делать, простым языком",\n'
         '  "bullets": ["5–7 пунктов ≤200 знаков каждый с [Источник] — цепочка: риск → состав → секторы → факторы → действие"],\n'
         '  "ai_cvar_note": "≤120 знаков — простыми словами: примерно сколько денег теряется '
         'в худший день из 20, нормально ли это для данного профиля риска [Quant Engine].",\n'
@@ -767,6 +805,7 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
         "- РЕАЛЬНЫЕ АКЦИИ, не только ETF; имена выводи из данных отчёта "
         "(см. правило DATA-DRIVEN ниже).\n"
         "- why: конкретные цифры (ROE, маржа, Beta, P/E, momentum) с тегом [источник].\n"
+        f"{plain_rule}"
         f"{contradiction_rule}"
         f"{held_rule}"
         f"{leverage_rule}"
@@ -788,11 +827,11 @@ def _fallback_narrative(results: dict, tier: str) -> dict:
     composite  = metrics.get("Composite_Risk_Score") or 0
     risk_label = ("консервативный" if composite < 33 else
                   "умеренный"      if composite < 66 else "агрессивный")
-    sharpe     = metrics.get("Sharpe_Ratio")
-    s_text     = (f"Sharpe {sharpe:.2f}"
-                  if isinstance(sharpe, (int, float)) and sharpe == sharpe else "Sharpe н/д")
-    verdict    = (f"Профиль риска: {risk_label} (композит {composite}/100). "
-                  f"{s_text}. Режим рынка: {regime.get('regime', 'н/д')} [Regime].")
+    # Sprint-5.3 (замечания 1+2): short, plain-Russian fallback verdict — one
+    # sentence, no jargon (Sharpe/композит/Expansion).  «Уровень риска —
+    # {risk_label}» keeps grammatical agreement (уровень — м.р.).
+    verdict    = (f"Уровень риска портфеля — {risk_label}. Проверьте "
+                  f"концентрацию и при необходимости снизьте крупнейшие позиции.")
 
     bullets: list[str] = []
     if perf is not None and not perf.empty and "Score_Hotspot" in perf.columns:
@@ -821,12 +860,12 @@ def _fallback_narrative(results: dict, tier: str) -> dict:
         bullets.append("Используйте Action Plan: уровни Buy/Sell/Stop рассчитаны "
                        "из ATR (Wilder RMA) и SMA200 [Quant Engine]")
 
+    # Sprint-5.3: max 2 short plain sentences, no jargon.
     plain_summary = (
-        f"Ваш портфель в {risk_label} зоне риска ({composite}/100). "
-        + (f"Доходность с учётом риска (Sharpe) = {sharpe:.2f} — "
-           + ("положительная, это хороший знак." if sharpe > 0 else "отрицательная, будьте осторожны.")
-           if isinstance(sharpe, (int, float)) and sharpe == sharpe else "")
-        + (" Проверьте Action Plan и сократите позиции-hotspots." if tier == "deep" else "")
+        f"Уровень риска портфеля — {risk_label}. "
+        + ("Снизьте крупнейшие позиции, чтобы риск не зависел от одной акции."
+           if tier == "deep" else
+           "Главное — не держать слишком много в одной акции.")
     )
 
     regime_label = regime.get("regime", "")
@@ -1184,8 +1223,10 @@ def generate_narrative(results: dict, tier: str = "base",
             return {"stance": stance, "summary": summary, "signals": signals}
 
         return {
-            "verdict":                  _soft_trim(verdict, 300),
-            "plain_summary":            _soft_trim(plain_summary, 400),
+            # Sprint-5.3 (замечание 1): hard length cut so the cover verdict
+            # stays short even if the model overruns — was 300/400.
+            "verdict":                  _soft_trim(verdict, 150),
+            "plain_summary":            _soft_trim(plain_summary, 230),
             "bullets":                  bullets[:7 if tier == "deep" else 4],
             "action_plan_text":         _soft_trim(plan_txt, 1000) if tier == "deep" else "",
             "ai_action_impact":         _soft_trim(impact_txt, 400) if tier == "deep" else "",
