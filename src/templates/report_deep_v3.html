@@ -1723,6 +1723,10 @@
         {% endfor %}
       </ul>
       {% endif %}
+
+      {# Sprint-5.4 (замечание 1): «Соответствие мандату» стоит ПОСЛЕ
+         комментариев ИИ, завершая блок «Вердикт по портфелю». #}
+      {% include "_mandate_compliance.html" ignore missing %}
     </div>
 
     <!-- RISK GAUGE 0–100 -->
@@ -1821,10 +1825,7 @@
     </div>
   </section>
 
-  {# Sprint-5.3 (замечание 3): «Соответствие мандату» перенесено сюда — в зону
-     «Вердикт по портфелю», сразу под индексом риска. Раньше было в секторной
-     секции, оторвано от профиля/гейджа. #}
-  {% include "_mandate_compliance.html" ignore missing %}
+  {# Sprint-5.4: mandate panel moved INTO the cover (after the AI comments). #}
 
   <!-- ═══ KPI STRIP ═══ -->
   <div class="block-label" style="margin-top:24px;">Ключевые показатели риска</div>

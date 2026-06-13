@@ -1,49 +1,96 @@
-{# Sprint-5 (Task 4) — Mandate compliance panel.
-   Shared partial included by report_basic_v3.html and report_deep_v3.html.
-   Renders ONLY when build_payload received an approved user_profile (so the
-   questionnaire result becomes visible): the investor's target profile plus
-   how the LIVE allocation sits against each asset-class limit.  Self-contained
-   inline styles (with CSS-var fallbacks) so it renders in either template. #}
+{# Mandate-compliance card — shared partial (BASE + DEEP).
+   Sprint-5.4: redesigned as a self-contained, MOBILE-RESPONSIVE card that
+   closes the «Вердикт по портфелю» block (sits right after the AI comments).
+   Each asset class shows a mini-bar: the allowed [lo,hi] band is shaded and a
+   marker sits at the actual weight, colour-coded (ok / under / over).  All
+   styling is scoped under `.mc-` and ships inline so it renders identically in
+   either template; %-based bars keep it tidy at any width. #}
 {% if data.mandate_compliance %}
 {% set _mc = data.mandate_compliance %}
-<div style="margin:0 14px 12px; padding:10px 12px;
-            border:1px solid var(--hairline, #e6e1d8); border-radius:6px; background:#fff;">
-  <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:5px;">
-    <div style="font-family:var(--font-mono, monospace); font-size:10px; letter-spacing:.04em;
-                color:var(--ink-60, #6b6256); text-transform:uppercase;">
-      Соответствие мандату · {{ _mc.profile_name }}
-    </div>
-    <div style="font-family:var(--font-mono, monospace); font-size:10px; font-weight:600;
-                color:{{ '#2e7d32' if _mc.compliant else '#c62828' }};">
-      {% if _mc.compliant %}✓ в рамках мандата{% else %}⚠ нарушений лимитов: {{ _mc.breaches }}{% endif %}
-    </div>
+<style>
+  .mc-card{margin:12px 0 4px;border:1px solid var(--hairline,#e6e1d8);
+    border-radius:7px;background:var(--paper,#fff);overflow:hidden;}
+  .mc-card .mc-head{display:flex;justify-content:space-between;align-items:center;
+    gap:10px;padding:8px 12px;background:rgba(42,46,51,0.03);
+    border-bottom:1px solid var(--hairline,#eee);}
+  .mc-card .mc-title{font-family:var(--font-mono,monospace);font-size:9.5px;
+    letter-spacing:.05em;text-transform:uppercase;color:var(--ink-60,#6b6256);}
+  .mc-card .mc-title b{color:var(--ink-90,#2a2e33);}
+  .mc-card .mc-chip{font-family:var(--font-mono,monospace);font-size:9.5px;
+    font-weight:700;white-space:nowrap;padding:2px 8px;border-radius:10px;}
+  .mc-card .mc-ok{color:#1f7a37;background:rgba(31,122,55,.10);}
+  .mc-card .mc-bad{color:#b3261e;background:rgba(179,38,30,.10);}
+  .mc-card .mc-meta{padding:6px 12px 2px;font-family:var(--font-mono,monospace);
+    font-size:9px;color:var(--ink-60,#6b6256);}
+  .mc-card .mc-rows{padding:6px 12px 11px;}
+  .mc-card .mc-row{margin-top:9px;}
+  .mc-card .mc-row-top{display:flex;justify-content:space-between;
+    align-items:baseline;gap:8px;}
+  .mc-card .mc-label{font-size:10.5px;color:var(--ink-90,#2a2e33);
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .mc-card .mc-val{font-family:var(--font-mono,monospace);font-size:10.5px;
+    font-weight:700;white-space:nowrap;}
+  .mc-card .mc-s-ok{color:var(--ink-90,#2a2e33);}
+  .mc-card .mc-s-under{color:#b26a00;}
+  .mc-card .mc-s-over{color:#b3261e;}
+  .mc-card .mc-track{position:relative;height:6px;margin:4px 0 2px;border-radius:4px;
+    background:rgba(42,46,51,0.07);overflow:hidden;}
+  .mc-card .mc-band{position:absolute;top:0;bottom:0;background:rgba(31,122,55,.20);}
+  .mc-card .mc-tick{position:absolute;top:-2px;width:2.5px;height:10px;
+    border-radius:2px;transform:translateX(-1px);}
+  .mc-card .mc-tick.mc-s-ok{background:#1f7a37;}
+  .mc-card .mc-tick.mc-s-under{background:#d08a00;}
+  .mc-card .mc-tick.mc-s-over{background:#b3261e;}
+  .mc-card .mc-limit{font-family:var(--font-mono,monospace);font-size:8.5px;
+    color:var(--ink-60,#8a8275);}
+  .mc-card .mc-margin{margin-top:10px;padding-top:8px;
+    border-top:1px dashed rgba(179,38,30,.35);
+    display:flex;justify-content:space-between;align-items:baseline;gap:8px;}
+  .mc-card .mc-margin .mc-label{color:#b3261e;font-weight:600;}
+  .mc-card .mc-margin .mc-val{color:#b3261e;}
+  .mc-card .mc-margin .mc-note{font-family:var(--font-mono,monospace);
+    font-size:8.5px;color:#b3261e;}
+  @media (max-width:480px){
+    .mc-card .mc-head{padding:7px 10px;}
+    .mc-card .mc-rows{padding:6px 10px 10px;}
+    .mc-card .mc-label{font-size:11px;}
+    .mc-card .mc-track{height:7px;}
+  }
+</style>
+<div class="mc-card">
+  <div class="mc-head">
+    <span class="mc-title">Соответствие мандату · <b>{{ _mc.profile_name }}</b></span>
+    <span class="mc-chip {{ 'mc-ok' if _mc.compliant else 'mc-bad' }}">
+      {% if _mc.compliant %}✓ в рамках{% else %}⚠ нарушений: {{ _mc.breaches }}{% endif %}
+    </span>
   </div>
-  <div style="font-family:var(--font-mono, monospace); font-size:9px;
-              color:var(--ink-60, #6b6256); margin-bottom:8px;">
-    целевая волатильность ≈{{ _mc.target_vol_pct }}% · tracking error ≤{{ _mc.target_te_pct }}%
+  <div class="mc-meta">
+    целевая нестабильность ≈{{ _mc.target_vol_pct }}% · допустимое отклонение от ориентира ≤{{ _mc.target_te_pct }}%
   </div>
-  <table style="width:100%; border-collapse:collapse; font-size:10px;">
+  <div class="mc-rows">
     {% for r in _mc.rows %}
-    {% set _col = '#c62828' if r.status == 'over' else ('#b26a00' if r.status == 'under' else 'var(--ink-90, #2a2e33)') %}
-    <tr>
-      <td style="padding:2px 0; color:var(--ink-90, #2a2e33);">{{ r.label }}</td>
-      <td style="padding:2px 6px; text-align:right; font-family:var(--font-mono, monospace);
-                 font-weight:600; color:{{ _col }};">{{ '%.0f' % r.actual }}%</td>
-      <td style="padding:2px 0; text-align:right; font-family:var(--font-mono, monospace);
-                 color:var(--ink-60, #6b6256); font-size:9px;">лимит {{ r.lo|int }}–{{ r.hi|int }}%</td>
-    </tr>
+    {% set _w = [r.actual, 100]|min %}
+    {% set _bw = (r.hi - r.lo) if (r.hi - r.lo) > 0 else 1 %}
+    <div class="mc-row">
+      <div class="mc-row-top">
+        <span class="mc-label">{{ r.label }}</span>
+        <span class="mc-val mc-s-{{ r.status }}">{{ '%.0f' % r.actual }}%</span>
+      </div>
+      <div class="mc-track">
+        <div class="mc-band" style="left:{{ r.lo }}%; width:{{ _bw }}%;"></div>
+        <div class="mc-tick mc-s-{{ r.status }}" style="left:{{ _w }}%;"></div>
+      </div>
+      <span class="mc-limit">допустимо {{ r.lo|int }}–{{ r.hi|int }}%</span>
+    </div>
     {% endfor %}
-    {# Sprint-5.1 (L2): margin debt sits OUTSIDE the asset-class limits —
-       show it explicitly so a leveraged book can't look "compliant". #}
+
     {% if _mc.leveraged %}
-    <tr>
-      <td style="padding:3px 0 1px; color:#c62828; font-weight:600;">Маржинальный долг</td>
-      <td style="padding:3px 6px 1px; text-align:right; font-family:var(--font-mono, monospace);
-                 font-weight:700; color:#c62828;">−{{ '%.0f' % _mc.margin_debt_pct }}%</td>
-      <td style="padding:3px 0 1px; text-align:right; font-family:var(--font-mono, monospace);
-                 color:#c62828; font-size:9px;">вне лимитов классов</td>
-    </tr>
+    <div class="mc-margin">
+      <span class="mc-label">Маржинальный долг</span>
+      <span class="mc-val">−{{ '%.0f' % _mc.margin_debt_pct }}%</span>
+      <span class="mc-note">вне лимитов классов</span>
+    </div>
     {% endif %}
-  </table>
+  </div>
 </div>
 {% endif %}

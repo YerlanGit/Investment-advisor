@@ -362,6 +362,50 @@ def _ai_status(ai_summary: Optional[dict]) -> dict:
     )
 
 
+def _fx_status(results: dict) -> dict:
+    """Sprint-5.4 — currency layer (Base Currency Approach).
+
+    Every price is FX-converted to the reporting currency BEFORE returns and
+    covariance, and Sharpe/Sortino use the matching risk-free rate.  This core
+    transform sits behind every number in the report yet had no CoVe row — add
+    it so the data-lineage picture is complete.  Data: portfolio_metrics
+    .fx_conversion / .reporting_currency / .risk_free_rate_source.
+    """
+    pm      = results.get("portfolio_metrics") or {}
+    ccy     = pm.get("reporting_currency") or "USD"
+    rfr_src = pm.get("risk_free_rate_source") or "—"
+    rfr_ann = pm.get("risk_free_rate_annual")
+    rfr_txt = (f"ставка {rfr_ann * 100:.2f}%/год"
+               if isinstance(rfr_ann, (int, float)) else "ставка —")
+    fx = pm.get("fx_conversion") or []
+
+    if not fx:
+        # No conversion records → every asset already priced in `ccy`.
+        return _row(
+            name   = "Валютный слой (конверсия + ставка)",
+            source = f"Base Currency = {ccy} · {rfr_src}",
+            method = f"конверсия не требуется (все активы в {ccy}) · {rfr_txt}",
+            status = "ok",
+            note   = "цены и безрисковая ставка в одной валюте",
+        )
+
+    pairs    = ", ".join(str(r.get("pair", "?")) for r in fx[:4])
+    fallback = any(r.get("fallback_used") for r in fx)
+    min_cov  = min((float(r.get("coverage_pct") or 0) for r in fx), default=100.0)
+    status   = "warn" if (fallback or min_cov < 90.0) else "ok"
+    notes    = []
+    if fallback:
+        notes.append("по части дней — T-1 фолбэк курса")
+    notes.append(f"покрытие курса ≥{min_cov:.0f}%" if min_cov < 100 else "полное покрытие курса")
+    return _row(
+        name   = "Валютный слой (конверсия + ставка)",
+        source = f"FX-провайдер (FRED) · Base = {ccy} · {rfr_src}",
+        method = (f"цены × курс до расчёта риска (лаг T-1) · {pairs} · {rfr_txt}"),
+        status = status,
+        note   = "; ".join(notes),
+    )
+
+
 # ── Public API ───────────────────────────────────────────────────────────────
 
 def build_lineage(results: dict,
@@ -378,7 +422,7 @@ def build_lineage(results: dict,
     rows.append(_row(
         name   = "Vol · CVaR · TE · IR · Max DD",
         source = "Quant Engine MAC3",
-        method = "Wilder RMA · EWMA λ≈0.94 ⊕ Ledoit-Wolf 70/30 · "
+        method = "Wilder RMA · EWMA hl=63 (λ≈0.99) ⊕ Ledoit-Wolf 70/30 · "
                  "Politis-Romano bootstrap CI",
         status = "ok",
     ))
@@ -391,6 +435,10 @@ def build_lineage(results: dict,
 
     # Прайсы + ATR + benchmark frame.
     rows.append(_tradernet_status(results, today))
+
+    # Sprint-5.4: currency layer (FX conversion + risk-free rate) — sits right
+    # after the price source it transforms.
+    rows.append(_fx_status(results))
 
     # SEC EDGAR (2 rows).
     rows.extend(_sec_status(results, today))
