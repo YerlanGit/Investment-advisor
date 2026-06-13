@@ -515,6 +515,98 @@ class CoverVerdictBindingTest(unittest.TestCase):
             self.assertNotIn("почти весь риск собран в двух позициях", src, tpl)
 
 
+# ═══════════════ Sprint 5.3 — UX замечания по живым отчётам ═══════════════════
+
+class VerdictBrevityTest(unittest.TestCase):
+    """Замечание 1: verdict/plain_summary must be short and the soft-trim caps
+    tightened so the cover never overruns."""
+
+    def test_prompt_demands_one_short_verdict(self):
+        from ai_narrative import _user_prompt
+        for tier in ("base", "deep"):
+            pr = _user_prompt({"regime": {"regime": "Expansion"}, "holdings": []},
+                              tier=tier)
+            self.assertIn("ОДНО короткое предложение", pr)
+            self.assertIn("МАКСИМУМ 2 коротких предложения", pr)
+
+    def test_fallback_verdict_is_one_sentence_plain(self):
+        import pandas as pd
+        from ai_narrative import _fallback_narrative
+        out = _fallback_narrative({
+            "portfolio_metrics": {"Composite_Risk_Score": 55, "Sharpe_Ratio": 0.66},
+            "regime": {"regime": "Expansion"},
+            "performance_table": pd.DataFrame([{"Ticker": "AAPL"}]),
+            "total_value": 10000.0,
+            "leverage_metrics": {"is_leveraged": False}}, "deep")
+        # one sentence-ish, and free of jargon
+        for term in ("Sharpe", "композит", "Expansion", "CVaR", "TRC"):
+            self.assertNotIn(term, out["verdict"])
+            self.assertNotIn(term, out["plain_summary"])
+        self.assertLessEqual(len(out["verdict"]), 160)
+
+
+class PlainLanguageRuleTest(unittest.TestCase):
+    """Замечание 2: AI comments must avoid jargon (trailing, ДИ, Expansion…)."""
+
+    def test_regime_ru_translates(self):
+        from ai_narrative import _regime_ru
+        self.assertEqual(_regime_ru("Expansion"), "экономика растёт")
+        self.assertEqual(_regime_ru("Recession"), "экономический спад")
+        self.assertIn("не определён", _regime_ru("???"))
+
+    def test_prompt_bans_jargon_and_feeds_russian_regime(self):
+        from ai_narrative import _user_prompt
+        for tier in ("base", "deep"):
+            pr = _user_prompt({"regime": {"regime": "Expansion"}, "holdings": []},
+                              tier=tier)
+            self.assertIn("ЯЗЫК — СТРОГО ДЛЯ НЕСПЕЦИАЛИСТА", pr)
+            self.assertIn("экономика растёт", pr)          # russian regime fed
+            for banned in ("trailing", "ДИ", "CVaR", "Sharpe"):
+                self.assertIn(banned, pr)                  # listed as banned term
+
+    def test_kpi_sub_has_no_CL_CI(self):
+        root = Path(__file__).resolve().parent.parent / "src" / "templates"
+        for tpl in ("report_basic_v3.html", "report_deep_v3.html"):
+            src = (root / tpl).read_text(encoding="utf-8")
+            self.assertNotIn("95% CL", src, tpl)
+            self.assertNotIn(" · CI ", src, tpl)
+            self.assertIn("худшие 5% дней", src, tpl)
+            self.assertIn("разброс", src, tpl)
+
+
+class MandatePanelMovedToCoverTest(unittest.TestCase):
+    """Замечание 3: «Соответствие мандату» moved to the cover (near the gauge),
+    out of the sector section."""
+
+    def _src(self, tpl):
+        root = Path(__file__).resolve().parent.parent / "src" / "templates"
+        return (root / tpl).read_text(encoding="utf-8")
+
+    def test_include_before_kpi_strip_and_once(self):
+        for tpl in ("report_basic_v3.html", "report_deep_v3.html"):
+            src = self._src(tpl)
+            self.assertEqual(src.count('_mandate_compliance.html'), 1, tpl)
+            i_inc = src.find('_mandate_compliance.html')
+            i_kpi = src.find('Ключевые показатели риска')
+            self.assertGreater(i_inc, 0, tpl)
+            self.assertLess(i_inc, i_kpi, f"{tpl}: panel must be on the cover")
+
+    def test_renders_once_in_cover_position(self):
+        from html_renderer import render_report_html, _mock_payload
+        for tier in ("base", "deep"):
+            p = _mock_payload(tier)
+            p["mandate_compliance"] = {
+                "profile_name": "Умеренно-агрессивный", "target_vol_pct": 14.0,
+                "target_te_pct": 6.0, "breaches": 1, "compliant": False,
+                "leveraged": False, "margin_debt_pct": 0.0,
+                "rows": [{"key": "Stocks_US", "label": "Акции США",
+                          "actual": 80.0, "lo": 30, "hi": 60, "status": "over"}]}
+            html = render_report_html(p, user_id=1, report_type="T", tier=tier)
+            self.assertEqual(html.count("Соответствие мандату"), 1)
+            self.assertLess(html.find("Соответствие мандату"),
+                            html.find("Ключевые показатели риска"))
+
+
 class RegimeConsistencyR3Test(unittest.TestCase):
     def _macro(self, yc, hy, vix):
         return {"yield_curve_10y2y": {"value": yc},

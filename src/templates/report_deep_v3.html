@@ -1821,6 +1821,11 @@
     </div>
   </section>
 
+  {# Sprint-5.3 (замечание 3): «Соответствие мандату» перенесено сюда — в зону
+     «Вердикт по портфелю», сразу под индексом риска. Раньше было в секторной
+     секции, оторвано от профиля/гейджа. #}
+  {% include "_mandate_compliance.html" ignore missing %}
+
   <!-- ═══ KPI STRIP ═══ -->
   <div class="block-label" style="margin-top:24px;">Ключевые показатели риска</div>
   <div class="kpi-grid">
@@ -1833,7 +1838,7 @@
       <div class="kpi-value-row">
         <span class="kpi-value">{{ data.cvar }}</span>
         <span class="kpi-sub">
-          (95% CL · 1 день{% if data.cvar_dollar %} · ≈ {{ data.cvar_dollar }}{% endif %}{% if data.cvar_ci %} · CI {{ data.cvar_ci }}{% endif %})
+          (худшие 5% дней · за 1 день{% if data.cvar_dollar %} · ≈ {{ data.cvar_dollar }}{% endif %}{% if data.cvar_ci %} · разброс {{ data.cvar_ci }}{% endif %})
         </span>
       </div>
 {# KPI sparkline — historical trend chart for this metric.
@@ -2385,7 +2390,8 @@
     </div>
     {% endif %}
 
-    {% include "_mandate_compliance.html" ignore missing %}
+    {# Sprint-5.3: «Соответствие мандату» moved up to the cover (next to the
+       risk gauge) — see the cover section. #}
 
     <div class="sp-body">
     <div class="pie-wrap">
