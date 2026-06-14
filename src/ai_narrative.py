@@ -89,8 +89,14 @@ def _soft_trim(text: str, max_chars: int) -> str:
         candidate = head[:end].rstrip()
         if len(candidate) >= max_chars // 2:
             return candidate
-    # Boundary too far back → ellipsis-tagged hard cut.
-    return head.rstrip(" ,;:[(") + "…"
+    # Audit 2026-06-14: no sentence boundary in budget → cut at the last WORD
+    # boundary, never mid-word.  The prod reports showed «увеличивать Fi…»,
+    # «недооце…», «рекомендуе…» — a hard char-cut landing inside a word.
+    cut = head.rstrip()
+    sp  = cut.rfind(" ")
+    if sp >= max_chars // 2:
+        cut = cut[:sp]
+    return cut.rstrip(" ,;:[(") + "…"
 
 
 def validate_stress_comment(text: str) -> str:
@@ -309,11 +315,14 @@ def _summarise_for_prompt(results: dict) -> dict:
         val = row.get("value")
         if val is None:
             continue
+        # Audit 2026-06-14: FRED-sourced, but sanitize for defense-in-depth so
+        # NO free-text field reaches the prompt un-fenced (closes the one
+        # exception to the "sanitize every string" invariant).
         macro_summary[label] = {
             "value":  _safe_round(val, 2),
-            "status": row.get("status"),
-            "as_of":  row.get("as_of"),
-            "unit":   row.get("unit"),
+            "status": _safe_text(row.get("status"), 16),
+            "as_of":  _safe_text(row.get("as_of"), 16),
+            "unit":   _safe_text(row.get("unit"), 12),
         }
 
     return {
