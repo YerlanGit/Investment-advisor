@@ -1,9 +1,36 @@
 # AUDIT.md — RAMP Bot · Институциональный аудит и стратегия
 
-> **Версия:** 2026-06-11 (Sprint 5 + UX Overhaul) · **Базовый коммит:** `ed85a8d` (merge PR #47 `claude/stoic-mccarthy-LM18P` → `main`)
-> **Текущая ветка:** `claude/stoic-mccarthy-LM18P` · коммиты `783e703` (Sprint 5) + `0232f5a` (R3) — на GitHub **Verified ✅**
+> **Версия:** 2026-06-14 (360° аудит · Sprint 5.x закрыт) · **Базовый коммит:** `ed85a8d` (merge PR #47 → `main`)
+> **Текущая ветка:** `claude/stoic-mccarthy-LM18P` · tip `bfc8baf` — все коммиты на GitHub **Verified ✅** (API: `verified=true`)
 > **Аудитор:** CTO / Lead Quant Architect / DevSecOps
-> **Верификация:** прод-отчёты от 2026-06-09 (`base.html`, `deep.html`, портфель U148046720, $11 665, USD) · pytest **376 passed, 10 skipped**
+> **Верификация:** живые прод-отчёты 2026-06-09 → **2026-06-14** (`base/deep.html`, портфель U148046720, с маржой) · pytest **418 passed, 10 skipped**
+> **Карты:** `REPORT_SECTIONS.md` (секция→builder→шаблон) · `REPORT_SECTIONS_AUDIT.md` (посекционный аудит живых отчётов)
+
+---
+
+## −3. 360° Аудит (2026-06-14, tip `bfc8baf`) — CTO / Quant / Security
+
+> **Метод:** 3 независимых прохода (математика · код/edge-cases · безопасность/LLM) + посекционный разбор живых отчётов `2026-06-14/{base,deep}.html`. **Критических блокеров — НЕТ.** Готовность ≈ **88/100** (production-ready под надзором).
+
+**Дашборд:** Математика **93** · Архитектура/код **82** · Инфра/Безопасность **88** · UI/UX **87**.
+
+| ID | Sev | Где | Суть | Статус |
+|---|---|---|---|---|
+| U-1 | 🟡 | `ai_narrative._soft_trim` | Комментарии ИИ резались **мид-слово** в проде («увеличивать Fi…», «недооце…») | ✅ Исправлено `bfc8baf` (откат на границу слова перед «…») |
+| A-3 | 🟡 | `pdf_payload.py:584` | `risk_pct`-фолбэк `vol/0.40·100` без clamp → перекрут стрелки гейджа `(risk_pct−50)·1.8°` | ✅ Исправлено `bfc8baf` (`min(100,max(0,…))`) |
+| S-2 | 🟢 | `ai_narrative._summarise_for_prompt` | Макро-поля FRED (`status/as_of/unit`) в промпт без `_safe_text` (риск~0) | ✅ Исправлено `bfc8baf` (defense-in-depth) |
+| M-1 | 🟡 | `investment_logic.py:794-797` | Sharpe на **модельной** σ, Sortino/доходность — на **реализованной** → несравнимость источника vol | ⏳ Action Plan A (выбрать один σ или задокументировать) |
+| A-1 | 🟡 | `tg_bot.py:808-916` | Мёртвый v1-путь сборки отчёта **внутри Telegram-слоя** (дубль `build_payload`, свой `iterrows`/`risk_pct`) за `REPORT_VERSION=v1` (дефолт v2) | ⏳ Action Plan A (удалить ветку) |
+| A-2 | 🟡 | `scoring_orchestrator.py:232`, `stress.py:274` | Векторизуемые `iterrows` на горячем пути (`_compute_valuation_ratios` — чистая колоночная арифметика; стресс — 7 проходов/отчёт) | ⏳ Action Plan A (векторизовать + golden-тест) |
+| S-1 | 🟡 | `tg_bot.py:950` | Латентный `{exc}` брокера в **мёртвом** `_build_analysis_payload` (нарушает F-6) | ⏳ удалить вместе с A-1 |
+| — | 🟢 | `simulate.py:34`, `black_litterman.py:193` | Устаревший докстринг (`|CVaR|/0.10`); пост-loop ренорм = no-op | ⏳ Action Plan B (косметика) |
+
+**✅ Подтверждено отлично (3 прохода):** нет валютной утечки в ковариацию (неконвертируемые активы дропаются до Σ, T-1 lag); BL-постериор / Эйлер-ERC=100% / выпуклый кап / детерминированный bootstrap-seed / гео-аннуализация — корректны; биллинг атомарен (списание только после Checkpoint-3 + refund на всех фейлах); гигиена секретов (логи только `*_present`); защита от prompt-injection (regex+strip+`<untrusted_data>`); edge-cases (пустой/одно-актив/σ=0/÷0/NaN) защищены; SSOT-консолидация реальна; SVG в границах viewBox; семантика цвета верна (SELL=красный).
+
+**Action Plan:**
+- **Спринт A (чистота, низкий риск):** удалить v1-путь + `_build_analysis_payload` (A-1+S-1 разом); векторизовать `_compute_valuation_ratios`/`stress` (A-2) с golden-тестом; свести Sharpe/Sortino к одному σ (M-1).
+- **Спринт B (полировка):** запрет сырых чисел режима в прозе ИИ; докстринг `simulate.py`.
+- **Спринт C (стратегия):** денежный леджер → Cloud SQL/Firestore (durable, снимает gcsfuse OutOfOrderError на корню); hash-lock зависимостей через CI; MCP-фаза (`MCP_STRATEGY.md`).
 
 ---
 

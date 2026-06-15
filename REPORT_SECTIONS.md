@@ -23,9 +23,9 @@
 
 | Секция | Ключи | Builder | Движок |
 |---|---|---|---|
-| Вердикт на обложке + инсайты | `ai_verdict`, `ai_bullets[]`, `ai_plain_summary` | прокидка из `ai_summary` | Sprint 5.2: H1 ← `ai_verdict`, `ai_bullets` рендерятся. Sprint 5.3: вердикт ≤1 предложения / summary ≤2, простой язык (soft-trim 150/230) |
+| Вердикт на обложке + инсайты | `ai_verdict`, `ai_bullets[]`, `ai_plain_summary` | прокидка из `ai_summary` | Sprint 5.2: H1 ← `ai_verdict`, `ai_bullets` рендерятся. Sprint 5.3: вердикт ≤1 предложения / summary ≤2, простой язык (soft-trim 150/230). 360°-аудит 06-14: `_soft_trim` режет по границе СЛОВА (не мид-слово) |
 | **Соответствие мандату** (в блоке вердикта) | `mandate_compliance{rows,breaches,compliant,leveraged,margin_debt_pct}` | `_build_mandate_compliance` + партиал `_mandate_compliance.html` | Sprint 5.4: панель стоит ПОСЛЕ комментариев ИИ (в `cover-main`); адаптивная карточка с мини-барами (полоса лимита + маркер факта), мобильный `@media`, «допустимое отклонение» вместо «tracking error» |
-| Риск-гейдж 0–100 + мандат-бейдж | `risk_pct`, `risk_label`, `risk_mandate_label` | `build_payload` (верх), `_risk_mandate_label` | `scoring.composite_risk_score` (веса по мандату `_RISK_MANDATE_MATRIX`); бейдж показывает реальное имя профиля при наличии `user_profile` (5.2) |
+| Риск-гейдж 0–100 + мандат-бейдж | `risk_pct`, `risk_label`, `risk_mandate_label` | `build_payload` (верх), `_risk_mandate_label` | `scoring.composite_risk_score` (веса по мандату `_RISK_MANDATE_MATRIX`); бейдж = реальное имя профиля при `user_profile` (5.2); `risk_pct` clamp `[0,100]` (360°-аудит 06-14, чтобы стрелка гейджа не перекручивалась) |
 | KPI-карточки CVaR / Sharpe / MaxDD | `cvar`, `cvar_ci`, `sharpe`, `sortino`, `max_drawdown`, `volatility`, `*_dollar` | `build_payload` (KPI-блок) | `investment_logic` (bootstrap-CVaR Politis-Romano, Sortino H-4) |
 | AI-комментарии к KPI | `ai_cvar_note`, `ai_sharpe_note`, `ai_mdd_note` | прокидка из `ai_summary` | `ai_narrative` (структурированный tool `emit_report`) |
 | MoM-дельта риска | `prev_risk_score`, `risk_score_delta` | `build_payload` + `prev_snapshot` | `db_tokenomics.get_last_report_snapshot` |

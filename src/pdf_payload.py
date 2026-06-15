@@ -581,8 +581,11 @@ def build_payload(results: dict, tier: str,
     var_raw    = _safe_float(metrics.get("VaR_95_Daily"),          0.0)
     mdd_raw    = _safe_float(metrics.get("Max_Drawdown"),          0.0)
     vol_raw    = _safe_float(metrics.get("Total_Volatility_Ann"),  0.0)
-    composite  = int(_safe_float(metrics.get("Composite_Risk_Score"),
-                                 vol_raw / 0.40 * 100))
+    # Audit 2026-06-14: clamp to [0,100] — the gauge needle rotates by
+    # (risk_pct−50)·1.8°, so an unclamped fallback (vol/0.40·100 with a high
+    # vol on a degenerate book) would over-rotate the dial past its scale.
+    composite  = int(min(100, max(0, _safe_float(
+        metrics.get("Composite_Risk_Score"), vol_raw / 0.40 * 100))))
 
     cvar_str    = f"{cvar_raw * 100:.1f}%"
     cvar_lo     = cvar_boot.get("lo95")

@@ -689,6 +689,44 @@ class CoVeFxRowTest(unittest.TestCase):
         self.assertEqual(i_fx, i_price + 1)   # right after the price source
 
 
+# ═══════════════ 360° audit 2026-06-14 — remediated findings ══════════════════
+
+class AuditRemediationTest(unittest.TestCase):
+    def test_soft_trim_no_midword_cut(self):
+        from ai_narrative import _soft_trim
+        t = ("при таком падении брокер может закрыть позицию увеличивать "
+             "Financials и Materials по совету банков")
+        out = _soft_trim(t, 40)
+        self.assertTrue(out.endswith("…"))
+        # the char before the ellipsis must be a full word, not a fragment
+        self.assertFalse(out.rstrip("…").endswith(("Fi", "Financ", "увеличива")))
+        self.assertNotIn("Fi…", out)
+
+    def test_risk_pct_clamped_to_100(self):
+        import pandas as pd
+        from pdf_payload import build_payload
+        res = {"performance_table": pd.DataFrame([
+                   {"Ticker": "A", "Current_Value": 1.0, "Total_Cost": 1.0,
+                    "PnL": 0.0, "Return_Pct": 0.0,
+                    "Euler_Risk_Contribution_Pct": 0.0}]),
+               "total_value": 1.0,
+               "portfolio_metrics": {"Total_Volatility_Ann": 0.9},  # no composite
+               "benchmark_comparison": {}, "sector_exposure": {"X": 1.0}}
+        self.assertLessEqual(build_payload(res, "base")["risk_pct"], 100)
+
+    def test_macro_fields_sanitized_in_prompt(self):
+        from ai_narrative import _summarise_for_prompt
+        results = {"portfolio_metrics": {},
+                   "macro_drivers": {"vix": {"value": 14.0,
+                       "status": "ok<script>", "as_of": "2026-06-14", "unit": "idx|x"}}}
+        s = _summarise_for_prompt(results)
+        macro = s.get("macro", {})
+        # control / tag chars stripped by _safe_text
+        for cell in macro.values():
+            self.assertNotIn("<", str(cell.get("status", "")))
+            self.assertNotIn("|", str(cell.get("unit", "")))
+
+
 class RegimeConsistencyR3Test(unittest.TestCase):
     def _macro(self, yc, hy, vix):
         return {"yield_curve_10y2y": {"value": yc},
