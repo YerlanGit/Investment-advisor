@@ -9,7 +9,7 @@
 > → HTML по подписанной ссылке.
 >
 > ИИ-поля приходят отдельной веткой: `generate_narrative()` (`src/ai_narrative.py`) → `ai_summary` → те же payload-ключи.
-> Обновлено: 2026-06-11 (Sprint 5.1).
+> Обновлено: 2026-06-16 (Sprint 6 · BLOCK 1–4: routing Sonnet/Opus, macro overlay, high-priority effect, CoVe).
 
 ## Легенда
 - **Ключ** — ключ в `payload` (в шаблоне читается как `data.<ключ>`).
@@ -47,6 +47,8 @@
 
 **Как менять:** сигналы классификатора → `regime.py` (`SHORT/MEDIUM_WIN`, компоненты осей); пороги сверки → `_build_regime_consistency`; геометрия SVG → `_regime_dot_coords` + анкор `qExpansion` в deep-шаблоне.
 
+> **Sprint 6 / BLOCK 3.4 — макро-обогащение:** FRED-каталог расширен до **6 серий** (+ `UNRATE` безработица, `A191RL1Q225SBEA` Real-GDP SAAR; `macro_data.py`). `RegimeClassifier.classify(prices, macro=…)` имеет **gated overlay** (env `REGIME_MACRO_OVERLAY=1`, OFF по умолч.): GDP→growth, безработица→cycle, аддитивно как доп-компоненты осей, ограничено `±0.05`. Тюнинг → константы `_MACRO_MAX_NUDGE/_TREND_GDP_GROWTH/_NEUTRAL_UNEMPLOYMENT` в `regime.py`.
+
 ---
 
 ## 3. Состав портфеля / риск-концентрация (BASE + DEEP)
@@ -83,7 +85,7 @@
 | Элемент | Ключи | Builder | Источник |
 |---|---|---|---|
 | Карточки идей (4 сценария) | `ai_ideas{growth/diversification/hedge/rotation}`, `ideas_count` | `_build_ai_ideas` | `ai_summary.stock_picks` |
-| Генерация пиков (LLM) | — | — | `ai_narrative._user_prompt`: правило **DATA-DRIVEN** (Sprint 5.1) — идеи обязаны опираться на режим/недовесы/4-Pillar/RAG, «дежурные» имена запрещены без данных; `temperature=0.5` (env `ANTHROPIC_TEMPERATURE`, клэмп 0.4–0.6; на Opus 4.7/4.8 параметр опускается) |
+| Генерация пиков (LLM) | — | — | `ai_narrative._user_prompt`: правило **DATA-DRIVEN** (Sprint 5.1) + **СВЕЖЕСТЬ ИДЕЙ** (Sprint 6/1.1 — период `YYYY-MM`, запрет повтора «по привычке»); `temperature=0.5` на BASE (Sonnet, env `ANTHROPIC_TEMPERATURE` 0.4–0.6). **Routing (1.2): BASE=`claude-sonnet-4-6`, DEEP=`claude-opus-4-8`** (env `ANTHROPIC_MODEL_BASE/DEEP`); Opus опускает `temperature` → дисперсию даёт директива свежести |
 | Фильтры пиков | — | — | `_remove_held_picks` → `_check_pick_contradictions` → `_backfill_empty_scenarios` |
 | Фолбэк-каталог (без API) | — | — | `_fallback_stock_picks`: 3 кандидата/слот + **месячная ротация** (Sprint 5.1) |
 
@@ -115,6 +117,8 @@
 
 **Как менять:** направление метрики → `_RISK_METRICS_LOWER_IS_BETTER` / `_NEUTRAL_METRICS`; карточный маппинг → `_KEYMAP` в `_build_expected_effect`; рендер → макрос `_ef_card` (deep-шаблон).
 
+> **Sprint 6 / BLOCK 2.3 — связка Идеи→Action→Эффект:** симуляция теперь идёт на **высокоприоритетных** action-строках (не-deferred Buy/Sell/Trim, `|Δw|>0`), а не на полном BL-векторе — `finance/simulate.high_priority_target_weights()`. Action Plan считается ДО симуляции в `analyze_all`. Payload несёт `expected_effect.high_priority_tickers` + `scoped_to_high_priority` (+ `driver`: `high_priority_action_plan`/`bl_target_fallback`) — UI помечает, что дельта Было/Стало относится именно к приоритетным идеям.
+
 ---
 
 ## 8. Бенчмарки и доходность (BASE + DEEP)
@@ -142,7 +146,7 @@
 | Элемент | Ключи | Builder |
 |---|---|---|
 | Integrity-панель ✓/⚠ | `integrity_checks[]` | `_build_integrity_checks` (RAG 3-state: used/no_match/unavailable) |
-| CoVe data-lineage (14 строк) | `cove_lineage[]` | `finance/data_lineage.build_lineage` — источники: Quant Engine, TRC-Euler, Tradernet-цены, **валютный слой FX+ставка** (Sprint 5.4, `_fx_status`), SEC (Z-scores + Altman/Piotroski), CDS, FRED-макро, Action levels, Black-Litterman, режим, стресс, Bank RAG, AI |
+| CoVe data-lineage (Sprint 6: +5 строк) | `cove_lineage[]` | `finance/data_lineage.build_lineage` — источники: Quant Engine, TRC-Euler, **факторная независимость κ+max\|corr\|** (4.6), Tradernet-цены, **валютный слой FX+ставка** (`_fx_status`), SEC (Z-scores + Altman/Piotroski), CDS, FRED-макро (6 серий), Action levels, Black-Litterman, режим, стресс, **Smart-Money/инсайдеры** (gated, 3.5), Bank RAG, AI, **LLM-чекеры галлюцинаций + проверки вычислений** (4.8) |
 | Data quality | `data_quality` | `build_payload` (факторы N/10, SEC-пропуски) |
 | AI-вердикт/буллеты | `ai_verdict`, `ai_plain_summary`, `ai_bullets` | прокидка из `ai_summary` |
 

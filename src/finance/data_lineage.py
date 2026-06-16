@@ -227,7 +227,10 @@ def _macro_status(results: dict) -> list[dict]:
         return [_row(
             name   = "Макро-драйверы (FRED)",
             source = "FRED St. Louis Fed",
-            method = "yield curve · HY spread · PMI · VIX · breakeven",
+            # BLOCK 3.4: PMI is discontinued on FRED; the pack is now yield
+            # curve · HY · VIX · breakeven · unemployment · real-GDP growth.
+            method = "yield curve · HY spread · VIX · breakeven · "
+                     "unemployment · GDP growth",
             status = "missing",
             note   = "FRED_API_KEY not set (see .env.template)",
         )]
@@ -340,7 +343,7 @@ def _ai_status(ai_summary: Optional[dict]) -> dict:
     if not a.get("verdict") and not a.get("bullets"):
         return _row(
             name   = "AI verdict · bullets",
-            source = "Anthropic Claude (Haiku/Sonnet)",
+            source = "Anthropic Claude (Sonnet/Opus)",
             method = "advisory only; verdict + plain summary + bullets",
             status = "missing",
             note   = "ANTHROPIC_API_KEY missing or AI call failed",
@@ -360,6 +363,89 @@ def _ai_status(ai_summary: Optional[dict]) -> dict:
         status = "ok",
         note   = "не является ИИР (индивидуальной инвест. рекомендацией)",
     )
+
+
+def _factor_diagnostic_status(results: dict) -> dict:
+    """BLOCK 4.6 — factor-multicollinearity diagnostic row.
+
+    Surfaces κ (condition number) + max|corr| of the factor set so a reader can
+    see the structural model was CHECKED for double-counting, not just trusted.
+    """
+    pm = results.get("portfolio_metrics") or {}
+    fd = pm.get("factor_diagnostics") or {}
+    if not fd:
+        return _row(
+            name   = "Факторная независимость (мультиколлинеарность)",
+            source = "Quant Engine MAC3",
+            method = "корр. факторов: κ (condition number) + max|corr|",
+            status = "missing",
+            note   = "структурная модель не построена на этом прогоне",
+        )
+    near = bool(fd.get("near_collinear"))
+    return _row(
+        name   = "Факторная независимость (мультиколлинеарность)",
+        source = "Quant Engine MAC3",
+        method = "Σ=B·F·Bᵀ+D несёт полную ковариацию F (без двойного счёта); "
+                 "диагностика κ + max|corr|",
+        status = "warn" if near else "ok",
+        note   = (f"факторов {fd.get('n_factors')} · max|corr|={fd.get('max_abs_corr')} "
+                  f"· κ={fd.get('condition_number')}"
+                  + (" · близки к коллинеарности" if near else "")),
+    )
+
+
+def _llm_checker_status(ai_summary: Optional[dict]) -> list[dict]:
+    """BLOCK 4.8 — explicit LLM verification rows.
+
+    The narrative is advisory, but it passes through deterministic CHECKERS
+    before it reaches the user; CoVe must show them so "the AI said so" is
+    never the end of the audit trail:
+
+      • Hallucination guard — held-tickers filter (no recommending owned
+        names), DATA-DRIVEN ideas rule, and the pick-contradiction filter.
+      • Math verification    — leverage-ratio phrasing rule (no "doubles" at
+        1.16x), the stress convex-cap mention validator, and the
+        no-self-aggregation directive on sector totals.
+    """
+    a = ai_summary or {}
+    have_ai = bool(a.get("verdict") or a.get("bullets"))
+    status  = "ok" if have_ai else "missing"
+    note_h  = ("held-filter + data-driven + contradiction-filter активны"
+               if have_ai else "AI не вызывался")
+    note_m  = ("leverage-phrasing + stress-cap + no-self-aggregation активны"
+               if have_ai else "AI не вызывался")
+    return [
+        _row(
+            name   = "LLM-чекер: контроль галлюцинаций",
+            source = "CoVe · post-LLM фильтры",
+            method = "held-tickers · DATA-DRIVEN идеи · фильтр противоречий пиков",
+            status = status,
+            note   = note_h,
+        ),
+        _row(
+            name   = "LLM-чекер: проверка вычислений",
+            source = "CoVe · валидаторы нарратива",
+            method = "плечо ≈Nx (без «удваивается») · упоминание выпуклого "
+                     "капа стресса · запрет ре-агрегации секторов",
+            status = status,
+            note   = note_m,
+        ),
+    ]
+
+
+def _smart_money_status(results: dict) -> dict:
+    """BLOCK 4.8/3.5 — insider (SEC Form 4) lineage row (gated)."""
+    try:
+        from finance.smart_money import insider_lineage_row
+        return insider_lineage_row(results.get("smart_money"))
+    except Exception:
+        return _row(
+            name   = "Smart-Money (инсайдеры SEC Form 4)",
+            source = "SEC EDGAR · Form 4",
+            method = "90д нетто-поток + кластер покупок",
+            status = "missing",
+            note   = "слой инсайдеров выключен (по умолчанию)",
+        )
 
 
 def _fx_status(results: dict) -> dict:
@@ -433,6 +519,10 @@ def build_lineage(results: dict,
         status = "ok",
     ))
 
+    # BLOCK 4.6: factor-independence diagnostic sits next to the risk engine
+    # whose betas it qualifies.
+    rows.append(_factor_diagnostic_status(results))
+
     # Прайсы + ATR + benchmark frame.
     rows.append(_tradernet_status(results, today))
 
@@ -455,9 +545,17 @@ def build_lineage(results: dict,
     # FRED macro drivers (variable rows depending on catalog).
     rows.extend(_macro_status(results))
 
+    # BLOCK 3.5/4.8: Smart-Money (insider Form-4) layer — gated, shows
+    # "missing" until SMART_MONEY_INSIDERS=1 wires a provider.
+    rows.append(_smart_money_status(results))
+
     # Bank RAG + AI narrative.
     rows.append(_rag_status(ai_summary))
     rows.append(_ai_status(ai_summary))
+
+    # BLOCK 4.8: explicit LLM verification rows — the narrative's
+    # hallucination + math checkers are part of the audit trail.
+    rows.extend(_llm_checker_status(ai_summary))
 
     return rows
 

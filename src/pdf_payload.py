@@ -457,6 +457,16 @@ def _build_expected_effect(raw: Optional[dict]) -> dict:
             "headline": str(verdict.get("headline", "")),
             "worsened": list(verdict.get("worsened") or []),
         }
+    # BLOCK 2.3: scope the panel to the HIGH-PRIORITY action items.  The
+    # template can label the cards "эффект приоритетных идей" and list the
+    # tickers, so the user sees the before/after delta is the effect of the
+    # prioritised plan — not a full, un-prioritised reshuffle.
+    hp = (raw or {}).get("high_priority_tickers")
+    if hp is not None:
+        out["high_priority_tickers"] = list(hp)
+        out["scoped_to_high_priority"] = bool(hp)
+        out["driver"] = str((raw or {}).get("driver") or
+                            ("high_priority_action_plan" if hp else "bl_target_fallback"))
     return out
 
 

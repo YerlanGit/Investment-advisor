@@ -215,6 +215,57 @@ def _it_share(tickers: list[str],
     return float(total)
 
 
+# ── BLOCK 2.3: high-priority target weights (Идеи → Action Plan → Эффект) ─────
+
+def high_priority_target_weights(
+        current_weights: dict[str, float],
+        action_plan_rows: Optional[list[dict]],
+        bl_records:       Optional[list[dict]] = None,
+) -> tuple[dict[str, float], list[str]]:
+    """
+    Build the weight vector the Expected-Effect panel should simulate so the
+    report tells ONE consistent story: the before/after delta is exactly what
+    executing the HIGH-PRIORITY action items would do — not the full,
+    un-prioritised Black-Litterman target.
+
+    "High priority" = the action rows that SURVIVED the turnover cap and carry
+    a real trade: action ∈ {Sell, Trim, Strong Buy, Buy} with |Δw| > 0.
+    Deferred (turnover-capped) and Hold rows are demoted to delta_w_pp = 0 by
+    build_action_plan, so they naturally drop out and leave their weight
+    unchanged.
+
+    Returns ``(target_weights, high_priority_tickers)``.  When NO actionable
+    rows exist it falls back to the Black-Litterman target (legacy behaviour),
+    returning an empty ticker list so the caller can tell the panel there were
+    no high-priority moves to show.
+    """
+    base = {str(k): float(v) for k, v in (current_weights or {}).items()}
+    hp_rows = [
+        r for r in (action_plan_rows or [])
+        if str(r.get("action")) not in ("None", "Hold", "")
+        and abs(float(r.get("delta_w_pp") or 0.0)) > 1e-9
+    ]
+    if hp_rows:
+        target = dict(base)
+        hp_tickers: list[str] = []
+        for r in hp_rows:
+            t = r.get("ticker")
+            if not t:
+                continue
+            cur = float(base.get(t, 0.0))
+            target[t] = cur + float(r.get("delta_w_pp") or 0.0) / 100.0
+            hp_tickers.append(str(t))
+        return target, hp_tickers
+
+    # No high-priority moves → fall back to the BL target (un-prioritised).
+    target = dict(base)
+    for r in (bl_records or []):
+        t = r.get("ticker")
+        if t:
+            target[t] = float(r.get("target_w", base.get(t, 0.0)))
+    return target, []
+
+
 # ── Public API ───────────────────────────────────────────────────────────────
 
 # Metrics whose IMPROVEMENT is a DECREASE of the raw `after - before` delta.
@@ -504,5 +555,6 @@ def simulate_after_plan(*,
 
 __all__ = [
     "simulate_after_plan",
+    "high_priority_target_weights",
     "_composite_risk_score",
 ]

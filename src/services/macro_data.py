@@ -1,18 +1,23 @@
 """
 FRED macro data feed for the regime / drivers panel.
 
-Pulls 4 macro time series from the St. Louis Fed (FRED) — all public-domain
+Pulls 6 macro time series from the St. Louis Fed (FRED) — all public-domain
 and free.  Used to enrich the DEEP P5 "Рыночный режим" page with hard
 macro signals beyond the ETF-based regime classifier:
 
-  • T10Y2Y         10Y-2Y Treasury spread     (yield curve · growth axis)
-  • BAMLH0A0HYM2   ICE BofA US HY OAS         (credit stress)
-  • VIXCLS         CBOE VIX                   (volatility regime)
-  • T10YIE         10Y Breakeven Inflation    (inflation impulse)
+  • T10Y2Y           10Y-2Y Treasury spread     (yield curve · growth axis)
+  • BAMLH0A0HYM2     ICE BofA US HY OAS         (credit stress)
+  • VIXCLS           CBOE VIX                   (volatility regime)
+  • T10YIE           10Y Breakeven Inflation    (inflation impulse · fwd)
+  • UNRATE           US Unemployment Rate       (cycle axis · BLOCK 3.4)
+  • A191RL1Q225SBEA  Real GDP growth (SAAR)     (growth axis · BLOCK 3.4)
 
 Note: the ISM Manufacturing PMI series (`NAPM`) was discontinued by FRED
 (ISM licensing) and is no longer fetched — it returned HTTP 400 on every
-run.  The regime classifier does not depend on it.
+run.  The regime classifier does not depend on it.  Realized CPI/PCE YoY is
+intentionally NOT pulled: FRED exposes only price LEVELS, and a YoY impulse
+needs a derived 12-month calc the generic last-value feed does not perform —
+the forward inflation signal is already carried by T10YIE (breakeven).
 
 Design constraints
 ──────────────────
@@ -134,6 +139,38 @@ MACRO_SERIES_CATALOG: list[SeriesSpec] = [
         freshness_calendar_days = 5,
         sanity_range            = (-1.0, 10.0),
         publish_cadence         = "daily",
+    ),
+    # BLOCK 3.4 — hard macro signals for the regime page.  These are the two
+    # series that are (a) free on FRED, (b) meaningful as a STANDALONE point
+    # value (a level/rate the reader can act on), and (c) directly map onto the
+    # regime axes (unemployment → cycle, real GDP growth → growth).  Freshness
+    # windows are widened to the publication cadence so a normal release lag
+    # (UNRATE ≈ monthly, GDP ≈ quarterly) does not flash "stale".
+    #
+    # Deliberately NOT added here (pruned per "убери ненужное"):
+    #   • CPI / PCE YoY — FRED exposes only LEVELS (CPIAUCSL/PCEPI); the YoY
+    #     impulse needs a derived 12-month calc, which the generic last-value
+    #     feed does not do.  The forward inflation signal is already covered by
+    #     T10YIE (breakeven).  Derived realized-inflation is a follow-up.
+    #   • ISM PMI (NAPM) — discontinued by FRED (ISM licensing); returns HTTP
+    #     400 on every call (see module docstring).  No free replacement series.
+    SeriesSpec(
+        key                     = "unemployment",
+        series_id               = "UNRATE",
+        label                   = "US Unemployment Rate",
+        unit                    = "%",
+        freshness_calendar_days = 45,   # monthly release + ~1-week lag
+        sanity_range            = (1.0, 25.0),
+        publish_cadence         = "monthly",
+    ),
+    SeriesSpec(
+        key                     = "gdp_growth",
+        series_id               = "A191RL1Q225SBEA",   # Real GDP, % change SAAR
+        label                   = "Real GDP growth (SAAR)",
+        unit                    = "%",
+        freshness_calendar_days = 120,  # quarterly release + revision lag
+        sanity_range            = (-15.0, 15.0),
+        publish_cadence         = "quarterly",
     ),
 ]
 

@@ -34,11 +34,59 @@ context — two identical price frames always produce the same regime label.
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Optional
 
 import numpy as np
 import pandas as pd
+
+
+# ── BLOCK 3.4 — hard-macro overlay tunables (gated, additive) ────────────────
+# The ETF-momentum axes above are the deterministic DEFAULT.  When the env
+# flag is set AND a FRED macro pack is supplied to classify(), two hard signals
+# join the axis component lists at the SAME scale as the ETF spreads:
+#   • Real GDP growth vs trend  → growth axis
+#   • Unemployment vs neutral   → cycle axis (inverted: low U = late-cycle hot)
+# Each is bounded to ±_MACRO_MAX_NUDGE so macro can TILT, never OVERRIDE, the
+# price-based regime.  Off by default → the classifier stays byte-identical.
+MACRO_OVERLAY_ENV     = "REGIME_MACRO_OVERLAY"
+_MACRO_MAX_NUDGE      = 0.05     # ≈ a quarter of the 0.20 magnitude reference
+_TREND_GDP_GROWTH     = 2.0      # % SAAR — long-run US real-GDP trend
+_GDP_SCALE            = 0.020    # 2pp above trend ⇒ +0.04 growth nudge
+_NEUTRAL_UNEMPLOYMENT = 4.5      # % — rough full-employment anchor
+_UNEMP_SCALE          = 0.030    # 1.5pp below neutral ⇒ +0.045 cycle nudge
+
+
+def _macro_overlay_enabled() -> bool:
+    return str(os.getenv(MACRO_OVERLAY_ENV, "")).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _usable_macro(series: object) -> Optional[float]:
+    """Return a finite value only for a consulted (ok/stale) FRED series."""
+    if not isinstance(series, dict):
+        return None
+    if series.get("status") not in ("ok", "stale"):
+        return None
+    v = series.get("value")
+    if isinstance(v, (int, float)) and np.isfinite(float(v)):
+        return float(v)
+    return None
+
+
+def _macro_nudges(macro: dict) -> tuple[Optional[float], Optional[float]]:
+    """Map a FRED macro pack to (growth_nudge, cycle_nudge), each bounded."""
+    g_nudge = c_nudge = None
+    gdp = _usable_macro((macro or {}).get("gdp_growth"))
+    if gdp is not None:
+        g_nudge = float(np.clip((gdp - _TREND_GDP_GROWTH) * _GDP_SCALE,
+                                -_MACRO_MAX_NUDGE, _MACRO_MAX_NUDGE))
+    une = _usable_macro((macro or {}).get("unemployment"))
+    if une is not None:
+        # Inverted: LOW unemployment ⇒ tight/late-cycle ⇒ positive cycle tilt.
+        c_nudge = float(np.clip((_NEUTRAL_UNEMPLOYMENT - une) * _UNEMP_SCALE,
+                                -_MACRO_MAX_NUDGE, _MACRO_MAX_NUDGE))
+    return g_nudge, c_nudge
 
 
 # Map of regime → action-relevant guidance.  Used by the Scoring engine
@@ -99,10 +147,16 @@ class RegimeClassifier:
     MEDIUM_WIN = 60    # ~3 months
     LONG_WIN   = 120   # ~6 months — stabiliser
 
-    def classify(self, prices: pd.DataFrame) -> Optional[RegimeReading]:
+    def classify(self, prices: pd.DataFrame,
+                 macro: Optional[dict] = None) -> Optional[RegimeReading]:
         """
         Return a RegimeReading or None if there's not enough data.
         Caller (UniversalPortfolioManager) treats None as "regime unknown".
+
+        ``macro`` (BLOCK 3.4) is the optional FRED pack from
+        MacroFeed.get_regime_drivers().  It is consulted ONLY when
+        REGIME_MACRO_OVERLAY=1; otherwise the classifier is the unchanged,
+        fully deterministic ETF-momentum model.
         """
         if prices is None or prices.empty or len(prices) < self.MEDIUM_WIN + 5:
             return None
@@ -153,6 +207,23 @@ class RegimeClassifier:
             cycle_components.append(iwm_60 - spy_60_for_cycle)
             signals["iwm_vs_spy_60d"] = iwm_60 - spy_60_for_cycle
         cycle_score = float(np.mean(cycle_components)) if cycle_components else 0.0
+
+        # ── BLOCK 3.4: optional hard-macro overlay (gated, additive) ──────
+        # Fold GDP-growth / unemployment in as extra components at the SAME
+        # scale as the ETF spreads, then recompute the axis means.  Because
+        # they enter the component LISTS, the magnitude + directional-agreement
+        # confidence math below picks them up with no special-casing.  Bounded
+        # and off-by-default, so this can tilt but never hijack price action.
+        if macro and _macro_overlay_enabled():
+            g_nudge, c_nudge = _macro_nudges(macro)
+            if g_nudge is not None:
+                growth_components.append(g_nudge)
+                signals["macro_gdp_growth_nudge"] = round(g_nudge, 4)
+            if c_nudge is not None:
+                cycle_components.append(c_nudge)
+                signals["macro_unemployment_nudge"] = round(c_nudge, 4)
+            growth_score = float(np.mean(growth_components)) if growth_components else 0.0
+            cycle_score  = float(np.mean(cycle_components))  if cycle_components else 0.0
 
         # If absolutely no inputs were available, bail.
         if not signals:
