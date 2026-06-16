@@ -1290,8 +1290,8 @@ class MacroFeedTest(unittest.TestCase):
                           http_get=boom, now=self._now)
         out = feed.get_regime_drivers()
         self.assertEqual(calls["n"], 0)
-        # All 4 series present, all with missing status.
-        self.assertEqual(len(out), 4)
+        # All 6 series present (BLOCK 3.4), all with missing status.
+        self.assertEqual(len(out), 6)
         for k, row in out.items():
             self.assertEqual(row["status"], "missing", f"{k} status")
             self.assertIsNone(row["value"])
@@ -1311,6 +1311,10 @@ class MacroFeedTest(unittest.TestCase):
                                                        ("2026-05-14", 3.05)]),
             "VIXCLS":       _fake_fred_observations([("2026-05-14", 14.2)]),
             "T10YIE":       _fake_fred_observations([("2026-05-14", 2.32)]),
+            # BLOCK 3.4 — monthly/quarterly series; dates within their (wider)
+            # freshness windows so status resolves to "ok" in this fixture.
+            "UNRATE":          _fake_fred_observations([("2026-05-01", 4.1)]),
+            "A191RL1Q225SBEA": _fake_fred_observations([("2026-04-01", 2.4)]),
         }
         calls = []
         def fake_get(url, params=None, timeout=None):
@@ -1322,15 +1326,17 @@ class MacroFeedTest(unittest.TestCase):
                           http_get=fake_get, now=self._now)
         out = feed.get_regime_drivers()
 
-        # All 4 series fetched.
+        # All 6 series fetched (BLOCK 3.4).
         self.assertEqual(sorted(calls),
-                          sorted(["T10Y2Y", "BAMLH0A0HYM2",
-                                   "VIXCLS", "T10YIE"]))
+                          sorted(["T10Y2Y", "BAMLH0A0HYM2", "VIXCLS", "T10YIE",
+                                   "UNRATE", "A191RL1Q225SBEA"]))
         # Values flow through correctly.
         self.assertAlmostEqual(out["yield_curve_10y2y"]["value"],   0.20, places=4)
         self.assertAlmostEqual(out["hy_credit_spread"]["value"],    3.05, places=4)
         self.assertAlmostEqual(out["vix"]["value"],                 14.2, places=2)
         self.assertAlmostEqual(out["breakeven_inflation"]["value"], 2.32, places=2)
+        self.assertAlmostEqual(out["unemployment"]["value"],         4.1, places=2)
+        self.assertAlmostEqual(out["gdp_growth"]["value"],           2.4, places=2)
         # Status ok everywhere; freshness within window.
         for k, row in out.items():
             self.assertEqual(row["status"], "ok",
@@ -1467,12 +1473,14 @@ class MacroFeedTest(unittest.TestCase):
 
     # ─── catalog completeness ──────────────────────────────────────────
 
-    def test_default_catalog_covers_all_4_drivers(self) -> None:
+    def test_default_catalog_covers_all_6_drivers(self) -> None:
         from services.macro_data import MACRO_SERIES_CATALOG
         keys = {s.key for s in MACRO_SERIES_CATALOG}
         # NAPM (ISM PMI) removed — discontinued by FRED, returned HTTP 400.
+        # BLOCK 3.4 added unemployment (UNRATE) + real-GDP growth (SAAR).
         self.assertEqual(keys, {"yield_curve_10y2y", "hy_credit_spread",
-                                  "vix", "breakeven_inflation"})
+                                  "vix", "breakeven_inflation",
+                                  "unemployment", "gdp_growth"})
 
     # ─── payload passthrough ───────────────────────────────────────────
 

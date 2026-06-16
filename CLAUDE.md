@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Detected stack
 - Languages: Python 3.11 (aiogram 3.x Telegram bot + quant engine: numpy / pandas / scikit-learn).
-- LLM: Anthropic API (Haiku 4.5 base tier / Sonnet 4.6 deep tier) via `src/ai_narrative.py`.
+- LLM: Anthropic API (Sonnet 4.6 base tier / Opus 4.8 deep tier) via `src/ai_narrative.py` — env-overridable (`ANTHROPIC_MODEL_BASE` / `ANTHROPIC_MODEL_DEEP`); Opus omits `temperature`, so DEEP idea variety comes from the prompt-level freshness directive.
 - Infra: GCP Cloud Run (long-polling bot), Cloud Function (RAG ingest), ChromaDB, SQLite on gcsfuse.
 
 ## Verification

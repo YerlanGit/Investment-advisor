@@ -1,10 +1,41 @@
 # AUDIT.md — RAMP Bot · Институциональный аудит и стратегия
 
-> **Версия:** 2026-06-14 (360° аудит · Sprint 5.x закрыт) · **Базовый коммит:** `ed85a8d` (merge PR #47 → `main`)
-> **Текущая ветка:** `claude/stoic-mccarthy-LM18P` · tip `bfc8baf` — все коммиты на GitHub **Verified ✅** (API: `verified=true`)
+> **Версия:** 2026-06-16 (Sprint 6 · BLOCK 1–4 audit/refactor) · **Базовый коммит:** `ed85a8d` (merge PR #47 → `main`)
+> **Текущая ветка:** `claude/stoic-mccarthy-LM18P` · tip `855afce`+Sprint-6 — все коммиты на GitHub **Verified ✅** (API: `verified=true`)
 > **Аудитор:** CTO / Lead Quant Architect / DevSecOps
-> **Верификация:** живые прод-отчёты 2026-06-09 → **2026-06-14** (`base/deep.html`, портфель U148046720, с маржой) · pytest **418 passed, 10 skipped**
+> **Верификация:** живые прод-отчёты 2026-06-09 → **2026-06-16** (`base/deep.html`, портфель U148046720, с маржой) · pytest **440 passed, 10 skipped**
 > **Карты:** `REPORT_SECTIONS.md` (секция→builder→шаблон) · `REPORT_SECTIONS_AUDIT.md` (посекционный аудит живых отчётов)
+
+---
+
+## −4. Sprint 6 — BLOCK 1–4 аудит/рефакторинг (2026-06-16) — Lead Quant Architect / AI-Engineer
+
+> **Метод:** «проанализируй задание перед выполнением, убери ненужное на данном этапе». 8 задач в 4 блоках,
+> хирургические правки + честный прунинг тяжёлого/платного. **pytest 440 passed, 10 skipped.**
+
+### Прунинг-вердикт (что НЕ делалось и почему — «точно не нужно на данном этапе»)
+
+| Запрошено | Решение | Причина |
+|---|---|---|
+| Model Routing → `claude-3-5-sonnet-latest` / `claude-3-opus-latest` | **Отклонены ID, исполнен ИНТЕНТ** на актуальных `claude-sonnet-4-6` / `claude-opus-4-8` | Это модели 2024 г. — пин был бы **регрессом** ниже текущего Haiku 4.5/Sonnet 4.6 и ДОРОЖЕ |
+| Факторы: PCA / ортогонализация | **Диагностика κ + max\|corr\| вместо принудительной PCA** | `Σ=B·F·Bᵀ+D` уже несёт полную ковариацию F → двойного учёта НЕТ; PCA лишь убила бы интерпретируемость именованных факторов |
+| Smart Money: политики + госстимулы + live Form-4 парсинг | **Фундамент + дизайн (gated, OFF)**; платное/тяжёлое отложено | Конгресс-сделки/USASpending — платные агрегаторы / крупный ингест; не нужны на данном этапе |
+| CPI/PCE YoY, PMI в макро | **UNRATE + Real-GDP добавлены; CPI/PCE YoY и PMI отложены** | На FRED нет чистой одиночной серии «CPI YoY» (только уровни), PMI **снят с публикации**; форвард-инфляция уже покрыта T10YIE |
+
+### Что сделано (Было / Стало)
+
+| # | Блок | Было | Стало | Файлы |
+|---|---|---|---|---|
+| 1.2 | Model Routing | BASE=Haiku 4.5, DEEP=Sonnet 4.6 | **BASE=Sonnet 4.6, DEEP=Opus 4.8** (env-overridable); гард `_model_supports_temperature` опускает `temperature` на Opus | `ai_narrative.py` |
+| 1.1 | Динамика идей | только `temperature=0.5` (исчезает на Opus) | + **директива свежести** в `ideas_rule` (период `YYYY-MM`, запрет «по привычке») — работает и без `temperature` | `ai_narrative.py` |
+| 2.3 | Идеи→Action→Эффект | «Ожидаемый эффект» считался на полном BL-векторе | **только высокоприоритетные** (не-deferred Buy/Sell/Trim) action-строки → `high_priority_target_weights()`; UI помечает скоуп (`scoped_to_high_priority`, список тикеров) | `simulate.py`, `investment_logic.py`, `pdf_payload.py` |
+| 3.4 | Рыночный режим | 4 FRED-серии; ETF-классификатор | + **UNRATE + Real-GDP (SAAR)** в каталог; **gated overlay** в `regime.classify(macro=…)` (env `REGIME_MACRO_OVERLAY`, OFF по умолч., аддитивно/ограниченно) | `macro_data.py`, `regime.py`, `investment_logic.py` |
+| 3.5 | Smart Money | отсутствовал | новый `finance/smart_money.py`: `InsiderSignal`, детерминир. скорер, интерфейс Form-4 (gated), CoVe-хук + бриф прогнозных моделей | `smart_money.py`, `data_lineage.py` |
+| 4.6 | Мультиколлинеарность | F не проверялась | **диагностика** κ (condition number) + max\|corr\| факторов, warn-лог при κ>30/\|corr\|>0.95, в `portfolio_metrics.factor_diagnostics` + CoVe-строка | `investment_logic.py`, `data_lineage.py` |
+| 4.7 | 4-Pillar | `composite_risk_score`/`fundamentals_score` доверяли входу | **`_finite()`-гард**: NaN/±Inf нейтрализуются в 0 (а не саморандомный min/max и не отравление Total NaN-ом) | `scoring.py` |
+| 4.8 | CoVe | 14 строк | + **LLM-чекеры** (галлюцинации, проверка вычислений), **Smart-Money** (gated), **факторная независимость**; убрана мёртвая ссылка на PMI | `data_lineage.py` |
+
+📝 **Остаётся (за флагом / след. фаза):** живой SEC Form-4 провайдер (gated `SMART_MONEY_INSIDERS=1`); включение `REGIME_MACRO_OVERLAY` после валидации на проде; реализованный CPI/PCE YoY как производная серия; ML-тиры инсайдер-сигнала (кросс-секционный ранкер, regime-conditioned).
 
 ---
 

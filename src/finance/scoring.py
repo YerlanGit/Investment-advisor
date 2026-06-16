@@ -41,6 +41,26 @@ import numpy as np
 HOTSPOT_TRC_PCT: float = 20.0
 
 
+# ── Numeric hygiene (BLOCK 4.7) ──────────────────────────────────────────────
+# Outlier / Inf / NaN protection shared by the pillar aggregators.  robust_z
+# already clips per-metric Z to ±3, but two downstream aggregators trusted
+# their inputs:
+#   • composite_risk_score relied on Python's min()/max() to clamp — and
+#     `max(0.0, float('nan'))` is ORDER-DEPENDENT (returns 0.0 here only by
+#     luck of argument order), so a NaN vol/CVaR could silently mis-score.
+#   • fundamentals_score added np.clip(macro_alignment, …) straight into the
+#     sum — a NaN macro tilt propagated to a NaN pillar and a NaN Total.
+# `_finite` coerces any non-finite (NaN/±Inf) value to a safe default so a
+# single corrupt upstream number can never poison the score.
+
+def _finite(value, default: float = 0.0) -> float:
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return default
+    return default if not np.isfinite(f) else f
+
+
 # ── Z-score utility ──────────────────────────────────────────────────────────
 
 def robust_z(value: Optional[float],
@@ -118,7 +138,9 @@ def fundamentals_score(*,
     if fcf_margin_z is not None:
         if fcf_margin_z >  1: s += 1.0
         if fcf_margin_z < -1: s -= 1.0
-    s += float(np.clip(macro_alignment, -0.5, 0.5))
+    # BLOCK 4.7: coerce a non-finite macro tilt to 0 BEFORE it enters the sum —
+    # otherwise a NaN regime-alignment poisons the whole pillar (and Total).
+    s += float(np.clip(_finite(macro_alignment, 0.0), -0.5, 0.5))
     return float(np.clip(s, -2.0, 2.0))
 
 
@@ -355,9 +377,12 @@ def composite_risk_score(volatility: float, cvar: float,
     def _norm(x: float, scale: float) -> float:
         return min(100.0, max(0.0, (x / scale) * 100.0)) if scale > 0 else 0.0
 
-    s_vol  = _norm(float(volatility),  _VOL_BASE)
-    s_cvar = _norm(abs(float(cvar)),   m["cvar_base"])
-    s_conc = _norm(float(max_erc_pct), _ERC_BASE)
+    # BLOCK 4.7: sanitize the three inputs to finite values FIRST.  A NaN here
+    # used to survive min()/max() in an argument-order-dependent way; +Inf now
+    # deterministically saturates the gauge instead of relying on clamp luck.
+    s_vol  = _norm(_finite(volatility),       _VOL_BASE)
+    s_cvar = _norm(abs(_finite(cvar)),        m["cvar_base"])
+    s_conc = _norm(_finite(max_erc_pct),      _ERC_BASE)
     return int(round(m["w_vol"] * s_vol + m["w_cvar"] * s_cvar + m["w_erc"] * s_conc))
 
 

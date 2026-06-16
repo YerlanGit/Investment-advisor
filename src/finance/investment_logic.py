@@ -672,7 +672,46 @@ class MAC3RiskEngine:
             cov_factors = 0.7 * cov_factors_ewma + 0.3 * cov_factors_shrunk
         except Exception:
             cov_factors = cov_factors_ewma
-        
+
+        # ── BLOCK 4.6: factor-multicollinearity diagnostic (read-only) ───────
+        # The structural model ALREADY avoids double-counting correlated risk:
+        # Σ = B·F·Bᵀ + D carries the FULL off-diagonal factor covariance F, so
+        # two correlated factors contribute their covariance exactly once.  A
+        # PCA / orthogonalisation would only DESTROY the named-factor
+        # interpretability the report depends on — so instead of forcing it we
+        # MEASURE collinearity and surface a diagnostic:
+        #   • max |off-diagonal correlation| across the factor set
+        #   • condition number κ of the factor CORRELATION matrix
+        # |corr| > 0.95 or κ > 30 ⇒ near-collinear factors make the Ridge betas
+        # unstable; we log a warning and feed the numbers to a CoVe row so the
+        # operator can prune/merge a redundant factor (e.g. SPY vs QQQ).
+        factor_diagnostic: dict = {}
+        try:
+            _F = np.asarray(cov_factors, dtype=float)
+            if _F.ndim == 2 and _F.shape[0] >= 2:
+                _d    = np.sqrt(np.clip(np.diag(_F), 1e-18, None))
+                _corr = _F / np.outer(_d, _d)
+                _off  = _corr - np.eye(_corr.shape[0])
+                _max_off = float(np.max(np.abs(_off))) if _off.size else 0.0
+                _cond    = float(np.linalg.cond(_corr))
+                factor_diagnostic = {
+                    "n_factors":        int(_F.shape[0]),
+                    "factors":          list(f_data.columns),
+                    "max_abs_corr":     round(_max_off, 4),
+                    "condition_number": round(_cond, 2),
+                    "near_collinear":   bool(_max_off > 0.95 or _cond > 30.0),
+                }
+                if factor_diagnostic["near_collinear"]:
+                    logger.warning(
+                        "Факторная мультиколлинеарность: max|corr|=%.2f, κ=%.1f "
+                        "(порог 0.95 / 30 → беты Ridge нестабильны; рассмотрите "
+                        "слияние коррелирующих факторов).",
+                        _max_off, _cond,
+                    )
+        except Exception as exc:
+            logger.debug("Factor diagnostic skipped: %s", exc)
+        self._last_factor_diagnostic = factor_diagnostic
+
         structural_cov = B @ cov_factors @ B.T + D
         structural_cov_ann = structural_cov * self.trading_days 
         
@@ -821,6 +860,9 @@ class MAC3RiskEngine:
             # H4 disclaimer is always present — even on portfolios where
             # no scenario hits the convex cap, the user sees the policy.
             "stress_test_disclaimer": _STRESS_TEST_DISCLAIMER,
+            # BLOCK 4.6: factor-multicollinearity diagnostic (κ + max|corr|),
+            # surfaced to the CoVe panel so collinear factors are visible.
+            "factor_diagnostics": getattr(self, "_last_factor_diagnostic", {}),
         }
 
         return cov_df, pd.DataFrame(exposures_report).T, portfolio_metrics
@@ -1334,26 +1376,29 @@ class UniversalPortfolioManager:
                 'group_b_fundamental': group_b,
             }
 
-        # ═══════════════ MACRO REGIME CLASSIFICATION ═══════════════
-        # Reuses the factor ETF prices already in `all_data` — no extra calls.
-        try:
-            from finance.regime import RegimeClassifier
-            regime_reading = RegimeClassifier().classify(all_data)
-        except Exception as exc:
-            logger.warning("Regime classification skipped: %s", exc)
-            regime_reading = None
-
         # ═══════════════ MACRO DRIVERS (FRED) ═══════════════
-        # 5-series pack (yield curve / HY OAS / PMI / VIX / breakeven) used
-        # by the DEEP P5 regime page.  Disk-cached for 12h; gracefully
-        # degrades to status="missing" when FRED_API_KEY is unset and to
-        # status="stale" on transient network failures.
+        # 6-series pack (yield curve / HY OAS / VIX / breakeven / unemployment /
+        # real-GDP growth) used by the DEEP P5 regime page.  Disk-cached for
+        # 12h; gracefully degrades to status="missing" when FRED_API_KEY is
+        # unset and to status="stale" on transient network failures.  Fetched
+        # BEFORE classification so the regime can (optionally) consume it.
         macro_drivers: dict = {}
         try:
             macro_drivers = _MacroFeed().get_regime_drivers()
         except Exception as exc:
             logger.warning("Macro drivers fetch skipped: %s", exc)
             macro_drivers = {}
+
+        # ═══════════════ MACRO REGIME CLASSIFICATION ═══════════════
+        # Reuses the factor ETF prices already in `all_data` — no extra calls.
+        # BLOCK 3.4: the FRED macro pack is passed in; it is only consulted when
+        # REGIME_MACRO_OVERLAY=1 (otherwise the classifier is unchanged).
+        try:
+            from finance.regime import RegimeClassifier
+            regime_reading = RegimeClassifier().classify(all_data, macro=macro_drivers)
+        except Exception as exc:
+            logger.warning("Regime classification skipped: %s", exc)
+            regime_reading = None
 
         # ═══════════════ TECHNICALS (pillar C) ═══════════════
         # Computes RSI/MACD/SMA/Bollinger/52w-Hi/Mom-12m1m per-asset.
@@ -1494,20 +1539,51 @@ class UniversalPortfolioManager:
             logger.warning("Black-Litterman skipped: %s", exc)
             bl_records = None
 
+        # ═══════════════ ACTION PLAN ═══════════════
+        # Buy zone / Sell target / Stop loss anchored to ATR + SMA + RSI.
+        # BLOCK 2.3: computed BEFORE the Expected-Effect simulation so the
+        # panel can be driven by the HIGH-PRIORITY (non-deferred) action items
+        # rather than the full BL target — keeping Идеи → Action Plan →
+        # Ожидаемый эффект one consistent story.
+        action_plan_rows: list[dict] = []
+        try:
+            from finance.action_plan import build_action_plan
+            ap_scores = {
+                t: {"action":  s.action,
+                    "total":   s.total,
+                    "hotspot": s.hotspot}
+                for t, s in asset_scores.items()
+            }
+            rows = build_action_plan(
+                perf_table      = perf,
+                asset_scores    = ap_scores,
+                technicals_map  = technicals_map,
+                bl_records      = bl_records,
+                portfolio_value = total_portfolio_value,
+                # Sprint-5.1 (A3): stop/take distances scale with the mandate
+                # (Conservative tighter, Aggressive wider) — levels are no
+                # longer one-size-fits-all.
+                risk_mandate    = self.engine.risk_mandate,
+            )
+            action_plan_rows = [r.as_dict() for r in rows]
+        except Exception as exc:
+            logger.warning("Action plan skipped: %s", exc)
+            action_plan_rows = []
+
         # ═══════════════ EXPECTED EFFECT (after-plan simulation) ═══════════
-        # Re-evaluates cover-page metrics under BL target weights.  Falls
-        # back to current weights when BL is unavailable — the "after" then
-        # equals "before" and every delta is 0, which the report can detect.
+        # Re-evaluates cover-page metrics under the HIGH-PRIORITY action items
+        # (BLOCK 2.3).  Falls back to the BL target — and then to current
+        # weights — when no actionable rows exist; the "after" then equals
+        # "before" and every delta is 0, which the report can detect.
         expected_effect: dict | None = None
         try:
-            # Build target_weights from BL where present; otherwise keep
-            # current weights (no-op simulation).
-            target_weights = dict(weights_dict)
-            if bl_records:
-                for r in bl_records:
-                    t = r.get("ticker")
-                    if t:
-                        target_weights[t] = float(r.get("target_w", weights_dict.get(t, 0)))
+            # BLOCK 2.3: the panel simulates ONLY the high-priority moves that
+            # survived the turnover cap (Buy/Sell/Trim with |Δw|>0).  Deferred
+            # and Hold rows leave their weight unchanged; falls back to the BL
+            # target when there are no actionable rows.
+            from finance.simulate import high_priority_target_weights
+            target_weights, hp_tickers = high_priority_target_weights(
+                weights_dict, action_plan_rows, bl_records)
 
             # Build daily log-returns matrix for assets the cov matrix knows
             # about.  Reuses all_data (already loaded) so no extra fetch.
@@ -1539,36 +1615,15 @@ class UniversalPortfolioManager:
                 target_weights    = target_weights,
                 sector_by_ticker  = sector_map_for_sim,
             )
+            # Tag which tickers drove the panel so the UI can show the
+            # before/after delta is scoped to the high-priority ideas.
+            if isinstance(expected_effect, dict):
+                expected_effect["high_priority_tickers"] = hp_tickers
+                expected_effect["driver"] = ("high_priority_action_plan"
+                                             if hp_tickers else "bl_target_fallback")
         except Exception as exc:
             logger.warning("Expected-effect simulator skipped: %s", exc)
             expected_effect = None
-
-        # ═══════════════ ACTION PLAN ═══════════════
-        # Buy zone / Sell target / Stop loss anchored to ATR + SMA + RSI.
-        action_plan_rows: list[dict] = []
-        try:
-            from finance.action_plan import build_action_plan
-            ap_scores = {
-                t: {"action":  s.action,
-                    "total":   s.total,
-                    "hotspot": s.hotspot}
-                for t, s in asset_scores.items()
-            }
-            rows = build_action_plan(
-                perf_table      = perf,
-                asset_scores    = ap_scores,
-                technicals_map  = technicals_map,
-                bl_records      = bl_records,
-                portfolio_value = total_portfolio_value,
-                # Sprint-5.1 (A3): stop/take distances scale with the mandate
-                # (Conservative tighter, Aggressive wider) — levels are no
-                # longer one-size-fits-all.
-                risk_mandate    = self.engine.risk_mandate,
-            )
-            action_plan_rows = [r.as_dict() for r in rows]
-        except Exception as exc:
-            logger.warning("Action plan skipped: %s", exc)
-            action_plan_rows = []
 
         # ── Leverage / gross exposure (read-only, AFTER risk math) ─────────
         # Margin debt manifests as a NEGATIVE weight on the cash leg (e.g.
