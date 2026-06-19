@@ -2971,7 +2971,7 @@
           {% endif %}
         </div>
 
-        {# ─── Macro drivers — FRED 5 series, fully data-driven ───────────────
+        {# ─── Macro drivers — FRED 6 series + rate-of-change, data-driven ────
              data.macro_drivers.series → list of {id, name, value, as_of,
              status, comment}.  status is engine vocab: ok/warn/stale/missing.
              Visual mapping mirrors CoVe: ok→bull (pos), warn→warn,
@@ -2989,6 +2989,8 @@
           <div class="reg-signal-row">
             <span class="reg-signal-name">{{ s.name }}{% if s.comment %} · <span style="color:var(--ink-60); font-weight:400; font-size:8.5px;">{{ s.comment }}</span>{% endif %}</span>
             <span class="reg-signal-val {{ valcls }}">{{ s.value }}</span>
+            {# F3 — rate-of-change chip (level is the value above; this is the темп). #}
+            {% if s.trend_label %}<span class="reg-signal-trend" style="font-family:var(--font-mono); font-size:8.5px; color:var(--ink-60); white-space:nowrap; margin:0 6px;">{{ s.trend_label }}</span>{% endif %}
             <span class="reg-signal-state {{ stcls }}">{{ stlbl }}</span>
           </div>
           {% else %}

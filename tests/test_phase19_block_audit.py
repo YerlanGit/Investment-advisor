@@ -317,5 +317,51 @@ class CoVeRowsTest(unittest.TestCase):
         self.assertIn("unemployment", macro[0]["method"])
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# F3 (UI) — macro rate-of-change chip in the DEEP Regime panel
+# ─────────────────────────────────────────────────────────────────────────────
+class MacroTrendChipTest(unittest.TestCase):
+    def test_rising_monthly_series_up(self):
+        from pdf_payload import _macro_series_trend
+        row = {"series_id": "UNRATE", "unit": "%", "publish_cadence": "monthly",
+               "history_30d": [{"value": v} for v in [3.8, 3.9, 4.0, 4.1]]}
+        t = _macro_series_trend(row)
+        self.assertEqual(t["dir"], "▲")
+        self.assertGreater(t["delta"], 0)
+        self.assertIn("за 3м", t["label"])
+
+    def test_falling_daily_series_down(self):
+        from pdf_payload import _macro_series_trend
+        row = {"series_id": "VIXCLS", "unit": "index", "publish_cadence": "daily",
+               "history_30d": [{"value": v} for v in [20, 18, 16, 15] * 6]}
+        t = _macro_series_trend(row)
+        self.assertEqual(t["dir"], "▼")
+        self.assertIn("за 1м", t["label"])
+
+    def test_hy_oas_delta_in_bp(self):
+        from pdf_payload import _macro_series_trend
+        # FRED reports HY OAS in % (3.10→3.40); the chip must show bp like value.
+        row = {"series_id": "BAMLH0A0HYM2", "unit": "pp", "publish_cadence": "daily",
+               "history_30d": [{"value": v} for v in [3.10, 3.20, 3.30, 3.40] * 6]}
+        t = _macro_series_trend(row)
+        self.assertIn("bp", t["label"])
+        self.assertEqual(t["dir"], "▲")
+
+    def test_insufficient_history_returns_none(self):
+        from pdf_payload import _macro_series_trend
+        self.assertIsNone(_macro_series_trend({"history_30d": [{"value": 1.0}]}))
+
+    def test_panel_exposes_trend_label(self):
+        from pdf_payload import _build_macro_drivers_panel
+        raw = {"unemployment": {"series_id": "UNRATE", "value": 4.1, "unit": "%",
+                                "status": "ok", "as_of": "2026-06-01",
+                                "publish_cadence": "monthly",
+                                "history_30d": [{"value": v} for v in [3.8, 3.9, 4.0, 4.1]]}}
+        panel = _build_macro_drivers_panel(raw)
+        self.assertEqual(len(panel["series"]), 1)
+        self.assertTrue(panel["series"][0]["trend_label"])
+        self.assertEqual(panel["series"][0]["trend_dir"], "▲")
+
+
 if __name__ == "__main__":
     unittest.main()
