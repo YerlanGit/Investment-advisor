@@ -146,6 +146,24 @@ class MacroRegimeOverlayTest(unittest.TestCase):
         finally:
             os.environ.pop("REGIME_MACRO_OVERLAY", None)
 
+    def test_overlay_reads_trend_not_just_level(self):
+        """Rising unemployment tilts cycle DOWN vs a flat series at same level."""
+        from finance.regime import RegimeClassifier
+        os.environ["REGIME_MACRO_OVERLAY"] = "1"
+        try:
+            prices = self._ramp_prices()
+            rising = {"unemployment": {"value": 3.5, "status": "ok",
+                       "history_30d": [{"value": v} for v in [3.0, 3.1, 3.2, 3.5]]}}
+            flat   = {"unemployment": {"value": 3.5, "status": "ok",
+                       "history_30d": [{"value": v} for v in [3.5, 3.5, 3.5, 3.5]]}}
+            r = RegimeClassifier().classify(prices, macro=rising)
+            f = RegimeClassifier().classify(prices, macro=flat)
+            self.assertIn("macro_unemployment_trend", r.signals)
+            self.assertGreater(r.signals["macro_unemployment_trend"], 0)   # rising
+            self.assertLess(r.cycle_score, f.cycle_score)                  # cools cycle
+        finally:
+            os.environ.pop("REGIME_MACRO_OVERLAY", None)
+
     def test_overlay_ignores_missing_status_series(self):
         from finance.regime import RegimeClassifier
         os.environ["REGIME_MACRO_OVERLAY"] = "1"

@@ -3306,11 +3306,27 @@
     <div class="d3-block-head">
       <div class="panel-title">Ожидаемый эффект на риск-показатели портфеля</div>
       <div class="d3-block-sub">оценка «до / после» при исполнении Action Plan ·
-        BL target weights · runtime из <code style="font-family:var(--font-mono);
+        runtime из <code style="font-family:var(--font-mono);
         font-size:9px; background:var(--tech-blue-08); color:var(--tech-blue);
         padding:1px 4px; border-radius:2px;">data.expected_effect</code> [Step 3]
         ·  горизонт 1 квартал
         <span class="src">[Quant Engine]</span></div>
+      {# BLOCK 2.3 — scope badge: the delta below reflects ONLY the high-priority
+         (non-deferred Buy/Sell/Trim) action items, not the full BL reshuffle. #}
+      {% if data.expected_effect and data.expected_effect.scoped_to_high_priority %}
+      <div class="ee-scope" style="margin-top:6px; font-size:10px;
+           font-family:var(--font-mono); color:var(--tech-blue);
+           background:var(--tech-blue-08); border-radius:3px; padding:3px 7px;
+           display:inline-block;">
+        ⚡ Δ только по высокоприоритетным идеям:
+        <b>{{ data.expected_effect.high_priority_tickers | join(', ') }}</b>
+      </div>
+      {% elif data.expected_effect and data.expected_effect.driver == 'bl_target_fallback' %}
+      <div class="ee-scope" style="margin-top:6px; font-size:10px;
+           font-family:var(--font-mono); color:var(--ink-soft, #888);">
+        Нет высокоприоритетных сделок — показан общий BL-таргет
+      </div>
+      {% endif %}
     </div>
 
     {# ─── Expected effect — data-driven 8-card grid ─────────────────────────

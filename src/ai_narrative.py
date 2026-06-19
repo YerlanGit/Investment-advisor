@@ -201,15 +201,28 @@ _REPORT_TOOL: dict = {
             "bullets":                {"type": "array", "items": {"type": "string"}},
             "action_plan_text":       {"type": "string"},
             "ai_action_impact":       {"type": "string"},
+            # KPI-strip notes.  ai_cvar_note was MISSING here while the prompt
+            # asks for it and the extractor reads it (line ~1273): a model that
+            # adheres strictly to the declared schema (Sonnet/BASE) then dropped
+            # it, leaving the CVaR card blank in the live BASE report while
+            # Sharpe/MDD rendered.  Declaring every field the extractor consumes
+            # makes the structured output deterministic across models.
+            "ai_cvar_note":           {"type": "string"},
             "ai_sharpe_note":         {"type": "string"},
             "ai_mdd_note":            {"type": "string"},
             "ai_risk_comment":        {"type": "string"},
             "ai_holdings_comment":    {"type": "string"},
             "ai_sector_comment":      {"type": "string"},
             "ai_factor_comment":      {"type": "string"},
+            "ai_4pillar_comment":     {"type": "string"},
             "ai_benchmark_comment":   {"type": "string"},
             "ai_performance_comment": {"type": "string"},
             "ai_regime_comment":      {"type": "string"},
+            # DEEP-tier section comments — likewise extracted downstream, so
+            # they must be declared or a schema-strict model silently omits them.
+            "ai_stress_comment":      {"type": "string"},
+            "ai_action_comment":      {"type": "string"},
+            "ai_effect_comment":      {"type": "string"},
             # Sprint-5 (margin/leverage AI-trigger): when the book carries
             # margin debt (cash leg < 0) the prompt sets has_leverage and
             # REQUIRES this field — an explicit Margin-Call / exponential-risk
