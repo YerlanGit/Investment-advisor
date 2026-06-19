@@ -201,15 +201,28 @@ _REPORT_TOOL: dict = {
             "bullets":                {"type": "array", "items": {"type": "string"}},
             "action_plan_text":       {"type": "string"},
             "ai_action_impact":       {"type": "string"},
+            # KPI-strip notes.  ai_cvar_note was MISSING here while the prompt
+            # asks for it and the extractor reads it (line ~1273): a model that
+            # adheres strictly to the declared schema (Sonnet/BASE) then dropped
+            # it, leaving the CVaR card blank in the live BASE report while
+            # Sharpe/MDD rendered.  Declaring every field the extractor consumes
+            # makes the structured output deterministic across models.
+            "ai_cvar_note":           {"type": "string"},
             "ai_sharpe_note":         {"type": "string"},
             "ai_mdd_note":            {"type": "string"},
             "ai_risk_comment":        {"type": "string"},
             "ai_holdings_comment":    {"type": "string"},
             "ai_sector_comment":      {"type": "string"},
             "ai_factor_comment":      {"type": "string"},
+            "ai_4pillar_comment":     {"type": "string"},
             "ai_benchmark_comment":   {"type": "string"},
             "ai_performance_comment": {"type": "string"},
             "ai_regime_comment":      {"type": "string"},
+            # DEEP-tier section comments — likewise extracted downstream, so
+            # they must be declared or a schema-strict model silently omits them.
+            "ai_stress_comment":      {"type": "string"},
+            "ai_action_comment":      {"type": "string"},
+            "ai_effect_comment":      {"type": "string"},
             # Sprint-5 (margin/leverage AI-trigger): when the book carries
             # margin debt (cash leg < 0) the prompt sets has_leverage and
             # REQUIRES this field — an explicit Margin-Call / exponential-risk
@@ -324,7 +337,21 @@ def _summarise_for_prompt(results: dict) -> dict:
         ("hy_credit_spread",  "hy_oas"),
         ("vix",               "vix"),
         ("breakeven_inflation", "breakeven"),
+        # BLOCK 3.4 — hard macro series the AI should weigh by their TREND.
+        ("unemployment",      "unemployment"),
+        ("gdp_growth",        "gdp_growth"),
     )
+
+    def _macro_trend(row: dict):
+        """Recent Δ (rate-of-change) so the AI weighs DIRECTION, not just level."""
+        hist = row.get("history_30d") or []
+        vals = [h.get("value") for h in hist
+                if isinstance(h.get("value"), (int, float))]
+        if len(vals) < 2:
+            return None
+        lag = min(3, len(vals) - 1)
+        return _safe_round(float(vals[-1]) - float(vals[-1 - lag]), 2)
+
     macro_summary: dict = {}
     for src_key, label in _MACRO_KEYS:
         row = macro_src.get(src_key) or {}
@@ -334,12 +361,18 @@ def _summarise_for_prompt(results: dict) -> dict:
         # Audit 2026-06-14: FRED-sourced, but sanitize for defense-in-depth so
         # NO free-text field reaches the prompt un-fenced (closes the one
         # exception to the "sanitize every string" invariant).
-        macro_summary[label] = {
+        entry = {
             "value":  _safe_round(val, 2),
             "status": _safe_text(row.get("status"), 16),
             "as_of":  _safe_text(row.get("as_of"), 16),
             "unit":   _safe_text(row.get("unit"), 12),
         }
+        # F3 — include the rate-of-change (темп роста/падения).  A rising 4.1%
+        # unemployment vs a falling 4.1% are OPPOSITE regime signals.
+        trend = _macro_trend(row)
+        if trend is not None:
+            entry["trend"] = trend
+        macro_summary[label] = entry
 
     return {
         "metrics": {

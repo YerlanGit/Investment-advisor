@@ -40,7 +40,7 @@
 | Под-секция | Ключи | Builder | Примечания |
 |---|---|---|---|
 | Квадрант Growth×Cycle (SVG) | `regime.dot_cx/dot_cy/dot_label`, `regime.label/growth/cycle/confidence/explainers` | `pdf_payload._regime_dot_coords` + regime-блок в `build_payload` | Точка **живая** (Sprint 5/R1): центр (155,155), 625 px/ед, клэмп в рамку. Сам классификатор: `finance/regime.py` |
-| Сигналы-драйверы (FRED) | `macro_drivers.series[]` | `_build_macro_drivers_panel` | Источник: `services/macro_data.py` (кривая 10Y−2Y, HY OAS, VIX, breakeven) |
+| Сигналы-драйверы (FRED) + темп | `macro_drivers.series[].{value,trend_label,trend_dir}` | `_build_macro_drivers_panel` + `_macro_series_trend` | Источник: `services/macro_data.py` (6 серий: 10Y−2Y, HY OAS, VIX, breakeven, **unemployment, GDP**). **F3:** по каждой серии чип темпа (▲/▼/▬ + Δ за окно по cadence — level ⊕ rate-of-change) |
 | Детерминированная сверка FRED↔моментум | `regime_consistency.status/note/signals` | `_build_regime_consistency` | Sprint 5/R3: пороги — инверсия<0, HY>5.5%, VIX>25 |
 | AI-подтверждение режима | `regime_confirmation.stance/summary/signals` | прокидка из `ai_summary` | DEEP-only; ✓/⚠/✗ |
 | RAG-подтверждение | `regime_rag_confirm[]` | `tg_bot._fetch_rag_context` | выдержки банковских PDF |

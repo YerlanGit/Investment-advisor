@@ -228,6 +228,7 @@ def _model_display_name(model_id: str) -> str:
         "claude-haiku-4-5-20251001": "Claude Haiku 4.5",
         "claude-haiku-4-5":          "Claude Haiku 4.5",
         "claude-sonnet-4-6":         "Claude Sonnet 4.6",
+        "claude-opus-4-8":           "Claude Opus 4.8",
         "claude-opus-4-7":           "Claude Opus 4.7",
         "fallback":                  "Fallback (нет API)",
     }
@@ -370,6 +371,7 @@ def _build_macro_drivers_panel(raw: Optional[dict]) -> dict:
             continue
         series_id = row.get("series_id") or key
         as_of     = str(row.get("as_of") or "")
+        trend     = _macro_series_trend(row)
         series_rows.append({
             "id":      series_id,
             "key":     key,
@@ -378,10 +380,56 @@ def _build_macro_drivers_panel(raw: Optional[dict]) -> dict:
             "as_of":   as_of,
             "status":  row.get("status") or "missing",
             "comment": row.get("note") or "",
+            # BLOCK 3.4 / F3 — rate-of-change (темп роста/падения) for the
+            # Regime panel: the regime cares about DIRECTION, not just level.
+            "trend_label": trend.get("label", "") if trend else "",
+            "trend_dir":   trend.get("dir", "") if trend else "",
         })
         if as_of > latest_as_of:
             latest_as_of = as_of
     return {"series": series_rows, "as_of": latest_as_of}
+
+
+# Cadence → (lookback in observations, window label) for the rate-of-change.
+_MACRO_TREND_LOOKBACK = {"daily": (21, "1м"), "monthly": (3, "3м"),
+                         "quarterly": (2, "2кв")}
+
+
+def _macro_series_trend(row: dict) -> Optional[dict]:
+    """
+    Rate-of-change for one FRED series, computed from its own history (F3).
+
+    Returns {dir: '▲'|'▼'|'▬', delta: float, label: str} or None when there is
+    not enough history.  Lookback follows the publish cadence so a daily series
+    is read over ~1 month and a quarterly one over ~2 quarters — comparing the
+    LATEST print to a same-cadence prior print, i.e. the trend a regime model
+    actually reacts to.
+    """
+    hist = row.get("history_30d") or []
+    vals = [float(h.get("value")) for h in hist
+            if isinstance(h.get("value"), (int, float))]
+    if len(vals) < 2:
+        return None
+    cadence = str(row.get("publish_cadence") or "daily")
+    lag, win = _MACRO_TREND_LOOKBACK.get(cadence, (5, ""))
+    lag = min(lag, len(vals) - 1)
+    delta = float(vals[-1] - vals[-1 - lag])
+
+    # Express the delta in the SAME display unit as the value (HY OAS → bp).
+    sid, unit = (row.get("series_id") or ""), row.get("unit")
+    if sid == "BAMLH0A0HYM2":
+        d, ud = delta * 100.0, "bp"
+    elif unit == "pp":
+        d, ud = delta, "pp"
+    elif unit == "%":
+        d, ud = delta, "пп"
+    else:                       # index (VIX) or unitless
+        d, ud = delta, ""
+
+    arrow = "▲" if d > 1e-9 else ("▼" if d < -1e-9 else "▬")
+    sign  = "+" if d > 0 else ""
+    label = f"{arrow} {sign}{d:.2f}{(' ' + ud) if ud else ''} за {win}".strip()
+    return {"dir": arrow, "delta": round(d, 4), "label": label}
 
 
 def _build_expected_effect(raw: Optional[dict]) -> dict:

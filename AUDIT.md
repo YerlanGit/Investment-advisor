@@ -39,6 +39,34 @@
 
 ---
 
+## −4.1. Пост-деплой аудит живых отчётов 06-18/06-19 (Sprint 6) — 4 фикса
+
+> Скачаны прод-отчёты `2026-06-19/base.html` + `2026-06-18/deep.html` (после деплоя −4). Routing
+> подтверждён вживую: **BASE = Claude Sonnet, DEEP = claude-opus**. Найдены 2 скрытых дефекта + 1
+> аналитическое улучшение + 1 плановая правка.
+
+| ID | Sev | Где | Дефект (живой факт) | Стало |
+|---|---|---|---|---|
+| **F1** | 🔧 | `ai_narrative._REPORT_TOOL.input_schema` | В BASE карточка **«CVaR 95%» БЕЗ ИИ-комментария** (Sharpe/MDD есть). Причина: `ai_cvar_note` (а также `ai_4pillar/stress/action/effect_comment`) **не объявлены** в `properties` tool-схемы — Sonnet строго следует схеме и опускает их; Opus (DEEP) добавлял из текста промпта, поэтому в DEEP cvar был | Объявлены все 5 недостающих полей → структурный вывод детерминирован для обеих моделей |
+| **F2** | 🔧 | `pdf_payload._model_display_name` | DEEP CoVe: **«Anthropic · claude-opus-4-8»** (сырой id) — карта не имела записи для opus-4-8 (внёс при роутинге −4) | +`"claude-opus-4-8":"Claude Opus 4.8"` → «Anthropic · Claude Opus 4.8» |
+| **F3** | 📈 | `finance/regime._macro_nudges` | Макро-overlay читал только **УРОВЕНЬ** (безработица vs 4.5, GDP vs 2.0). Для режима важнее **темп роста/падения**: 4.1% безработицы *растущей* = слабость, *падающей* = сила | Сигнал = LEVEL ⊕ RATE-OF-CHANGE (Δ по истории серии: безработица −3 мес, GDP −1 кв). 50/50 при наличии истории, иначе только уровень. Δ-компоненты в `signals` для QC |
+| **F3-UI** | 📈 | `report_deep_v3.html` (Regime · «Сигналы-драйверы») + `pdf_payload._macro_series_trend` | Темп роста/падения не был виден в отчёте | По КАЖДОЙ FRED-серии добавлен чип темпа (▲/▼/▬ + Δ за окно по cadence: daily 1м, monthly 3м, quarterly 2кв). AI-пак тоже получил `trend` + серии unemployment/gdp → `ai_regime_comment` рассуждает о направлении, не только уровне |
+| **F4** | 🎯 | `report_deep_v3.html` (Ожид. эффект) | Плановая правка 2.3: панель называла источник «BL target weights», без пометки приоритетности | Бейдж «⚡ Δ только по высокоприоритетным идеям: <тикеры>» по флагам `scoped_to_high_priority`/`high_priority_tickers`; подпись «BL target weights» убрана |
+
+**Математика отчётов — сверка пройдена:** DEEP CVaR 3.25%×$11 326 = $368 ✓; DEEP MaxDD −24%→$11 326×0.76≈$8 600 ✓;
+BASE MaxDD −24.25%×$11 273 = $2 734 ✓; Sharpe 0.52(BASE)/0.55(DEEP) консистентны для разных дат. ИИ-комментарии
+грамматически чисты и **связывают секции** (концентрация→плечо→конкретный тикер NVDA→action; Sharpe→бенчмарк;
+CVaR→плечо) — правила DATA-DRIVEN + ЦЕПОЧКА АНАЛИЗА работают.
+
+**Аудит md-файлов:** 7 нужны (`SYSTEM_PROMPT.md` — **грузится в рантайме** `ai_narrative`/`advisor_bot`; `CLAUDE.md`,
+`README.md`, `AUDIT.md`, `REPORT_SECTIONS.md`, `REPORT_SECTIONS_AUDIT.md`, `MCP_STRATEGY.md`). **4 чужих**
+(`PARITY.md`/`PHILOSOPHY.md`/`ROADMAP.md`/`USAGE.md` — документы проекта «Claw Code», Rust-харнесс: нет `rust/`,
+нет `claw`, 0 ссылок) → **УДАЛЕНЫ** (подтверждено владельцем).
+
+pytest **446 passed, 10 skipped** · оба тира рендерятся.
+
+---
+
 ## −3. 360° Аудит (2026-06-14, tip `bfc8baf`) — CTO / Quant / Security
 
 > **Метод:** 3 независимых прохода (математика · код/edge-cases · безопасность/LLM) + посекционный разбор живых отчётов `2026-06-14/{base,deep}.html`. **Критических блокеров — НЕТ.** Готовность ≈ **88/100** (production-ready под надзором).

@@ -146,6 +146,24 @@ class MacroRegimeOverlayTest(unittest.TestCase):
         finally:
             os.environ.pop("REGIME_MACRO_OVERLAY", None)
 
+    def test_overlay_reads_trend_not_just_level(self):
+        """Rising unemployment tilts cycle DOWN vs a flat series at same level."""
+        from finance.regime import RegimeClassifier
+        os.environ["REGIME_MACRO_OVERLAY"] = "1"
+        try:
+            prices = self._ramp_prices()
+            rising = {"unemployment": {"value": 3.5, "status": "ok",
+                       "history_30d": [{"value": v} for v in [3.0, 3.1, 3.2, 3.5]]}}
+            flat   = {"unemployment": {"value": 3.5, "status": "ok",
+                       "history_30d": [{"value": v} for v in [3.5, 3.5, 3.5, 3.5]]}}
+            r = RegimeClassifier().classify(prices, macro=rising)
+            f = RegimeClassifier().classify(prices, macro=flat)
+            self.assertIn("macro_unemployment_trend", r.signals)
+            self.assertGreater(r.signals["macro_unemployment_trend"], 0)   # rising
+            self.assertLess(r.cycle_score, f.cycle_score)                  # cools cycle
+        finally:
+            os.environ.pop("REGIME_MACRO_OVERLAY", None)
+
     def test_overlay_ignores_missing_status_series(self):
         from finance.regime import RegimeClassifier
         os.environ["REGIME_MACRO_OVERLAY"] = "1"
@@ -297,6 +315,52 @@ class CoVeRowsTest(unittest.TestCase):
         self.assertEqual(len(macro), 1)
         self.assertNotIn("PMI", macro[0]["method"])
         self.assertIn("unemployment", macro[0]["method"])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# F3 (UI) — macro rate-of-change chip in the DEEP Regime panel
+# ─────────────────────────────────────────────────────────────────────────────
+class MacroTrendChipTest(unittest.TestCase):
+    def test_rising_monthly_series_up(self):
+        from pdf_payload import _macro_series_trend
+        row = {"series_id": "UNRATE", "unit": "%", "publish_cadence": "monthly",
+               "history_30d": [{"value": v} for v in [3.8, 3.9, 4.0, 4.1]]}
+        t = _macro_series_trend(row)
+        self.assertEqual(t["dir"], "▲")
+        self.assertGreater(t["delta"], 0)
+        self.assertIn("за 3м", t["label"])
+
+    def test_falling_daily_series_down(self):
+        from pdf_payload import _macro_series_trend
+        row = {"series_id": "VIXCLS", "unit": "index", "publish_cadence": "daily",
+               "history_30d": [{"value": v} for v in [20, 18, 16, 15] * 6]}
+        t = _macro_series_trend(row)
+        self.assertEqual(t["dir"], "▼")
+        self.assertIn("за 1м", t["label"])
+
+    def test_hy_oas_delta_in_bp(self):
+        from pdf_payload import _macro_series_trend
+        # FRED reports HY OAS in % (3.10→3.40); the chip must show bp like value.
+        row = {"series_id": "BAMLH0A0HYM2", "unit": "pp", "publish_cadence": "daily",
+               "history_30d": [{"value": v} for v in [3.10, 3.20, 3.30, 3.40] * 6]}
+        t = _macro_series_trend(row)
+        self.assertIn("bp", t["label"])
+        self.assertEqual(t["dir"], "▲")
+
+    def test_insufficient_history_returns_none(self):
+        from pdf_payload import _macro_series_trend
+        self.assertIsNone(_macro_series_trend({"history_30d": [{"value": 1.0}]}))
+
+    def test_panel_exposes_trend_label(self):
+        from pdf_payload import _build_macro_drivers_panel
+        raw = {"unemployment": {"series_id": "UNRATE", "value": 4.1, "unit": "%",
+                                "status": "ok", "as_of": "2026-06-01",
+                                "publish_cadence": "monthly",
+                                "history_30d": [{"value": v} for v in [3.8, 3.9, 4.0, 4.1]]}}
+        panel = _build_macro_drivers_panel(raw)
+        self.assertEqual(len(panel["series"]), 1)
+        self.assertTrue(panel["series"][0]["trend_label"])
+        self.assertEqual(panel["series"][0]["trend_dir"], "▲")
 
 
 if __name__ == "__main__":

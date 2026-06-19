@@ -45,17 +45,27 @@ import pandas as pd
 # ── BLOCK 3.4 — hard-macro overlay tunables (gated, additive) ────────────────
 # The ETF-momentum axes above are the deterministic DEFAULT.  When the env
 # flag is set AND a FRED macro pack is supplied to classify(), two hard signals
-# join the axis component lists at the SAME scale as the ETF spreads:
-#   • Real GDP growth vs trend  → growth axis
-#   • Unemployment vs neutral   → cycle axis (inverted: low U = late-cycle hot)
-# Each is bounded to ±_MACRO_MAX_NUDGE so macro can TILT, never OVERRIDE, the
-# price-based regime.  Off by default → the classifier stays byte-identical.
+# join the axis component lists at the SAME scale as the ETF spreads.  Crucially
+# each signal blends a LEVEL with a RATE-OF-CHANGE (темпы роста/падения) — the
+# regime cares far more about the DIRECTION a macro series is moving than its
+# absolute reading: unemployment at 4.1% that is RISING is a slowdown signal,
+# the same 4.1% FALLING is an expansion signal.  So:
+#   • Real GDP growth : level (vs ~2% trend) ⊕ acceleration (Δ vs prior quarter) → growth axis
+#   • Unemployment    : level (vs ~4.5% neutral, inverted) ⊕ −trend (RISING = bad) → cycle axis
+# When history is available the two halves blend 50/50; with only a spot value
+# the level carries full weight.  Each signal is bounded to ±_MACRO_MAX_NUDGE so
+# macro can TILT, never OVERRIDE, the price-based regime.  Off by default → the
+# classifier stays byte-identical.
 MACRO_OVERLAY_ENV     = "REGIME_MACRO_OVERLAY"
 _MACRO_MAX_NUDGE      = 0.05     # ≈ a quarter of the 0.20 magnitude reference
 _TREND_GDP_GROWTH     = 2.0      # % SAAR — long-run US real-GDP trend
-_GDP_SCALE            = 0.020    # 2pp above trend ⇒ +0.04 growth nudge
+_GDP_SCALE            = 0.020    # 2pp above trend ⇒ +0.04 growth (level half)
+_GDP_TREND_LAG        = 1        # obs back (≈ prior quarter) for acceleration
+_GDP_TREND_SCALE      = 0.015    # +2pp QoQ acceleration ⇒ +0.03 growth (trend half)
 _NEUTRAL_UNEMPLOYMENT = 4.5      # % — rough full-employment anchor
-_UNEMP_SCALE          = 0.030    # 1.5pp below neutral ⇒ +0.045 cycle nudge
+_UNEMP_SCALE          = 0.030    # 1.5pp below neutral ⇒ +0.045 cycle (level half)
+_UNEMP_TREND_LAG      = 3        # obs back (≈ 3 months) for the U-rate direction
+_UNEMP_TREND_SCALE    = 0.040    # +0.5pp rise over 3mo ⇒ −0.02 cycle (trend half)
 
 
 def _macro_overlay_enabled() -> bool:
@@ -74,19 +84,60 @@ def _usable_macro(series: object) -> Optional[float]:
     return None
 
 
-def _macro_nudges(macro: dict) -> tuple[Optional[float], Optional[float]]:
-    """Map a FRED macro pack to (growth_nudge, cycle_nudge), each bounded."""
+def _value_and_trend(series: object, lag: int) -> tuple[Optional[float], Optional[float]]:
+    """
+    (latest_value, recent_change) for a usable FRED series.
+
+    `recent_change` = latest − value `lag` observations ago, computed from the
+    series' own history (history_30d holds the last 30 OBSERVATIONS — i.e. ~30
+    months for monthly UNRATE, ~30 quarters for GDP).  Returns trend=None when
+    there is not enough history, so the caller falls back to level-only.
+    """
+    v = _usable_macro(series)
+    if v is None:
+        return None, None
+    hist = (series or {}).get("history_30d") or []
+    vals = [float(h.get("value")) for h in hist
+            if isinstance(h.get("value"), (int, float)) and np.isfinite(float(h.get("value")))]
+    trend = float(vals[-1] - vals[-1 - lag]) if len(vals) >= lag + 1 else None
+    return v, trend
+
+
+def _blend(level: float, momentum: Optional[float]) -> float:
+    """Level alone when no momentum is available; otherwise a 50/50 blend."""
+    return level if momentum is None else 0.5 * level + 0.5 * momentum
+
+
+def _macro_nudges(macro: dict) -> tuple[Optional[float], Optional[float], dict]:
+    """
+    Map a FRED macro pack to (growth_nudge, cycle_nudge, diagnostics).
+
+    Each nudge fuses a LEVEL and a RATE-OF-CHANGE so the overlay reads macro
+    momentum, not just the spot print.  `diagnostics` exposes the raw trend
+    components for the QC/CoVe panel.
+    """
     g_nudge = c_nudge = None
-    gdp = _usable_macro((macro or {}).get("gdp_growth"))
+    diag: dict = {}
+
+    # GDP growth: above-trend level ⊕ quarter-on-quarter acceleration.
+    gdp, gdp_tr = _value_and_trend((macro or {}).get("gdp_growth"), _GDP_TREND_LAG)
     if gdp is not None:
-        g_nudge = float(np.clip((gdp - _TREND_GDP_GROWTH) * _GDP_SCALE,
-                                -_MACRO_MAX_NUDGE, _MACRO_MAX_NUDGE))
-    une = _usable_macro((macro or {}).get("unemployment"))
+        lvl = (gdp - _TREND_GDP_GROWTH) * _GDP_SCALE
+        mom = None if gdp_tr is None else gdp_tr * _GDP_TREND_SCALE
+        g_nudge = float(np.clip(_blend(lvl, mom), -_MACRO_MAX_NUDGE, _MACRO_MAX_NUDGE))
+        if gdp_tr is not None:
+            diag["macro_gdp_trend"] = round(gdp_tr, 3)
+
+    # Unemployment: below-neutral level (inverted) ⊕ −trend (RISING U = cooling).
+    une, une_tr = _value_and_trend((macro or {}).get("unemployment"), _UNEMP_TREND_LAG)
     if une is not None:
-        # Inverted: LOW unemployment ⇒ tight/late-cycle ⇒ positive cycle tilt.
-        c_nudge = float(np.clip((_NEUTRAL_UNEMPLOYMENT - une) * _UNEMP_SCALE,
-                                -_MACRO_MAX_NUDGE, _MACRO_MAX_NUDGE))
-    return g_nudge, c_nudge
+        lvl = (_NEUTRAL_UNEMPLOYMENT - une) * _UNEMP_SCALE
+        mom = None if une_tr is None else (-une_tr) * _UNEMP_TREND_SCALE
+        c_nudge = float(np.clip(_blend(lvl, mom), -_MACRO_MAX_NUDGE, _MACRO_MAX_NUDGE))
+        if une_tr is not None:
+            diag["macro_unemployment_trend"] = round(une_tr, 3)
+
+    return g_nudge, c_nudge, diag
 
 
 # Map of regime → action-relevant guidance.  Used by the Scoring engine
@@ -215,13 +266,14 @@ class RegimeClassifier:
         # confidence math below picks them up with no special-casing.  Bounded
         # and off-by-default, so this can tilt but never hijack price action.
         if macro and _macro_overlay_enabled():
-            g_nudge, c_nudge = _macro_nudges(macro)
+            g_nudge, c_nudge, macro_diag = _macro_nudges(macro)
             if g_nudge is not None:
                 growth_components.append(g_nudge)
                 signals["macro_gdp_growth_nudge"] = round(g_nudge, 4)
             if c_nudge is not None:
                 cycle_components.append(c_nudge)
                 signals["macro_unemployment_nudge"] = round(c_nudge, 4)
+            signals.update(macro_diag)   # raw Δ components for QC transparency
             growth_score = float(np.mean(growth_components)) if growth_components else 0.0
             cycle_score  = float(np.mean(cycle_components))  if cycle_components else 0.0
 
