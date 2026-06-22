@@ -40,7 +40,8 @@
 | Под-секция | Ключи | Builder | Примечания |
 |---|---|---|---|
 | Квадрант Growth×Cycle (SVG) | `regime.dot_cx/dot_cy/dot_label`, `regime.label/growth/cycle/confidence/explainers` | `pdf_payload._regime_dot_coords` + regime-блок в `build_payload` | Точка **живая** (Sprint 5/R1): центр (155,155), 625 px/ед, клэмп в рамку. Сам классификатор: `finance/regime.py` |
-| Сигналы-драйверы (FRED) + темп | `macro_drivers.series[].{value,trend_label,trend_dir}` | `_build_macro_drivers_panel` + `_macro_series_trend` | Источник: `services/macro_data.py` (6 серий: 10Y−2Y, HY OAS, VIX, breakeven, **unemployment, GDP**). **F3:** по каждой серии чип темпа (▲/▼/▬ + Δ за окно по cadence — level ⊕ rate-of-change) |
+| Сигналы-драйверы (FRED) + темп | `macro_drivers.series[].{value,trend_label,trend_dir}` | `_build_macro_drivers_panel` + `_macro_series_trend` | Источник: `services/macro_data.py` (6 серий: 10Y−2Y, HY OAS, VIX, breakeven, **unemployment, GDP**). **F3/2.3:** чип темпа (▲/▼/▬ + Δ) — **OLS-наклон по ≥3 изменениям** (общий `regime.series_trend`), level ⊕ rate-of-change |
+| **Smart Money · инсайдеры (SEC Form 4)** | `smart_money.{status,enabled,rows[],headline,hint}` | `_build_smart_money` (+ блок B2.4 в deep-шаблоне) | `finance/smart_money.py` (gated `SMART_MONEY_INSIDERS`); видна всегда: active-таблица или плашка «источник не активирован». Архитектура → `SMART_MONEY.md` |
 | Детерминированная сверка FRED↔моментум | `regime_consistency.status/note/signals` | `_build_regime_consistency` | Sprint 5/R3: пороги — инверсия<0, HY>5.5%, VIX>25 |
 | AI-подтверждение режима | `regime_confirmation.stance/summary/signals` | прокидка из `ai_summary` | DEEP-only; ✓/⚠/✗ |
 | RAG-подтверждение | `regime_rag_confirm[]` | `tg_bot._fetch_rag_context` | выдержки банковских PDF |
@@ -85,7 +86,7 @@
 | Элемент | Ключи | Builder | Источник |
 |---|---|---|---|
 | Карточки идей (4 сценария) | `ai_ideas{growth/diversification/hedge/rotation}`, `ideas_count` | `_build_ai_ideas` | `ai_summary.stock_picks` |
-| Генерация пиков (LLM) | — | — | `ai_narrative._user_prompt`: правило **DATA-DRIVEN** (Sprint 5.1) + **СВЕЖЕСТЬ ИДЕЙ** (Sprint 6/1.1 — период `YYYY-MM`, запрет повтора «по привычке»); `temperature=0.5` на BASE (Sonnet, env `ANTHROPIC_TEMPERATURE` 0.4–0.6). **Routing (1.2): BASE=`claude-sonnet-4-6`, DEEP=`claude-opus-4-8`** (env `ANTHROPIC_MODEL_BASE/DEEP`); Opus опускает `temperature` → дисперсию даёт директива свежести |
+| Генерация пиков (LLM) | — | — | `ai_narrative._user_prompt`: **DATA-DRIVEN** (5.1) + **СВЕЖЕСТЬ ИДЕЙ** (6.2/1.1 — **ДНЕВНОЙ** якорь `YYYY-MM-DD` + дневной `УГОЛ РОТАЦИИ` из `_IDEA_ROTATION_ANGLES`, бан расширен на V/MA/GS/UNH/PG/AVGO); `temperature=0.7` на BASE (Sonnet, env, band 0.5–0.85). **Routing: BASE=`claude-sonnet-4-6`, DEEP=`claude-opus-4-8`**; Opus опускает `temperature` → дисперсию даёт директива |
 | Фильтры пиков | — | — | `_remove_held_picks` → `_check_pick_contradictions` → `_backfill_empty_scenarios` |
 | Фолбэк-каталог (без API) | — | — | `_fallback_stock_picks`: 3 кандидата/слот + **месячная ротация** (Sprint 5.1) |
 

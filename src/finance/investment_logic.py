@@ -51,6 +51,74 @@ from finance.simulate import simulate_after_plan as _simulate_after_plan
 # is unreachable.
 from services.macro_data import MacroFeed as _MacroFeed
 
+
+# ── BLOCK 3.5 — hierarchical factor orthogonalization (gated) ────────────────
+# The factor set mixes a CORE macro axis (Market, Rates, Commodities) with
+# long-only style ETFs (Momentum/Value/Quality/Size/Volatility) and EM proxies
+# that all carry the SAME market/rates beta — so the raw factor covariance F is
+# near-collinear (condition number κ ≈ 62 in production), the Ridge betas get
+# unstable, and B·F·Bᵀ double-counts the shared market risk.
+#
+# Rather than PCA (which would destroy the NAMED factors the report depends on),
+# we residualize each style/EM factor against its CORE PARENT via OLS — a
+# hierarchical Gram-Schmidt: «основные макро-факторы → суб-факторы стилей».
+# Each factor keeps its name and its own mean; only the redundant shared beta is
+# removed, so "Momentum" becomes MARKET-NEUTRAL momentum, etc.  κ drops sharply
+# and the style premia stop being counted twice.
+#
+# GATED (FACTOR_ORTHOGONALIZE=1, default OFF) so the validated production
+# decomposition is byte-identical until the owner enables it.
+FACTOR_ORTHOGONALIZE_ENV = "FACTOR_ORTHOGONALIZE"
+_FACTOR_CORE = ("Market", "Rates", "Commodities")
+# Each non-core factor → the core parent(s) to neutralise its shared beta against.
+_FACTOR_PARENTS = {
+    "Momentum":   ("Market",),
+    "Value":      ("Market",),
+    "Quality":    ("Market",),
+    "Size":       ("Market",),
+    "Volatility": ("Market",),
+    "EM_Equity":  ("Market",),
+    "EM_Bond":    ("Rates",),
+}
+
+
+def factor_orthogonalize_enabled() -> bool:
+    return str(os.getenv(FACTOR_ORTHOGONALIZE_ENV, "")).strip().lower() in (
+        "1", "true", "yes", "on")
+
+
+def orthogonalize_factors_hierarchical(f_data: "pd.DataFrame") -> "pd.DataFrame":
+    """
+    Residualize each style/EM factor against its core macro parent(s).
+
+    Pure + deterministic.  Returns a NEW DataFrame with identical columns/index:
+    core factors pass through untouched; each child factor is replaced by
+    (child − OLS_fit_on_parents) + child_mean, so its level/scale is preserved
+    while the shared parent beta is removed.  Falls back to the input unchanged
+    when the core parents are absent or history is too short (<10 rows).
+    """
+    if f_data is None or f_data.empty or len(f_data) < 10:
+        return f_data
+    cols = list(f_data.columns)
+    out = f_data.copy()
+    for child, parents in _FACTOR_PARENTS.items():
+        if child not in cols:
+            continue
+        par = [p for p in parents if p in cols]
+        if not par:
+            continue
+        y = f_data[child].values.astype(float)
+        X = np.column_stack(
+            [np.ones(len(f_data))] + [f_data[p].values.astype(float) for p in par])
+        try:
+            beta, *_ = np.linalg.lstsq(X, y, rcond=None)
+            resid = y - X @ beta
+            out[child] = resid + float(np.mean(y))   # keep the factor's own mean
+        except Exception:
+            continue
+    return out
+
+
 class MAC3RiskEngine:
     """
     Институциональный движок рисков (RAMP Style).
@@ -574,6 +642,14 @@ class MAC3RiskEngine:
         f_data = returns[list(present_factors.values())]
         f_data.columns = list(present_factors.keys())
 
+        # BLOCK 3.5: optionally orthogonalize style/EM factors against the core
+        # macro factors to kill multicollinearity (κ≈62) BEFORE fitting betas +
+        # covariance — so B and F are built on independent, still-named factors.
+        # Gated; default OFF leaves the production decomposition unchanged.
+        _orthogonalized = factor_orthogonalize_enabled()
+        if _orthogonalized:
+            f_data = orthogonalize_factors_hierarchical(f_data)
+
         # F-3: underdetermined-regression guard.  Ridge fits K factor betas per
         # asset and LedoitWolf/EWMA estimate a KxK factor covariance — with
         # fewer observations than ~2K the betas are near-interpolating noise
@@ -700,6 +776,9 @@ class MAC3RiskEngine:
                     "max_abs_corr":     round(_max_off, 4),
                     "condition_number": round(_cond, 2),
                     "near_collinear":   bool(_max_off > 0.95 or _cond > 30.0),
+                    # BLOCK 3.5: whether the hierarchical orthogonalization was
+                    # applied (κ above is then the POST-orthogonalization value).
+                    "orthogonalized":   bool(_orthogonalized),
                 }
                 if factor_diagnostic["near_collinear"]:
                     logger.warning(
@@ -1570,6 +1649,21 @@ class UniversalPortfolioManager:
             logger.warning("Action plan skipped: %s", exc)
             action_plan_rows = []
 
+        # ═══════════════ SMART MONEY (insider SEC Form-4) ═══════════════
+        # BLOCK 3.5 / B2.4 — always populate results["smart_money"] so the DEEP
+        # report can RENDER the insider layer.  Its status is visible even when
+        # gated OFF: the panel then shows "слой готов — источник Form-4 не
+        # подключён" instead of the section being absent.  No live EDGAR crawl
+        # here (gated provider); default per-ticker state is "disabled".
+        smart_money: dict = {}
+        try:
+            from finance.smart_money import build_insider_signals
+            sm_tickers = [str(t) for t in df.index][:25]
+            smart_money = build_insider_signals(sm_tickers)
+        except Exception as exc:
+            logger.warning("Smart Money skipped: %s", exc)
+            smart_money = {}
+
         # ═══════════════ EXPECTED EFFECT (after-plan simulation) ═══════════
         # Re-evaluates cover-page metrics under the HIGH-PRIORITY action items
         # (BLOCK 2.3).  Falls back to the BL target — and then to current
@@ -1689,4 +1783,6 @@ class UniversalPortfolioManager:
             # Phase 3 additions
             "black_litterman":   bl_records,
             "action_plan":       action_plan_rows,
+            # BLOCK 3.5 / B2.4 — insider (Form-4) signals for the DEEP layer.
+            "smart_money":       smart_money,
         }

@@ -24,7 +24,7 @@ from typing import Optional
 
 logger = logging.getLogger("AINarrative")
 
-MAX_TOKENS_BASE = 4_500  # raised from 3_500 — Haiku BASE was hitting cap on long action plans, triggering JSON repair on every call
+MAX_TOKENS_BASE = 5_000  # 4_500 → 5_000 (BLOCK 1.2): BASE now runs on Sonnet (more verbose than Haiku); headroom so the structured tool output is never truncated → no JSON repair / dropped KPI notes
 MAX_TOKENS_DEEP = 7_000
 
 
@@ -136,17 +136,19 @@ MODEL_DEEP = os.getenv("ANTHROPIC_MODEL_DEEP", "claude-opus-4-8")
 
 # Sprint-5 (idea staleness): the narrative + stock-picks are produced by ONE
 # model call, and that call ran at temperature 0.1 — near-deterministic, so a
-# stable macro regime produced byte-identical "ideas" month after month.  Raise
-# to a moderate 0.5 (env-overridable, clamped to the 0.4–0.6 band) so the idea
-# generation EXPLORES, while Structured Outputs (forced tool_use) still
-# guarantee the JSON shape.  The risk NUMBERS are engine-computed (deterministic)
-# regardless of this temperature — only the prose / picks vary.
+# stable macro regime produced byte-identical "ideas" month after month.
+# BLOCK 1.1 (06-22): the BASE tier (Sonnet) still parroted the same blue-chips,
+# so the default is raised 0.5 → 0.7 and the band widened to 0.5–0.85 — more
+# idea exploration while Structured Outputs (forced tool_use) still guarantee
+# the JSON shape.  The risk NUMBERS are engine-computed (deterministic)
+# regardless of this temperature — only the prose / picks vary.  (DEEP runs on
+# Opus, which ignores temperature; its variety comes from the prompt directive.)
 def _resolve_temperature() -> float:
     try:
-        t = float(os.getenv("ANTHROPIC_TEMPERATURE", "0.5"))
+        t = float(os.getenv("ANTHROPIC_TEMPERATURE", "0.7"))
     except (TypeError, ValueError):
-        t = 0.5
-    return min(0.6, max(0.4, t))
+        t = 0.7
+    return min(0.85, max(0.5, t))
 
 
 NARRATIVE_TEMPERATURE = _resolve_temperature()
@@ -163,6 +165,21 @@ _TEMPERATURE_UNSUPPORTED_PREFIXES = ("claude-opus-4-7", "claude-opus-4-8")
 def _model_supports_temperature(model: str) -> bool:
     m = str(model or "")
     return not any(m.startswith(p) for p in _TEMPERATURE_UNSUPPORTED_PREFIXES)
+
+
+# BLOCK 1.1 (06-22) — day-rotating "angle" for idea generation (time-decay).
+# Indexed by day-of-year so successive reports nudge the model toward DIFFERENT
+# fresh angles instead of the same blue-chips every run.  Deterministic (same
+# day → same angle = reproducible report) but varies daily.
+_IDEA_ROTATION_ANGLES = [
+    "приоритизируй НЕДОоценённые сектора текущего режима, а не очевидные мегакэпы",
+    "предложи имена СРЕДНЕЙ капитализации (mid-cap) с сильными фундаменталиями",
+    "усиль НЕДОпредставленный в портфеле фактор (Value/Quality/Momentum) точечной идеей",
+    "добавь международную / EM-идею для географической диверсификации",
+    "приоритизируй имена с недавним позитивным пересмотром прибыли и сильным momentum",
+    "сделай акцент на качестве с реальной премией, избегая дежурных дивидендных мегакэпов",
+    "предложи тематическую идею под текущий макро-режим (а не «вечные» имена)",
+]
 
 
 # Sprint-5.3 (замечание 2): plain-Russian regime names.  The engine's labels
@@ -343,14 +360,16 @@ def _summarise_for_prompt(results: dict) -> dict:
     )
 
     def _macro_trend(row: dict):
-        """Recent Δ (rate-of-change) so the AI weighs DIRECTION, not just level."""
+        """Windowed темп over ≥3 changes (shared series_trend) so the AI weighs
+        a sustained DIRECTION, not a single noisy print."""
         hist = row.get("history_30d") or []
-        vals = [h.get("value") for h in hist
-                if isinstance(h.get("value"), (int, float))]
-        if len(vals) < 2:
-            return None
-        lag = min(3, len(vals) - 1)
-        return _safe_round(float(vals[-1]) - float(vals[-1 - lag]), 2)
+        vals = [h.get("value") for h in hist if isinstance(h, dict)]
+        try:
+            from finance.regime import series_trend
+            total, _slope, _n = series_trend(vals, 3)
+        except Exception:
+            total = None
+        return None if total is None else _safe_round(total, 2)
 
     macro_summary: dict = {}
     for src_key, label in _MACRO_KEYS:
@@ -625,6 +644,14 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
     # (PLTR/CRWD/JNJ/KO/COST).  Require every pick to be ANCHORED to data
     # from THIS report (regime, sector gaps, 4-pillar, RAG) and ban the
     # template names unless the data of the current report supports them.
+    # BLOCK 1.1 (06-22) — ротация идей по дню (time-decay).  Картина «идеи не
+    # меняются месяц» имела две причины: (1) якорь свежести был МЕСЯЧНЫМ
+    # (`%Y-%m` → «2026-06» весь месяц), (2) бан «дежурных» имён не покрывал
+    # quality-compounder-мегакэпы (V/MA/GS/UNH/PG), к которым модель сходится
+    # «по умолчанию».  Якорь стал ДНЕВНЫМ + дневной «угол» ротации, а бан-лист
+    # расширен — так BASE-идеи варьируются от отчёта к отчёту, как в DEEP.
+    _angle = _IDEA_ROTATION_ANGLES[
+        date.today().timetuple().tm_yday % len(_IDEA_ROTATION_ANGLES)]
     ideas_rule = (
         "ИДЕИ — СТРОГО DATA-DRIVEN: каждая идея в stock_picks обязана "
         "опираться на данные ЭТОГО отчёта: текущий режим "
@@ -632,21 +659,17 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
         "sectors, сигналы 4-Pillar и/или АНАЛИТИКУ БАНКОВ (RAG). В поле why — "
         "явная привязка к этим данным (что именно в портфеле/режиме делает "
         "идею уместной СЕЙЧАС). НЕ предлагай «дежурные» имена (PLTR, CRWD, "
-        "JNJ, KO, COST, MTUM, DBC), если их преимущество не следует из данных "
-        "текущего отчёта — предпочитай менее очевидные имена с тем же "
-        "профилем риска/качества.\n"
-        # BLOCK 1.1 — idea freshness.  The DEEP tier now runs on Opus, which
-        # omits the `temperature` knob, so variety has to come from the prompt.
-        # Anchor the picks to the CURRENT reporting cycle and forbid recycling
-        # the same names every run: each cycle the model must justify picks
-        # against the LATEST regime/sector/valuation snapshot, not a stale
-        # template.  `as_of` makes "now" concrete so successive reports diverge.
-        f"СВЕЖЕСТЬ ИДЕЙ (период {date.today():%Y-%m}): идеи должны отражать "
+        "JNJ, KO, COST, MTUM, DBC, V, MA, GS, UNH, PG, AVGO), если их "
+        "преимущество не следует из данных текущего отчёта — предпочитай менее "
+        "очевидные имена с тем же профилем риска/качества.\n"
+        # Idea freshness — now DAILY-anchored + a day-rotating angle so the
+        # BASE tier (Sonnet) diverges report-to-report instead of parroting the
+        # same blue-chips for a whole month.
+        f"СВЕЖЕСТЬ ИДЕЙ (срез на {date.today():%Y-%m-%d}): идеи должны отражать "
         "ИМЕННО текущий срез данных этого отчёта. НЕ повторяй один и тот же "
         "набор тикеров из отчёта в отчёт «по привычке» — если режим/недовесы/"
-        "оценки сместились, picks обязаны сместиться вслед за ними. При прочих "
-        "равных предпочитай разнообразие имён внутри одного профиля "
-        "риска/качества.\n"
+        "оценки сместились, picks обязаны сместиться вслед за ними.\n"
+        f"УГОЛ РОТАЦИИ НА СЕГОДНЯ (соблюдай, если не противоречит данным): {_angle}.\n"
     )
 
     # Sprint-5 — Margin/leverage AI-trigger.  When the engine flags a
