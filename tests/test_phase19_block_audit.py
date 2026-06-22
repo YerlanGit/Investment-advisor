@@ -363,5 +363,134 @@ class MacroTrendChipTest(unittest.TestCase):
         self.assertEqual(panel["series"][0]["trend_dir"], "▲")
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# B3.5 — hierarchical factor orthogonalization (κ reduction, names preserved)
+# ─────────────────────────────────────────────────────────────────────────────
+class FactorOrthogonalizationTest(unittest.TestCase):
+    def _collinear_frame(self):
+        import numpy as np, pandas as pd
+        rng = np.random.default_rng(0)
+        n = 250
+        mkt = rng.normal(0, 0.01, n)
+        return pd.DataFrame({
+            "Market":      mkt,
+            "Rates":       rng.normal(0, 0.005, n),
+            "Commodities": rng.normal(0, 0.008, n),
+            "Momentum":    mkt * 1.1 + rng.normal(0, 0.004, n),
+            "Value":       mkt * 0.9 + rng.normal(0, 0.004, n),
+            "Quality":     mkt * 1.0 + rng.normal(0, 0.004, n),
+            "Size":        mkt * 1.2 + rng.normal(0, 0.004, n),
+            "Volatility":  mkt * 0.7 + rng.normal(0, 0.004, n),
+            "EM_Equity":   mkt * 1.3 + rng.normal(0, 0.004, n),
+            "EM_Bond":     rng.normal(0, 0.005, n),
+        })
+
+    @staticmethod
+    def _kappa(df):
+        import numpy as np
+        F = np.cov(df.values.T)
+        d = np.sqrt(np.clip(np.diag(F), 1e-18, None))
+        return float(np.linalg.cond(F / np.outer(d, d)))
+
+    def test_orthogonalization_reduces_condition_number(self):
+        from finance.investment_logic import orthogonalize_factors_hierarchical
+        df = self._collinear_frame()
+        k_raw = self._kappa(df)
+        ortho = orthogonalize_factors_hierarchical(df)
+        k_ortho = self._kappa(ortho)
+        self.assertGreater(k_raw, 30.0)            # raw factors ARE collinear
+        self.assertLess(k_ortho, k_raw)            # orthogonalization helps
+        self.assertEqual(list(ortho.columns), list(df.columns))   # names kept
+
+    def test_core_factors_pass_through_unchanged(self):
+        import numpy as np, pandas as pd
+        from finance.investment_logic import orthogonalize_factors_hierarchical
+        n = 50
+        df = pd.DataFrame({"Market": np.linspace(0, 1, n),
+                           "Rates": np.linspace(1, 0, n),
+                           "Commodities": np.linspace(0, 2, n),
+                           "Momentum": np.linspace(0, 1, n)})
+        out = orthogonalize_factors_hierarchical(df)
+        np.testing.assert_allclose(out["Market"].values, df["Market"].values)
+        np.testing.assert_allclose(out["Rates"].values, df["Rates"].values)
+
+    def test_gate_default_off(self):
+        import os
+        from finance.investment_logic import factor_orthogonalize_enabled
+        os.environ.pop("FACTOR_ORTHOGONALIZE", None)
+        self.assertFalse(factor_orthogonalize_enabled())
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# B1.1 — idea rotation / freshness (daily anchor + expanded ban)
+# ─────────────────────────────────────────────────────────────────────────────
+class IdeaRotationTest(unittest.TestCase):
+    def test_daily_anchor_and_rotation_angle(self):
+        from datetime import date
+        from ai_narrative import _user_prompt
+        p = _user_prompt({"regime": {"regime": "Expansion"}}, tier="base")
+        self.assertIn(f"{date.today():%Y-%m-%d}", p)   # DAILY, not %Y-%m
+        self.assertIn("УГОЛ РОТАЦИИ", p)
+
+    def test_ban_list_expanded_to_default_bluechips(self):
+        from ai_narrative import _user_prompt
+        p = _user_prompt({"regime": {"regime": "Expansion"}}, tier="base")
+        for name in ("UNH", "AVGO", "GS", "MA"):
+            self.assertIn(name, p)
+
+    def test_temperature_band_raised(self):
+        import importlib, ai_narrative
+        importlib.reload(ai_narrative)
+        self.assertGreaterEqual(ai_narrative.NARRATIVE_TEMPERATURE, 0.5)
+        self.assertLessEqual(ai_narrative.NARRATIVE_TEMPERATURE, 0.85)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# B2.4 — Smart Money panel states
+# ─────────────────────────────────────────────────────────────────────────────
+class SmartMoneyPanelTest(unittest.TestCase):
+    def test_disabled_state_is_renderable(self):
+        import os
+        from finance.smart_money import build_insider_signals
+        from pdf_payload import _build_smart_money
+        os.environ.pop("SMART_MONEY_INSIDERS", None)
+        panel = _build_smart_money(build_insider_signals(["AAPL", "MSFT"]))
+        self.assertEqual(panel["status"], "disabled")
+        self.assertFalse(panel["enabled"])
+        self.assertTrue(panel["headline"])
+        self.assertIn("SMART_MONEY_INSIDERS", panel.get("hint", ""))
+
+    def test_active_state_lists_rows(self):
+        from pdf_payload import _build_smart_money
+        raw = {"AAPL": {"status": "ok", "ticker": "AAPL", "net_flow_usd": 1e6,
+                        "buy_count": 3, "sell_count": 0, "cluster_flag": True,
+                        "score": 1.5}}
+        panel = _build_smart_money(raw)
+        self.assertEqual(panel["status"], "active")
+        self.assertTrue(panel["enabled"])
+        self.assertEqual(len(panel["rows"]), 1)
+        self.assertTrue(panel["rows"][0]["cluster"])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# B2.3 — trend over ≥3 changes (multi-point slope, robust to a single spike)
+# ─────────────────────────────────────────────────────────────────────────────
+class SeriesTrendThreeChangesTest(unittest.TestCase):
+    def test_needs_four_points_three_changes(self):
+        from finance.regime import series_trend
+        total, _s, _n = series_trend([1.0, 2.0, 3.0], 3)      # 3 pts = 2 changes
+        self.assertIsNone(total)
+        total, _s, n = series_trend([1.0, 2.0, 3.0, 4.0], 3)  # 4 pts = 3 changes
+        self.assertIsNotNone(total)
+        self.assertGreater(total, 0)
+
+    def test_slope_robust_to_single_last_spike(self):
+        from finance.regime import series_trend
+        # steady rise, last print dips — OLS over ≥3 changes still reads "up",
+        # whereas a single latest−prior delta would have flipped to "down".
+        total, _s, _n = series_trend([1.0, 2.0, 3.0, 4.0, 3.8], 4)
+        self.assertGreater(total, 0)
+
+
 if __name__ == "__main__":
     unittest.main()

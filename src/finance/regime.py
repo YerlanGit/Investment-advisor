@@ -60,12 +60,15 @@ MACRO_OVERLAY_ENV     = "REGIME_MACRO_OVERLAY"
 _MACRO_MAX_NUDGE      = 0.05     # ≈ a quarter of the 0.20 magnitude reference
 _TREND_GDP_GROWTH     = 2.0      # % SAAR — long-run US real-GDP trend
 _GDP_SCALE            = 0.020    # 2pp above trend ⇒ +0.04 growth (level half)
-_GDP_TREND_LAG        = 1        # obs back (≈ prior quarter) for acceleration
-_GDP_TREND_SCALE      = 0.015    # +2pp QoQ acceleration ⇒ +0.03 growth (trend half)
+_GDP_TREND_LAG        = 3        # obs back (≈ 3 quarters ≥3 changes) for the GDP trend
+_GDP_TREND_SCALE      = 0.015    # +2pp trend over the window ⇒ +0.03 growth (trend half)
 _NEUTRAL_UNEMPLOYMENT = 4.5      # % — rough full-employment anchor
 _UNEMP_SCALE          = 0.030    # 1.5pp below neutral ⇒ +0.045 cycle (level half)
-_UNEMP_TREND_LAG      = 3        # obs back (≈ 3 months) for the U-rate direction
-_UNEMP_TREND_SCALE    = 0.040    # +0.5pp rise over 3mo ⇒ −0.02 cycle (trend half)
+_UNEMP_TREND_LAG      = 3        # obs back (≈ 3 months ≥3 changes) for the U-rate trend
+_UNEMP_TREND_SCALE    = 0.040    # +0.5pp rise over the window ⇒ −0.02 cycle (trend half)
+# Минимум наблюдений для расчёта темпа: 4 точки = 3 последовательных изменения
+# (требование «анализировать темпы минимум 3 изменений, а не 1»).
+_TREND_MIN_POINTS     = 4
 
 
 def _macro_overlay_enabled() -> bool:
@@ -84,23 +87,51 @@ def _usable_macro(series: object) -> Optional[float]:
     return None
 
 
+def series_trend(values, lag: int, *, min_points: int = _TREND_MIN_POINTS
+                 ) -> tuple[Optional[float], Optional[float], int]:
+    """
+    Multi-point RATE-OF-CHANGE over ≥3 consecutive changes (анализ темпов).
+
+    Instead of a single latest−prior difference (which a one-off print can
+    flip), fit a least-squares line across the last ``lag+1`` observations and
+    report the MODELLED change over that window.  This needs ≥ ``min_points``
+    points (default 4 ⇒ ≥3 changes); with less history it returns
+    ``(None, None, n)`` so the caller falls back to a level-only signal.
+
+    Returns ``(total_change_over_window, slope_per_obs, n_points_used)``.
+    """
+    vals = [float(v) for v in (values or [])
+            if isinstance(v, (int, float)) and np.isfinite(float(v))]
+    n = len(vals)
+    if n < max(min_points, 2):
+        return None, None, n
+    window = min(int(lag), n - 1)
+    if window < min_points - 1:          # fewer than 3 changes available
+        return None, None, n
+    seg = vals[-(window + 1):]
+    x = np.arange(len(seg), dtype=float)
+    slope = float(np.polyfit(x, seg, 1)[0])      # OLS slope per observation
+    total = slope * (len(seg) - 1)               # modelled Δ across the window
+    return total, slope, len(seg)
+
+
 def _value_and_trend(series: object, lag: int) -> tuple[Optional[float], Optional[float]]:
     """
-    (latest_value, recent_change) for a usable FRED series.
+    (latest_value, windowed_trend) for a usable FRED series.
 
-    `recent_change` = latest − value `lag` observations ago, computed from the
-    series' own history (history_30d holds the last 30 OBSERVATIONS — i.e. ~30
-    months for monthly UNRATE, ~30 quarters for GDP).  Returns trend=None when
-    there is not enough history, so the caller falls back to level-only.
+    The trend is the slope-based change over ≥3 observations (series_trend) —
+    NOT a single-step difference — so the regime reacts to a sustained темп,
+    not one noisy print.  history_30d holds the last 30 OBSERVATIONS (≈30
+    months for monthly UNRATE, ≈30 quarters for GDP).  trend=None when history
+    is too short ⇒ caller falls back to level-only.
     """
     v = _usable_macro(series)
     if v is None:
         return None, None
     hist = (series or {}).get("history_30d") or []
-    vals = [float(h.get("value")) for h in hist
-            if isinstance(h.get("value"), (int, float)) and np.isfinite(float(h.get("value")))]
-    trend = float(vals[-1] - vals[-1 - lag]) if len(vals) >= lag + 1 else None
-    return v, trend
+    vals = [h.get("value") for h in hist if isinstance(h, dict)]
+    total, _slope, _n = series_trend(vals, lag)
+    return v, total
 
 
 def _blend(level: float, momentum: Optional[float]) -> float:
@@ -359,4 +390,5 @@ __all__ = [
     "RegimeReading",
     "REGIME_FAVOURED_SECTORS",
     "REGIME_PENALISED_SECTORS",
+    "series_trend",
 ]

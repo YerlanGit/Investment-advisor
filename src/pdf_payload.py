@@ -391,8 +391,10 @@ def _build_macro_drivers_panel(raw: Optional[dict]) -> dict:
 
 
 # Cadence → (lookback in observations, window label) for the rate-of-change.
+# Lookbacks give ≥3 consecutive changes (4 points) so the chip reads a TREND,
+# not a single noisy step (BLOCK 2.3 — «темпы минимум 3 изменений»).
 _MACRO_TREND_LOOKBACK = {"daily": (21, "1м"), "monthly": (3, "3м"),
-                         "quarterly": (2, "2кв")}
+                         "quarterly": (3, "3кв")}
 
 
 def _macro_series_trend(row: dict) -> Optional[dict]:
@@ -406,14 +408,15 @@ def _macro_series_trend(row: dict) -> Optional[dict]:
     actually reacts to.
     """
     hist = row.get("history_30d") or []
-    vals = [float(h.get("value")) for h in hist
-            if isinstance(h.get("value"), (int, float))]
-    if len(vals) < 2:
-        return None
+    vals = [h.get("value") for h in hist if isinstance(h, dict)]
     cadence = str(row.get("publish_cadence") or "daily")
     lag, win = _MACRO_TREND_LOOKBACK.get(cadence, (5, ""))
-    lag = min(lag, len(vals) - 1)
-    delta = float(vals[-1] - vals[-1 - lag])
+    # F3 / BLOCK 2.3 — multi-point темп over ≥3 changes (shared with the regime
+    # engine via finance.regime.series_trend), NOT a single latest−prior delta.
+    from finance.regime import series_trend
+    delta, _slope, _n = series_trend(vals, lag)
+    if delta is None:
+        return None
 
     # Express the delta in the SAME display unit as the value (HY OAS → bp).
     sid, unit = (row.get("series_id") or ""), row.get("unit")
@@ -430,6 +433,55 @@ def _macro_series_trend(row: dict) -> Optional[dict]:
     sign  = "+" if d > 0 else ""
     label = f"{arrow} {sign}{d:.2f}{(' ' + ud) if ud else ''} за {win}".strip()
     return {"dir": arrow, "delta": round(d, 4), "label": label}
+
+
+def _build_smart_money(raw: Optional[dict]) -> dict:
+    """
+    Adapt finance.smart_money signals → DEEP «Smart Money» panel (B2.4).
+
+    ALWAYS returns a renderable dict so the section is VISIBLE rather than
+    silently absent:
+      • status='disabled' — layer wired but the SEC Form-4 provider is gated
+        off; the panel explains how to turn it on.
+      • status='active'   — per-ticker insider net flow + cluster buys + score.
+      • status='missing'  — no signals on this run.
+    """
+    sig = raw or {}
+    if not sig:
+        return {"status": "missing", "enabled": False, "rows": [],
+                "headline": "Слой Smart Money недоступен на этом прогоне."}
+    statuses = [v.get("status") for v in sig.values()]
+    if statuses and all(s == "disabled" for s in statuses):
+        return {
+            "status":   "disabled",
+            "enabled":  False,
+            "rows":     [],
+            "headline": "Слой инсайдеров (SEC Form 4) подключён, источник данных не активирован.",
+            "hint":     "Включается флагом SMART_MONEY_INSIDERS=1 + провайдер Form-4 (EDGAR). "
+                        "Архитектура и модели — см. SMART_MONEY.md.",
+        }
+    rows: list[dict] = []
+    for t, v in sig.items():
+        if v.get("status") in ("ok", "warn"):
+            rows.append({
+                "ticker":       t,
+                "net_flow_usd": v.get("net_flow_usd"),
+                "buys":         v.get("buy_count"),
+                "sells":        v.get("sell_count"),
+                "cluster":      bool(v.get("cluster_flag")),
+                "score":        v.get("score"),
+                "as_of":        v.get("as_of"),
+            })
+    rows.sort(key=lambda r: (not r["cluster"], -(r.get("score") or 0.0)))
+    n_cluster = sum(1 for r in rows if r["cluster"])
+    return {
+        "status":   "active" if rows else "missing",
+        "enabled":  True,
+        "rows":     rows,
+        "headline": (f"{len(rows)} тикеров с инсайдерскими сделками · "
+                     f"{n_cluster} кластерных покупок"
+                     if rows else "Нет покрытия Form-4 для текущих тикеров."),
+    }
 
 
 def _build_expected_effect(raw: Optional[dict]) -> dict:
@@ -1227,6 +1279,10 @@ def build_payload(results: dict, tier: str,
                 "action_color": _action_color(sc.get("action")),
             })
         payload["score_breakdown"] = score_breakdown
+
+        # B2.4 — Smart Money / insider (Form-4) layer (always renderable; shows
+        # its gated state when the provider is off so the section is visible).
+        payload["smart_money"] = _build_smart_money(results.get("smart_money"))
 
         # Action plan (with current Price / Buy zone / Sell target / Stop)
         action_plan = results.get("action_plan") or []

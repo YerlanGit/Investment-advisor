@@ -381,16 +381,23 @@ def _factor_diagnostic_status(results: dict) -> dict:
             status = "missing",
             note   = "структурная модель не построена на этом прогоне",
         )
-    near = bool(fd.get("near_collinear"))
+    near  = bool(fd.get("near_collinear"))
+    ortho = bool(fd.get("orthogonalized"))
+    # BLOCK 3.5: if the hierarchical orthogonalization is ON, a high raw κ is
+    # already remediated → treat as OK and label it; otherwise warn on near-
+    # collinearity so the operator can enable FACTOR_ORTHOGONALIZE.
     return _row(
         name   = "Факторная независимость (мультиколлинеарность)",
         source = "Quant Engine MAC3",
-        method = "Σ=B·F·Bᵀ+D несёт полную ковариацию F (без двойного счёта); "
-                 "диагностика κ + max|corr|",
-        status = "warn" if near else "ok",
+        method = ("Σ=B·F·Bᵀ+D; "
+                  + ("иерархическая ортогонализация (style→core) ON · " if ortho
+                     else "диагностика ")
+                  + "κ + max|corr|"),
+        status = "ok" if (ortho or not near) else "warn",
         note   = (f"факторов {fd.get('n_factors')} · max|corr|={fd.get('max_abs_corr')} "
                   f"· κ={fd.get('condition_number')}"
-                  + (" · близки к коллинеарности" if near else "")),
+                  + (" · ортогонализовано" if ortho
+                     else (" · близки к коллинеарности (вкл. FACTOR_ORTHOGONALIZE)" if near else ""))),
     )
 
 
