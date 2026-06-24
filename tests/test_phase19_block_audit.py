@@ -87,11 +87,16 @@ class HighPriorityTargetTest(unittest.TestCase):
             {"ticker": "BND",  "action": "Hold", "delta_w_pp": 0.0,
              "reason": "deferred (turnover cap)"},
         ]
-        target, hp = high_priority_target_weights(cur, rows, bl_records=None)
+        target, hp, acts = high_priority_target_weights(cur, rows, bl_records=None)
         self.assertEqual(hp, ["AAPL"])
         self.assertAlmostEqual(target["AAPL"], 0.30, places=6)   # 0.40 − 0.10
         self.assertAlmostEqual(target["MSFT"], 0.30, places=6)   # unchanged
         self.assertAlmostEqual(target["BND"],  0.30, places=6)   # unchanged
+        # User #5 — the idea breakdown spells out the direction.
+        self.assertEqual(len(acts), 1)
+        self.assertEqual(acts[0]["ticker"], "AAPL")
+        self.assertEqual(acts[0]["side"], "sell")
+        self.assertEqual(acts[0]["delta_pp"], -10.0)
 
     def test_falls_back_to_bl_when_no_actionable_rows(self):
         from finance.simulate import high_priority_target_weights
@@ -99,8 +104,9 @@ class HighPriorityTargetTest(unittest.TestCase):
         rows = [{"ticker": "AAPL", "action": "Hold", "delta_w_pp": 0.0}]
         bl = [{"ticker": "AAPL", "target_w": 0.40},
               {"ticker": "MSFT", "target_w": 0.60}]
-        target, hp = high_priority_target_weights(cur, rows, bl_records=bl)
+        target, hp, acts = high_priority_target_weights(cur, rows, bl_records=bl)
         self.assertEqual(hp, [])                                 # no high-priority
+        self.assertEqual(acts, [])                               # no idea breakdown
         self.assertAlmostEqual(target["AAPL"], 0.40, places=6)   # BL fallback
         self.assertAlmostEqual(target["MSFT"], 0.60, places=6)
 
@@ -490,6 +496,45 @@ class SeriesTrendThreeChangesTest(unittest.TestCase):
         # whereas a single latest−prior delta would have flipped to "down".
         total, _s, _n = series_trend([1.0, 2.0, 3.0, 4.0, 3.8], 4)
         self.assertGreater(total, 0)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 06-23 audit fixes: Smart Money idea card, CoVe neutral status, MaxDD $, etc.
+# ─────────────────────────────────────────────────────────────────────────────
+class Audit0623Test(unittest.TestCase):
+    def test_idea_card_is_smart_money_not_regime(self):
+        from pdf_payload import _build_ai_ideas
+        picks = {"smart_money": {"label": "Smart Money", "desc": "x",
+                                 "picks": [{"ticker": "BRK.B", "name": "B",
+                                            "why": "institutional", "type": "Stock"}]}}
+        out = _build_ai_ideas(picks, tier="deep")
+        self.assertTrue(out.get("rotation"))
+        self.assertEqual(out["rotation"][0]["category"], "Smart Money")
+
+    def test_smart_money_cove_status_disabled_not_missing(self):
+        # Gated-off Smart Money must be 'disabled' (neutral –), NOT 'error'/red ✗.
+        import os
+        from finance.smart_money import build_insider_signals, insider_lineage_row
+        os.environ.pop("SMART_MONEY_INSIDERS", None)
+        row = insider_lineage_row(build_insider_signals(["AAPL", "MSFT"]))
+        self.assertEqual(row["status"], "disabled")
+
+    def test_expected_effect_carries_idea_actions(self):
+        from pdf_payload import _build_expected_effect
+        raw = {"metrics": {"risk_index": {"before": 49, "after": 51,
+                                          "delta": 2, "improved": False}},
+               "high_priority_tickers": ["NVDA"],
+               "high_priority_actions": [{"ticker": "NVDA", "action": "Trim",
+                                          "side": "sell", "delta_pp": -10.0}]}
+        out = _build_expected_effect(raw)
+        self.assertIn("high_priority_actions", out)
+        self.assertEqual(out["high_priority_actions"][0]["side"], "Продать")
+        self.assertEqual(out["high_priority_actions"][0]["side_key"], "sell")
+
+    def test_expected_effect_empty_stays_empty(self):
+        from pdf_payload import _build_expected_effect
+        self.assertEqual(_build_expected_effect(None), {})
+        self.assertEqual(_build_expected_effect({"metrics": {}}), {})
 
 
 if __name__ == "__main__":

@@ -221,7 +221,7 @@ def high_priority_target_weights(
         current_weights: dict[str, float],
         action_plan_rows: Optional[list[dict]],
         bl_records:       Optional[list[dict]] = None,
-) -> tuple[dict[str, float], list[str]]:
+) -> tuple[dict[str, float], list[str], list[dict]]:
     """
     Build the weight vector the Expected-Effect panel should simulate so the
     report tells ONE consistent story: the before/after delta is exactly what
@@ -234,10 +234,12 @@ def high_priority_target_weights(
     build_action_plan, so they naturally drop out and leave their weight
     unchanged.
 
-    Returns ``(target_weights, high_priority_tickers)``.  When NO actionable
-    rows exist it falls back to the Black-Litterman target (legacy behaviour),
-    returning an empty ticker list so the caller can tell the panel there were
-    no high-priority moves to show.
+    Returns ``(target_weights, high_priority_tickers, actions)`` where
+    ``actions`` is a per-move breakdown — ``{ticker, action, side, delta_pp}``
+    with side ∈ {"sell","buy"} — so the panel can spell out the idea ("продать
+    NVDA −10пп / купить GOOGL +5пп") and tie the metric deltas to it.  When NO
+    actionable rows exist it falls back to the Black-Litterman target (legacy
+    behaviour), returning empty lists.
     """
     base = {str(k): float(v) for k, v in (current_weights or {}).items()}
     hp_rows = [
@@ -248,14 +250,24 @@ def high_priority_target_weights(
     if hp_rows:
         target = dict(base)
         hp_tickers: list[str] = []
+        actions: list[dict] = []
         for r in hp_rows:
             t = r.get("ticker")
             if not t:
                 continue
+            dpp = float(r.get("delta_w_pp") or 0.0)
             cur = float(base.get(t, 0.0))
-            target[t] = cur + float(r.get("delta_w_pp") or 0.0) / 100.0
+            target[t] = cur + dpp / 100.0
             hp_tickers.append(str(t))
-        return target, hp_tickers
+            actions.append({
+                "ticker":   str(t),
+                "action":   str(r.get("action") or ""),
+                "side":     "buy" if dpp > 0 else "sell",
+                "delta_pp": round(dpp, 2),
+            })
+        # Largest moves first so the panel leads with the most impactful idea.
+        actions.sort(key=lambda a: abs(a["delta_pp"]), reverse=True)
+        return target, hp_tickers, actions
 
     # No high-priority moves → fall back to the BL target (un-prioritised).
     target = dict(base)
@@ -263,7 +275,7 @@ def high_priority_target_weights(
         t = r.get("ticker")
         if t:
             target[t] = float(r.get("target_w", base.get(t, 0.0)))
-    return target, []
+    return target, [], []
 
 
 # ── Public API ───────────────────────────────────────────────────────────────

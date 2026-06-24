@@ -1676,7 +1676,7 @@ class UniversalPortfolioManager:
             # and Hold rows leave their weight unchanged; falls back to the BL
             # target when there are no actionable rows.
             from finance.simulate import high_priority_target_weights
-            target_weights, hp_tickers = high_priority_target_weights(
+            target_weights, hp_tickers, hp_actions = high_priority_target_weights(
                 weights_dict, action_plan_rows, bl_records)
 
             # Build daily log-returns matrix for assets the cov matrix knows
@@ -1713,6 +1713,7 @@ class UniversalPortfolioManager:
             # before/after delta is scoped to the high-priority ideas.
             if isinstance(expected_effect, dict):
                 expected_effect["high_priority_tickers"] = hp_tickers
+                expected_effect["high_priority_actions"] = hp_actions
                 expected_effect["driver"] = ("high_priority_action_plan"
                                              if hp_tickers else "bl_target_fallback")
         except Exception as exc:

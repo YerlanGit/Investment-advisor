@@ -545,11 +545,11 @@ scenario-ключи ИИ `boost_alpha/rebalance/protect_capital/regime_play` →
 категории (фикс 5.2 — иначе в заголовках текли сырые ключи `boost_alpha`).
 
 **Источник пиков.** `ai_summary.stock_picks` от `ai_narrative._user_prompt`: правило
-**DATA-DRIVEN** (привязка к портфелю) + **СВЕЖЕСТЬ ИДЕЙ** (период `YYYY-MM`, запрет повтора
-«по привычке»). Фильтры: `_remove_held_picks` (запрет уже имеющихся тикеров) →
+**DATA-DRIVEN** (привязка к портфелю) + **СВЕЖЕСТЬ ИДЕЙ** (дневной срез `YYYY-MM-DD` +
+дневной «угол ротации» из `_IDEA_ROTATION_ANGLES`, запрет повтора «по привычке»). Фильтры: `_remove_held_picks` (запрет уже имеющихся тикеров) →
 `_check_pick_contradictions` → `_backfill_empty_scenarios` (фолбэк-каталог помечается
 «· резервный каталог»). Без API — `_fallback_stock_picks` (месячная ротация). BASE: модель
-`claude-sonnet-4-6`, `temperature≈0.5`.
+`claude-sonnet-4-6`, `temperature≈0.7` (env `ANTHROPIC_TEMPERATURE`, band 0.5–0.85).
 
 **Рендер карточки.** Цветовая полоса по категории; чип приоритета; свёрнутая карточка показывает
 title + rationale + чипы тикеров-кандидатов; по клику раскрываются конвейер (Factor→Regime→RAG),

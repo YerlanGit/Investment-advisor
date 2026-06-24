@@ -148,12 +148,12 @@ class IdeaBackfillTest(unittest.TestCase):
             "rebalance":       {"label": "Ребаланс", "desc": "", "picks": [
                 {"ticker": "COST", "name": "Costco", "why": "y", "type": "Stock"}]},
             "protect_capital": {"label": "Защита", "desc": "", "picks": []},
-            "regime_play":     {"label": "Режим", "desc": "", "picks": []},
+            "smart_money":     {"label": "Smart Money", "desc": "", "picks": []},
         }
         results = {"performance_table": pd.DataFrame(), "action_plan": []}
         out = _backfill_empty_scenarios(stock_picks, "Expansion", "deep", "", results)
         # All four scenarios now carry picks.
-        for key in ("boost_alpha", "rebalance", "protect_capital", "regime_play"):
+        for key in ("boost_alpha", "rebalance", "protect_capital", "smart_money"):
             self.assertTrue(out[key]["picks"],
                             f"{key} should have picks after backfill")
 
@@ -164,7 +164,7 @@ class IdeaBackfillTest(unittest.TestCase):
             "boost_alpha":     {"label": "Рост", "desc": "", "picks": [original_pick]},
             "rebalance":       {"label": "Ребаланс", "desc": "", "picks": [original_pick]},
             "protect_capital": {"label": "Защита", "desc": "", "picks": [original_pick]},
-            "regime_play":     {"label": "Режим", "desc": "", "picks": [original_pick]},
+            "smart_money":     {"label": "Smart Money", "desc": "", "picks": [original_pick]},
         }
         results = {"performance_table": pd.DataFrame(), "action_plan": []}
         out = _backfill_empty_scenarios(stock_picks, "Expansion", "deep", "", results)
