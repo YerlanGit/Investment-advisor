@@ -246,7 +246,7 @@ def _build_ai_ideas(stock_picks: dict, tier: str = "base") -> dict:
     templates render.
 
     Input  (ai_narrative.generate_narrative → stock_picks):
-        {boost_alpha|rebalance|protect_capital|regime_play:
+        {boost_alpha|rebalance|protect_capital|smart_money:
             {label, desc, picks: [{ticker, name, why, type}]}}
     Output (template ideas grid — buckets flattened in canonical order):
         {risk_reduction|diversification|growth|hedge|rotation:
@@ -260,7 +260,10 @@ def _build_ai_ideas(stock_picks: dict, tier: str = "base") -> dict:
         ("boost_alpha",     "growth",          "Рост доходности",   "high"),
         ("rebalance",       "diversification", "Ребалансировка",    "medium"),
         ("protect_capital", "hedge",           "Защита капитала",   "low"),
-        ("regime_play",     "rotation",        "Режимная ставка",   "medium"),
+        # B2.4 — the 4th card is now Smart Money (institutional + insider
+        # conviction) instead of the generic regime play.  Still rendered in
+        # the `rotation` template bucket, so no template change is needed.
+        ("smart_money",     "rotation",        "Smart Money",       "medium"),
     ]
     ideas: dict = {"risk_reduction": [], "diversification": [],
                    "growth": [], "hedge": [], "rotation": []}
@@ -276,9 +279,9 @@ def _build_ai_ideas(stock_picks: dict, tier: str = "base") -> dict:
         "protect_capital": [("FACTOR", "Низкая Beta + дивидендная стабильность"),
                             ("REGIME", "Защитные сектора при текущем режиме"),
                             ("RAG",    "Оценка хвостового риска")],
-        "regime_play":     [("FACTOR", "Факторный сигнал по режиму"),
-                            ("REGIME", "Quadrant: Growth × Cycle"),
-                            ("RAG",    "Банковские прогнозы режима")],
+        "smart_money":     [("FACTOR", "Сигнал умных денег: институц. накопление"),
+                            ("REGIME", "Позиционирование фондов/инсайдеров под режим"),
+                            ("RAG",    "13F-фонды + инсайдеры (SEC Form 4)")],
     }
     _PIPELINE_DEEP = {
         "boost_alpha":     [("FACTOR", "Momentum + Quality скоринг"),
@@ -293,10 +296,10 @@ def _build_ai_ideas(stock_picks: dict, tier: str = "base") -> dict:
                             ("REGIME", "Защитные сектора Healthcare/Gold"),
                             ("STRESS", "Positive P&L при recession сценарии"),
                             ("RAG",    "CDS + банковские отчёты по риску")],
-        "regime_play":     [("FACTOR", "Regime-specific факторный сигнал"),
-                            ("REGIME", "Growth-Cycle квадрант + confidence"),
-                            ("STRESS", "Сценарный анализ смены режима"),
-                            ("RAG",    "Банковские прогнозы режима")],
+        "smart_money":     [("FACTOR", "Институц. потоки + инсайдерские покупки"),
+                            ("REGIME", "Накопление умных денег в текущем квадранте"),
+                            ("STRESS", "Устойчивость идеи при смене режима"),
+                            ("RAG",    "13F/Form 4 + банковский консенсус")],
     }
     pipeline_map = _PIPELINE_DEEP if tier == "deep" else _PIPELINE_BASE
 
@@ -567,6 +570,20 @@ def _build_expected_effect(raw: Optional[dict]) -> dict:
         out["scoped_to_high_priority"] = bool(hp)
         out["driver"] = str((raw or {}).get("driver") or
                             ("high_priority_action_plan" if hp else "bl_target_fallback"))
+    # User #5 — spell out the IDEA and its direction so the reader sees how the
+    # metrics move on a SELL vs a BUY.  Each entry: {ticker, side ("Продать"/
+    # "Купить"), delta_pp, action}.
+    _SIDE_RU = {"sell": "Продать", "buy": "Купить"}
+    acts = (raw or {}).get("high_priority_actions") or []
+    if acts:   # only add the key when there's an idea to show (keeps {} for empty input)
+        out["high_priority_actions"] = [
+            {"ticker":   str(a.get("ticker", "")),
+             "side":     _SIDE_RU.get(str(a.get("side")), str(a.get("side") or "")),
+             "side_key": str(a.get("side") or ""),
+             "delta_pp": a.get("delta_pp"),
+             "action":   str(a.get("action", ""))}
+            for a in acts if isinstance(a, dict)
+        ]
     return out
 
 
@@ -1001,9 +1018,19 @@ def build_payload(results: dict, tier: str,
     }
 
     # ── Dollar impact fields ───────────────────────────────────────────────
-    cvar_dollar = f"${abs(cvar_raw * total_val):,.0f}" if total_val > 0 else "—"
-    mdd_dollar  = f"${abs(mdd_raw  * total_val):,.0f}" if total_val > 0 else "—"
-    var_dollar  = f"${abs(var_raw  * total_val):,.0f}" if total_val > 0 else "—"
+    # Audit 06-23 (#4): derive each $ from the SAME rounded % the headline
+    # displays, so "−20.2% (≈ $X)" is internally consistent.  Using the raw
+    # fraction (0.2015) next to a rounded −20.2% headline made the dollar look
+    # ~$7 off and produced different $ values across captions for one number.
+    def _dollar(frac_raw, decimals: int) -> str:
+        if not total_val or total_val <= 0:
+            return "—"
+        pct_disp = round(float(frac_raw) * 100.0, decimals)   # the SHOWN percent
+        return f"${abs(pct_disp / 100.0 * total_val):,.0f}"
+
+    cvar_dollar = _dollar(cvar_raw, 1)
+    mdd_dollar  = _dollar(mdd_raw,  1)
+    var_dollar  = _dollar(var_raw,  1)
 
     # ── Month-over-month risk delta ────────────────────────────────────────
     prev_risk_score: Optional[int] = None

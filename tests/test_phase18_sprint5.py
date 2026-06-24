@@ -391,7 +391,7 @@ class FallbackIdeasRotationTest(unittest.TestCase):
         a = _fallback_stock_picks("Expansion", "deep")
         b = _fallback_stock_picks("Expansion", "deep")
         self.assertEqual(a, b)                 # deterministic within a month
-        for key in ("boost_alpha", "rebalance", "protect_capital", "regime_play"):
+        for key in ("boost_alpha", "rebalance", "protect_capital", "smart_money"):
             self.assertTrue(a[key]["picks"], f"{key} must have picks")
 
     def test_defensive_regime_uses_defensive_catalogue(self):

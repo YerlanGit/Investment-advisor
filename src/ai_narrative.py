@@ -741,9 +741,10 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
             '    "protect_capital": {"label": "Защита капитала", "desc": "≤80 знаков", '
             '"picks": [{"ticker": "...", "name": "...", "why": "≤120 знаков: низкая бета + '
             'дивиденды + защита от стресс-сценария [Источник]", "type": "Stock"}]},\n'
-            '    "regime_play": {"label": "Режимная ставка", "desc": "≤80 знаков — позиционирование под режим", '
-            '"picks": [{"ticker": "...", "name": "...", "why": "≤120 знаков: почему именно этот режим '
-            'даёт преимущество + банковский взгляд [Regime]", "type": "Stock|ETF"}]}\n'
+            '    "smart_money": {"label": "Smart Money", "desc": "≤80 знаков — следование за умными деньгами", '
+            '"picks": [{"ticker": "...", "name": "...", "why": "≤120 знаков: ПРИЗНАК умных денег — '
+            'заметные покупки инсайдеров (Form 4), накопление институционалов/13F или необычный '
+            'объём — + как это согласуется с режимом [Smart Money]", "type": "Stock|ETF"}]}\n'
             '  }\n'
             '}\n\n'
             "ПРАВИЛА:\n"
@@ -794,10 +795,10 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
       {{"ticker": "...", "name": "...", "why": "≤200 знаков: Beta/корреляция/дивиденд [источник]", "type": "Stock|ETF|Bond"}}
     ]
   }},
-  "regime_play": {{
-    "label": "Режимная ставка — {regime_label}", "desc": "≤100 знаков. Тактическая ставка под текущий режим.",
-    "picks": [  // 1-2 идеи специфичные для режима {regime_label}
-      {{"ticker": "...", "name": "...", "why": "≤200 знаков: почему этот режим даёт преимущество [Regime]", "type": "Stock|ETF"}}
+  "smart_money": {{
+    "label": "Smart Money", "desc": "≤100 знаков. Следование за умными деньгами (институционалы + инсайдеры).",
+    "picks": [  // 1-2 идеи с ПРИЗНАКОМ умных денег
+      {{"ticker": "...", "name": "...", "why": "≤200 знаков: конкретный сигнал умных денег — покупки инсайдеров (SEC Form 4), накопление институционалов/13F, необычный объём — и согласование с режимом {regime_label} [Smart Money]", "type": "Stock|ETF"}}
     ]
   }}
 }}"""
@@ -865,7 +866,10 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
         'Ожидаемый эффект на долю в риске (TRC) позиций [Quant Engine]",\n'
         '  "ai_effect_comment": "≤220 знаков — чего ожидать после ребалансировки: '
         'потери в худший день из 20 (CVaR) до→после, нестабильность (Vol), Sharpe. '
-        'Причинно-следственная связь с конкретными изменениями позиций [Quant Engine]",\n'
+        'ОБЯЗАТЕЛЬНО согласуй с rebalance_verdict из данных: если kind=tradeoff/degradation — '
+        'ЯВНО назови ухудшившуюся метрику (напр. рост концентрации Max TRC при урезании топ-позиции) '
+        'и НЕ заявляй об одностороннем снижении риска. Причинно-следственная связь с конкретными '
+        'изменениями позиций [Quant Engine]",\n'
         f'{picks_spec},\n'
         '  "action_plan_text": "≤800 знаков — приоритетные действия: Trim/Sell сначала, '
         'конкретные уровни, cumulative |Δw| ≤ 25% NAV",\n'
@@ -1145,8 +1149,21 @@ def _fallback_stock_picks(regime_label: str, tier: str) -> dict:
             offset=1))
         picks_balance.append(_pick(_BALANCE_DEEP_EXTRA, offset=1))
 
-    # regime_play: a regime-aligned pick (rotates monthly like the rest)
-    picks_regime = [_pick(_REGIME_EXPANSION if expansion else _REGIME_DEFENSIVE)]
+    # smart_money: institutional / insider-conviction proxies (B2.4).  The
+    # offline catalogue can't read live Form 4, so it uses widely-followed
+    # "smart money" proxies; rotates monthly like the rest.
+    _SMART_MONEY = [
+        {"ticker": "BRK.B", "name": "Berkshire Hathaway",
+         "why": "Прокси на аллокацию Баффета — сам по себе индикатор умных денег; "
+                "диверсифицированный кэш-генератор [Smart Money]", "type": "Stock"},
+        {"ticker": "BLK", "name": "BlackRock",
+         "why": "Крупнейший управляющий активами, бенефициар притоков; "
+                "высокая институциональная доля [Smart Money]", "type": "Stock"},
+        {"ticker": "BX", "name": "Blackstone",
+         "why": "Лидер альтернативных активов; индикатор аппетита институционалов "
+                "к риску [Smart Money]", "type": "Stock"},
+    ]
+    picks_smart = [_pick(_SMART_MONEY)]
     return {
         "boost_alpha":     {"label": "Повышение доходности — повышенный риск",
                             "desc":  "Увеличение потенциальной доходности за счёт акций роста и momentum.",
@@ -1157,9 +1174,9 @@ def _fallback_stock_picks(regime_label: str, tier: str) -> dict:
         "protect_capital": {"label": "Защита капитала — снижение риска",
                             "desc":  "Защитное позиционирование при макроэкономической неопределённости.",
                             "picks": picks_protect},
-        "regime_play":     {"label": f"Режимная ставка — {'Expansion' if expansion else 'Slowdown'}",
-                            "desc":  "Тактическое позиционирование под текущий макро-режим.",
-                            "picks": picks_regime},
+        "smart_money":     {"label": "Smart Money — институционалы и инсайдеры",
+                            "desc":  "Следование за умными деньгами (накопление фондов / покупки инсайдеров).",
+                            "picks": picks_smart},
     }
 
 
@@ -1366,7 +1383,7 @@ def _normalise_stock_picks(raw: dict, tier: str, market_context: str) -> dict:
     Strips unverified RAG citations from pick rationale.
     """
     result: dict = {}
-    for key in ("boost_alpha", "rebalance", "protect_capital", "regime_play"):
+    for key in ("boost_alpha", "rebalance", "protect_capital", "smart_money"):
         scenario = raw.get(key) or {}
         picks    = scenario.get("picks") or []
         clean_picks = []
@@ -1471,7 +1488,7 @@ def _backfill_empty_scenarios(stock_picks: dict, regime_label: str, tier: str,
     fallback = _normalise_stock_picks(fallback, tier, market_context)
     fallback = _remove_held_picks(fallback, results)
 
-    for key in ("boost_alpha", "rebalance", "protect_capital", "regime_play"):
+    for key in ("boost_alpha", "rebalance", "protect_capital", "smart_money"):
         scenario = stock_picks.get(key) or {}
         if scenario.get("picks"):
             continue

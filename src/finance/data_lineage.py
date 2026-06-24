@@ -417,9 +417,13 @@ def _llm_checker_status(ai_summary: Optional[dict]) -> list[dict]:
     a = ai_summary or {}
     have_ai = bool(a.get("verdict") or a.get("bullets"))
     status  = "ok" if have_ai else "missing"
-    note_h  = ("held-filter + data-driven + contradiction-filter активны"
+    # Honesty (audit 06-23): these rows reflect that the post-LLM filters are
+    # CONFIGURED in the pipeline, not a per-run pass/trip count — so the copy
+    # says "настроены" (configured), not "активны" (which over-claimed that they
+    # ran AND caught something on this specific run).
+    note_h  = ("held-filter + data-driven + contradiction-filter настроены"
                if have_ai else "AI не вызывался")
-    note_m  = ("leverage-phrasing + stress-cap + no-self-aggregation активны"
+    note_m  = ("leverage-phrasing + stress-cap + no-self-aggregation настроены"
                if have_ai else "AI не вызывался")
     return [
         _row(

@@ -85,7 +85,7 @@
 
 | Элемент | Ключи | Builder | Источник |
 |---|---|---|---|
-| Карточки идей (4 сценария) | `ai_ideas{growth/diversification/hedge/rotation}`, `ideas_count` | `_build_ai_ideas` | `ai_summary.stock_picks` |
+| Карточки идей (4 сценария) | `ai_ideas{growth/diversification/hedge/rotation}`, `ideas_count` | `_build_ai_ideas` | `ai_summary.stock_picks` (ключи `boost_alpha/rebalance/protect_capital/`**`smart_money`**) — 4-я карточка **Smart Money** (институционалы+инсайдеры) вместо «режима» (06-23); рендерится в bucket `rotation` |
 | Генерация пиков (LLM) | — | — | `ai_narrative._user_prompt`: **DATA-DRIVEN** (5.1) + **СВЕЖЕСТЬ ИДЕЙ** (6.2/1.1 — **ДНЕВНОЙ** якорь `YYYY-MM-DD` + дневной `УГОЛ РОТАЦИИ` из `_IDEA_ROTATION_ANGLES`, бан расширен на V/MA/GS/UNH/PG/AVGO); `temperature=0.7` на BASE (Sonnet, env, band 0.5–0.85). **Routing: BASE=`claude-sonnet-4-6`, DEEP=`claude-opus-4-8`**; Opus опускает `temperature` → дисперсию даёт директива |
 | Фильтры пиков | — | — | `_remove_held_picks` → `_check_pick_contradictions` → `_backfill_empty_scenarios` |
 | Фолбэк-каталог (без API) | — | — | `_fallback_stock_picks`: 3 кандидата/слот + **месячная ротация** (Sprint 5.1) |
@@ -118,7 +118,7 @@
 
 **Как менять:** направление метрики → `_RISK_METRICS_LOWER_IS_BETTER` / `_NEUTRAL_METRICS`; карточный маппинг → `_KEYMAP` в `_build_expected_effect`; рендер → макрос `_ef_card` (deep-шаблон).
 
-> **Sprint 6 / BLOCK 2.3 — связка Идеи→Action→Эффект:** симуляция теперь идёт на **высокоприоритетных** action-строках (не-deferred Buy/Sell/Trim, `|Δw|>0`), а не на полном BL-векторе — `finance/simulate.high_priority_target_weights()`. Action Plan считается ДО симуляции в `analyze_all`. Payload несёт `expected_effect.high_priority_tickers` + `scoped_to_high_priority` (+ `driver`: `high_priority_action_plan`/`bl_target_fallback`) — UI помечает, что дельта Было/Стало относится именно к приоритетным идеям.
+> **Sprint 6 / BLOCK 2.3 — связка Идеи→Action→Эффект:** симуляция теперь идёт на **высокоприоритетных** action-строках (не-deferred Buy/Sell/Trim, `|Δw|>0`), а не на полном BL-векторе — `finance/simulate.high_priority_target_weights()` (возвращает `(target, tickers, actions)`). Action Plan считается ДО симуляции в `analyze_all`. Payload несёт `expected_effect.high_priority_tickers` + `scoped_to_high_priority` + **`high_priority_actions[]`** (06-23: `{ticker, side=Продать/Купить, delta_pp}` — панель спеллит ИДЕЮ и направление). ИИ-комментарий `ai_effect_comment` ОБЯЗАН согласовать с `verdict.kind` (tradeoff → не заявлять односторонне снижение риска).
 
 ---
 

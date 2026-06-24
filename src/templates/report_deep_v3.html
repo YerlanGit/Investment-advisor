@@ -1329,6 +1329,7 @@
   }
   .cove-item.warn .cove-check { color: var(--amber); }
   .cove-item.fail .cove-check { color: var(--neg); }
+  .cove-item.off  .cove-check { color: var(--ink-60); }
   .cove-body {
     font-size: 10.5px; line-height: 1.5; color: var(--ink);
   }
@@ -3024,9 +3025,12 @@
             {% set stlbl  = 'актуально' if st == 'ok' else ('устарело' if st == 'stale' else ('частично' if st == 'warn' else 'нет данных')) %}
           <div class="reg-signal-row">
             <span class="reg-signal-name">{{ s.name }}{% if s.comment %} · <span style="color:var(--ink-60); font-weight:400; font-size:8.5px;">{{ s.comment }}</span>{% endif %}</span>
-            <span class="reg-signal-val {{ valcls }}">{{ s.value }}</span>
-            {# F3 — rate-of-change chip (level is the value above; this is the темп). #}
-            {% if s.trend_label %}<span class="reg-signal-trend" style="font-family:var(--font-mono); font-size:8.5px; color:var(--ink-60); white-space:nowrap; margin:0 6px;">{{ s.trend_label }}</span>{% endif %}
+            {# value + темп share ONE grid cell so the 3-col grid (and mobile
+               override) stay intact — F3 chip no longer wraps `state` to a new row. #}
+            <span class="reg-signal-val {{ valcls }}" style="display:inline-flex; gap:7px; align-items:baseline; justify-content:flex-end;">
+              <span>{{ s.value }}</span>
+              {% if s.trend_label %}<span class="reg-signal-trend" style="font-family:var(--font-mono); font-size:8.5px; color:var(--ink-60); white-space:nowrap; font-weight:400;">{{ s.trend_label }}</span>{% endif %}
+            </span>
             <span class="reg-signal-state {{ stcls }}">{{ stlbl }}</span>
           </div>
           {% else %}
@@ -3110,7 +3114,7 @@
   <div class="section-sources" style="margin-top:14px;">
     ИСТОЧНИКИ:
     <b>Quant Engine MAC3</b> — расчёт режима по факторам Growth/Cycle ·
-    <b>FRED</b> — макро-индикаторы (yield curve, HY spread, PMI) ·
+    <b>FRED</b> — макро-индикаторы (yield curve, HY spread, VIX, breakeven, безработица, ВВП) ·
     <b>SEC EDGAR</b> — earnings revisions ratio ·
     <b>Tradernet</b> — рыночные цены/тех-индикаторы ·
     <b>ChromaDB · Bank PDF reports</b> — публичные обзоры GS / MS / JPM ·
@@ -3352,12 +3356,20 @@
       {# BLOCK 2.3 — scope badge: the delta below reflects ONLY the high-priority
          (non-deferred Buy/Sell/Trim) action items, not the full BL reshuffle. #}
       {% if data.expected_effect and data.expected_effect.scoped_to_high_priority %}
+      {# User #5 — spell out the IDEA: which positions to SELL and BUY, and how
+         far (Δw в пп).  Метрики ниже = эффект ИМЕННО этих сделок. #}
       <div class="ee-scope" style="margin-top:6px; font-size:10px;
            font-family:var(--font-mono); color:var(--tech-blue);
-           background:var(--tech-blue-08); border-radius:3px; padding:3px 7px;
-           display:inline-block;">
-        ⚡ Δ только по высокоприоритетным идеям:
-        <b>{{ data.expected_effect.high_priority_tickers | join(', ') }}</b>
+           background:var(--tech-blue-08); border-radius:3px; padding:4px 8px;">
+        ⚡ Идея (высокоприоритетные сделки) — метрики «до/после» = их эффект:
+        {% for a in (data.expected_effect.high_priority_actions or []) %}
+          <span style="white-space:nowrap; color:{{ '#2e7d32' if a.side_key == 'buy' else '#c62828' }};">
+            {{ a.side }} <b>{{ a.ticker }}</b> {{ '%+.1f'|format(a.delta_pp or 0) }}пп</span>{% if not loop.last %} · {% endif %}
+        {% endfor %}
+      </div>
+      <div style="margin-top:3px; font-size:9px; color:var(--ink-60);">
+        Продажа (−пп) снижает вес и риск-вклад позиции; покупка (+пп) добавляет.
+        Итоговое влияние на vol / CVaR / концентрацию — в карточках ниже и в вердикте.
       </div>
       {% elif data.expected_effect and data.expected_effect.driver == 'bl_target_fallback' %}
       <div class="ee-scope" style="margin-top:6px; font-size:10px;
@@ -3519,12 +3531,16 @@
     </div>
 
     {# CoVe rows — fully data-driven from data.cove_lineage (engine output).
-       Engine status vocab → visual icon:  ok=v · warn/stale=! · error/missing=x #}
+       Engine 5-state vocab → visual icon.  CRITICAL: `missing`/`disabled`
+       mean "intentionally NOT consulted" (e.g. feature gated off, FRED key
+       unset) — they are NEUTRAL (–), NOT the red ✗ that means a source FAILED
+       (`error`).  Collapsing them together mislabels a switched-off feature as
+       a broken data source.  ok=✓ · warn/stale=! · error=✗ · missing/disabled=– #}
     <div class="cove-grid">
       {% for row in (data.cove_lineage or []) %}
         {% set status = row.status or 'ok' %}
-        {% set klass  = 'warn' if status in ('warn', 'stale') else ('fail' if status in ('error', 'missing') else '') %}
-        {% set icon   = '!' if status in ('warn', 'stale') else ('✗' if status in ('error', 'missing') else '✓') %}
+        {% set klass  = 'warn' if status in ('warn', 'stale') else ('fail' if status == 'error' else ('off' if status in ('missing', 'disabled') else '')) %}
+        {% set icon   = '!' if status in ('warn', 'stale') else ('✗' if status == 'error' else ('–' if status in ('missing', 'disabled') else '✓')) %}
         <div class="cove-item {{ klass }}">
           <span class="cove-check">{{ icon }}</span>
           <span class="cove-body"><b>{{ row.name }}</b><br>
@@ -3545,7 +3561,8 @@
     <div style="margin-top:10px; font-size:9px; color:var(--ink-60); line-height:1.5;">
       <b style="color:var(--ink);">✓</b> — данные прошли QualityGate ·
       <b style="color:var(--amber);">!</b> — частичное покрытие или fallback на устаревший кэш ·
-      <b style="color:var(--neg);">✗</b> — источник недоступен.
+      <b style="color:var(--neg);">✗</b> — источник не сработал (ошибка) ·
+      <b style="color:var(--ink-60);">–</b> — источник не запрашивался / выключен.
       Документ не является ИИР (индивидуальной инвестиционной рекомендацией) —
       только аналитический материал.
     </div>

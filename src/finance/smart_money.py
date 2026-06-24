@@ -238,7 +238,9 @@ def insider_lineage_row(signals: Optional[dict]) -> dict:
                 "note": "insider layer off / no data"}
     statuses = [s.get("status") for s in signals.values()]
     if all(s == "disabled" for s in statuses):
-        return {**base, "status": "missing",
+        # 'disabled' (NOT 'missing'/'error') → renders as a NEUTRAL "–" in the
+        # CoVe panel: the layer is intentionally switched off, not broken.
+        return {**base, "status": "disabled",
                 "note": f"{SMART_MONEY_ENV}=0 (выкл. по умолчанию)"}
     n_ok      = sum(1 for s in statuses if s == "ok")
     n_cluster = sum(1 for s in signals.values() if s.get("cluster_flag"))

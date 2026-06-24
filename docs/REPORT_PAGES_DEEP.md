@@ -10,7 +10,7 @@
 ```
 analyze_all()  (src/finance/investment_logic.py)
    → risk_matrix, portfolio_metrics, asset_scores, regime, macro_drivers,
-     stress_scenarios, black_litterman, expected_effect, action_plan, factor_betas …
+     stress_scenarios, black_litterman, expected_effect, action_plan, factor_scores …
         │
         ▼
 build_payload(results, tier="deep", ai_summary, user_profile, …)  (src/pdf_payload.py)
@@ -132,9 +132,8 @@ Value, Quality, Size, Rates, Commodities, EM…) — и где спрятана 
 
 **Builder / источник.** SVG и таблицу собирает бот (`tg_bot._build_*`) из Ridge-бет движка.
 Подзаголовок в шаблоне фиксирует методологию: «Ridge β-регрессия (α=0.001) · EWMA-ковариация
-λ≈0.94 · окно 60 дней». (Примечание: подпись `λ≈0.94` — историческая; фактический halflife
-структурной ковариации в `calculate_structural_risk` = 63 дня, λ≈0.99; см. также фикс подписи
-EWMA в CoVe.)
+hl=63 (λ≈0.99) ⊕ Ledoit-Wolf 70/30 · окно 60 дней». Halflife структурной ковариации в
+`calculate_structural_risk` = 63 торговых дня, λ≈0.99 (плавнее RiskMetrics λ=0.94 ≈ hl 11 дн).
 
 **Как работает математика.** Для каждого актива дневные лог-доходности регрессируются Ridge
 (`α=0.001`, гасит мультиколлинеарность коррелирующих факторов) на фактор-ETF → β. Колонка
@@ -341,11 +340,12 @@ breakeven (инфл. ожидания), **UNRATE (безработица)**, **R
 
 **Как работает.** Builder форматирует значение по юниту: HY OAS (`BAMLH0A0HYM2`) → bp (×100),
 `pp` → «+X.XX pp», `%` → «X.XX%», index (VIX) → «X.X». **Темп (F3)** `_macro_series_trend`:
-по истории серии (`history_30d` — последние 30 наблюдений) считает `delta = vals[-1] − vals[-1-lag]`,
-где lag по cadence (daily→21≈1м, monthly→3≈3м, quarterly→2≈2кв). Чип вида `▲ +0.12 pp за 1м`
-(level ⊕ rate-of-change — режим реагирует на **направление**, не только уровень). Статус
-(`ok/warn/stale/missing`) маппится на цвет: ok→bull, warn/stale→warn, missing→flat; подпись
-«актуально/устарело/частично/нет данных».
+по истории серии (`history_30d` — последние 30 наблюдений) считает изменение как **OLS-наклон
+по ≥3 последовательным изменениям** (общий `finance.regime.series_trend`, ≥4 точек), а не одношаговую
+разницу `vals[-1] − vals[-1-lag]`; lag по cadence (daily→21≈1м, monthly→3≈3м, quarterly→3≈3кв).
+Чип вида `▲ +0.12 pp за 1м` (level ⊕ rate-of-change — режим реагирует на **направление**, не только
+уровень). Статус (`ok/warn/stale/missing`) маппится на цвет: ok→bull, warn/stale→warn, missing→flat;
+подпись «актуально/устарело/частично/нет данных».
 
 **Как читать.** Значение — текущий уровень. Чип-темп — куда движется (▲ растёт, ▼ падает).
 Инверсия кривой (10Y−2Y < 0), широкий HY (>5.5%), VIX>25 — классические стресс-сигналы (см. 4.D).
@@ -415,9 +415,9 @@ breakeven (инфл. ожидания), **UNRATE (безработица)**, **R
 positive P&L при recession, сценарный анализ смены режима).
 
 **Источник пиков.** `ai_summary.stock_picks` от `ai_narrative` — модель **`claude-opus-4-8`**.
-Правило DATA-DRIVEN (привязка к портфелю) + СВЕЖЕСТЬ ИДЕЙ (период `YYYY-MM`). Opus опускает
-`temperature` → дисперсию даёт директива свежести. Фильтры: held-tickers → contradiction →
-backfill (помечается «резервный каталог»).
+Правило DATA-DRIVEN (привязка к портфелю) + СВЕЖЕСТЬ ИДЕЙ (дневной срез `YYYY-MM-DD` + дневной
+«угол ротации»). Opus опускает `temperature` → дисперсию даёт директива свежести. Фильтры:
+held-tickers → contradiction → backfill (помечается «резервный каталог»).
 
 **Рендер.** Цветная полоса по категории (risk/diversify/rebalance/grow/hedge/rotation —
 расширенный маппинг по RU/EN ключам, чтобы новый бакет не терял бейдж). Свёрнуто: title +
