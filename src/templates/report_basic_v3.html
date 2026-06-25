@@ -1359,7 +1359,8 @@
           {# Top 5 positions sorted by Euler TRC (engine output).
              H-2: HOTSPOT is decided by the engine — the template just renders
              the boolean `a.hotspot` flag, it does NOT re-apply the >20% rule. #}
-          {% set _sorted = (data.assets or []) | sort(attribute='euler_risk', reverse=true) %}
+          {# Numeric sort — the formatted-string sort dropped the true #4 TRC. #}
+          {% set _sorted = (data.assets or []) | sort(attribute='euler_risk_pct', reverse=true) %}
           {% for a in _sorted[:5] %}
             {% set is_hot = a.hotspot %}
           <tr>

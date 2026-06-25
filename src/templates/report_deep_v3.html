@@ -1944,7 +1944,9 @@
              boolean directly; the template does NOT re-derive the >20% rule.
              Source: data.assets (already sorted by weight in build_payload).
              We surface the top 5 by TRC to keep the panel compact. #}
-          {% set _sorted = (data.assets or []) | sort(attribute='euler_risk', reverse=true) %}
+          {# Sort on the NUMERIC euler_risk_pct — sorting the formatted string
+             ranked "9.6%" above "33.9%" and dropped the true #4 contributor. #}
+          {% set _sorted = (data.assets or []) | sort(attribute='euler_risk_pct', reverse=true) %}
           {% for a in _sorted[:5] %}
             {% set is_hot = a.hotspot %}
           <tr>

@@ -818,6 +818,7 @@ def build_payload(results: dict, tier: str,
                 "asset_class":   asset_class,
                 "is_cash":       is_cash,
                 "euler_risk":    f"{euler:.1f}%",
+                "euler_risk_pct": float(euler),   # numeric TRC% — the cover top-5 table MUST sort on this, not the formatted string (else "9.6%" > "33.9%" lexicographically and the true #4 is dropped)
                 "euler_extreme": _flag(euler, kind="trc_pct"),
                 "beta":          f"{beta_mkt:.2f}" if beta_mkt is not None else "—",
                 "atr_pct":       f"{atr_pct:.2f}%" if atr_pct is not None else "—",
@@ -1712,14 +1713,29 @@ def _build_integrity_checks(results: dict,
         checks.append({"status": "⚠", "label": "Серия доходностей",
                         "detail": "ряд не построен"})
 
-    # 3. Factor model coverage
+    # 3. Factor model coverage + collinearity.  Audit 06-25: a green "100%
+    # покрытие" chip here contradicted the page-6 CoVe «факторная независимость»
+    # warn (κ≈61).  Downgrade to ⚠ when the factors are near-collinear and the
+    # hierarchical orthogonalization is off, so the two panels agree.
     f_loaded = data_quality.get("factors_loaded", 0)
     f_total  = data_quality.get("factors_total", 1)
     f_pct    = round(f_loaded / f_total * 100) if f_total else 0
+    _fdiag   = (results.get("portfolio_metrics") or {}).get("factor_diagnostics") or {}
+    _collinear = bool(_fdiag.get("near_collinear")) and not bool(_fdiag.get("orthogonalized"))
+    if f_pct < 80:
+        _f_status = "⚠"
+        _f_detail = f"Ridge β · {f_loaded}/{f_total} факторов · {f_pct}% покрытие"
+    elif _collinear:
+        _f_status = "⚠"
+        _f_detail = (f"Ridge β · {f_loaded}/{f_total} факторов · κ={_fdiag.get('condition_number')} "
+                     "(близки к коллинеарности)")
+    else:
+        _f_status = "✓"
+        _f_detail = f"Ridge β · {f_loaded}/{f_total} факторов · {f_pct}% покрытие"
     checks.append({
-        "status": "✓" if f_pct >= 80 else "⚠",
+        "status": _f_status,
         "label":  "Факторная модель",
-        "detail": f"Ridge β · {f_loaded}/{f_total} факторов · {f_pct}% покрытие",
+        "detail": _f_detail,
     })
 
     # 4. Math: Euler decomposition presence

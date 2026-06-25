@@ -251,6 +251,8 @@ def high_priority_target_weights(
         target = dict(base)
         hp_tickers: list[str] = []
         actions: list[dict] = []
+        sell_proceeds = 0.0          # freed weight (decimal) from sells/trims
+        acted: set[str] = set()
         for r in hp_rows:
             t = r.get("ticker")
             if not t:
@@ -258,13 +260,57 @@ def high_priority_target_weights(
             dpp = float(r.get("delta_w_pp") or 0.0)
             cur = float(base.get(t, 0.0))
             target[t] = cur + dpp / 100.0
-            hp_tickers.append(str(t))
+            hp_tickers.append(str(t)); acted.add(str(t))
+            if dpp < 0:
+                sell_proceeds += -dpp / 100.0
             actions.append({
                 "ticker":   str(t),
                 "action":   str(r.get("action") or ""),
                 "side":     "buy" if dpp > 0 else "sell",
                 "delta_pp": round(dpp, 2),
             })
+
+        # User #1 (06-25) — make the idea a COMPLETE rebalance: show what we BUY,
+        # not just what we sell.  The turnover cap fills the budget with high-
+        # priority SELLS first, deferring buys to cash → a sells-only idea that
+        # (a) doesn't show a buy side and (b) concentrates the relative risk on
+        # the surviving names.  When the idea is sells-only, REINVEST the freed
+        # weight into the highest-conviction Black-Litterman BUY targets that are
+        # already HELD (so they sit in the covariance matrix and the simulated
+        # metrics genuinely reflect the buy).  Proportional to BL conviction,
+        # so "sell overvalued tech → buy the undervalued name" reads as one idea
+        # and concentration actually drops.
+        have_buy = any(a["side"] == "buy" for a in actions)
+        if sell_proceeds > 1e-6 and not have_buy and bl_records:
+            buys = [r for r in bl_records
+                    if float(r.get("delta_w_pp") or 0.0) > 0.0
+                    and str(r.get("ticker")) not in acted
+                    and str(r.get("ticker")) in base]        # held ⇒ in cov ⇒ simulated
+            buys.sort(key=lambda r: float(r.get("delta_w_pp") or 0.0), reverse=True)
+            buys = buys[:3]
+            conv = sum(float(b.get("delta_w_pp") or 0.0) for b in buys)
+            _PER_BUY_CAP = 0.12          # ≤+12pp per name so a reinvest can't create NEW concentration
+            remaining = sell_proceeds
+            for b in buys:
+                if remaining <= 1e-6:
+                    break
+                t = str(b.get("ticker"))
+                share = (float(b.get("delta_w_pp") or 0.0) / conv) if conv > 0 else 1.0 / len(buys)
+                add = min(sell_proceeds * share, _PER_BUY_CAP, remaining)
+                if add <= 1e-9:
+                    continue
+                target[t] = float(base.get(t, 0.0)) + add
+                remaining -= add
+                hp_tickers.append(t)
+                actions.append({
+                    "ticker":   t,
+                    "action":   str(b.get("action") or "Buy"),
+                    "side":     "buy",
+                    "delta_pp": round(add * 100.0, 2),
+                })
+            # Any un-reinvested remainder stays as cash (de-risking) — honest:
+            # the panel shows it implicitly via the lower after-vol.
+
         # Largest moves first so the panel leads with the most impactful idea.
         actions.sort(key=lambda a: abs(a["delta_pp"]), reverse=True)
         return target, hp_tickers, actions
