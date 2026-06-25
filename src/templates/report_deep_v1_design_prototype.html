@@ -8,8 +8,8 @@
     3. Факторное разложение · 4-Pillar Scoring · стресс-сценарии  [DEEP]
     4. Action Plan · Ожидаемый эффект · CoVe                       [DEEP]
     5. Рыночный режим                                              [DEEP]
-  Дизайн-язык V2 (Premium): cream/gold/ink, Manrope + JetBrains Mono,
-  gauge-level графики, hairline-detail. V1 → report_deep_v1_design_prototype.html.
+  Дизайн-язык совпадает с BASE: gauge-level графики, hairline-detail,
+  IBM Plex, кремовый фон. Открыть просто в браузере.
   ─────────────────────────────────────────────────────────────────────────
 -->
 <html lang="ru">
@@ -19,64 +19,27 @@
 <title>DEEP Report — полный отчёт (5 страниц) — Прототип</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-<style>
-/* ═══ Premium V2 — единая мобильная адаптация (грузится в <head>, !important
-   гарантирует победу над per-page инлайн-стилями ниже по документу) ═══ */
-@media (max-width: 600px) {
-  .sheet { max-width: 100% !important; padding: 12px 13px 20px !important; }
-  /* любой многоколоночный grid → одна колонка */
-  .cover, .kpi-grid, .risk-conc, .score-grid, .effect-grid, .cove-grid,
-  .factor-layout, .regime-layout, .gv-stats, .stat-grid, .ideas-grid,
-  .rag-quotes, [class*="-grid"], [class*="-layout"] {
-    grid-template-columns: 1fr !important; gap: 12px !important;
-  }
-  /* таблицы и широкие панели — горизонтальный скролл вместо обрезки */
-  .panel, .d3-block, .table-wrap { overflow-x: auto !important; -webkit-overflow-scrolling: touch; }
-  table { font-size: 10.5px !important; }
-  thead th, tbody td { padding: 4px 5px !important; }
-  /* SVG/чарты/гейджи не вылезают за экран */
-  svg, .risk-gauge-svg, .kpi-spark svg, .factor-radar-svg, .equity-curve-svg {
-    max-width: 100% !important; height: auto !important;
-  }
-  h1.verdict { font-size: 21px !important; line-height: 1.28 !important; }
-  .kpi-value { font-size: 24px !important; }
-  .panel-title, .sec-title, .d3-block .panel-title { font-size: 13px !important; }
-  body { font-size: 14px; }
-}
-@media (max-width: 380px) {
-  .sheet { padding: 10px 10px 16px !important; }
-  h1.verdict { font-size: 19px !important; }
-  .kpi-value { font-size: 21px !important; }
-}
-</style>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
 <style>
 /* ════════ СТРАНИЦА 1 — обложка · KPI · концентрация риска ════════ */
-  /* ── Premium design language (V2): cream/gold/ink · Manrope + JetBrains Mono.
-     Re-skin of V1 — same structure & data, premium palette.  The accent token
-     keeps its old name (--tech-blue) so the ~hundreds of refs don't churn, but
-     its VALUE is now dark-gold (legible on cream); bright gold #f5d04e is used
-     for fills/bars via --gold and the accent tints. ── */
   :root {
-    --bg:          #FAF9F5;   /* premium кремовый фон */
-    --panel:       #FBF8F1;   /* карточки чуть теплее */
-    --ink:         #1C1B1A;   /* premium near-black */
-    --ink-60:      rgba(28,27,26,0.60);
-    --ink-40:      rgba(28,27,26,0.40);
-    --hairline:    rgba(28,27,26,0.16);
-    --hairline-2:  rgba(28,27,26,0.09);
-    --gold:        #F5D04E;   /* signature bright gold — заливки/бары/акценты */
-    --gold-soft:   #EFE2A8;
-    --tech-blue:   #9A7A10;   /* accent TEXT (тёмное золото, читаемо на креме) */
-    --tech-blue-08:rgba(245,208,78,0.18);
-    --tech-blue-14:rgba(245,208,78,0.30);
-    --ai-bg:       #FBF5E0;   /* тёплый золотисто-кремовый фон AI-блока */
-    --amber:       #B8801F;
+    --bg:          #F4F2EC;   /* тёплый кремовый фон */
+    --panel:       #FBFAF7;   /* карточки чуть светлее */
+    --ink:         #2A2E33;
+    --ink-60:      rgba(42,46,51,0.60);
+    --ink-40:      rgba(42,46,51,0.40);
+    --hairline:    rgba(42,46,51,0.18);
+    --hairline-2:  rgba(42,46,51,0.10);
+    --tech-blue:   #2F6FB3;   /* основной акцент */
+    --tech-blue-08:rgba(47,111,179,0.08);
+    --tech-blue-14:rgba(47,111,179,0.14);
+    --ai-bg:       #F0F6FF;   /* фон AI-блока */
+    --amber:       #C77B2C;
     --green:       #3F8F5F;
     --neg:         #C0492F;
 
-    --font-ui:   'Manrope', -apple-system, BlinkMacSystemFont, sans-serif;
-    --font-mono: 'JetBrains Mono', 'JetBrains Mono', monospace;
+    --font-ui:   'IBM Plex Sans', -apple-system, sans-serif;
+    --font-mono: 'IBM Plex Mono', monospace;
   }
 
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -197,7 +160,7 @@
 
   .kpi-spark {
     margin-top: 10px;
-    background: rgba(28,27,26,0.03);
+    background: rgba(42,46,51,0.03);
     border-radius: 2px; padding: 6px 8px;
   }
   .kpi-spark svg { display: block; width: 100%; height: 32px; }
@@ -306,23 +269,23 @@
 
 /* ════════ СТРАНИЦА 2 — что вы держите ════════ */
   :root {
-    --bg:          #FAF9F5;
-    --panel:       #FBF8F1;
-    --ink:         #1C1B1A;
-    --ink-60:      rgba(28,27,26,0.60);
-    --ink-40:      rgba(28,27,26,0.40);
-    --hairline:    rgba(28,27,26,0.18);
-    --hairline-2:  rgba(28,27,26,0.10);
-    --tech-blue:   #9A7A10;
-    --tech-blue-08:rgba(154,122,16,0.08);
-    --ai-bg:       #FBF5E0;
+    --bg:          #F4F2EC;
+    --panel:       #FBFAF7;
+    --ink:         #2A2E33;
+    --ink-60:      rgba(42,46,51,0.60);
+    --ink-40:      rgba(42,46,51,0.40);
+    --hairline:    rgba(42,46,51,0.18);
+    --hairline-2:  rgba(42,46,51,0.10);
+    --tech-blue:   #2F6FB3;
+    --tech-blue-08:rgba(47,111,179,0.08);
+    --ai-bg:       #F0F6FF;
     --amber:       #C77B2C;
     --amber-08:    rgba(199,123,44,0.10);
     --green:       #3F8F5F;
     --neg:         #C0492F;
 
-    --font-ui:   'Manrope', -apple-system, sans-serif;
-    --font-mono: 'JetBrains Mono', monospace;
+    --font-ui:   'IBM Plex Sans', -apple-system, sans-serif;
+    --font-mono: 'IBM Plex Mono', monospace;
   }
 
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -440,7 +403,7 @@
   .h-detail.open { display: block; }
   .h-detail-inner {
     border-left: 2px solid var(--tech-blue);
-    background: rgba(28,27,26,0.02);
+    background: rgba(42,46,51,0.02);
     border-radius: 0 2px 2px 0;
     padding: 12px 14px;
   }
@@ -502,7 +465,7 @@
     content: ''; position: absolute; top: 50%; left: 50%;
     width: 156px; height: 156px; border-radius: 50%;
     transform: translate(-50%, -47%);
-    background: radial-gradient(closest-side, rgba(28,27,26,0.18), rgba(28,27,26,0) 72%);
+    background: radial-gradient(closest-side, rgba(42,46,51,0.18), rgba(42,46,51,0) 72%);
     filter: blur(2px);
     z-index: 0; pointer-events: none;
   }
@@ -513,7 +476,7 @@
       /* верхний rim-highlight на 12 часов */
       radial-gradient(circle at 50% 8%, rgba(255,255,255,0.55), rgba(255,255,255,0) 28%),
       /* нижний rim-shadow */
-      radial-gradient(circle at 50% 96%, rgba(28,27,26,0.16), rgba(28,27,26,0) 32%),
+      radial-gradient(circle at 50% 96%, rgba(42,46,51,0.16), rgba(42,46,51,0) 32%),
       /* основной сектор: с тонкими белыми разделителями */
       conic-gradient(
         var(--amber)              0       61.5%,
@@ -528,14 +491,14 @@
       );
     box-shadow:
       0 1px 1px rgba(255,255,255,0.6) inset,
-      0 -1px 2px rgba(28,27,26,0.08) inset,
-      0 2px 6px rgba(28,27,26,0.12);
+      0 -1px 2px rgba(42,46,51,0.08) inset,
+      0 2px 6px rgba(42,46,51,0.12);
   }
   /* внешний hairline-обод */
   .pie::before {
     content: ''; position: absolute; inset: -1px;
     border-radius: 50%;
-    border: 0.5pt solid rgba(28,27,26,0.20);
+    border: 0.5pt solid rgba(42,46,51,0.20);
     pointer-events: none;
   }
   /* центральная «втулка» — с лёгкой объёмной обводкой */
@@ -544,8 +507,8 @@
     background:
       radial-gradient(circle at 35% 30%, #FFFFFF, var(--panel) 70%);
     border-radius: 50%;
-    border: 0.5pt solid rgba(28,27,26,0.18);
-    box-shadow: 0 1px 2px rgba(28,27,26,0.10) inset;
+    border: 0.5pt solid rgba(42,46,51,0.18);
+    box-shadow: 0 1px 2px rgba(42,46,51,0.10) inset;
   }
   .pie-center {
     position: absolute; inset: 0; display: flex; flex-direction: column;
@@ -657,23 +620,23 @@
 
 /* ════════ СТРАНИЦА 3 — рост против рынка ════════ */
   :root {
-    --bg:          #FAF9F5;
-    --panel:       #FBF8F1;
-    --ink:         #1C1B1A;
-    --ink-60:      rgba(28,27,26,0.60);
-    --ink-40:      rgba(28,27,26,0.40);
-    --hairline:    rgba(28,27,26,0.18);
-    --hairline-2:  rgba(28,27,26,0.10);
-    --tech-blue:   #9A7A10;
-    --tech-blue-08:rgba(154,122,16,0.08);
-    --ai-bg:       #FBF5E0;
+    --bg:          #F4F2EC;
+    --panel:       #FBFAF7;
+    --ink:         #2A2E33;
+    --ink-60:      rgba(42,46,51,0.60);
+    --ink-40:      rgba(42,46,51,0.40);
+    --hairline:    rgba(42,46,51,0.18);
+    --hairline-2:  rgba(42,46,51,0.10);
+    --tech-blue:   #2F6FB3;
+    --tech-blue-08:rgba(47,111,179,0.08);
+    --ai-bg:       #F0F6FF;
     --amber:       #C77B2C;
     --amber-08:    rgba(199,123,44,0.10);
     --green:       #3F8F5F;
     --neg:         #C0492F;
 
-    --font-ui:   'Manrope', -apple-system, sans-serif;
-    --font-mono: 'JetBrains Mono', monospace;
+    --font-ui:   'IBM Plex Sans', -apple-system, sans-serif;
+    --font-mono: 'IBM Plex Mono', monospace;
   }
 
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -847,24 +810,24 @@
 
 /* ════════ СТРАНИЦА 4 — идеи ИИ ════════ */
   :root {
-    --bg:          #FAF9F5;
-    --panel:       #FBF8F1;
-    --ink:         #1C1B1A;
-    --ink-60:      rgba(28,27,26,0.60);
-    --ink-40:      rgba(28,27,26,0.40);
-    --hairline:    rgba(28,27,26,0.18);
-    --hairline-2:  rgba(28,27,26,0.10);
-    --tech-blue:   #9A7A10;
-    --tech-blue-08:rgba(154,122,16,0.08);
-    --ai-bg:       #FBF5E0;
+    --bg:          #F4F2EC;
+    --panel:       #FBFAF7;
+    --ink:         #2A2E33;
+    --ink-60:      rgba(42,46,51,0.60);
+    --ink-40:      rgba(42,46,51,0.40);
+    --hairline:    rgba(42,46,51,0.18);
+    --hairline-2:  rgba(42,46,51,0.10);
+    --tech-blue:   #2F6FB3;
+    --tech-blue-08:rgba(47,111,179,0.08);
+    --ai-bg:       #F0F6FF;
     --amber:       #C77B2C;
     --amber-08:    rgba(199,123,44,0.10);
     --green:       #3F8F5F;
     --green-08:    rgba(63,143,95,0.10);
     --neg:         #C0492F;
 
-    --font-ui:   'Manrope', -apple-system, sans-serif;
-    --font-mono: 'JetBrains Mono', monospace;
+    --font-ui:   'IBM Plex Sans', -apple-system, sans-serif;
+    --font-mono: 'IBM Plex Mono', monospace;
   }
 
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -980,7 +943,7 @@
   .tk-chip {
     font-family: var(--font-mono); font-size: 9.5px; font-weight: 600;
     color: var(--tech-blue); background: var(--tech-blue-08);
-    border: 0.5pt solid rgba(154,122,16,0.22);
+    border: 0.5pt solid rgba(47,111,179,0.22);
     padding: 1.5px 6px; border-radius: 2px;
   }
   .swap-note {
@@ -1060,7 +1023,7 @@
   /* ── ОЖИДАЕМЫЙ ЭФФЕКТ ── */
   .idea-effect {
     margin-top: 10px; padding: 7px 9px;
-    background: rgba(28,27,26,0.035); border-radius: 2px;
+    background: rgba(42,46,51,0.035); border-radius: 2px;
     border: 0.5pt solid var(--hairline-2);
   }
   .idea-effect-label {
@@ -1085,7 +1048,7 @@
     color: var(--tech-blue); background: var(--tech-blue-08);
     padding: 1.5px 5px; border-radius: 2px;
   }
-  .src-chip.data { color: var(--ink-60); background: rgba(28,27,26,0.05); }
+  .src-chip.data { color: var(--ink-60); background: rgba(42,46,51,0.05); }
 
   /* ── ДИСКЛЕЙМЕР ── */
   .disclaimer {
@@ -1210,12 +1173,12 @@
   .sc-pillar-name { color: var(--ink-60); font-weight: 600; }
   .sc-pillar-bar {
     position: relative; height: 6px;
-    background: rgba(28,27,26,0.06); border-radius: 1px;
+    background: rgba(42,46,51,0.06); border-radius: 1px;
   }
   /* центральная ось 0 */
   .sc-pillar-bar::before {
     content: ''; position: absolute; left: 50%; top: -1px; bottom: -1px;
-    width: 0.5pt; background: rgba(28,27,26,0.30);
+    width: 0.5pt; background: rgba(42,46,51,0.30);
   }
   /* заполнение от 0: позиция и ширина зависят от значения через CSS-vars */
   .sc-pillar-fill {
@@ -1268,12 +1231,12 @@
     position: relative; min-width: 140px; padding-right: 12px;
   }
   .impact-bar {
-    height: 6px; background: rgba(28,27,26,0.06); border-radius: 1px;
+    height: 6px; background: rgba(42,46,51,0.06); border-radius: 1px;
     position: relative; overflow: hidden;
   }
   .impact-bar::before {
     content: ''; position: absolute; left: 50%; top: 0; bottom: 0;
-    width: 0.5pt; background: rgba(28,27,26,0.30);
+    width: 0.5pt; background: rgba(42,46,51,0.30);
   }
   .impact-fill {
     position: absolute; top: 0.5px; bottom: 0.5px; border-radius: 1px;
@@ -1553,7 +1516,7 @@
 .tk-chip {
   font-family: var(--font-mono); font-size: 9.5px; font-weight: 600;
   color: var(--tech-blue); background: var(--tech-blue-08);
-  border: 0.5pt solid rgba(154,122,16,0.22);
+  border: 0.5pt solid rgba(47,111,179,0.22);
   padding: 1.5px 6px; border-radius: 2px;
 }
 .swap-note {
@@ -1629,7 +1592,7 @@
   padding: 0 4px; border-radius: 2px;
 }
 .cand-meta .meta-sec {
-  color: var(--ink-60); background: rgba(28,27,26,0.05);
+  color: var(--ink-60); background: rgba(42,46,51,0.05);
   padding: 0 4px; border-radius: 2px;
 }
 .cand-scn { display: block; color: var(--ink-60); margin-top: 2px; font-size: 9px; }
@@ -1637,7 +1600,7 @@
 /* Expected effect (DEEP: 3 rows instead of BASE's 2) */
 .idea-effect {
   margin-top: 10px; padding: 7px 9px;
-  background: rgba(28,27,26,0.035); border-radius: 2px;
+  background: rgba(42,46,51,0.035); border-radius: 2px;
   border: 0.5pt solid var(--hairline-2);
 }
 .idea-effect-label {
@@ -1662,7 +1625,7 @@
   color: var(--tech-blue); background: var(--tech-blue-08);
   padding: 1.5px 5px; border-radius: 2px;
 }
-.src-chip.data { color: var(--ink-60); background: rgba(28,27,26,0.05); }
+.src-chip.data { color: var(--ink-60); background: rgba(42,46,51,0.05); }
 .src-chip.stress { color: var(--amber); background: var(--amber-08); }
 
 /* ─────────── АДАПТИВ — DEEP-only components (P3+ : фактор-радар,
@@ -1785,7 +1748,7 @@
           <!-- объёмная заклёпка-пивот: тёмная сталь со светлым бликом -->
           <radialGradient id="pivotGrad" cx="35%" cy="30%" r="80%">
             <stop offset="0%"   stop-color="#6A7079"/>
-            <stop offset="55%"  stop-color="#1C1B1A"/>
+            <stop offset="55%"  stop-color="#2A2E33"/>
             <stop offset="100%" stop-color="#0E1013"/>
           </radialGradient>
           <!-- конусная стрелка: лёгкий вертикальный градиент -->
@@ -1801,9 +1764,9 @@
 
         <!-- внешний и внутренний hairline-обод (бель «прибора») -->
         <path d="M 28 138 A 112 112 0 0 1 252 138"
-              fill="none" stroke="rgba(28,27,26,0.22)" stroke-width="0.6"/>
+              fill="none" stroke="rgba(42,46,51,0.22)" stroke-width="0.6"/>
         <path d="M 52 138 A 88 88 0 0 1 228 138"
-              fill="none" stroke="rgba(28,27,26,0.16)" stroke-width="0.6"/>
+              fill="none" stroke="rgba(42,46,51,0.16)" stroke-width="0.6"/>
 
         <!-- основная цветная дуга шкалы -->
         <path d="M 40 138 A 100 100 0 0 1 240 138"
@@ -1813,17 +1776,17 @@
               fill="none" stroke="rgba(255,255,255,0.40)" stroke-width="1.2"/>
         <!-- внешний тёмный ободок шкалы (тень, эффект глубины) -->
         <path d="M 29.6 138 A 110.4 110.4 0 0 1 250.4 138"
-              fill="none" stroke="rgba(28,27,26,0.18)" stroke-width="1.2"/>
+              fill="none" stroke="rgba(42,46,51,0.18)" stroke-width="1.2"/>
 
         <!-- мажорные тики и подписи: 0 / 25 / 50 / 75 / 100 -->
-        <g stroke="#1C1B1A" stroke-opacity="0.55" stroke-width="0.8">
+        <g stroke="#2A2E33" stroke-opacity="0.55" stroke-width="0.8">
           <line x1="22"    y1="138"  x2="29"    y2="138"/>
           <line x1="52.0"  y1="50.0" x2="56.9"  y2="54.9"/>
           <line x1="140"   y1="20"   x2="140"   y2="27"/>
           <line x1="223.1" y1="54.9" x2="228.0" y2="50.0"/>
           <line x1="251"   y1="138"  x2="258"   y2="138"/>
         </g>
-        <g font-family="JetBrains Mono" font-size="9.5" fill="rgba(28,27,26,0.62)">
+        <g font-family="IBM Plex Mono" font-size="9.5" fill="rgba(42,46,51,0.62)">
           <text x="14"  y="155" text-anchor="middle">0</text>
           <text x="45"  y="42"  text-anchor="middle">25</text>
           <text x="140" y="13"  text-anchor="middle">50</text>
@@ -1832,7 +1795,7 @@
         </g>
 
         <!-- зональные подписи внутри полукруга -->
-        <g font-family="JetBrains Mono" font-size="7.5" fill="rgba(28,27,26,0.42)" letter-spacing="0.04em">
+        <g font-family="IBM Plex Mono" font-size="7.5" fill="rgba(42,46,51,0.42)" letter-spacing="0.04em">
           <text x="80"  y="120" text-anchor="middle">НИЗКИЙ</text>
           <text x="140" y="86"  text-anchor="middle">УМЕРЕННЫЙ</text>
           <text x="200" y="120" text-anchor="middle">ВЫСОКИЙ</text>
@@ -1847,7 +1810,7 @@
 
         <!-- Пивот-хаб: объёмная заклёпка с обводкой и бликом -->
         <circle cx="140" cy="138" r="10.5" fill="url(#pivotGrad)"
-                stroke="rgba(28,27,26,0.45)" stroke-width="0.6"/>
+                stroke="rgba(42,46,51,0.45)" stroke-width="0.6"/>
         <ellipse cx="136.5" cy="134.5" rx="3.2" ry="2.2"
                  fill="rgba(255,255,255,0.32)"/>
       </svg>
@@ -2035,8 +1998,8 @@
           </linearGradient>
           <!-- синий: итоговый риск -->
           <linearGradient id="barBlue" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%"   stop-color="#C9A227"/>
-            <stop offset="100%" stop-color="#8A6D0E"/>
+            <stop offset="0%"   stop-color="#3E83C9"/>
+            <stop offset="100%" stop-color="#23588F"/>
           </linearGradient>
           <!-- мягкая тень под барами -->
           <filter id="barShadow" x="-20%" y="-20%" width="140%" height="140%">
@@ -2076,16 +2039,16 @@
         {% set _y_scale  = 147.0 / _y_max_pp %}
 
         {# ─── Y-axis grid (dynamic 0..N% in 4 even ticks) ─────────────────── #}
-        <g font-family="JetBrains Mono" font-size="8" fill="rgba(28,27,26,0.45)">
-          <line x1="34" y1="165"    x2="352" y2="165"    stroke="#1C1B1A" stroke-opacity="0.22" stroke-width="0.5"/>
+        <g font-family="IBM Plex Mono" font-size="8" fill="rgba(42,46,51,0.45)">
+          <line x1="34" y1="165"    x2="352" y2="165"    stroke="#2A2E33" stroke-opacity="0.22" stroke-width="0.5"/>
           <text x="30" y="168" text-anchor="end">0%</text>
-          <line x1="34" y1="128.25" x2="352" y2="128.25" stroke="#1C1B1A" stroke-opacity="0.10" stroke-width="0.5" stroke-dasharray="2 3"/>
+          <line x1="34" y1="128.25" x2="352" y2="128.25" stroke="#2A2E33" stroke-opacity="0.10" stroke-width="0.5" stroke-dasharray="2 3"/>
           <text x="30" y="131" text-anchor="end">{{ '%.0f' % (_y_max_pp * 0.25) }}%</text>
-          <line x1="34" y1="91.5"   x2="352" y2="91.5"   stroke="#1C1B1A" stroke-opacity="0.10" stroke-width="0.5" stroke-dasharray="2 3"/>
+          <line x1="34" y1="91.5"   x2="352" y2="91.5"   stroke="#2A2E33" stroke-opacity="0.10" stroke-width="0.5" stroke-dasharray="2 3"/>
           <text x="30" y="94" text-anchor="end">{{ '%.0f' % (_y_max_pp * 0.50) }}%</text>
-          <line x1="34" y1="54.75"  x2="352" y2="54.75"  stroke="#1C1B1A" stroke-opacity="0.10" stroke-width="0.5" stroke-dasharray="2 3"/>
+          <line x1="34" y1="54.75"  x2="352" y2="54.75"  stroke="#2A2E33" stroke-opacity="0.10" stroke-width="0.5" stroke-dasharray="2 3"/>
           <text x="30" y="57" text-anchor="end">{{ '%.0f' % (_y_max_pp * 0.75) }}%</text>
-          <line x1="34" y1="18"     x2="352" y2="18"     stroke="#1C1B1A" stroke-opacity="0.10" stroke-width="0.5" stroke-dasharray="2 3"/>
+          <line x1="34" y1="18"     x2="352" y2="18"     stroke="#2A2E33" stroke-opacity="0.10" stroke-width="0.5" stroke-dasharray="2 3"/>
           <text x="30" y="21" text-anchor="end">{{ '%.0f' % _y_max_pp }}%</text>
         </g>
 
@@ -2130,7 +2093,7 @@
           </g>
 
           {# Connector tails (dashed) between cumulative tops — cum_end_pp from backend. #}
-          <g stroke="#1C1B1A" stroke-opacity="0.42" stroke-width="0.5" stroke-dasharray="2.5 2">
+          <g stroke="#2A2E33" stroke-opacity="0.42" stroke-width="0.5" stroke-dasharray="2.5 2">
           {% for c in _contribs %}
             {% set _x_right_of_this = _plot_x0 + _step * (loop.index0 + 0.15) + _bar_w %}
             {% set _x_left_of_next  = _plot_x0 + _step * (loop.index0 + 1 + 0.15) %}
@@ -2141,7 +2104,7 @@
           </g>
 
           {# Value labels above each bar (cum_end_pp from backend) #}
-          <g font-family="JetBrains Mono" font-size="8.5" fill="#1C1B1A">
+          <g font-family="IBM Plex Mono" font-size="8.5" fill="#2A2E33">
           {% for c in _contribs %}
             {% set _cx = _plot_x0 + _step * (loop.index0 + 0.5) %}
             {% set _y = 165.0 - _y_scale * (c.cum_end_pp if c.cum_end_pp is defined else 0) - 4 %}
@@ -2156,11 +2119,11 @@
             {% set _blue_cx  = _plot_x0 + _step * (_N + 1 + 0.5) %}
             {% set _blue_lbl_y = 165.0 - _y_scale * _tot_pp - 4 %}
             <text x="{{ '%.1f' % _blue_cx }}" y="{{ '%.1f' % _blue_lbl_y }}"
-                  text-anchor="middle" fill="#8A6D0E" font-weight="600">{{ '%.1f' % _tot_pp }}%</text>
+                  text-anchor="middle" fill="#23588F" font-weight="600">{{ '%.1f' % _tot_pp }}%</text>
           </g>
 
           {# Ticker labels below each amber bar #}
-          <g font-family="JetBrains Mono" font-size="8.5" fill="#1C1B1A">
+          <g font-family="IBM Plex Mono" font-size="8.5" fill="#2A2E33">
           {% for c in _contribs %}
             {% set _cx = _plot_x0 + _step * (loop.index0 + 0.5) %}
             <text x="{{ '%.1f' % _cx }}" y="178" text-anchor="middle">{{ c.ticker }}</text>
@@ -2168,7 +2131,7 @@
           </g>
 
           {# Two-line legend under green + blue bars #}
-          <g font-family="Manrope" font-size="7.5" fill="rgba(28,27,26,0.7)">
+          <g font-family="IBM Plex Sans" font-size="7.5" fill="rgba(42,46,51,0.7)">
             <text x="{{ '%.1f' % _green_cx }}" y="176" text-anchor="middle">Диверси-</text>
             <text x="{{ '%.1f' % _green_cx }}" y="184" text-anchor="middle">фикация</text>
             <text x="{{ '%.1f' % _blue_cx }}"  y="176" text-anchor="middle">Итоговый</text>
@@ -2180,18 +2143,18 @@
           {% set _bracket_x2 = _plot_x0 + _step * (_N - 1 + 0.15) + _bar_w %}
           {% set _bracket_xm = (_bracket_x1 + _bracket_x2) / 2 %}
           <path d="M{{ '%.1f' % _bracket_x1 }},192 L{{ '%.1f' % _bracket_x1 }},197 L{{ '%.1f' % _bracket_xm }},200 L{{ '%.1f' % _bracket_xm }},203 L{{ '%.1f' % _bracket_xm }},200 L{{ '%.1f' % _bracket_x2 }},197 L{{ '%.1f' % _bracket_x2 }},192"
-                fill="none" stroke="#1C1B1A" stroke-opacity="0.50" stroke-width="0.5"/>
+                fill="none" stroke="#2A2E33" stroke-opacity="0.50" stroke-width="0.5"/>
           <text x="{{ '%.1f' % _bracket_xm }}" y="214" text-anchor="middle"
-                font-family="Manrope" font-size="8.5" fill="rgba(28,27,26,0.65)">Риск каждой позиции по отдельности</text>
+                font-family="IBM Plex Sans" font-size="8.5" fill="rgba(42,46,51,0.65)">Риск каждой позиции по отдельности</text>
 
         {% else %}
           {# Empty-state: no covariance matrix available #}
           <text x="180" y="95" text-anchor="middle"
-                font-family="Manrope" font-size="11" fill="rgba(28,27,26,0.55)">
+                font-family="IBM Plex Sans" font-size="11" fill="rgba(42,46,51,0.55)">
             Декомпозиция риска недоступна
           </text>
           <text x="180" y="112" text-anchor="middle"
-                font-family="Manrope" font-size="9" fill="rgba(28,27,26,0.45)">
+                font-family="IBM Plex Sans" font-size="9" fill="rgba(42,46,51,0.45)">
             нужна ковариационная матрица (≥ 30 дней истории)
           </text>
         {% endif %}
@@ -2209,7 +2172,7 @@
 
     <!-- КОНТРОЛЬ КАЧЕСТВА ДАННЫХ (Page 1) -->
     {% if data.integrity_checks %}
-    <div style="margin-top:10px; padding:8px 12px; background:rgba(0,0,0,0.02); border-radius:5px; border-left:2px solid #C9A227;">
+    <div style="margin-top:10px; padding:8px 12px; background:rgba(0,0,0,0.02); border-radius:5px; border-left:2px solid #4a90d9;">
       <div style="font-size:8.5px; font-weight:700; color:#555; letter-spacing:.05em; margin-bottom:5px;">КОНТРОЛЬ КАЧЕСТВА ДАННЫХ</div>
       <div style="display:flex; flex-wrap:wrap; gap:5px;">
       {% for c in data.integrity_checks %}
@@ -2298,7 +2261,7 @@
                 ${{ pnl_abs_raw }}
               {%- endif %}</span>
         </div>
-        <div class="h-cell action">{% if asset.is_cash %}{# Negative cash weight ⇒ margin debt — render with a dashed neutral badge so it cannot be confused with a profit. #}{% set _cash_label = 'Долг' if (asset.weight_pct_num is defined and asset.weight_pct_num < 0) else 'Кэш' %}{% set _cash_style = 'border-style:dashed; background:rgba(28,27,26,0.04); color:var(--ink-60);' if _cash_label == 'Долг' else '' %}<span class="badge hold" style="{{ _cash_style }}">{{ _cash_label }}</span>{% else %}<span class="badge {{ action_class }}">{{ (asset.action or 'HOLD') | upper }}</span>{% endif %}</div>
+        <div class="h-cell action">{% if asset.is_cash %}{# Negative cash weight ⇒ margin debt — render with a dashed neutral badge so it cannot be confused with a profit. #}{% set _cash_label = 'Долг' if (asset.weight_pct_num is defined and asset.weight_pct_num < 0) else 'Кэш' %}{% set _cash_style = 'border-style:dashed; background:rgba(42,46,51,0.04); color:var(--ink-60);' if _cash_label == 'Долг' else '' %}<span class="badge hold" style="{{ _cash_style }}">{{ _cash_label }}</span>{% else %}<span class="badge {{ action_class }}">{{ (asset.action or 'HOLD') | upper }}</span>{% endif %}</div>
         <div class="h-cell caret-cell">
           <span class="h-toggle">
             <span class="t-more">Детали</span>
@@ -2453,7 +2416,7 @@
       {% endfor %}
       <div class="pie" {% if ns.parts %}style="background:
             radial-gradient(circle at 50% 8%,  rgba(255,255,255,0.55), rgba(255,255,255,0) 28%),
-            radial-gradient(circle at 50% 96%, rgba(28,27,26,0.16),  rgba(28,27,26,0) 32%),
+            radial-gradient(circle at 50% 96%, rgba(42,46,51,0.16),  rgba(42,46,51,0) 32%),
             conic-gradient({{ ns.parts | join(', ') }});"{% endif %}>
         <div class="pie-center">
           <span class="pc-pct">{{ _top_sec.weight_str if _top_sec else '—' }}</span>
@@ -2541,7 +2504,7 @@
 
   <!-- КОНТРОЛЬ КАЧЕСТВА ДАННЫХ (Page 2) -->
   {% if data.integrity_checks %}
-  <div style="margin-top:10px; padding:8px 12px; background:rgba(0,0,0,0.02); border-radius:5px; border-left:2px solid #C9A227;">
+  <div style="margin-top:10px; padding:8px 12px; background:rgba(0,0,0,0.02); border-radius:5px; border-left:2px solid #4a90d9;">
     <div style="font-size:8.5px; font-weight:700; color:#555; letter-spacing:.05em; margin-bottom:5px;">КОНТРОЛЬ КАЧЕСТВА ДАННЫХ</div>
     <div style="display:flex; flex-wrap:wrap; gap:5px;">
     {% for c in data.integrity_checks %}
@@ -2861,7 +2824,7 @@
 
     <!-- КОНТРОЛЬ КАЧЕСТВА ДАННЫХ (Page 3) -->
     {% if data.integrity_checks %}
-    <div style="margin-top:10px; padding:8px 12px; background:rgba(0,0,0,0.02); border-radius:5px; border-left:2px solid #C9A227;">
+    <div style="margin-top:10px; padding:8px 12px; background:rgba(0,0,0,0.02); border-radius:5px; border-left:2px solid #4a90d9;">
       <div style="font-size:8.5px; font-weight:700; color:#555; letter-spacing:.05em; margin-bottom:5px;">КОНТРОЛЬ КАЧЕСТВА ДАННЫХ</div>
       <div style="display:flex; flex-wrap:wrap; gap:5px;">
       {% for c in data.integrity_checks %}
@@ -2921,8 +2884,8 @@
               <stop offset="100%" stop-color="#D9A03B" stop-opacity="0.04"/>
             </linearGradient>
             <linearGradient id="qExpansion" x1="0" y1="1" x2="1" y2="0">
-              <stop offset="0%"   stop-color="#C9A227" stop-opacity="0.20"/>
-              <stop offset="100%" stop-color="#C9A227" stop-opacity="0.04"/>
+              <stop offset="0%"   stop-color="#3E83C9" stop-opacity="0.20"/>
+              <stop offset="100%" stop-color="#3E83C9" stop-opacity="0.04"/>
             </linearGradient>
             <linearGradient id="qRecession" x1="0" y1="0" x2="1" y2="1">
               <stop offset="0%"   stop-color="#D85C42" stop-opacity="0.16"/>
@@ -2934,8 +2897,8 @@
             </linearGradient>
             <radialGradient id="regDot" cx="35%" cy="30%" r="80%">
               <stop offset="0%"   stop-color="#FFFFFF"/>
-              <stop offset="55%"  stop-color="#C9A227"/>
-              <stop offset="100%" stop-color="#8A6D0E"/>
+              <stop offset="55%"  stop-color="#3E83C9"/>
+              <stop offset="100%" stop-color="#23588F"/>
             </radialGradient>
             <filter id="regDotShadow" x="-50%" y="-50%" width="200%" height="200%">
               <feDropShadow dx="0" dy="1.6" stdDeviation="1.4" flood-opacity="0.35"/>
@@ -2952,7 +2915,7 @@
           <!--   top-right (Growth↑, Cycle↑): EXPANSION                             -->
           <!--   bot-left  (Growth↓, Cycle↓): RECESSION                             -->
           <!--   bot-right (Growth↓, Cycle↑): SLOWDOWN                              -->
-          <g font-family="JetBrains Mono" font-size="9" fill="rgba(28,27,26,0.55)" font-weight="600" letter-spacing="0.05em">
+          <g font-family="IBM Plex Mono" font-size="9" fill="rgba(42,46,51,0.55)" font-weight="600" letter-spacing="0.05em">
             <text x="92.5"  y="50">RECOVERY</text>
             <text x="217.5" y="50">EXPANSION</text>
             <text x="92.5"  y="275">RECESSION</text>
@@ -2960,11 +2923,11 @@
           </g>
 
           <!-- оси (центральный крест) -->
-          <line x1="155" y1="30"  x2="155" y2="280" stroke="rgba(28,27,26,0.35)" stroke-width="0.6"/>
-          <line x1="30"  y1="155" x2="280" y2="155" stroke="rgba(28,27,26,0.35)" stroke-width="0.6"/>
+          <line x1="155" y1="30"  x2="155" y2="280" stroke="rgba(42,46,51,0.35)" stroke-width="0.6"/>
+          <line x1="30"  y1="155" x2="280" y2="155" stroke="rgba(42,46,51,0.35)" stroke-width="0.6"/>
 
           <!-- сетка -->
-          <g stroke="rgba(28,27,26,0.10)" stroke-width="0.5" stroke-dasharray="2 3">
+          <g stroke="rgba(42,46,51,0.10)" stroke-width="0.5" stroke-dasharray="2 3">
             <line x1="30"  y1="92.5"  x2="280" y2="92.5"/>
             <line x1="30"  y1="217.5" x2="280" y2="217.5"/>
             <line x1="92.5"  y1="30"  x2="92.5"  y2="280"/>
@@ -2972,11 +2935,11 @@
           </g>
 
           <!-- подписи осей -->
-          <g font-family="JetBrains Mono" font-size="9.5" fill="rgba(28,27,26,0.70)" font-weight="600">
+          <g font-family="IBM Plex Mono" font-size="9.5" fill="rgba(42,46,51,0.70)" font-weight="600">
             <text x="285" y="158">→ Cycle ↑</text>
             <text x="155" y="22"  text-anchor="middle">↑ Growth</text>
           </g>
-          <g font-family="JetBrains Mono" font-size="8" fill="rgba(28,27,26,0.45)">
+          <g font-family="IBM Plex Mono" font-size="8" fill="rgba(42,46,51,0.45)">
             <text x="160" y="45">+0.2</text>
             <text x="160" y="270">−0.2</text>
             <text x="40"  y="158">−0.2</text>
@@ -3000,14 +2963,14 @@
           <line x1="155" y1="155" x2="{{ _rcx }}" y2="{{ _rcy }}"
                 stroke="rgba(62,131,201,0.35)" stroke-width="1"
                 stroke-dasharray="3 2" stroke-linecap="round"/>
-          <circle cx="{{ _rcx }}" cy="{{ _rcy }}" r="14" fill="#C9A227" fill-opacity="0.18"/>
+          <circle cx="{{ _rcx }}" cy="{{ _rcy }}" r="14" fill="#3E83C9" fill-opacity="0.18"/>
           <circle cx="{{ _rcx }}" cy="{{ _rcy }}" r="8"  fill="url(#regDot)" filter="url(#regDotShadow)"/>
           <text x="{{ _lx }}" y="{{ _rcy - 3 }}" text-anchor="{{ _anchor }}"
-                font-family="JetBrains Mono" font-size="9.5"
-                font-weight="600" fill="#8A6D0E">сейчас</text>
+                font-family="IBM Plex Mono" font-size="9.5"
+                font-weight="600" fill="#23588F">сейчас</text>
           <text x="{{ _lx }}" y="{{ _rcy + 9 }}" text-anchor="{{ _anchor }}"
-                font-family="JetBrains Mono" font-size="8.5"
-                fill="rgba(28,27,26,0.6)">{{ data.regime.dot_label }}</text>
+                font-family="IBM Plex Mono" font-size="8.5"
+                fill="rgba(42,46,51,0.6)">{{ data.regime.dot_label }}</text>
           {% endif %}
         </svg>
       </div>
@@ -3136,7 +3099,7 @@
 
   <!-- ПОЛОСА ИСТОЧНИКОВ -->
   {% if data.integrity_checks %}
-  <div style="margin-top:16px; padding:10px 14px; background:rgba(0,0,0,0.03); border-radius:6px; border-left:3px solid #C9A227;">
+  <div style="margin-top:16px; padding:10px 14px; background:rgba(0,0,0,0.03); border-radius:6px; border-left:3px solid #4a90d9;">
     <div style="font-size:9px; font-weight:700; color:#555; letter-spacing:.05em; margin-bottom:6px;">КОНТРОЛЬ КАЧЕСТВА ДАННЫХ</div>
     <div style="display:flex; flex-wrap:wrap; gap:6px;">
     {% for c in data.integrity_checks %}
@@ -3525,7 +3488,7 @@
 
     <!-- КОНТРОЛЬ КАЧЕСТВА ДАННЫХ (Page 5) -->
     {% if data.integrity_checks %}
-    <div style="margin-top:10px; padding:8px 12px; background:rgba(0,0,0,0.02); border-radius:5px; border-left:2px solid #C9A227;">
+    <div style="margin-top:10px; padding:8px 12px; background:rgba(0,0,0,0.02); border-radius:5px; border-left:2px solid #4a90d9;">
       <div style="font-size:8.5px; font-weight:700; color:#555; letter-spacing:.05em; margin-bottom:5px;">КОНТРОЛЬ КАЧЕСТВА ДАННЫХ</div>
       <div style="display:flex; flex-wrap:wrap; gap:5px;">
       {% for c in data.integrity_checks %}

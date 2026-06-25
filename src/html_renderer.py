@@ -231,7 +231,7 @@ def _build_mock_sparklines() -> dict:
         from tg_bot import _sparkline_svg
         return {
             "cvar_svg":   _sparkline_svg(cvar_pts,   color="#3F8F5F", invert=True),
-            "sharpe_svg": _sparkline_svg(sharpe_pts, color="#2F6FB3", invert=False),
+            "sharpe_svg": _sparkline_svg(sharpe_pts, color="#9A7A10", invert=False),
             "mdd_svg":    _sparkline_svg(mdd_pts,    color="#C0492F", invert=True),
         }
     except Exception:
@@ -252,7 +252,7 @@ def _build_mock_sparklines() -> dict:
                      f'</svg>')
         return {
             "cvar_svg":   _fallback(cvar_pts,   "#3F8F5F"),
-            "sharpe_svg": _fallback(sharpe_pts, "#2F6FB3"),
+            "sharpe_svg": _fallback(sharpe_pts, "#9A7A10"),
             "mdd_svg":    _fallback(mdd_pts,    "#C0492F"),
         }
 
