@@ -416,7 +416,7 @@ def _build_equity_curve_svg(results: dict) -> str:
 
 # ── KPI sparklines (DEEP/BASE templates · cover KPI strip) ──────────────────
 
-def _sparkline_svg(values: list[float], color: str = "#2F6FB3",
+def _sparkline_svg(values: list[float], color: str = "#9A7A10",
                     invert: bool = False) -> str:
     """
     Inline 240×36 SVG sparkline for one KPI's 12-month trend.
@@ -566,7 +566,7 @@ def _build_kpi_sparklines(results: dict) -> Optional[dict]:
 
         return {
             "cvar_svg":   _sparkline_svg(cvar_pts,   color="#3F8F5F", invert=True),
-            "sharpe_svg": _sparkline_svg(sharpe_pts, color="#2F6FB3", invert=False),
+            "sharpe_svg": _sparkline_svg(sharpe_pts, color="#9A7A10", invert=False),
             "mdd_svg":    _sparkline_svg(mdd_pts,    color="#C0492F", invert=True),
         }
     except Exception as exc:
