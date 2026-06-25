@@ -29,11 +29,12 @@ Math
         Assumes "as if the new weights had always been held" — standard
         ex-post approximation; for forward Monte-Carlo use a separate tool.
 
-  Composite Risk Score      Same formula as MAC3RiskEngine._composite_risk_score:
-        0.40 · min(vol/0.40, 1)·100  +
-        0.40 · min(|CVaR|/0.10, 1)·100  +
-        0.20 · min(max_TRC/50, 1)·100
-        Replicated here so the simulator carries no engine dependency.
+  Composite Risk Score      Delegates to finance.scoring.composite_risk_score
+        (the SSOT) — mandate-weighted blend of vol / |CVaR| / max-TRC.  For the
+        MODERATE mandate that is 0.40·vol(/0.40) + 0.40·|CVaR|(/0.065) +
+        0.20·maxTRC(/50), each min-clamped to 100.  (The CVaR base is
+        mandate-dependent: CONSERVATIVE 0.03 · MODERATE 0.065 · AGGRESSIVE 0.08
+        — see _RISK_MANDATE_MATRIX; the old 0.10 here was stale.)
 
   Expected return           E[r_ann] = Σ w_i · μ_i  where μ_i is the BL
         posterior mean (annualised).  Fallback: realised annualised return

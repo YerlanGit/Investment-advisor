@@ -40,22 +40,23 @@ DEEP-отчёт — **6 «листов»** (`<div class="sheet">`):
 | # | Лист | Содержимое | Якорь для grep |
 |---|---|---|---|
 | 1 | Обложка · KPI · концентрация (наследует BASE) | вердикт, гейдж, мандат, 3 KPI, TRC-таблица, водопад, QC | `class="cover"`, `kpi-grid` |
-| 2 | Что вы держите (наследует BASE) | таблица позиций + SEC-раскрытие, секторный пай, плечо | `holdings-layout` |
+| 2 | Что вы держите (наследует BASE + Smart Money) | таблица позиций + SEC-раскрытие, секторный пай, плечо, блок Smart Money (SEC Form 4) | `holdings-layout`, `smart_money` |
 | 3 | Факторное разложение · 4-Pillar · стресс | β-радар, 4-Pillar карточки, стресс-таблица 7 шоков | `d3-block`, `factor-layout`, `score-grid`, `stress-table` |
 | 4 | Рыночный режим и макро-контекст | квадрант Growth×Cycle, growth/cycle факторы, FRED-сигналы, R3-сверка, ИИ-подтверждение | `regime-layout`, `reg-quadrant-svg`, `macro_drivers` |
 | 5 | AI Ideas · Action Plan · Ожидаемый эффект | idea-карточки (4-stage), таблица Buy/Sell/Stop, 8 карт before→after | `ideas-grid`, `action-table`, `effect-grid` |
 | 6 | CoVe — верификация источников | data-lineage всех источников с методом и статусом | `cove-grid`, `cove_lineage` |
 
-Листы 1–2 идентичны BASE (один движок, паритет чисел) — их детальный разбор см. в
+Лист 1 идентичен BASE (один движок, паритет чисел); лист 2 наследует BASE-состав плюс
+DEEP-эксклюзивный блок Smart Money (SEC Form 4). Их детальный разбор по holdings см. в
 `docs/REPORT_PAGES_BASE.md` (§1.x, §2.x). Здесь они даны кратко; основной фокус — DEEP-эксклюзив
-(листы 3–6).
+(блок Smart Money на листе 2 + листы 3–6).
 
 ---
 
 ## Оглавление
 
 - Лист 1 — Обложка · KPI · концентрация (= BASE §1)
-- Лист 2 — Что вы держите (= BASE §2)
+- Лист 2 — Что вы держите (= BASE §2 + DEEP-only блок Smart Money / SEC Form 4)
 - Лист 3 — Факторное разложение · 4-Pillar Scoring · стресс
   - 3.A Факторный β-радар (скрытые концентрации)
   - 3.B 4-Pillar Scoring (F/V/T/C)
@@ -102,7 +103,8 @@ DEEP-отчёт — **6 «листов»** (`<div class="sheet">`):
 
 # Лист 2 — Что вы держите (наследует BASE)
 
-Идентичен BASE-листу 2. Кратко:
+Наследует BASE-лист 2 (таблица позиций, сектора, ИИ-блок), плюс **DEEP-эксклюзивный блок
+Smart Money внизу листа** (B2.4). Кратко:
 
 - **Таблица позиций** — `data.assets[]` (вес, класс, `euler_risk`, P/L%, P/L$, action, hotspot);
   раскрытие по клику — SEC-фундаментал из `data.fundamental_layer[]` (ROE, OpM, Долг/Активы,
@@ -114,8 +116,14 @@ DEEP-отчёт — **6 «листов»** (`<div class="sheet">`):
   `data.ai_leverage_warning`.
 - **Сводный ИИ-блок** — `data.ai_holdings_comment`, `data.ai_sector_comment`,
   `data.ai_benchmark_comment` (в DEEP добавлен третий абзац «vs Бенчмарк»).
+- **Smart Money · Инсайдерские сделки (SEC Form 4)** [DEEP-only] — `data.smart_money`
+  (`{status, enabled, rows[], headline, hint}`), builder `_build_smart_money` (источник
+  `finance/smart_money.py`, gated `SMART_MONEY_INSIDERS`). 90-дневный нетто-поток инсайдеров +
+  кластеры покупок + role-weighted score [−2…+2]. Виден ВСЕГДА: при активном источнике —
+  таблица (Тикер · Нетто-поток $ · Покупки/Продажи · Кластер · Score); при выключенном слое —
+  нейтральная плашка «источник Form-4 не активирован» (`status='disabled'`).
 
-Детали — `docs/REPORT_PAGES_BASE.md` §2.1–2.3.
+Детали по holdings — `docs/REPORT_PAGES_BASE.md` §2.1–2.3.
 
 ---
 
@@ -399,7 +407,7 @@ breakeven (инфл. ожидания), **UNRATE (безработица)**, **R
 
 ## 5.A AI Ideas (4-stage pipeline)
 
-**Назначение.** Стратегические идеи-карточки (рост · ребаланс · защита · режим) с кандидатами
+**Назначение.** Стратегические идеи-карточки (рост · ребаланс · защита · Smart Money) с кандидатами
 **вне портфеля** и раскрываемым 4-этапным конвейером отбора (DEEP добавляет стадию STRESS и
 β/сектор по каждому кандидату).
 
@@ -411,8 +419,10 @@ breakeven (инфл. ожидания), **UNRATE (безработица)**, **R
 **Builder:** `_build_ai_ideas(stock_picks, tier="deep")`. Конвейер из `_PIPELINE_DEEP` —
 **4 стадии** (vs 3 в BASE), напр. для `boost_alpha`: FACTOR (Momentum+Quality) → REGIME
 (Growth×Cycle квадрант) → **STRESS** (устойчивость при rate shock +200 bps) → RAG (инвестбанки).
-Аналогично rebalance/protect_capital/regime_play получают свою STRESS-стадию (equity shock −20%,
-positive P&L при recession, сценарный анализ смены режима).
+Аналогично rebalance/protect_capital/**smart_money** получают свою STRESS-стадию (equity shock −20%,
+positive P&L при recession, устойчивость идеи при смене режима). `smart_money` (4-я карточка,
+рендерится в bucket `rotation`): FACTOR (институц. потоки + инсайдерские покупки) → REGIME
+(накопление умных денег в квадранте) → STRESS → RAG (13F/Form 4 + банковский консенсус).
 
 **Источник пиков.** `ai_summary.stock_picks` от `ai_narrative` — модель **`claude-opus-4-8`**.
 Правило DATA-DRIVEN (привязка к портфелю) + СВЕЖЕСТЬ ИДЕЙ (дневной срез `YYYY-MM-DD` + дневной
@@ -549,7 +559,10 @@ freshness_days}`.
 схема (каждая строка — те же ключи). **Порядок строк = порядок рендера.**
 
 **Состояния (статус-таксономия,** зеркалит `MacroFeed`): `ok` (✓, в окне свежести),
-`warn`/`stale` (`!`, частично/устаревший кэш), `error`/`missing` (`✗`, недоступен/не использован).
+`warn`/`stale` (`!`, частично/устаревший кэш), `error` (`✗`, источник СБОЙНУЛ — ошибка),
+`missing`/`disabled` (нейтральный `–`, источник намеренно НЕ запрашивался: фича выключена /
+ключ не задан). Важно: `missing`/`disabled` НЕ путать с красным `✗` (`error`) — выключенная
+фича ≠ сломанный источник.
 
 **Что в lineage (по порядку):**
 1. **Vol · CVaR · TE · IR · Max DD** — Quant Engine MAC3; метод «Wilder RMA · EWMA hl=63 (λ≈0.99)
