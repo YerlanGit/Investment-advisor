@@ -110,6 +110,23 @@ class HighPriorityTargetTest(unittest.TestCase):
         self.assertAlmostEqual(target["AAPL"], 0.40, places=6)   # BL fallback
         self.assertAlmostEqual(target["MSFT"], 0.60, places=6)
 
+    def test_sells_only_idea_reinvests_into_held_bl_buys(self):
+        # User #1 (06-25): a sells-only high-priority idea must SHOW the buy side
+        # by reinvesting proceeds into held BL-buy targets (so metrics reflect it).
+        from finance.simulate import high_priority_target_weights
+        cur = {"NVDA": 0.40, "ORCL": 0.30, "GOOGL": 0.20, "BND": 0.10}
+        rows = [{"ticker": "NVDA", "action": "Trim", "delta_w_pp": -10.0},
+                {"ticker": "ORCL", "action": "Sell", "delta_w_pp": -10.0}]
+        bl = [{"ticker": "GOOGL", "delta_w_pp": 8.0, "action": "Buy"},   # held → reinvest
+              {"ticker": "XYZ",   "delta_w_pp": 5.0, "action": "Buy"}]   # not held → skip
+        target, hp, acts = high_priority_target_weights(cur, rows, bl_records=bl)
+        sides = {a["ticker"]: a["side"] for a in acts}
+        self.assertEqual(sides.get("NVDA"), "sell")
+        self.assertEqual(sides.get("GOOGL"), "buy")     # buy side now shown
+        self.assertNotIn("XYZ", sides)                  # new name not simulated
+        # 20pp freed, GOOGL capped at +12pp; remainder (8pp) stays cash.
+        self.assertAlmostEqual(target["GOOGL"], 0.20 + 0.12, places=4)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # BLOCK 3.4 — macro enrichment + gated regime overlay

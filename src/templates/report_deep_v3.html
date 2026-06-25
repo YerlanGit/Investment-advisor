@@ -1944,7 +1944,9 @@
              boolean directly; the template does NOT re-derive the >20% rule.
              Source: data.assets (already sorted by weight in build_payload).
              We surface the top 5 by TRC to keep the panel compact. #}
-          {% set _sorted = (data.assets or []) | sort(attribute='euler_risk', reverse=true) %}
+          {# Sort on the NUMERIC euler_risk_pct — sorting the formatted string
+             ranked "9.6%" above "33.9%" and dropped the true #4 contributor. #}
+          {% set _sorted = (data.assets or []) | sort(attribute='euler_risk_pct', reverse=true) %}
           {% for a in _sorted[:5] %}
             {% set is_hot = a.hotspot %}
           <tr>
@@ -3143,7 +3145,7 @@
   <div class="d3-block">
     <div class="d3-block-head">
       <div class="panel-title">AI Ideas — стратегические рекомендации</div>
-      <div class="d3-block-sub">{{ data.ideas_count }} идей: рост доходности · ребалансировка · защита капитала · режимная ставка.  Каждая идея пропущена через
+      <div class="d3-block-sub">{{ data.ideas_count }} идей: рост доходности · ребалансировка · защита капитала · Smart Money.  Каждая идея пропущена через
         <b style="color:var(--tech-blue);">FACTOR → REGIME → STRESS → RAG</b> — pipeline доказывает, почему AI выбрал именно эти кандидаты.  Тикеры не из вашего портфеля — рассмотрите как замену / дополнение.
         <span class="src">[{{ data.ai_model_used or 'Claude Sonnet 4.6' }}]</span></div>
     </div>
@@ -3177,7 +3179,7 @@
         {% elif 'ребаланс' in cat_low or 'rebalance' in cat_low %}{% set card_cls = 'rebalance' %}
         {% elif 'рост' in cat_low or 'grow' in cat_low %}{% set card_cls = 'grow' %}
         {% elif 'хедж' in cat_low or 'hedge' in cat_low or 'защит' in cat_low %}{% set card_cls = 'hedge' %}
-        {% elif 'ротац' in cat_low or 'режим' in cat_low or 'rotation' in cat_low %}{% set card_cls = 'rotation' %}
+        {% elif 'ротац' in cat_low or 'режим' in cat_low or 'rotation' in cat_low or 'smart' in cat_low %}{% set card_cls = 'rotation' %}
         {% else %}{% set card_cls = 'grow' %}{% endif %}
       <div class="idea-card {{ card_cls }}">
         <div class="idea-head" onclick="tgIdea(this)">

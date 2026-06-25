@@ -303,6 +303,19 @@ def _sector_complex_figure(results: dict) -> dict | None:
 
 # ── Compact summary for LLM input ───────────────────────────────────────────
 
+def _regime_for_prompt(regime: Optional[dict]) -> Optional[dict]:
+    """Copy the regime dict and add `confidence_pct` = int(round(conf*100)) so
+    the AI echoes the SAME integer the report panel renders (no 74% vs 75%)."""
+    if not isinstance(regime, dict):
+        return regime
+    out = dict(regime)
+    try:
+        out["confidence_pct"] = int(round(float(regime.get("confidence") or 0) * 100))
+    except (TypeError, ValueError):
+        pass
+    return out
+
+
 def _summarise_for_prompt(results: dict) -> dict:
     """
     Build a compact, JSON-serialisable view of analyze_all() results.
@@ -407,7 +420,11 @@ def _summarise_for_prompt(results: dict) -> dict:
             "composite":    metrics.get("Composite_Risk_Score"),
         },
         "total_value":  _safe_round(results.get("total_value"), 0),
-        "regime":       results.get("regime"),
+        # Audit 06-25: feed the AI the SAME pre-rounded confidence integer the
+        # panel shows (int(round(conf*100))) so the prose can't print 74% next to
+        # the panel's 75%.  `confidence_pct` is authoritative — the prompt tells
+        # the model to echo it verbatim.
+        "regime":       _regime_for_prompt(results.get("regime")),
         "macro":        macro_summary,
         # Share-of-long-book basis (matches the report panel) + the authoritative
         # combined super-group figure.  The prompt forbids re-aggregating sectors
@@ -885,11 +902,15 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
         "  TRC → 'доля в общем риске портфеля'\n"
         "  Recovery-режим → 'рынок восстанавливается после спада'\n"
         "- Если используешь финансовый термин — сразу поясни его в скобках простыми словами.\n"
+        "- НИКОГДА не упоминай в тексте внутренние имена полей (ai_holdings_comment, "
+        "ai_sector_comment, ai_risk_comment и т.п.) и не пиши «(см. …)» с именем поля — "
+        "это технические ключи, а не ссылки для читателя; пиши законченную самодостаточную прозу.\n"
         "- БАНКОВСКАЯ АНАЛИТИКА: даже без RAG-данных — используй знания о позициях "
         "Goldman Sachs, Barclays, JPMorgan, Morgan Stanley по текущему режиму и секторам. "
         "Теги: [GS], [Barclays], [JPM], [MS].\n"
         "- ПОДТВЕРЖДЕНИЕ РЕЖИМА — заполни поле regime_confirmation:\n"
-        f"    движок выдал {regime_label} (confidence из summary.regime); проверь это на "
+        f"    движок выдал {regime_label}; УВЕРЕННОСТЬ бери ВЕРБАТИМ из summary.regime.confidence_pct "
+        "    (целое %, НЕ округляй сам); проверь режим на "
         "    НЕЗАВИСИМЫХ сигналах: yield curve 10Y−2Y (положительная = рост, инверсия = "
         "    рецессия), HY OAS (<350 bp = риск-он, >550 bp = стресс), VIX (<20 = спокойствие), "
         "    breakeven (инфляционные ожидания), факторные беты портфеля и банковский консенсус. "

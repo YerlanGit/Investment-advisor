@@ -1359,7 +1359,8 @@
           {# Top 5 positions sorted by Euler TRC (engine output).
              H-2: HOTSPOT is decided by the engine — the template just renders
              the boolean `a.hotspot` flag, it does NOT re-apply the >20% rule. #}
-          {% set _sorted = (data.assets or []) | sort(attribute='euler_risk', reverse=true) %}
+          {# Numeric sort — the formatted-string sort dropped the true #4 TRC. #}
+          {% set _sorted = (data.assets or []) | sort(attribute='euler_risk_pct', reverse=true) %}
           {% for a in _sorted[:5] %}
             {% set is_hot = a.hotspot %}
           <tr>
@@ -2091,7 +2092,7 @@
   <!-- ЗАГОЛОВОК СЕКЦИИ -->
   <div class="sec-head">
     <div class="sec-title">Идеи ИИ</div>
-    <div class="sec-sub">{{ data.ideas_count }} идей (рост · ребалансировка · защита · режим) на основе <b style="color:var(--tech-blue);">Factor → Regime → RAG</b> pipeline · нажмите на карточку, чтобы раскрыть детали · <span style="color:var(--ink-60);">[{{ data.ai_model_used or 'Claude Haiku 4.5' }}]</span></div>
+    <div class="sec-sub">{{ data.ideas_count }} идей (рост · ребалансировка · защита · Smart Money) на основе <b style="color:var(--tech-blue);">Factor → Regime → RAG</b> pipeline · нажмите на карточку, чтобы раскрыть детали · <span style="color:var(--ink-60);">[{{ data.ai_model_used or 'Claude Haiku 4.5' }}]</span></div>
   </div>
 
   <!-- ВВОДНЫЙ AI-БЛОК — вердикт ИИ (НЕ дублирует блок «Что вы держите») -->

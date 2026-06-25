@@ -524,7 +524,7 @@ Advisory.
 
 ## 4.2 Сетка идей (4 категории, конвейер Factor→Regime→RAG)
 
-**Назначение.** До 4 стратегических идей-карточек (рост · ребалансировка · защита · режим), с
+**Назначение.** До 4 стратегических идей-карточек (рост · ребалансировка · защита · Smart Money), с
 тикерами-кандидатами **вне портфеля** и раскрываемым обоснованием (конвейер отбора).
 
 **Payload-ключи:** `data.ai_ideas` (dict бакетов) + `data.ideas_count`. Шаблон уплощает бакеты
@@ -533,13 +533,14 @@ Advisory.
 `candidates[]` (`{ticker, name, scenario}`), `pipeline[]` (стадии), `sources[]`.
 
 **Builder:** `_build_ai_ideas(stock_picks, tier="base")` (`pdf_payload.py`). Маппит
-scenario-ключи ИИ `boost_alpha/rebalance/protect_capital/regime_play` → бакеты
-`growth/diversification/hedge/rotation` с русскими категориями и приоритетом. **Конвейер**
+scenario-ключи ИИ `boost_alpha/rebalance/protect_capital/smart_money` → бакеты
+`growth/diversification/hedge/rotation` с русскими категориями и приоритетом (4-я карточка —
+**Smart Money**, институционалы+инсайдеры — рендерится в bucket `rotation`). **Конвейер**
 синтезируется из типа пика (`_PIPELINE_BASE`) — 3 стадии:
 - `boost_alpha`: FACTOR (Momentum+Quality) → REGIME (соответствие режиму роста) → RAG (банк-отчёты);
 - `rebalance`: FACTOR (4-Pillar F+V+T+C) → REGIME (секторная ротация) → RAG (фундаментал);
 - `protect_capital`: FACTOR (низкая Beta+дивиденды) → REGIME (защитные сектора) → RAG (хвостовой риск);
-- `regime_play`: FACTOR (сигнал по режиму) → REGIME (Growth×Cycle) → RAG (прогнозы режима).
+- `smart_money`: FACTOR (сигнал умных денег: институц. накопление) → REGIME (позиционирование фондов/инсайдеров под режим) → RAG (13F-фонды + инсайдеры SEC Form 4).
 
 Если ИИ не вернул `label` (или label == raw-ключ), подставляется каноническое русское имя
 категории (фикс 5.2 — иначе в заголовках текли сырые ключи `boost_alpha`).

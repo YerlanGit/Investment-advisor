@@ -118,7 +118,7 @@
 
 **Как менять:** направление метрики → `_RISK_METRICS_LOWER_IS_BETTER` / `_NEUTRAL_METRICS`; карточный маппинг → `_KEYMAP` в `_build_expected_effect`; рендер → макрос `_ef_card` (deep-шаблон).
 
-> **Sprint 6 / BLOCK 2.3 — связка Идеи→Action→Эффект:** симуляция теперь идёт на **высокоприоритетных** action-строках (не-deferred Buy/Sell/Trim, `|Δw|>0`), а не на полном BL-векторе — `finance/simulate.high_priority_target_weights()` (возвращает `(target, tickers, actions)`). Action Plan считается ДО симуляции в `analyze_all`. Payload несёт `expected_effect.high_priority_tickers` + `scoped_to_high_priority` + **`high_priority_actions[]`** (06-23: `{ticker, side=Продать/Купить, delta_pp}` — панель спеллит ИДЕЮ и направление). ИИ-комментарий `ai_effect_comment` ОБЯЗАН согласовать с `verdict.kind` (tradeoff → не заявлять односторонне снижение риска).
+> **Sprint 6 / BLOCK 2.3 — связка Идеи→Action→Эффект:** симуляция идёт на **высокоприоритетных** action-строках (не-deferred Buy/Sell/Trim, `|Δw|>0`), а не на полном BL-векторе — `finance/simulate.high_priority_target_weights()` → `(target, tickers, actions)`. **06-25:** если идея вышла «только продажи» (турновер-кап заполняется продажами первыми), освободившийся вес **реинвестируется** в топ-BL-покупки (только УЖЕ держимые имена → они в ковариации → метрики реально отражают покупку), ≤+12пп на имя, остаток в кэш → панель показывает И что продаёшь, И что покупаешь, и концентрация реально падает. Payload: `expected_effect.high_priority_actions[]` (`{ticker, side=Продать/Купить, delta_pp}`) + `scoped_to_high_priority`. `ai_effect_comment` ОБЯЗАН согласовать с `verdict.kind` (tradeoff → не заявлять односторонне снижение риска).
 
 ---
 
