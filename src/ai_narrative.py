@@ -638,6 +638,42 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
             "Это противоречит сигналам Quant Engine.\n"
         )
 
+    # ── BLOCK 4: Action Plan = SINGLE SOURCE OF TRUTH for BUY/SELL/TRIM ──────
+    # The action_plan rows carry the authoritative per-ticker signal
+    # (Strong Buy / Buy / Hold / Trim / Sell) derived from the 4-Pillar score +
+    # Black-Litterman delta-weights.  The cross-section desync bug — an AI
+    # comment saying «Купить NVDA» while the high-priority plan says «Trim NVDA»
+    # — happened because the prose was generated free-hand.  Pin an explicit
+    # ticker→signal map into the prompt and HARD-REQUIRE every directional
+    # mention (verdict / bullets / per-section comments / picks) to match it, in
+    # BOTH tiers and ALL sections.
+    _SIGNAL_RU = {
+        "strong buy": "STRONG BUY (наращивать)", "buy": "BUY (покупать)",
+        "hold": "HOLD (держать)", "trim": "TRIM (сократить)", "sell": "SELL (продать)",
+    }
+    signal_map: dict[str, str] = {}
+    for ap in (summary.get("action_plan") or []):
+        tkr = str(ap.get("ticker", "")).strip().upper()
+        act = str(ap.get("action", "")).strip().lower()
+        if tkr and act:
+            signal_map[tkr] = _SIGNAL_RU.get(act, act.upper())
+    signal_sync_rule = ""
+    if signal_map:
+        _pairs = " · ".join(f"{t}={s}" for t, s in sorted(signal_map.items()))
+        signal_sync_rule = (
+            "🔒 ЕДИНЫЙ ИСТОЧНИК ПРАВДЫ — ACTION PLAN (математическое ядро движка):\n"
+            f"    Авторитетные сигналы по тикерам: {_pairs}.\n"
+            "    Эти сигналы — РЕШЕНИЕ ДВИЖКА (4-Pillar score + Black-Litterman). "
+            "ВСЕ разделы и AI-комментарии (verdict, plain_summary, bullets, "
+            "ai_action_comment, ai_holdings_comment, ai_effect_comment, "
+            "action_plan_text, stock_picks) ОБЯЗАНЫ совпадать с ними НА 100%. "
+            "ЗАПРЕЩЕНО: рекомендовать «купить/нарастить» тикер со статусом "
+            "TRIM/SELL, или «сократить/продать» тикер со статусом BUY/STRONG BUY. "
+            "Если упоминаешь действие по тикеру из списка — бери ТОЛЬКО его "
+            "сигнал отсюда (не противоречь и не смягчай). Приоритетность в "
+            "тексте: сначала SELL/TRIM, затем STRONG BUY/BUY, затем HOLD.\n"
+        )
+
     # Sprint-5.2 (live-report audit) — held-tickers rule.  The 2026-06-12 BASE
     # report showed pure catalogue picks: Haiku spent its picks on HELD names,
     # the held-filter drained them, and the deterministic backfill took over.
@@ -782,6 +818,7 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
             "why — конкретные цифры (ROE, маржа, Бета) с тегом [Источник].\n"
             f"{plain_rule}"
             f"{contradiction_rule}"
+            f"{signal_sync_rule}"
             f"{held_rule}"
             f"{leverage_rule}"
             f"{ideas_rule}"
@@ -854,11 +891,12 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
         '    "stance": "confirms | partial | diverges",\n'
         '    "summary": "≤220 знаков — простыми словами: подтверждается ли вывод движка о режиме, '
         'на основании каких независимых сигналов",\n'
-        '    "signals": ["3–6 строк ≤90 знаков — каждая начинается с ✓/⚠/✗ + сигнал. '
-        'ПОКРЫТЬ обязательно: (1) кривая доходности 10Y−2Y из summary.macro, '
-        '(2) HY OAS (кредитный спред), (3) VIX (страх рынка), '
-        '(4) факторные беты портфеля vs ожидаемые для режима ([Barclays]), '
-        '(5) банковский консенсус [GS]/[Barclays]/[JPM]"]\n'
+        '    "signals": ["4–6 строк ≤90 знаков — каждая начинается с ✓/⚠/✗ + сигнал. '
+        'ПОКРЫТЬ обязательно: (1) МАКРО-ДИНАМИКА — направление темпов из summary.macro[*].trend: '
+        'безработица РАСТЁТ/ПАДАЕТ, ВВП УСКОРЯЕТСЯ/ЗАМЕДЛЯЕТСЯ (приоритет ТЕМПА над уровнем); '
+        '(2) кривая доходности 10Y−2Y, (3) HY OAS (кредитный спред), (4) VIX (страх рынка), '
+        '(5) факторные беты портфеля vs ожидаемые для режима ([Barclays]), '
+        '(6) банковский консенсус [GS]/[Barclays]/[JPM]"]\n'
         '  },\n'
         '  "ai_holdings_comment": "≤200 знаков — какие позиции занимают наибольшую долю в риске '
         '(TRC — доля в общем риске). Назови конкретные тикеры-hotspots и объясни почему они опасны. '
@@ -910,12 +948,22 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
         "Теги: [GS], [Barclays], [JPM], [MS].\n"
         "- ПОДТВЕРЖДЕНИЕ РЕЖИМА — заполни поле regime_confirmation:\n"
         f"    движок выдал {regime_label}; УВЕРЕННОСТЬ бери ВЕРБАТИМ из summary.regime.confidence_pct "
-        "    (целое %, НЕ округляй сам); проверь режим на "
-        "    НЕЗАВИСИМЫХ сигналах: yield curve 10Y−2Y (положительная = рост, инверсия = "
-        "    рецессия), HY OAS (<350 bp = риск-он, >550 bp = стресс), VIX (<20 = спокойствие), "
-        "    breakeven (инфляционные ожидания), факторные беты портфеля и банковский консенсус. "
-        "    Stance: 'confirms' если ≥80% сигналов согласны, 'partial' если 2-3 расходятся, "
-        "    'diverges' при фундаментальном противоречии. Каждый сигнал в signals[] — "
+        "    (целое %, НЕ округляй сам).\n"
+        "    ОБЯЗАТЕЛЬНЫЙ ЧЕКПОИНТ «✓ ИИ подтверждает режим по ДИНАМИКЕ МАКРО»: первый "
+        "    сигнал в signals[] подтверждает/опровергает режим по ТЕМПАМ изменения "
+        "    (rate-of-change), а НЕ по статичным уровням. Бери summary.macro[*].trend "
+        "    (темп за ≥3 наблюдения): для МЕСЯЧНЫХ индикаторов СТРОГО приоритет темпа над "
+        "    уровнем — безработица 4.1% РАСТУЩАЯ = охлаждение (против Recovery/Expansion), та же "
+        "    4.1% ПАДАЮЩАЯ = ускорение; ВВП — ускорение/замедление важнее абсолютного %. Если "
+        "    темп противоречит уровню — верь ТЕМПУ и пометь ⚠. Если trend отсутствует — "
+        "    скажи об этом явно и опирайся на уровень как запасной вариант.\n"
+        "    Затем проверь режим на остальных НЕЗАВИСИМЫХ сигналах: yield curve 10Y−2Y "
+        "    (положительная = рост, инверсия = рецессия), HY OAS (<350 bp = риск-он, >550 bp = "
+        "    стресс), VIX (<20 = спокойствие), breakeven (инфляционные ожидания), факторные беты "
+        "    портфеля и банковский консенсус. "
+        "    Stance: 'confirms' если ≥80% сигналов (включая макро-динамику) согласны, 'partial' "
+        "    если 2-3 расходятся, 'diverges' при фундаментальном противоречии (особенно если "
+        "    макро-ТЕМПЫ направлены против режима). Каждый сигнал в signals[] — "
         "    одна строка с ✓/⚠/✗ + что именно подтверждает или противоречит.\n"
         "- 3-step reasoning: взаимосвязи → риски → рекомендации с числами.\n"
         "- Каждое число — [Quant Engine], [SEC EDGAR], [Regime] или [RAG: файл].\n"
@@ -925,6 +973,7 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
         "- why: конкретные цифры (ROE, маржа, Beta, P/E, momentum) с тегом [источник].\n"
         f"{plain_rule}"
         f"{contradiction_rule}"
+        f"{signal_sync_rule}"
         f"{held_rule}"
         f"{leverage_rule}"
         f"{ideas_rule}"

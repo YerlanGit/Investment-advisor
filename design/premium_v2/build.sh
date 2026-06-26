@@ -33,3 +33,13 @@ cp node_modules/react-dom/umd/react-dom.production.min.js .
 rm -f .deep.jsx .base.jsx
 
 echo "Built: report.compiled.css · deep-components.js · base-components.js · react(-dom).production.min.js"
+
+# 4) Sync the RUNTIME subset into src/premium_assets/ so it ships in the deployed
+#    container (Dockerfile COPYs src/ but not design/).  premium_renderer reads here.
+mkdir -p ../../src/premium_assets
+for f in react.production.min.js react-dom.production.min.js deep-components.js \
+         base-components.js report.compiled.css custom.css \
+         deep-data.sample.json base-data.sample.json; do
+  cp "$f" "../../src/premium_assets/$f"
+done
+echo "Synced runtime assets → src/premium_assets/"

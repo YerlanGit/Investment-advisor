@@ -141,17 +141,35 @@ class MacroRegimeOverlayTest(unittest.TestCase):
         ief = pd.Series(100 * (1 + np.linspace(0, 0.01, 200)), index=idx)
         return pd.DataFrame({"SPY.US": spy, "IEF.US": ief})
 
-    def test_overlay_off_by_default_is_unchanged(self):
+    def test_overlay_explicit_off_is_unchanged(self):
+        # BLOCK 2 (2026-06-26): the overlay is now DEFAULT-ON, so the
+        # unchanged-classifier guarantee lives behind the explicit escape
+        # hatch REGIME_MACRO_OVERLAY=0.
+        from finance.regime import RegimeClassifier
+        os.environ["REGIME_MACRO_OVERLAY"] = "0"
+        try:
+            prices = self._ramp_prices()
+            macro = {"unemployment": {"value": 3.5, "status": "ok"},
+                     "gdp_growth":   {"value": 4.0, "status": "ok"}}
+            a = RegimeClassifier().classify(prices)                  # no macro
+            b = RegimeClassifier().classify(prices, macro=macro)     # macro, gate OFF
+            self.assertIsNotNone(a)
+            self.assertAlmostEqual(a.growth_score, b.growth_score, places=9)
+            self.assertNotIn("macro_gdp_growth_nudge", b.signals)
+        finally:
+            os.environ.pop("REGIME_MACRO_OVERLAY", None)
+
+    def test_overlay_on_by_default_consults_macro(self):
+        # Unset env → overlay active → macro dynamics fold into the axes.
         from finance.regime import RegimeClassifier
         os.environ.pop("REGIME_MACRO_OVERLAY", None)
         prices = self._ramp_prices()
-        macro = {"unemployment": {"value": 3.5, "status": "ok"},
-                 "gdp_growth":   {"value": 4.0, "status": "ok"}}
-        a = RegimeClassifier().classify(prices)                  # no macro
-        b = RegimeClassifier().classify(prices, macro=macro)     # macro, gate OFF
-        self.assertIsNotNone(a)
-        self.assertAlmostEqual(a.growth_score, b.growth_score, places=9)
-        self.assertNotIn("macro_gdp_growth_nudge", b.signals)
+        hot = {"unemployment": {"value": 3.0, "status": "ok"},
+               "gdp_growth":   {"value": 5.0, "status": "ok"}}
+        reading = RegimeClassifier().classify(prices, macro=hot)
+        self.assertIsNotNone(reading)
+        self.assertIn("macro_gdp_growth_nudge", reading.signals)
+        self.assertIn("macro_unemployment_nudge", reading.signals)
 
     def test_overlay_on_tilts_axes(self):
         from finance.regime import RegimeClassifier
@@ -437,11 +455,21 @@ class FactorOrthogonalizationTest(unittest.TestCase):
         np.testing.assert_allclose(out["Market"].values, df["Market"].values)
         np.testing.assert_allclose(out["Rates"].values, df["Rates"].values)
 
-    def test_gate_default_off(self):
+    def test_gate_default_on(self):
+        # BLOCK 3 (2026-06-26): orthogonalization is now DEFAULT-ON so production
+        # κ drops below the collinearity threshold.  Unset → enabled; only an
+        # explicit off-switch restores the legacy collinear decomposition.
         import os
         from finance.investment_logic import factor_orthogonalize_enabled
         os.environ.pop("FACTOR_ORTHOGONALIZE", None)
-        self.assertFalse(factor_orthogonalize_enabled())
+        self.assertTrue(factor_orthogonalize_enabled())          # default ON
+        try:
+            os.environ["FACTOR_ORTHOGONALIZE"] = "0"
+            self.assertFalse(factor_orthogonalize_enabled())     # escape hatch
+            os.environ["FACTOR_ORTHOGONALIZE"] = "1"
+            self.assertTrue(factor_orthogonalize_enabled())
+        finally:
+            os.environ.pop("FACTOR_ORTHOGONALIZE", None)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

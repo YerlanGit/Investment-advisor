@@ -214,6 +214,10 @@ def _map_deep(p: dict, meta: dict) -> dict:
         "meta": {**meta, "tier": "DEEP", "engine": "MAC3"},
         "verdict": {"headline": _txt(p, "ai_verdict"), "sub": _txt(p, "ai_plain_summary"),
                     "riskIndex": round(_num(p, "risk_pct")), "riskTier": _txt(p, "risk_label"),
+                    # BLOCK 5 — portfolio FORWARD expected annual return shown
+                    # next to the risk index ("доходность относительно риска").
+                    "expReturn": _txt(p, "expected_return_annual"),
+                    "expSharpe": _txt(p, "expected_sharpe"),
                     "summary": _txt(p, "ai_plain_summary"), "bullets": bullets},
         "mandate": mandate,
         "heroStats": [
@@ -274,6 +278,9 @@ def _map_base(p: dict, meta: dict) -> dict:
         "meta": {**meta, "tier": "BASE", "engine": "MAC3"},
         "verdict": {"headline": _txt(p, "ai_verdict"), "sub": _txt(p, "ai_plain_summary"),
                     "riskIndex": round(_num(p, "risk_pct")),
+                    # BLOCK 5 — portfolio FORWARD expected annual return + Sharpe.
+                    "expReturn": _txt(p, "expected_return_annual"),
+                    "expSharpe": _txt(p, "expected_sharpe"),
                     "riskTrendDelta": _g(p, "risk_score_delta", default=0), "nav": _txt(p, "total_value_usd")},
         "kpis": {
             "cvar": _kpi_obj("CVaR 95%", "cvar", "%", _txt(p, "cvar_dollar")),

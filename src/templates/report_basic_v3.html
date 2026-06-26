@@ -1314,6 +1314,12 @@
         <span class="kpi-value">{{ data.sharpe }}</span>
         <span class="kpi-sub">(Sortino {{ data.sortino }})</span>
       </div>
+      {# BLOCK 5 — portfolio FORWARD expected annual return against realised risk. #}
+      {% if data.expected_return_annual and data.expected_return_annual != '—' %}
+      <div class="kpi-value-row" style="margin-top:4px">
+        <span class="kpi-sub">Ожид. доходность (год.): <b>{{ data.expected_return_annual }}</b>{% if data.expected_sharpe and data.expected_sharpe != '—' %} · фвд-Sharpe {{ data.expected_sharpe }}{% endif %}</span>
+      </div>
+      {% endif %}
 {# KPI sparkline — historical trend chart for this metric.
          Gated behind data.kpi_sparklines because the engine doesn't yet
          emit per-KPI history series.  When the future helper

@@ -728,6 +728,21 @@ def build_payload(results: dict, tier: str,
     mdd_str     = f"{mdd_raw * 100:.1f}%"
     vol_str     = f"{vol_raw * 100:.1f}%"
 
+    # BLOCK 5: portfolio-level FORWARD expected annual return + ex-ante Sharpe.
+    # Σ w_i·E[r_i] + cash·rfr, computed in the engine (investment_logic) — the
+    # forward expectation implied by today's factor betas, NOT the trailing
+    # realised CAGR.  Surfaced here so both the v3 template and the Premium
+    # mapper render the same authoritative number against risk.
+    exp_ret_raw  = metrics.get("Expected_Return_Annual")
+    exp_shrp_raw = metrics.get("Expected_Sharpe")
+    exp_ret_num  = (exp_ret_raw * 100
+                    if isinstance(exp_ret_raw, (int, float))
+                    and not math.isnan(float(exp_ret_raw)) else None)
+    exp_ret_str  = f"{exp_ret_num:.1f}%" if exp_ret_num is not None else "—"
+    exp_sharpe_str = (f"{exp_shrp_raw:.2f}"
+                      if isinstance(exp_shrp_raw, (int, float))
+                      and not math.isnan(float(exp_shrp_raw)) else "—")
+
     # Risk-free rate the engine used to compute Sharpe / Sortino.
     # Surfaced in the payload so the report's KPI commentary shows the
     # actual RFR (auditable), not a hardcoded template fallback.
@@ -1088,6 +1103,10 @@ def build_payload(results: dict, tier: str,
         "max_drawdown":      mdd_str,
         "volatility":        vol_str,
         "risk_free_rate":    rfr_str,
+        # BLOCK 5 — portfolio FORWARD expected annual return & ex-ante Sharpe.
+        "expected_return_annual": exp_ret_str,
+        "expected_return_pct_num": exp_ret_num,          # numeric (chart-safe)
+        "expected_sharpe":        exp_sharpe_str,
         "risk_pct":          composite,
         "risk_label":        _risk_score_label(composite),
         # H1: mandate label next to the gauge — the gauge is mandate-

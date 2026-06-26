@@ -72,7 +72,14 @@ _TREND_MIN_POINTS     = 4
 
 
 def _macro_overlay_enabled() -> bool:
-    return str(os.getenv(MACRO_OVERLAY_ENV, "")).strip().lower() in ("1", "true", "yes", "on")
+    # BLOCK 2 (2026-06-26): DEFAULT-ON.  The regime confirmation must read macro
+    # DYNAMICS (rate-of-change of unemployment / GDP), not just price momentum —
+    # so the FRED overlay now runs in production whenever a macro pack is
+    # supplied.  Escape hatch: REGIME_MACRO_OVERLAY=0 restores the pure
+    # price-momentum classifier.  The overlay is still bounded (±_MACRO_MAX_NUDGE)
+    # so macro can only TILT, never hijack, the price-based regime.
+    return str(os.getenv(MACRO_OVERLAY_ENV, "on")).strip().lower() not in (
+        "0", "false", "no", "off", "")
 
 
 def _usable_macro(series: object) -> Optional[float]:

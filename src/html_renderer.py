@@ -578,7 +578,12 @@ def render_report_html(data_dict: dict | None,
                                              generated_at=generated_at)
             return render_premium(tier, design_data)
         except Exception as exc:   # never break delivery — degrade to v3
-            logger.warning("Premium V2 render failed (%s) — falling back to v3.", exc)
+            # ERROR (not warning) + stack: the flag is ON, so a fallback here is
+            # a real misconfiguration (e.g. missing premium assets) the operator
+            # MUST see — it silently masked the v3 output before.
+            logger.error("PREMIUM_REPORT_ENABLED=on but premium render FAILED (%s) — "
+                         "falling back to v3.  Check src/premium_assets/ is deployed.",
+                         exc, exc_info=True)
 
     template = _jinja_env().get_template(_select_template(tier))
     return template.render(
