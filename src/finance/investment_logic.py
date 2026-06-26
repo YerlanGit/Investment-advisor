@@ -66,8 +66,16 @@ from services.macro_data import MacroFeed as _MacroFeed
 # removed, so "Momentum" becomes MARKET-NEUTRAL momentum, etc.  κ drops sharply
 # and the style premia stop being counted twice.
 #
-# GATED (FACTOR_ORTHOGONALIZE=1, default OFF) so the validated production
-# decomposition is byte-identical until the owner enables it.
+# BLOCK 3 (2026-06-26): multicollinearity fix promoted to DEFAULT-ON.  The
+# production factor set carried κ≈60.8 (max|corr|≈0.89) — the style/EM betas
+# were near-interpolating noise because their shared market/rates beta was
+# counted twice.  The hierarchical residualisation below is the effective math
+# solution (chosen over PCA precisely BECAUSE it preserves the named factors the
+# report depends on): it removes only the redundant shared beta, dropping κ
+# below the 30 collinearity threshold while every factor keeps its name + mean.
+# The env var now ONLY exists as an escape hatch — set FACTOR_ORTHOGONALIZE=0 to
+# restore the legacy raw-factor decomposition; any other value (incl. unset)
+# orthogonalises.
 FACTOR_ORTHOGONALIZE_ENV = "FACTOR_ORTHOGONALIZE"
 _FACTOR_CORE = ("Market", "Rates", "Commodities")
 # Each non-core factor → the core parent(s) to neutralise its shared beta against.
@@ -83,8 +91,10 @@ _FACTOR_PARENTS = {
 
 
 def factor_orthogonalize_enabled() -> bool:
-    return str(os.getenv(FACTOR_ORTHOGONALIZE_ENV, "")).strip().lower() in (
-        "1", "true", "yes", "on")
+    # DEFAULT-ON (BLOCK 3): unset → enabled.  Only an explicit off-switch
+    # (0/false/no/off) restores the legacy collinear decomposition.
+    return str(os.getenv(FACTOR_ORTHOGONALIZE_ENV, "on")).strip().lower() not in (
+        "0", "false", "no", "off", "")
 
 
 def orthogonalize_factors_hierarchical(f_data: "pd.DataFrame") -> "pd.DataFrame":
@@ -1315,6 +1325,43 @@ class UniversalPortfolioManager:
                 expected_log_daily * self.engine.trading_days) - 1.0
             # Specific Alpha: actual holding-period return minus expected (in %)
             df['Alpha_Specific'] = (df['Return_Pct'] - df['Expected_Return']) * 100
+
+        # ── BLOCK 5: portfolio-level FORWARD expected annual return ──────────
+        # Aggregate the per-asset CAPM expectations into a single portfolio
+        # number the UI can show against risk:
+        #     E[r_port] = Σ_i w_i · E[r_i]   +   w_cash · r_f
+        # The risky weights generally sum to <1 (cash/bonds sit outside the
+        # factor model); the un-invested residual earns the risk-free rate, so
+        # cash drag is priced in rather than silently dropped.  This is distinct
+        # from `Annualised_Return` (the REALISED trailing CAGR) — it is the
+        # forward expectation implied by today's factor betas + factor premia.
+        # The result is fed back into the SAME port_metrics dict the structural
+        # model returned, so every downstream surface reads one figure.
+        if 'Expected_Return' in df.columns and isinstance(port_metrics, dict):
+            try:
+                _exp = df['Expected_Return']
+                _w_risky = 0.0
+                _er_weighted = 0.0
+                for _t in df.index:
+                    _w = float(weights_dict.get(_t, 0.0) or 0.0)
+                    _er = _exp.get(_t)
+                    if _er is None or not np.isfinite(float(_er)):
+                        continue
+                    _w_risky += _w
+                    _er_weighted += _w * float(_er)
+                _rfr = float(port_metrics.get("risk_free_rate_annual") or 0.0)
+                _cash_w = max(0.0, 1.0 - _w_risky)
+                _port_exp = _er_weighted + _cash_w * _rfr
+                _vol = float(port_metrics.get("Total_Volatility_Ann") or 0.0)
+                port_metrics["Expected_Return_Annual"] = _port_exp
+                # Forward (ex-ante) Sharpe — expected excess return per unit of
+                # structural vol.  Complements the realised Sharpe_Ratio above.
+                port_metrics["Expected_Sharpe"] = (
+                    (_port_exp - _rfr) / _vol if _vol > 0 else None)
+                port_metrics["Expected_Return_Cash_Weight"] = round(_cash_w, 4)
+                port_metrics["Expected_Return_Invested_Weight"] = round(_w_risky, 4)
+            except Exception as _exc:
+                logger.warning("portfolio expected-return aggregation skipped: %s", _exc)
 
         # ═══════════════ BENCHMARK COMPARISON ═══════════════
         # Профильный бенчмарк ставится первым для корректного расчёта Tracking Error.

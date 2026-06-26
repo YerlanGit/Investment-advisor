@@ -20,11 +20,21 @@ from __future__ import annotations
 import json
 import os
 
-_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "design", "premium_v2")
+# BLOCK 1 fix: runtime assets live in src/premium_assets/ so they ship inside
+# the deployed container (the Dockerfile COPYs src/ but NOT design/).  The old
+# path pointed at design/premium_v2/, which is absent in the Cloud Run image →
+# render_premium raised FileNotFoundError and the report silently fell back to
+# v3 even with PREMIUM_REPORT_ENABLED=true.  Falls back to the design/ source
+# dir for local dev where src/premium_assets/ may be stale.
+_HERE     = os.path.dirname(os.path.abspath(__file__))
+_DIR      = os.path.join(_HERE, "premium_assets")                       # deployed
+_DEV_DIR  = os.path.join(_HERE, "..", "design", "premium_v2")           # dev source
 
 
 def _read(name: str) -> str:
-    with open(os.path.join(_DIR, name), encoding="utf-8") as f:
+    primary = os.path.join(_DIR, name)
+    path = primary if os.path.exists(primary) else os.path.join(_DEV_DIR, name)
+    with open(path, encoding="utf-8") as f:
         return f.read()
 
 

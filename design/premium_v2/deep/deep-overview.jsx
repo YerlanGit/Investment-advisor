@@ -21,6 +21,20 @@ const GaugeCard = ({ v }) => (
     <div className="flex-1 flex items-center justify-center py-2">
       <RiskGauge value={v.riskIndex} size={210}/>
     </div>
+    {(v.expReturn && v.expReturn !== '–') && (
+      <div className="flex items-center justify-center gap-4 mb-2 text-center">
+        <div>
+          <div className="text-[10px] text-ink-500 font-medium uppercase tracking-wider">Ожид. доходность (год.)</div>
+          <div className="num text-2xl font-light text-sage-600 leading-none mt-1">{v.expReturn}</div>
+        </div>
+        {(v.expSharpe && v.expSharpe !== '–') && (
+          <div>
+            <div className="text-[10px] text-ink-500 font-medium uppercase tracking-wider">Фвд-Sharpe</div>
+            <div className="num text-2xl font-light text-ink-900 leading-none mt-1">{v.expSharpe}</div>
+          </div>
+        )}
+      </div>
+    )}
     <div className="text-[11px] text-ink-500 text-center font-light">
       Рассчитан для профиля <span className="text-ink-900 font-medium">{window.DEEP.meta.profile}</span>
     </div>
