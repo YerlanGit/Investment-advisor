@@ -554,5 +554,62 @@ class Audit0623Test(unittest.TestCase):
         self.assertEqual(_build_expected_effect({"metrics": {}}), {})
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Premium V2 data mapper (engine payload → strict design contract)
+# ─────────────────────────────────────────────────────────────────────────────
+class PremiumMapperTest(unittest.TestCase):
+    def test_deep_contract_is_exactly_29_keys(self):
+        from premium_payload import build_design_data
+        d = build_design_data({}, "deep")          # empty payload → no KeyError
+        self.assertEqual(len(d), 29)
+
+    def test_base_contract_is_exactly_11_keys(self):
+        from premium_payload import build_design_data
+        b = build_design_data({}, "base")
+        self.assertEqual(len(b), 11)
+
+    def test_none_payload_defensive_dash(self):
+        from premium_payload import build_design_data
+        d = build_design_data(None, "deep")        # None → never raises
+        self.assertEqual(d["verdict"]["headline"], "–")   # missing text → neutral '–'
+        self.assertEqual(d["meta"]["aiModel"], "–")
+
+    def test_chart_numeric_fields_stay_numeric(self):
+        # Defensive '–' must NOT leak into fields the React charts do math on.
+        from premium_payload import build_design_data
+        d = build_design_data({}, "deep")
+        self.assertIsInstance(d["verdict"]["riskIndex"], (int, float))
+        # holdings/actionPlan numeric subfields default to 0, not '–'
+        b = build_design_data({"assets": [{"ticker": "X"}]}, "base")
+        self.assertIsInstance(b["holdings"][0]["w"], (int, float))
+
+    def test_cove_status_collapses_to_3_state_keeping_disabled_neutral(self):
+        from premium_payload import _cove_st
+        self.assertEqual(_cove_st("ok"), "ok")
+        self.assertEqual(_cove_st("error"), "fail")
+        self.assertEqual(_cove_st("warn"), "warn")
+        self.assertEqual(_cove_st("disabled"), "warn")   # off ≠ failed (not 'fail')
+        self.assertEqual(_cove_st("missing"), "warn")
+
+    def test_idea_tone_only_valid_design_keys(self):
+        from premium_payload import build_design_data
+        d = build_design_data({"ai_ideas": {"risk_reduction": [{"category": "X"}],
+                                            "diversification": [{"category": "Y"}]}}, "deep")
+        for idea in d["ideas"]:
+            self.assertIn(idea["tone"], {"grow", "rebalance", "rotation", "hedge"})
+
+    def test_feature_flag_default_off_routes_to_v3(self):
+        import os, importlib, html_renderer
+        os.environ.pop("PREMIUM_REPORT_ENABLED", None)
+        importlib.reload(html_renderer)
+        try:
+            self.assertFalse(html_renderer.PREMIUM_REPORT_ENABLED)
+            html = html_renderer.render_report_html(html_renderer._mock_payload("deep"),
+                                                    user_id="x", tier="deep")
+            self.assertNotIn('id="root"', html)      # v3 Jinja, not the React shell
+        finally:
+            importlib.reload(html_renderer)
+
+
 if __name__ == "__main__":
     unittest.main()
