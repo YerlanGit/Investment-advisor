@@ -511,6 +511,14 @@ MOCK_DATA: dict = {}   # lazily filled by the CLI / smoke entry-point below.
 DEEP_VERSION  = os.getenv("REPORT_DEEP_VERSION",  "v3").lower()
 BASIC_VERSION = os.getenv("REPORT_BASIC_VERSION", "v3").lower()
 
+# Premium V2 feature flag (routing layer — see PREMIUM_DESIGN.md).  When ON, the
+# report is rendered through the Premium V2 React design (premium_renderer) via
+# the data mapper (premium_payload); when OFF (default) the classic v3 Jinja
+# pipeline is used unchanged.  Default OFF so production delivery never changes
+# unless explicitly enabled.
+PREMIUM_REPORT_ENABLED = os.getenv("PREMIUM_REPORT_ENABLED", "false").strip().lower() in (
+    "1", "true", "yes", "on")
+
 
 def _select_template(tier: str) -> str:
     """
@@ -558,6 +566,20 @@ def render_report_html(data_dict: dict | None,
         write_report_html() or services.report_storage.upload_report().
     """
     payload  = data_dict if data_dict is not None else _mock_payload(tier)
+
+    # ── Routing: Premium V2 (flag) vs classic v3 Jinja ─────────────────────────
+    # Feature-flagged so the v3 pipeline below is byte-identical when OFF.  Any
+    # failure in the premium path falls back to v3 — a report is always produced.
+    if PREMIUM_REPORT_ENABLED:
+        try:
+            from premium_payload import build_design_data
+            from premium_renderer import render_premium
+            design_data = build_design_data(payload, tier, user_id=user_id,
+                                             generated_at=generated_at)
+            return render_premium(tier, design_data)
+        except Exception as exc:   # never break delivery — degrade to v3
+            logger.warning("Premium V2 render failed (%s) — falling back to v3.", exc)
+
     template = _jinja_env().get_template(_select_template(tier))
     return template.render(
         data         = payload,
