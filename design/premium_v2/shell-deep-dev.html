@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>DEEP Risk Report — Premium</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        fontFamily: {
+          sans: ['Manrope', 'system-ui', 'sans-serif'],
+          mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
+        },
+        colors: {
+          cream: { 50:'#fbf8f1', 100:'#f6f3ea', 200:'#efe9d8' },
+          ink:   { 950:'#100f0e', 900:'#1c1b1a', 800:'#2a2825', 700:'#3a3833', 600:'#55524c', 500:'#6b6862', 400:'#9a958c', 300:'#c4bfb5', 200:'#e2ddd1' },
+          gold:  { 300:'#fbe48a', 400:'#f5d04e', 500:'#eac233', 600:'#caa01a', 700:'#9a7a10' },
+          sage:  { 500:'#7a9a78', 600:'#5d7c5c' },
+          rust:  { 500:'#c47358', 600:'#a85a40' },
+        },
+        borderRadius: { '4xl':'32px', '5xl':'40px' },
+        boxShadow: {
+          'card':  '0 1px 0 rgba(255,255,255,0.7) inset, 0 24px 48px -28px rgba(60,50,30,0.18), 0 1px 2px rgba(60,50,30,0.05)',
+          'card-lg':'0 1px 0 rgba(255,255,255,0.7) inset, 0 36px 72px -36px rgba(60,50,30,0.28), 0 1px 2px rgba(60,50,30,0.06)',
+          'dark':  '0 1px 0 rgba(255,255,255,0.06) inset, 0 24px 48px -24px rgba(0,0,0,0.45)',
+        }
+      }
+    }
+  }
+</script>
+<style>
+  :root {
+    --cream-50:#fbf8f1; --cream-100:#f6f3ea; --gold-400:#f5d04e;
+    --ink-900:#1c1b1a; --ink-500:#6b6862;
+  }
+  html { scroll-behavior: smooth; scroll-padding-top: 96px; }
+  body {
+    background:
+      radial-gradient(1100px 700px at 100% -10%, rgba(245,208,78,0.42), transparent 55%),
+      radial-gradient(900px 700px at -10% 110%, rgba(231,219,191,0.55), transparent 55%),
+      radial-gradient(700px 500px at 50% 50%, rgba(255,255,255,0.4), transparent 70%),
+      linear-gradient(135deg, #f6f3ea 0%, #f9eed1 100%);
+    background-attachment: fixed;
+    color: var(--ink-900);
+    font-family: 'Manrope', system-ui, sans-serif;
+  }
+  .glass        { background: rgba(255,255,255,0.62); backdrop-filter: blur(20px) saturate(140%); -webkit-backdrop-filter: blur(20px) saturate(140%); }
+  .glass-strong { background: rgba(255,255,255,0.82); backdrop-filter: blur(24px) saturate(160%); -webkit-backdrop-filter: blur(24px) saturate(160%); }
+  .num { font-feature-settings: 'tnum' 1, 'ss01' 1; font-variant-numeric: tabular-nums; }
+  ::selection { background: #f5d04e; color: #1c1b1a; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(60,50,30,0.15); border-radius: 10px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(60,50,30,0.28); }
+  .lift { transition: transform .35s cubic-bezier(.2,.7,.2,1), box-shadow .35s ease; }
+  .lift:hover { transform: translateY(-2px); }
+  @keyframes rise { from{transform:translateY(10px)} to{transform:none} }
+  .rise { opacity: 1; }
+  @media (prefers-reduced-motion: no-preference) {
+    .rise { animation: rise .6s cubic-bezier(.2,.7,.2,1); }
+  }
+  .preload { opacity: 0; }
+</style>
+</head>
+<body class="antialiased">
+  <div id="root" class="preload"></div>
+
+  <template id="__bundler_thumbnail">
+    <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="tg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#f9eed1"/>
+          <stop offset="1" stop-color="#f5d04e"/>
+        </linearGradient>
+      </defs>
+      <rect width="100" height="100" rx="18" fill="url(#tg)"/>
+      <g transform="translate(30,30)">
+        <rect x="0" y="0" width="10" height="10" rx="3" fill="#1c1b1a"/>
+        <rect x="3" y="3" width="4" height="4" rx="1" fill="#f5d04e"/>
+      </g>
+      <text x="50" y="62" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="15" font-weight="700" fill="#1c1b1a">DEEP</text>
+      <text x="50" y="74" text-anchor="middle" font-family="Manrope, sans-serif" font-size="6.5" letter-spacing="1" fill="#9a7a10">RISK REPORT</text>
+    </svg>
+  </template>
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+  <script type="text/babel" src="deep/deep-data.jsx"></script>
+  <script type="text/babel" src="deep/deep-icons.jsx"></script>
+  <script type="text/babel" src="deep/deep-charts.jsx"></script>
+  <script type="text/babel" src="deep/deep-overview.jsx"></script>
+  <script type="text/babel" src="deep/deep-holdings.jsx"></script>
+  <script type="text/babel" src="deep/deep-factors.jsx"></script>
+  <script type="text/babel" src="deep/deep-stress-regime.jsx"></script>
+  <script type="text/babel" src="deep/deep-plan.jsx"></script>
+  <script type="text/babel" src="deep/deep-cove.jsx"></script>
+  <script type="text/babel" src="deep/deep-app.jsx"></script>
+</body>
+</html>
