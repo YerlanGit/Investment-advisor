@@ -567,6 +567,12 @@ def render_report_html(data_dict: dict | None,
     """
     payload  = data_dict if data_dict is not None else _mock_payload(tier)
 
+    # Resolve the timestamp ONCE so BOTH render paths show it.  Previously only
+    # the v3 branch defaulted it (inside template.render); the premium branch
+    # passed the raw `generated_at` (None when the caller omits it, as tg_bot
+    # does) straight to the mapper → meta.generated / meta.session rendered '–'.
+    generated_at = generated_at or datetime.now().strftime("%d.%m.%Y %H:%M UTC+5")
+
     # ── Routing: Premium V2 (flag) vs classic v3 Jinja ─────────────────────────
     # Feature-flagged so the v3 pipeline below is byte-identical when OFF.  Any
     # failure in the premium path falls back to v3 — a report is always produced.

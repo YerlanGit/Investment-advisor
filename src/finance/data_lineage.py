@@ -401,7 +401,8 @@ def _factor_diagnostic_status(results: dict) -> dict:
     )
 
 
-def _llm_checker_status(ai_summary: Optional[dict]) -> list[dict]:
+def _llm_checker_status(ai_summary: Optional[dict],
+                        leveraged: bool = False) -> list[dict]:
     """BLOCK 4.8 — explicit LLM verification rows.
 
     The narrative is advisory, but it passes through deterministic CHECKERS
@@ -423,8 +424,15 @@ def _llm_checker_status(ai_summary: Optional[dict]) -> list[dict]:
     # ran AND caught something on this specific run).
     note_h  = ("held-filter + data-driven + contradiction-filter настроены"
                if have_ai else "AI не вызывался")
-    note_m  = ("leverage-phrasing + stress-cap + no-self-aggregation настроены"
-               if have_ai else "AI не вызывался")
+    # Leverage/debt phrasing is HIDDEN unless the book is actually margin-funded
+    # (cash balance < 0): on an unlevered portfolio the «плечо ≈Nx» validator is
+    # not applicable, and the rule is to keep every leverage/debt term out of the
+    # report when cash is non-negative.  The other two math validators always show.
+    _checks_m = (["плечо ≈Nx (без «удваивается»)"] if leveraged else []) + [
+        "упоминание выпуклого капа стресса", "запрет ре-агрегации секторов"]
+    _note_validators = ("leverage-phrasing + " if leveraged else "") + \
+        "stress-cap + no-self-aggregation настроены"
+    note_m  = (_note_validators if have_ai else "AI не вызывался")
     return [
         _row(
             name   = "LLM-чекер: контроль галлюцинаций",
@@ -436,8 +444,7 @@ def _llm_checker_status(ai_summary: Optional[dict]) -> list[dict]:
         _row(
             name   = "LLM-чекер: проверка вычислений",
             source = "CoVe · валидаторы нарратива",
-            method = "плечо ≈Nx (без «удваивается») · упоминание выпуклого "
-                     "капа стресса · запрет ре-агрегации секторов",
+            method = " · ".join(_checks_m),
             status = status,
             note   = note_m,
         ),
@@ -566,7 +573,8 @@ def build_lineage(results: dict,
 
     # BLOCK 4.8: explicit LLM verification rows — the narrative's
     # hallucination + math checkers are part of the audit trail.
-    rows.extend(_llm_checker_status(ai_summary))
+    _lev = bool((results.get("leverage_metrics") or {}).get("is_leveraged"))
+    rows.extend(_llm_checker_status(ai_summary, leveraged=_lev))
 
     return rows
 

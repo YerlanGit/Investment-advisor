@@ -155,8 +155,15 @@ def _map_deep(p: dict, meta: dict) -> dict:
     for key, label in _ELABELS:
         cell = _g(ee, key, default={}) or {}
         fav = _g(cell, "favourable")
-        effect.append({"name": label, "before": _txt(cell, "before"), "after": _txt(cell, "after"),
-                       "delta": _txt(cell, "delta_pp"),
+        # The source stores RAW numerics (fractions for %-metrics, points for the
+        # index, a ratio for Sharpe); the design's EffectGrid prints before/after/
+        # delta as plain strings.  The v3 template formats via _ef_card at render,
+        # but the premium mapper used _txt() → raw "0.18692…" leaked into the card.
+        # Format per metric type so the cards read 18.7% / 0.34 / 49 like v3.
+        effect.append({"name": label,
+                       "before": _eff_fmt(key, _g(cell, "before")),
+                       "after":  _eff_fmt(key, _g(cell, "after")),
+                       "delta":  _eff_delta(key, _g(cell, "delta_pp")),
                        "tone": "pos" if fav is True else ("neg" if fav is False else "flat")})
 
     # action plan
@@ -198,15 +205,22 @@ def _map_deep(p: dict, meta: dict) -> dict:
                                  if x and x != DASH)} for c in _list(p, "cove_lineage")]
     quality = [f"{_txt(q, 'status')} {_txt(q, 'label')}" for q in _list(p, "integrity_checks")]
 
-    # mandate
+    # mandate — the engine's _build_mandate_compliance emits target_vol_pct /
+    # target_te_pct / breaches and per-row {actual, status}.  The previous mapper
+    # read non-existent keys (target_vol / tracking_cap / value / state), so the
+    # whole panel rendered targetVol/trackingCap='–', every row value=0.0 and
+    # state='–'.  Map the REAL keys; targetVol/trackingCap fall back to '–' only
+    # when genuinely unset (0 ⇒ not configured).
     mc = _g(p, "mandate_compliance", default={}) or {}
+    _tv = _num(mc, "target_vol_pct")
+    _tc = _num(mc, "target_te_pct")
     mandate = {
         "profile": _txt(p, "risk_mandate_label"),
-        "targetVol": _num(mc, "target_vol", default=DASH if not _g(mc, "target_vol") else 0),
-        "trackingCap": _g(mc, "tracking_cap", default=DASH),
-        "violations": len([r for r in _list(mc, "rows") if _g(r, "state") in ("over", "under")]),
-        "rows": [{"label": _txt(r, "label"), "value": _num(r, "value"),
-                  "lo": _num(r, "lo"), "hi": _num(r, "hi"), "state": _txt(r, "state")}
+        "targetVol": round(_tv, 1) if _tv else DASH,
+        "trackingCap": round(_tc, 1) if _tc else DASH,
+        "violations": int(_num(mc, "breaches", default=0)),
+        "rows": [{"label": _txt(r, "label"), "value": round(_num(r, "actual"), 1),
+                  "lo": _num(r, "lo"), "hi": _num(r, "hi"), "state": _txt(r, "status")}
                  for r in _list(mc, "rows")],
     }
 
@@ -307,6 +321,45 @@ def _map_base(p: dict, meta: dict) -> dict:
 
 # ── shared helpers ────────────────────────────────────────────────────────────
 
+# Expected-effect cards: which metric keys are stored as FRACTIONS (×100 = %).
+# risk_index → integer points; sharpe → bare ratio; everything else → percent.
+_EFFECT_PCT = {"vol", "cvar_95", "max_drawdown", "it_share", "expected_return", "max_erc_pct"}
+
+
+def _eff_to_num(v: Any):
+    if isinstance(v, (int, float)):
+        return float(v)
+    try:
+        return float(str(v).replace("−", "-").replace("%", "")
+                     .replace(",", ".").replace("пп", "").strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _eff_fmt(key: str, v: Any) -> str:
+    """Format a before/after value for the design's effect card."""
+    x = _eff_to_num(v)
+    if x is None:
+        return DASH
+    if key == "risk_index":
+        return f"{round(x)}"
+    if key == "sharpe":
+        return f"{x:.2f}"
+    return f"{x * 100:.1f}%"          # %-metric stored as a fraction
+
+
+def _eff_delta(key: str, v: Any) -> str:
+    """Format the delta (already in display units: pp / points / ratio)."""
+    x = _eff_to_num(v)
+    if x is None:
+        return DASH
+    if key == "risk_index":
+        return f"{x:+.0f} пункта"
+    if key == "sharpe":
+        return f"{x:+.2f}"
+    return f"{x:+.1f} пп"
+
+
 def _coverage(p: dict) -> float:
     dq = _g(p, "data_quality", default={}) or {}
     fl, ft = _num(dq, "factors_loaded"), _num(dq, "factors_total", default=10.0)
@@ -354,6 +407,28 @@ def _map_performance(p: dict) -> dict:
             "periods": periods}
 
 
+def _pipe_step(s: Any) -> str:
+    """Render one idea-pipeline step → its DETAIL string.
+
+    Both idea components (BASE PipelineNode, DEEP PipeNode) supply their OWN
+    stage label by position, so the value must be the detail ALONE — the design
+    samples store plain strings like 'Momentum + Quality скоринг'.
+
+    The source step may be a {stage,detail} dict OR a (stage, detail) tuple/list.
+    The previous mapper only handled the dict and fell back to `str(s)`, leaking a
+    raw Python tuple repr — «('RAG', 'Фундаментальный анализ')» — into the card.
+    Return the detail (tuple/list → element[1:], dict → detail) so no double
+    label and no tuple repr reaches the UI."""
+    if isinstance(s, dict):
+        return _txt(s, "detail") if _g(s, "detail") else _txt(s, "stage")
+    if isinstance(s, (list, tuple)):
+        parts = [str(x).strip() for x in s if x is not None and str(x).strip()]
+        if len(parts) >= 2:
+            return " · ".join(parts[1:])      # drop the stage; card labels it
+        return parts[0] if parts else ""
+    return str(s)
+
+
 def _map_ideas(p: dict, base: bool = False) -> list:
     """ai_ideas buckets → the design idea-card list."""
     ai = _g(p, "ai_ideas", default={}) or {}
@@ -370,8 +445,7 @@ def _map_ideas(p: dict, base: bool = False) -> list:
                 "n": f"{n:02d}", "cat": _txt(c, "category"), "prio": _txt(c, "priority"),
                 "tone": _TONE.get(bucket, "grow"), "title": _txt(c, "title"),
                 "lede": _txt(c, "rationale") if _g(c, "rationale") else _txt(c, "lede"),
-                "pipeline": [(_txt(s, "stage") + ": " + _txt(s, "detail")) if isinstance(s, dict) else str(s)
-                             for s in _list(c, "pipeline")],
+                "pipeline": [_pipe_step(s) for s in _list(c, "pipeline")],
             }
             if base:
                 item["tickers"] = cands      # list[{t,name,why}] — card reads t.t / t.why
