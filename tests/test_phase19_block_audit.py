@@ -670,7 +670,16 @@ class DeployConfigPinsPremiumFlagTest(unittest.TestCase):
     def test_cloudbuild_pins_premium_flag_true(self):
         from pathlib import Path
         root = Path(__file__).resolve().parent.parent
-        cb = (root / "cloudbuild.yaml").read_text(encoding="utf-8")
+        cb_path = root / "cloudbuild.yaml"
+        # The CI deploy-gate runs `unittest discover` INSIDE the built image,
+        # whose Dockerfile copies only src/ + SYSTEM_PROMPT.md + tests/ — NOT the
+        # deploy config.  So this repo-level invariant is unverifiable there:
+        # skip (don't ERROR — that would fail the very build this guard exists to
+        # protect).  It still runs against a repo checkout (local dev + the
+        # pre-merge `python -m pytest tests/` gate in python-ci.yml).
+        if not cb_path.exists():
+            self.skipTest("cloudbuild.yaml not shipped in the deploy image (repo-only guard)")
+        cb = cb_path.read_text(encoding="utf-8")
         # The env-var must live on a --set-env-vars line (so it persists), not
         # merely appear somewhere in a comment.
         set_env_lines = [ln for ln in cb.splitlines()
