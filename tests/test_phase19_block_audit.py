@@ -658,6 +658,68 @@ class PremiumMapperTest(unittest.TestCase):
             importlib.reload(html_renderer)
 
 
+class PremiumMapperAuditTest(unittest.TestCase):
+    """2026-06-27 premium-report audit: lost-parameter + formatting fixes."""
+
+    def test_mandate_reads_real_engine_keys(self):
+        # The mapper used to read target_vol / tracking_cap / value / state — none
+        # of which the engine emits — so the whole panel was '–' / 0.0.
+        from premium_payload import build_design_data
+        p = {"risk_mandate_label": "Умеренно-агрессивный",
+             "mandate_compliance": {"target_vol_pct": 14.0, "target_te_pct": 5.0,
+                "breaches": 1,
+                "rows": [{"label": "Акции США", "actual": 68.1, "lo": 30.0, "hi": 60.0, "status": "over"}]}}
+        m = build_design_data(p, "deep")["mandate"]
+        self.assertEqual(m["targetVol"], 14.0)
+        self.assertEqual(m["trackingCap"], 5.0)
+        self.assertEqual(m["violations"], 1)
+        self.assertEqual(m["rows"][0]["value"], 68.1)     # was 0.0 (wrong key)
+        self.assertEqual(m["rows"][0]["state"], "over")   # was '–' (wrong key)
+
+    def test_effect_cards_are_formatted_not_raw(self):
+        # %-metrics stored as fractions must render as "18.7%", not "0.18692…".
+        from premium_payload import build_design_data
+        p = {"expected_effect": {
+            "risk_index": {"before": 49, "after": 45, "delta_pp": -4.0, "favourable": True},
+            "vol":        {"before": 0.18692, "after": 0.16094, "delta_pp": -2.6, "favourable": True},
+            "sharpe":     {"before": 0.3419, "after": 0.4489, "delta_pp": 0.107, "favourable": True}}}
+        eff = {e["name"]: e for e in build_design_data(p, "deep")["effect"]}
+        self.assertEqual(eff["Волатильность"]["before"], "18.7%")
+        self.assertEqual(eff["Sharpe"]["before"], "0.34")
+        self.assertEqual(eff["Индекс риска"]["before"], "49")
+        self.assertNotIn("0.18", eff["Волатильность"]["before"])
+
+    def test_idea_pipeline_no_tuple_leak(self):
+        # A (stage, detail) tuple must render as the detail string, never as a
+        # Python repr «('RAG', 'Фундаментальный анализ')».
+        from premium_payload import build_design_data
+        p = {"ai_ideas": {"rotation": [{"title": "T", "rationale": "R",
+              "pipeline": [("FACTOR", "4-Pillar"), ("RAG", "Фундаментальный анализ")],
+              "candidates": [{"ticker": "MSCI", "name": "MSCI", "why": "w"}]}]}}
+        pipe = build_design_data(p, "base")["ideas"][0]["pipeline"]
+        self.assertEqual(pipe, ["4-Pillar", "Фундаментальный анализ"])
+        self.assertFalse(any("(" in s and "'" in s for s in pipe))
+
+    def test_generated_timestamp_flows_to_premium_meta(self):
+        from premium_payload import build_design_data
+        d = build_design_data({}, "deep", generated_at="27.06.2026 11:45 UTC+5")
+        self.assertEqual(d["meta"]["generated"], "27.06.2026 11:45 UTC+5")
+        self.assertNotEqual(d["meta"]["generated"], "–")
+
+    def test_leverage_phrasing_hidden_when_not_leveraged(self):
+        # Rule: no leverage/debt term in the report when cash balance ≥ 0.
+        from finance.data_lineage import build_lineage
+        ai = {"verdict": "x", "bullets": ["y"]}
+        rows = build_lineage({"leverage_metrics": {"is_leveraged": False}}, ai)
+        blob = " ".join(str(r.get("method", "")) + str(r.get("note", "")) for r in rows)
+        self.assertNotIn("плеч", blob)
+        self.assertNotIn("leverage", blob)
+        # …and present when the book IS margin-funded.
+        rows_lev = build_lineage({"leverage_metrics": {"is_leveraged": True}}, ai)
+        blob_lev = " ".join(str(r.get("method", "")) for r in rows_lev)
+        self.assertIn("плеч", blob_lev)
+
+
 class DeployConfigPinsPremiumFlagTest(unittest.TestCase):
     """ROOT-CAUSE regression guard (2026-06-27).
 

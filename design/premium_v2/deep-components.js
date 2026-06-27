@@ -1137,11 +1137,13 @@ const VerdictCard = ({
 }, v.bullets.map((b, i) => /*#__PURE__*/React.createElement("div", {
   key: i,
   className: "flex items-start gap-3"
-}, /*#__PURE__*/React.createElement("span", {
+}, b.tag ? /*#__PURE__*/React.createElement("span", {
   className: "mt-[3px] px-1.5 py-0.5 rounded-md bg-gold-400/15 text-gold-400 text-[9px] font-mono font-bold tracking-wider uppercase flex-shrink-0 w-[58px] text-center"
-}, b.tag), /*#__PURE__*/React.createElement("p", {
+}, b.tag) : /*#__PURE__*/React.createElement("span", {
+  className: "mt-[3px] w-1.5 h-1.5 rounded-full bg-gold-400/50 flex-shrink-0"
+}), /*#__PURE__*/React.createElement("p", {
   className: "text-white/70 text-[11.5px] leading-snug font-light flex-1"
-}, b.text, /*#__PURE__*/React.createElement("span", {
+}, b.text, b.src && /*#__PURE__*/React.createElement("span", {
   className: "text-white/35 font-mono"
 }, " [", b.src, "]"))))));
 
