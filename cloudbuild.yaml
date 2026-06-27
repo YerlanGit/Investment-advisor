@@ -107,7 +107,17 @@ steps:
       # have to re-onboard after every redeploy (B1).
       # ADMIN_USER_IDS — Telegram IDs allowed to /grant test tokens.
       # 148046720 is the owner's account; add more comma-separated as needed.
-      - --set-env-vars=REPORT_BUCKET_NAME=ramp-bot-reports,CHROMA_BUCKET=ramp-bot-chroma-db,TOKENOMICS_DB_PATH=/mnt/state/tokenomics.db,VAULT_DB_PATH=/mnt/state/users_vault.db,REPORTING_CURRENCY=USD,ADMIN_USER_IDS=148046720
+      #
+      # PREMIUM_REPORT_ENABLED=true — ROOT-CAUSE FIX (2026-06-27): the Premium V2
+      # React report is gated by this flag (html_renderer reads it at import).
+      # `gcloud run deploy --set-env-vars` REPLACES the ENTIRE env-var set on
+      # every deploy, so a value set by hand in the console was WIPED back to
+      # unset (→ "false") on the next CI deploy — which is why production kept
+      # serving the v3 Jinja report even though the flag "was on".  Pinning it
+      # here makes the premium routing persistent across every redeploy.  The
+      # render path still falls back to v3 on any premium error (see
+      # html_renderer.render_report_html), so this is safe to ship.
+      - --set-env-vars=REPORT_BUCKET_NAME=ramp-bot-reports,CHROMA_BUCKET=ramp-bot-chroma-db,TOKENOMICS_DB_PATH=/mnt/state/tokenomics.db,VAULT_DB_PATH=/mnt/state/users_vault.db,REPORTING_CURRENCY=USD,ADMIN_USER_IDS=148046720,PREMIUM_REPORT_ENABLED=true
 
   # ── Step 5: Deploy the RAG-ingest Cloud Function (M3) ──────────────────────
   # Listens to the DEDICATED, write-controlled ingest bucket (NOT the reports

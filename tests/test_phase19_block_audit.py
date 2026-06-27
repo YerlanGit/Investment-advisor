@@ -638,6 +638,48 @@ class PremiumMapperTest(unittest.TestCase):
         finally:
             importlib.reload(html_renderer)
 
+    def test_feature_flag_on_routes_to_premium(self):
+        # The flip side of the routing contract: with the flag ON the report is
+        # the Premium V2 React shell, NOT v3.  Proves the assets are present and
+        # the premium path renders without throwing (else it would fall back).
+        import os, importlib, html_renderer
+        os.environ["PREMIUM_REPORT_ENABLED"] = "true"
+        importlib.reload(html_renderer)
+        try:
+            self.assertTrue(html_renderer.PREMIUM_REPORT_ENABLED)
+            for tier in ("deep", "base"):
+                html = html_renderer.render_report_html(
+                    html_renderer._mock_payload(tier), user_id="x", tier=tier)
+                self.assertIn('id="root"', html)         # React shell
+                self.assertIn('createElement', html)     # compiled components present
+                self.assertNotIn('class="sheet"', html)  # NOT the v3 fallback
+        finally:
+            os.environ.pop("PREMIUM_REPORT_ENABLED", None)
+            importlib.reload(html_renderer)
+
+
+class DeployConfigPinsPremiumFlagTest(unittest.TestCase):
+    """ROOT-CAUSE regression guard (2026-06-27).
+
+    `gcloud run deploy --set-env-vars` REPLACES the entire env-var set, so a
+    PREMIUM_REPORT_ENABLED value set by hand in the console was wiped on the
+    next CI deploy and production silently reverted to the v3 report.  The flag
+    MUST be pinned in cloudbuild.yaml's --set-env-vars so it survives redeploys.
+    """
+
+    def test_cloudbuild_pins_premium_flag_true(self):
+        from pathlib import Path
+        root = Path(__file__).resolve().parent.parent
+        cb = (root / "cloudbuild.yaml").read_text(encoding="utf-8")
+        # The env-var must live on a --set-env-vars line (so it persists), not
+        # merely appear somewhere in a comment.
+        set_env_lines = [ln for ln in cb.splitlines()
+                         if "--set-env-vars" in ln and "PREMIUM_REPORT_ENABLED" in ln]
+        self.assertTrue(set_env_lines,
+                        "cloudbuild.yaml --set-env-vars must pin PREMIUM_REPORT_ENABLED "
+                        "(else every deploy wipes the manually-set flag → v3 fallback).")
+        self.assertIn("PREMIUM_REPORT_ENABLED=true", set_env_lines[0])
+
 
 if __name__ == "__main__":
     unittest.main()
