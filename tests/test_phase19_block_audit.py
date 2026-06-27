@@ -706,6 +706,40 @@ class PremiumMapperAuditTest(unittest.TestCase):
         self.assertEqual(d["meta"]["generated"], "27.06.2026 11:45 UTC+5")
         self.assertNotEqual(d["meta"]["generated"], "–")
 
+    def test_holdings_join_sec_fundamentals(self):
+        # SEC EDGAR fundamentals live in a SEPARATE fundamental_layer[] keyed by
+        # ticker — NOT on assets[].  The mapper used to read a non-existent
+        # assets[].fundamentals key ⇒ every holding's grid was empty.
+        from premium_payload import build_design_data
+        p = {"assets": [{"ticker": "AAPL", "atr_pct": "1.60%", "weight_pct_num": 16.0},
+                        {"ticker": "GLD",  "atr_pct": "0.44%", "weight_pct_num": 8.0}],
+             "fundamental_layer": [{"ticker": "AAPL", "roe": "147.0%", "op_m": "30.1%",
+                                    "dta": "31.0%", "rev_g": "+2.0%", "altman_z": "8.21"}]}
+        for tier in ("deep", "base"):
+            h = {x["t"]: x["fund"] for x in build_design_data(p, tier)["holdings"]}
+            self.assertEqual(h["AAPL"]["roe"], "147.0%")     # was {} (wrong key)
+            self.assertEqual(h["AAPL"]["margin"], "30.1%")   # op_m → margin
+            self.assertEqual(h["AAPL"]["z"], "8.21")         # altman_z → z
+            self.assertEqual(h["AAPL"]["atr"], "1.60%")      # atr from the asset row
+            self.assertEqual(h["GLD"]["roe"], "н/д")         # ETF: no SEC coverage
+            self.assertEqual(h["GLD"]["atr"], "0.44%")
+
+    def test_regime_drivers_read_series_list(self):
+        # macro_drivers is the ADAPTED panel {"series":[...]}, NOT a raw
+        # {key:{value}} dict — the old .items() walk always yielded [].
+        from premium_payload import build_design_data
+        p = {"macro_drivers": {"series": [
+                {"name": "Кривая 10Y−2Y", "value": "+0.18 pp", "status": "ok", "trend_label": "▲"},
+                {"name": "VIX", "value": "14.2", "status": "stale", "trend_label": "▬"},
+                {"name": "Безработица", "value": "—", "status": "missing"}]},  # dropped
+             "regime": {"label": "Expansion", "confidence": 0.4}}
+        drv = build_design_data(p, "deep")["regime"]["drivers"]
+        self.assertEqual(len(drv), 2)                        # was 0; missing dropped
+        self.assertEqual(drv[0]["name"], "Кривая 10Y−2Y")
+        self.assertEqual(drv[0]["val"], "+0.18 pp")
+        self.assertEqual(drv[0]["tone"], "pos")             # ok → sage
+        self.assertEqual(drv[1]["tone"], "warn")            # stale → gold
+
     def test_leverage_phrasing_hidden_when_not_leveraged(self):
         # Rule: no leverage/debt term in the report when cash balance ≥ 0.
         from finance.data_lineage import build_lineage
