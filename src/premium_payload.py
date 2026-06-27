@@ -95,9 +95,9 @@ def _map_deep(p: dict, meta: dict) -> dict:
 
     # holdings / concentration from assets[]
     assets = _list(p, "assets")
+    fmap = _fund_map(p)
     holdings = []
     for a in assets:
-        fl = _g(p, "fundamental_layer", default=[]) or []
         holdings.append({
             "t": _txt(a, "ticker"), "name": _txt(a, "name") if _g(a, "name") else _txt(a, "ticker"),
             "cls": _txt(a, "asset_class"),
@@ -106,7 +106,7 @@ def _map_deep(p: dict, meta: dict) -> dict:
             "pnlUsd": _num(a, "pnl_abs_num", default=_pct(_g(a, "pnl_abs"))),
             "signal": _txt(a, "action").upper() if _g(a, "action") else DASH,
             "status": "HOTSPOT" if _g(a, "euler_extreme") else "",
-            "fund": _g(a, "fundamentals", default={}) or {},
+            "fund": _fund_for(fmap, a),
             "note": _txt(a, "note") if _g(a, "note") else "",
         })
     conc = sorted(
@@ -179,12 +179,24 @@ def _map_deep(p: dict, meta: dict) -> dict:
     # regime
     reg = _g(p, "regime", default={}) or {}
     rc = _g(p, "regime_confirmation", default={}) or {}
+    # FRED macro-driver chips.  pdf_payload stores the ADAPTED panel
+    # ({"series": [{name,value,status,trend_label,...}], "as_of"}), NOT the raw
+    # FRED dict — so the old `.items()` walk (expecting {key:{value}}) always
+    # yielded an empty list and the «координаты режима» chips never rendered even
+    # though FRED was fresh.  Read the `series` list and drop only genuinely
+    # missing prints (value formatted as "—").
     drivers = []
-    for k, m in (_g(p, "macro_drivers", default={}) or {}).items():
-        if isinstance(m, dict) and _g(m, "value") is not None:
-            drivers.append({"name": _txt(m, "label"), "val": _txt(m, "value"),
-                            "trend": _txt(m, "trend_label") if _g(m, "trend_label") else "",
-                            "state": _txt(m, "status"), "tone": "pos"})
+    for m in _list(_g(p, "macro_drivers", default={}), "series"):
+        if not isinstance(m, dict):
+            continue
+        val = _txt(m, "value")
+        if val in (DASH, "—", "-", ""):
+            continue
+        st = str(_g(m, "status") or "").strip().lower()
+        drivers.append({"name": _txt(m, "name"), "val": val,
+                        "trend": _txt(m, "trend_label") if _g(m, "trend_label") else "",
+                        "state": _txt(m, "status"),
+                        "tone": "pos" if st == "ok" else "warn"})
     regime = {
         "name": _txt(reg, "label").split()[0] if _g(reg, "label") else DASH,
         "nameRu": _txt(reg, "label_ru") if _g(reg, "label_ru") else _txt(reg, "label"),
@@ -263,6 +275,7 @@ def _map_deep(p: dict, meta: dict) -> dict:
 
 def _map_base(p: dict, meta: dict) -> dict:
     assets = _list(p, "assets")
+    fmap = _fund_map(p)
     holdings = [{
         "t": _txt(a, "ticker"), "name": _txt(a, "name") if _g(a, "name") else _txt(a, "ticker"),
         "cls": _txt(a, "asset_class"), "w": _num(a, "weight_pct_num"),
@@ -270,7 +283,7 @@ def _map_base(p: dict, meta: dict) -> dict:
         "pnlPct": _pct(_g(a, "pnl_pct")), "pnlUsd": _pct(_g(a, "pnl_abs")),
         "status": "HOTSPOT" if _g(a, "euler_extreme") else "",
         "signal": _txt(a, "action").upper() if _g(a, "action") else DASH,
-        "fund": _g(a, "fundamentals", default={}) or {}, "note": _txt(a, "note") if _g(a, "note") else "",
+        "fund": _fund_for(fmap, a), "note": _txt(a, "note") if _g(a, "note") else "",
     } for a in assets]
 
     hot = (_list(p, "hotspots") or [{}])[0]
@@ -358,6 +371,47 @@ def _eff_delta(key: str, v: Any) -> str:
     if key == "sharpe":
         return f"{x:+.2f}"
     return f"{x:+.1f} пп"
+
+
+def _fund_map(p: dict) -> dict:
+    """{ticker → design `fund` object} joined from the engine's SEC-EDGAR layer.
+
+    The SEC fundamentals are NOT on assets[] — they live in a SEPARATE
+    `fundamental_layer` list keyed by ticker (roe / op_m / dta / rev_g /
+    altman_z).  The mapper previously read a non-existent assets[].fundamentals
+    key, so EVERY holding's fundamentals grid was empty — even AAPL / MSFT /
+    NVDA whose 4-Pillar F-scores prove SEC data was present.  Map the engine
+    keys → the component's {roe,margin,debt,growth,z}; `atr` is added per-holding
+    from the asset row (it is a price metric, not an SEC field)."""
+    out: dict = {}
+    for r in _list(p, "fundamental_layer"):
+        t = _txt(r, "ticker")
+        if not t or t == DASH:
+            continue
+        out[t] = {
+            "roe":    _txt(r, "roe"),
+            "margin": _txt(r, "op_m"),
+            "debt":   _txt(r, "dta"),
+            "growth": _txt(r, "rev_g"),
+            "z":      _txt(r, "altman_z"),
+        }
+    return out
+
+
+def _fund_for(fmap: dict, a: Any) -> dict:
+    """Per-holding `fund` object — SEC fields from the join (or 'н/д' when the
+    instrument has no SEC coverage: ETFs / cash / EM-proxies), `atr` always from
+    the asset's own price row."""
+    sec = fmap.get(_txt(a, "ticker"), {})
+    atr = _txt(a, "atr_pct")
+    return {
+        "roe":    sec.get("roe", "н/д"),
+        "margin": sec.get("margin", "н/д"),
+        "debt":   sec.get("debt", "н/д"),
+        "growth": sec.get("growth", "н/д"),
+        "atr":    atr if atr and atr not in (DASH, "—", "-") else "н/д",
+        "z":      sec.get("z", "н/д"),
+    }
 
 
 def _coverage(p: dict) -> float:
