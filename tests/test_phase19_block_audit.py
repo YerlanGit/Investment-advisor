@@ -740,6 +740,41 @@ class PremiumMapperAuditTest(unittest.TestCase):
         self.assertEqual(drv[0]["tone"], "pos")             # ok → sage
         self.assertEqual(drv[1]["tone"], "warn")            # stale → gold
 
+    def test_action_plan_joins_score_and_hotspot(self):
+        # score + hotspot are NOT on action_plan rows — they live in
+        # score_breakdown (total) and assets (hotspot).  The mapper read
+        # non-existent score_total/hotspot keys ⇒ every row showed 0 / false.
+        from premium_payload import build_design_data
+        p = {"assets": [{"ticker": "NVDA", "hotspot": True, "euler_extreme": True},
+                        {"ticker": "AAPL", "hotspot": False}],
+             "score_breakdown": [{"ticker": "NVDA", "total": "+1.5"},
+                                 {"ticker": "AAPL", "total": "-0.8"}],
+             "action_plan": [{"ticker": "NVDA", "action": "Trim", "price": "875.30"},
+                             {"ticker": "AAPL", "action": "Hold", "price": "230.10"}]}
+        plan = {x["t"]: x for x in build_design_data(p, "deep")["actionPlan"]}
+        self.assertEqual(plan["NVDA"]["score"], 1.5)     # was 0
+        self.assertTrue(plan["NVDA"]["hot"])             # was False
+        self.assertEqual(plan["AAPL"]["score"], -0.8)
+        self.assertFalse(plan["AAPL"]["hot"])
+
+    def test_base_top_hotspot_derived_from_max_risk_asset(self):
+        # `hotspots` in the payload is a list of STRINGS — the old mapper indexed
+        # it as a dict ⇒ the featured card was all '–'/0.  Derive from assets.
+        from premium_payload import build_design_data
+        p = {"assets": [
+                {"ticker": "NVDA", "asset_class": "Технологии", "weight_pct_num": 15.0,
+                 "euler_risk_pct": 32.2, "action": "Trim", "pnl_pct": "+24.1%", "pnl_abs": "+1200"},
+                {"ticker": "AAPL", "asset_class": "Технологии", "weight_pct_num": 11.0,
+                 "euler_risk_pct": 8.8, "action": "Hold"},
+                {"ticker": "USD", "is_cash": True, "euler_risk_pct": 0.0}],
+             "score_breakdown": [{"ticker": "NVDA", "action": "Trim"}]}
+        th = build_design_data(p, "base")["topHotspot"]
+        self.assertEqual(th["ticker"], "NVDA")           # was '–'
+        self.assertEqual(th["riskShare"], 32.2)          # was 0
+        self.assertEqual(th["weight"], 15.0)
+        self.assertEqual(th["signal"], "TRIM")
+        self.assertNotEqual(th["note"], "–")
+
     def test_leverage_phrasing_hidden_when_not_leveraged(self):
         # Rule: no leverage/debt term in the report when cash balance ≥ 0.
         from finance.data_lineage import build_lineage

@@ -1918,6 +1918,8 @@ const StressTable = ({
 }, "Параметрические шоки факторов (ΔPnL = w′·B·shock) · горизонт 1 квартал")), /*#__PURE__*/React.createElement("span", {
   className: "text-[10px] font-mono text-ink-400 tracking-wider px-2.5 py-1 rounded-full bg-cream-50 border border-ink-900/5"
 }, "7 сценариев · не прогноз")), /*#__PURE__*/React.createElement("div", {
+  className: "mob-scroll-x"
+}, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
   className: "grid grid-cols-[minmax(0,2.1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.4fr)_minmax(0,0.9fr)_minmax(0,1fr)] gap-3 px-1 pb-2.5 text-[9.5px] tracking-widest uppercase text-ink-400 font-mono border-b border-ink-900/8"
 }, /*#__PURE__*/React.createElement("div", null, "Сценарий"), /*#__PURE__*/React.createElement("div", {
   className: "text-right"
@@ -1947,7 +1949,7 @@ const StressTable = ({
   }, r.dd == null ? '—' : `${r.dd.toFixed(1)}%`), /*#__PURE__*/React.createElement("div", {
     className: "text-right text-[11.5px] num text-ink-500"
   }, r.rec));
-})), /*#__PURE__*/React.createElement("div", {
+})))), /*#__PURE__*/React.createElement("div", {
   className: "mt-4 rounded-2xl bg-cream-50 border border-ink-900/5 px-4 py-3.5 flex items-start gap-3"
 }, /*#__PURE__*/React.createElement(Icons.Sparkles, {
   size: 14,
