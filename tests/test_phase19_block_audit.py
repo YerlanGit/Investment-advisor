@@ -740,6 +740,28 @@ class PremiumMapperAuditTest(unittest.TestCase):
         self.assertEqual(drv[0]["tone"], "pos")             # ok → sage
         self.assertEqual(drv[1]["tone"], "warn")            # stale → gold
 
+    def test_regime_signals_parsed_to_objects(self):
+        # The DEEP component renders each confirm bullet as {ok, t}; the mapper
+        # passed raw strings → b.t undefined → six icon-only rows with NO text.
+        from premium_payload import build_design_data
+        p = {"regime_confirmation": {"stance": "partial", "signals": [
+                "✓ Безработица снижается (темп −0,09)",
+                "⚠ ВВП замедляется (темп −2,7) — против фазы роста"]}}
+        cb = build_design_data(p, "deep")["regime"]["confirmBullets"]
+        self.assertEqual(cb[0], {"ok": True,  "t": "Безработица снижается (темп −0,09)"})
+        self.assertEqual(cb[1], {"ok": False, "t": "ВВП замедляется (темп −2,7) — против фазы роста"})
+
+    def test_sector_warnings_extract_text_not_dict_repr(self):
+        # sector_warnings are dicts; the mapper str()'d the whole dict, leaking
+        # «{'sector': 'Technology', ...}» into the UI.  Extract the text field.
+        from premium_payload import build_design_data
+        p = {"sector_warnings": [
+                {"sector": "Technology", "weight_pct": 48.8, "cap_pct": 40.0,
+                 "overage_pp": 8.8, "text": "Technology: 49% портфеля — превышен лимит 40%"}]}
+        sw = build_design_data(p, "deep")["sectorWarn"]
+        self.assertEqual(sw[0], "Technology: 49% портфеля — превышен лимит 40%")
+        self.assertNotIn("{", sw[0])
+
     def test_action_plan_joins_score_and_hotspot(self):
         # score + hotspot are NOT on action_plan rows — they live in
         # score_breakdown (total) and assets (hotspot).  The mapper read

@@ -91,3 +91,27 @@ src/premium_renderer.py           # сборщик отчёта: assets + дан
 
 V1 (синий IBM-Plex) и V2-reskin (gold, текущий прод) сохранены: `report_*_v1_design_prototype.html`,
 `report_*_v3.html`. Premium V2 (этот документ) — отдельная ветка, включается флагом после маппера.
+
+---
+
+## Live-report fixes & mobile (2026-06-28) — §−5 в `AUDIT.md`
+
+**Маппер-контракт (`premium_payload.py`) — ключи, которые легко перепутать с источником:**
+- `holdings[].fund` ← джойн `fundamental_layer[]` по тикеру (НЕ `assets[].fundamentals`); ETF/кэш → «н/д».
+- `regime.drivers` ← `macro_drivers.series[]` (адаптированная панель, НЕ сырой dict); фильтр value=«—».
+- `regime.confirmBullets` ← `_signal_obj` парсит `«✓/⚠/✗ текст»` → `{ok,t}` (компонент рисует иконку+текст).
+- `sectorWarn` ← `_warn_text` берёт поле `text` (источник — список dict, НЕ строк).
+- `mandate` ← `target_vol_pct`/`target_te_pct`/`breaches`/`{actual,status}` (НЕ `target_vol`/`value`/`state`).
+- `actionPlan[].score|hot` ← джойн `score_breakdown.total` + `assets.hotspot` (нет на `action_plan[]`).
+- `topHotspot` (BASE) ← актив с макс. `euler_risk_pct` (НЕ `hotspots`, который список СТРОК).
+- `effect[].before/after/delta` — форматируются per-metric (`_eff_fmt`/`_eff_delta`); источник хранит сырые float.
+- идея `pipeline[]` ← `_pipe_step` (деталь-строка; стадию-метку даёт компонент по позиции).
+- BASE «AI · {модель}» — из `meta.aiModel`, не хардкод.
+
+**Мобайл (`custom.css`, `@media (max-width:640px)`):**
+- НЕ ставить `min-width:0` на ячейки `grid-cols-[…minmax(0,fr)…]` — треки схлопываются и числа НАКЛАДЫВАЮТСЯ.
+- Широкие таблицы (holdings/action-plan/stress) обёрнуты в `.mob-scroll-x` → гор. скролл, натуральная ширина;
+  на десктопе обёртка инертна (правила только внутри `@media`). Идея-карточки: `TickerCard dark` проп (явные цвета).
+
+**Пересборка статики:** `design/premium_v2/build.sh`; CSS-шаг — Tailwind `content` glob `./design/**/*.jsx` работает
+из КОРНЯ репо (build.sh делает `cd design/premium_v2` → запускать tailwind отдельно из корня, либо чинить glob).

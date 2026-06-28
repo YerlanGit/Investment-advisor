@@ -1689,6 +1689,8 @@ const Holdings = () => {
   }, /*#__PURE__*/React.createElement("div", {
     className: "glass-strong rounded-4xl shadow-card overflow-hidden"
   }, /*#__PURE__*/React.createElement("div", {
+    className: "mob-scroll-x"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "grid grid-cols-[36px_minmax(0,1.9fr)_minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.1fr)_84px_36px] items-center gap-3 px-5 py-3 border-b border-ink-900/6 text-[9.5px] tracking-widest uppercase text-ink-500 font-mono"
   }, /*#__PURE__*/React.createElement("div", null), /*#__PURE__*/React.createElement("div", null, "Тикер · Имя"), /*#__PURE__*/React.createElement("div", null, "Класс"), /*#__PURE__*/React.createElement("div", null, "Вес"), /*#__PURE__*/React.createElement("div", null, "Риск"), /*#__PURE__*/React.createElement("div", null, "P/L"), /*#__PURE__*/React.createElement("div", {
     className: "text-right"
@@ -1701,7 +1703,7 @@ const Holdings = () => {
     onToggle: () => setOpenIdx(openIdx === i ? -1 : i)
   })), rows.length === 0 && /*#__PURE__*/React.createElement("div", {
     className: "px-6 py-12 text-center text-ink-500 text-[14px]"
-  }, "Ничего не подходит под фильтр «", filter, "».")))), /*#__PURE__*/React.createElement("div", {
+  }, "Ничего не подходит под фильтр «", filter, "».")))))), /*#__PURE__*/React.createElement("div", {
     className: "col-span-12 lg:col-span-4"
   }, /*#__PURE__*/React.createElement(SectorMix, {
     sectors: p.sectors,
@@ -2135,6 +2137,8 @@ const ActionPlan = ({
 }, "ATR (Wilder RMA) · SMA50/200 · RSI(14) · MACD(12,26,9) · без внешних таргет-прайсов")), /*#__PURE__*/React.createElement("span", {
   className: "text-[10px] font-mono text-ink-400 tracking-wider px-2.5 py-1 rounded-full bg-cream-50 border border-ink-900/5"
 }, "Quant Engine")), /*#__PURE__*/React.createElement("div", {
+  className: "mob-scroll-x"
+}, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
   className: "grid grid-cols-[minmax(0,1fr)_72px_minmax(0,1fr)_minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1.6fr)] gap-3 px-1 pb-2.5 text-[9.5px] tracking-widest uppercase text-ink-400 font-mono border-b border-ink-900/8"
 }, /*#__PURE__*/React.createElement("div", null, "Тикер"), /*#__PURE__*/React.createElement("div", null, "Действие"), /*#__PURE__*/React.createElement("div", {
   className: "text-right"
@@ -2162,7 +2166,7 @@ const ActionPlan = ({
   className: "text-right text-[12px] num text-rust-600"
 }, r.stop), /*#__PURE__*/React.createElement("div", {
   className: "text-[11px] text-ink-500 leading-tight"
-}, "Score ", r.score > 0 ? '+' : '', r.score.toFixed(1), r.hot && ' · Hotspot TRC>20%', r.defer && ' · отложено (turnover cap)')))), /*#__PURE__*/React.createElement("div", {
+}, "Score ", r.score > 0 ? '+' : '', r.score.toFixed(1), r.hot && ' · Hotspot TRC>20%', r.defer && ' · отложено (turnover cap)')))))), /*#__PURE__*/React.createElement("div", {
   className: "mt-4 rounded-2xl bg-cream-50 border border-ink-900/5 px-4 py-3.5 flex items-start gap-3"
 }, /*#__PURE__*/React.createElement(Icons.Sparkles, {
   size: 14,

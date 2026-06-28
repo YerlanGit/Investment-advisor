@@ -1,10 +1,46 @@
 # AUDIT.md — RAMP Bot · Институциональный аудит и стратегия
 
-> **Версия:** 2026-06-16 (Sprint 6 · BLOCK 1–4 audit/refactor) · **Базовый коммит:** `ed85a8d` (merge PR #47 → `main`)
-> **Текущая ветка:** `claude/stoic-mccarthy-LM18P` · tip `855afce`+Sprint-6 — все коммиты на GitHub **Verified ✅** (API: `verified=true`)
-> **Аудитор:** CTO / Lead Quant Architect / DevSecOps
-> **Верификация:** живые прод-отчёты 2026-06-09 → **2026-06-16** (`base/deep.html`, портфель U148046720, с маржой) · pytest **440 passed, 10 skipped**
+> **Версия:** 2026-06-28 (§−5 Premium V2 rollout + live-report audit) · **Базовый коммит:** `ed85a8d` (merge PR #47 → `main`)
+> **Текущая ветка:** `claude/stoic-mccarthy-LM18P` — Premium V2 в проде (PR #66/#67 → `main`); коммиты на GitHub **Verified ✅** (linked `claude` account)
+> **Аудитор:** CTO / Lead Quant Architect / Lead UI / DevSecOps
+> **Верификация:** живые прод-отчёты 2026-06-09 → **2026-06-28** (`base/deep.html`, портфель U148046720) · pytest **480 passed, 10 skipped**
 > **Карты:** `REPORT_SECTIONS.md` (секция→builder→шаблон) · `REPORT_SECTIONS_AUDIT.md` (посекционный аудит живых отчётов)
+
+---
+
+## −5. Premium V2 — production rollout + аудит живых отчётов (2026-06-26 → 28) — Lead UI/Quant
+
+> **Контекст:** Premium V2 (React+Tailwind) включён в прод. Серия живых отчётов U148046720
+> (`2026-06-26 → 28`) выявила цепочку дефектов **доставки → данных → вёрстки**. **pytest 480 passed, 10 skipped.**
+
+### Было / Стало
+
+| # | Слой | Было | Стало | Файлы |
+|---|---|---|---|---|
+| D1 | Деплой-флаг | `gcloud run deploy --set-env-vars` ЗАМЕНЯЕТ все env → `PREMIUM_REPORT_ENABLED`, выставленный руками, **стирался** каждым CI-деплоем → прод отдавал v3 | Флаг **запинен** в `--set-env-vars` cloudbuild → переживает редеплой | `cloudbuild.yaml` |
+| D2 | Ассеты премиума | Dockerfile COPY `src/` без `design/` → `render_premium` падал `FileNotFoundError` → тихий v3 | Рантайм-ассеты в `src/premium_assets/` (едут с `src/`); фоллбэк → ERROR-лог | `premium_renderer.py`, `build.sh` |
+| 3PD1 | SEC EDGAR фундаментал | маппер читал несуществующий `assets[].fundamentals` → пусто у всех 13 позиций | джойн из `fundamental_layer[]` по тикеру → ROE/маржа/долг/рост/Altman-Z | `premium_payload.py` |
+| 3PD2 | FRED макро-драйверы | маппер `.items()` по адаптированной панели → `[]` всегда | чтение `macro_drivers.series[]` → 6 чипов (level ⊕ темп) | `premium_payload.py` |
+| M1 | Мандат-панель | ключи `target_vol`/`value`/`state` (нет таких) → `–`/0.0 | `target_vol_pct`/`actual`/`status` + `breaches` | `premium_payload.py` |
+| M2 | «Ожид. эффект» | сырые float `0.1869…` | формат per-metric → `18.7%`/`0.34`/`49`/`−2.6 пп` | `premium_payload.py` |
+| M3 | Конвейер идей | утечка Python-кортежа `('RAG','…')` | `_pipe_step` → деталь-строка (метку даёт компонент) | `premium_payload.py` |
+| M4 | BASE «AI · Haiku» | захардкоженная строка | `window.PORTFOLIO.meta.aiModel` (Sonnet 4.6) | `portfolio-ideas.jsx` |
+| M5 | BASE top-hotspot | `hotspots` (список СТРОК) индексировался как dict → `–`/0 | вывод из актива с макс. Euler-TRC | `premium_payload.py` |
+| M6 | Action Plan score/hot | ключи `score_total`/`hotspot` (нет) → 0/false | джойн `score_breakdown.total` + `assets.hotspot` | `premium_payload.py` |
+| M7 | Сектор-предупреждения | `str(dict)` → `{'sector': …}` в UI | `_warn_text` → поле `text` | `premium_payload.py` |
+| M8 | ИИ-подтверждение режима | сигналы-строки → 6 пустых ⚠ (компонент ждёт `{ok,t}`) | `_signal_obj` парсит `✓/⚠/✗ текст` → `{ok,t}` | `premium_payload.py` |
+| U1 | Leverage/долг | строка валидатора «плечо ≈Nx» при cash≥0 | gated на `is_leveraged` (скрыто на немаржинальной книге) | `data_lineage.py` |
+| U2 | BLOCK 5 — портфельная E[r] | отсутствовала | `Σwᵢ·E[rᵢ]+cash·rfr` + фвд-Sharpe в gauge + v3 | `investment_logic.py`, шаблоны |
+| MOB1 | Мобайл: hero/overflow | гор. скролл 613–701px, заголовок 54–58px обрезан | `@media≤640`: clamp-типографика, contain-bleed, 0 page-scroll | `custom.css` |
+| MOB2 | Таблицы (holdings/action/stress) | `minmax(0,fr)` схлопывался → **наложение** колонок | `.mob-scroll-x` (гор. скролл, натуральная ширина) — десктоп без изменений | `*.jsx` + `custom.css` |
+| MOB3 | Идея-карточки | белый текст на белом (невидимо) | `TickerCard dark` проп (явные цвета, не arbitrary-variant) | `portfolio-ideas.jsx` |
+
+**Математика (проверено, реальные данные):** Base Currency Approach USD (RFR 4.5%); Sharpe/Sortino/фвд-Sharpe валютно-согласованы;
+SEC EDGAR 10-K (AAPL ROE 151.9%), FRED live (VIX 18.9, 10Y−2Y +0.31пп), Tradernet-цены. AI-вывод (BASE «продать MSFT/ORCL/QCOM»)
+совпадает с action-plan сигналами (MSFT −2.3/ORCL −5.3/QCOM −2.0 → SELL) — **BLOCK 4 single-source-of-truth держится**. Режим «partial»
+логичен: 5/6 сигналов risk-on, но ВВП (темп −2,7) замедляется → приоритет rate-of-change (BLOCK 2).
+
+> **Деплой:** все правки на `claude/stoic-mccarthy-LM18P`; прод деплоится из `main` — мержить ветку PR'ом, отчёты регенерируются после сборки.
 
 ---
 
