@@ -7,13 +7,13 @@ const catTone = (cat) => ({
   'Увеличение риска': { chip:'bg-gold-500/20 text-gold-700',  dot:'bg-gold-500',  icon: Icons.TrendUp },
 }[cat] || { chip:'bg-ink-900/8 text-ink-700', dot:'bg-ink-900', icon: Icons.Sparkles });
 
-const TickerCard = ({ ticker, why }) => (
-  <div className="rounded-2xl p-3.5 bg-cream-50 border border-ink-900/5 hover:border-ink-900/15 transition group cursor-pointer">
+const TickerCard = ({ ticker, why, dark }) => (
+  <div className={`rounded-2xl p-3.5 border transition group cursor-pointer ${dark?'bg-white/8 border-white/10':'bg-cream-50 border-ink-900/5 hover:border-ink-900/15'}`}>
     <div className="flex items-center justify-between mb-1">
-      <span className="text-[14px] font-bold num tracking-tight text-ink-900">{ticker}</span>
-      <span className="text-[10px] text-ink-400 font-mono uppercase tracking-wider opacity-0 group-hover:opacity-100 transition">view</span>
+      <span className={`text-[14px] font-bold num tracking-tight ${dark?'text-white':'text-ink-900'}`}>{ticker}</span>
+      <span className={`text-[10px] font-mono uppercase tracking-wider opacity-0 group-hover:opacity-100 transition ${dark?'text-white/40':'text-ink-400'}`}>view</span>
     </div>
-    <p className="text-[11.5px] text-ink-500 leading-snug font-light">{why}</p>
+    <p className={`text-[11.5px] leading-snug font-light ${dark?'text-white/70':'text-ink-500'}`}>{why}</p>
   </div>
 );
 
@@ -121,9 +121,8 @@ const IdeaCard = ({ idea, open, onToggle, isHighlight }) => {
                             ${isHighlight?'text-white/40':'text-ink-400'}`}>
               Почему именно эти бумаги
             </div>
-            <div className={`grid grid-cols-1 md:grid-cols-3 gap-2.5
-                            ${isHighlight ? '[&_div.rounded-2xl]:!bg-white/8 [&_div.rounded-2xl]:!border-white/10 [&_.text-ink-900]:!text-white [&_.text-ink-500]:!text-white/60 [&_.text-ink-400]:!text-white/40' : ''}`}>
-              {idea.tickers.map(t => <TickerCard key={t.t} ticker={t.t} why={t.why}/>)}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
+              {idea.tickers.map(t => <TickerCard key={t.t} ticker={t.t} why={t.why} dark={isHighlight}/>)}
             </div>
           </div>
 

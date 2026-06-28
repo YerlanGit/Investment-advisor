@@ -213,7 +213,7 @@ def _map_deep(p: dict, meta: dict) -> dict:
         "ragSignals": [str(x) for x in _list(reg, "explainers")][:4],
         "drivers": drivers,
         "confirm": _txt(rc, "stance") if _g(rc, "stance") else DASH,
-        "confirmBullets": [str(x) for x in _list(rc, "signals")][:6],
+        "confirmBullets": [_signal_obj(x) for x in _list(rc, "signals")][:6],
         "regimeAI": _txt(p, "ai_regime_comment"),
     }
 
@@ -266,7 +266,7 @@ def _map_deep(p: dict, meta: dict) -> dict:
         "concentration": conc, "riskDecomp": riskDecomp,
         "concAI": _txt(p, "ai_risk_comment") if _g(p, "ai_risk_comment") else _txt(p, "ai_holdings_comment"),
         "holdings": holdings, "sectors": sectors,
-        "sectorWarn": [str(x) for x in _list(p, "sector_warnings")][:3] or [DASH],
+        "sectorWarn": [_warn_text(x) for x in _list(p, "sector_warnings")][:3] or [DASH],
         "holdingsAI": _txt(p, "ai_holdings_comment"),
         "factors": factors, "factorCoverage": _coverage(p), "factorAI": _txt(p, "ai_factor_comment"),
         "scores": scores, "scoresNote": _txt(p, "ai_4pillar_comment"), "scoresAI": _txt(p, "ai_4pillar_comment"),
@@ -391,6 +391,30 @@ def _eff_delta(key: str, v: Any) -> str:
     if key == "sharpe":
         return f"{x:+.2f}"
     return f"{x:+.1f} пп"
+
+
+def _signal_obj(s: Any) -> dict:
+    """Parse a regime-confirmation signal «✓/⚠/✗ текст» → {ok, t}.
+
+    The DEEP regime component renders each bullet as an object (b.ok → Check vs
+    Warning icon, b.t → text).  The mapper passed the raw STRING, so b.t was
+    undefined and the panel showed six icon-only rows with NO text."""
+    txt = str(s).strip()
+    ok = txt[:1] in ("✓", "✔")
+    for ic in ("✓", "✔", "⚠️", "⚠", "✗", "✘", "•"):
+        if txt.startswith(ic):
+            txt = txt[len(ic):].strip()
+            break
+    return {"ok": ok, "t": txt}
+
+
+def _warn_text(x: Any) -> str:
+    """Sector-warning → its human text.  The engine emits dicts
+    {sector, weight_pct, cap_pct, overage_pp, text}; the mapper used to str() the
+    whole dict, leaking «{'sector': 'Technology', ...}» into the UI."""
+    if isinstance(x, dict):
+        return _txt(x, "text")
+    return str(x).strip()
 
 
 def _fund_map(p: dict) -> dict:

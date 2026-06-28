@@ -81,15 +81,17 @@
            their content width and clipped the last column.  Let grid children
            shrink to their track and tighten the inter-column gap so every
            column fits the phone instead of overflowing the card. */
-    #root [class*="grid-cols-["] { gap: 0.4rem !important; }
-    #root [class*="grid-cols-["] > * { min-width: 0 !important; }
+    /* NOTE: do NOT force min-width:0 on grid cells — it collapses the tracks and
+       the nowrap numerics OVERLAP (weight/risk/PnL printed on top of each other).
+       Wide data tables instead get a .mob-scroll-x wrapper (below) so they scroll
+       horizontally with their natural column widths — no overlap, no clipping. */
     /* The widest table (6-column stress) is wrapped in .mob-scroll-x in the
        component: on a phone it scrolls horizontally (its inner keeps natural
        width) instead of clipping the last column.  On desktop these are inert
        plain divs (rules live only inside this mobile @media block). */
     #root .mob-scroll-x { overflow-x: auto !important; -webkit-overflow-scrolling: touch; max-width: 100%; }
-    /* Inner keeps a modest fixed width (a little wider than the phone) so the
-       6 columns get breathing room and the table scrolls only ~70px — not the
-       full single-line max-content width, which would force excessive swiping. */
-    #root .mob-scroll-x > * { min-width: 360px !important; }
+    /* Inner takes its natural content width so every column keeps real room
+       (no collapsed minmax(0,fr) tracks → no overlapping numerics) and the table
+       scrolls horizontally within the card; full-width (≥100%) on desktop. */
+    #root .mob-scroll-x > * { width: max-content !important; min-width: 100% !important; }
   }

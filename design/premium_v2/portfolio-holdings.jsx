@@ -155,6 +155,7 @@ const Holdings = () => {
       </div>
 
       <div className="glass-strong rounded-4xl shadow-card overflow-hidden">
+        <div className="mob-scroll-x"><div>
         {/* Table header */}
         <div className="grid grid-cols-[40px_minmax(0,2fr)_minmax(0,1.6fr)_repeat(4,minmax(0,1fr))_88px_40px] items-center gap-3 px-6 py-3.5 border-b border-ink-900/6 text-[10px] tracking-widest uppercase text-ink-500 font-mono">
           <div></div>
@@ -177,6 +178,7 @@ const Holdings = () => {
             <div className="px-6 py-12 text-center text-ink-500 text-[14px]">Ничего не подходит под фильтр «{filter}».</div>
           )}
         </div>
+        </div></div>
       </div>
     </section>
   );

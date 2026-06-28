@@ -1259,6 +1259,8 @@ const Holdings = () => {
   }, f)))), /*#__PURE__*/React.createElement("div", {
     className: "glass-strong rounded-4xl shadow-card overflow-hidden"
   }, /*#__PURE__*/React.createElement("div", {
+    className: "mob-scroll-x"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "grid grid-cols-[40px_minmax(0,2fr)_minmax(0,1.6fr)_repeat(4,minmax(0,1fr))_88px_40px] items-center gap-3 px-6 py-3.5 border-b border-ink-900/6 text-[10px] tracking-widest uppercase text-ink-500 font-mono"
   }, /*#__PURE__*/React.createElement("div", null), /*#__PURE__*/React.createElement("div", null, "Тикер · Имя"), /*#__PURE__*/React.createElement("div", null, "Класс"), /*#__PURE__*/React.createElement("div", null, "Вес"), /*#__PURE__*/React.createElement("div", null, "Риск"), /*#__PURE__*/React.createElement("div", null, "Beta"), /*#__PURE__*/React.createElement("div", null, "P/L"), /*#__PURE__*/React.createElement("div", {
     className: "text-right"
@@ -1272,7 +1274,7 @@ const Holdings = () => {
     onToggle: () => setOpenIdx(openIdx === i ? -1 : i)
   })), rows.length === 0 && /*#__PURE__*/React.createElement("div", {
     className: "px-6 py-12 text-center text-ink-500 text-[14px]"
-  }, "Ничего не подходит под фильтр «", filter, "»."))));
+  }, "Ничего не подходит под фильтр «", filter, "»."))))));
 };
 Object.assign(window, {
   Holdings
@@ -1469,17 +1471,18 @@ const catTone = cat => ({
 };
 const TickerCard = ({
   ticker,
-  why
+  why,
+  dark
 }) => /*#__PURE__*/React.createElement("div", {
-  className: "rounded-2xl p-3.5 bg-cream-50 border border-ink-900/5 hover:border-ink-900/15 transition group cursor-pointer"
+  className: `rounded-2xl p-3.5 border transition group cursor-pointer ${dark ? 'bg-white/8 border-white/10' : 'bg-cream-50 border-ink-900/5 hover:border-ink-900/15'}`
 }, /*#__PURE__*/React.createElement("div", {
   className: "flex items-center justify-between mb-1"
 }, /*#__PURE__*/React.createElement("span", {
-  className: "text-[14px] font-bold num tracking-tight text-ink-900"
+  className: `text-[14px] font-bold num tracking-tight ${dark ? 'text-white' : 'text-ink-900'}`
 }, ticker), /*#__PURE__*/React.createElement("span", {
-  className: "text-[10px] text-ink-400 font-mono uppercase tracking-wider opacity-0 group-hover:opacity-100 transition"
+  className: `text-[10px] font-mono uppercase tracking-wider opacity-0 group-hover:opacity-100 transition ${dark ? 'text-white/40' : 'text-ink-400'}`
 }, "view")), /*#__PURE__*/React.createElement("p", {
-  className: "text-[11.5px] text-ink-500 leading-snug font-light"
+  className: `text-[11.5px] leading-snug font-light ${dark ? 'text-white/70' : 'text-ink-500'}`
 }, why));
 const PipelineNode = ({
   label,
@@ -1589,12 +1592,12 @@ const IdeaCard = ({
     className: `text-[10px] tracking-widest uppercase font-mono mb-2.5
                             ${isHighlight ? 'text-white/40' : 'text-ink-400'}`
   }, "Почему именно эти бумаги"), /*#__PURE__*/React.createElement("div", {
-    className: `grid grid-cols-1 md:grid-cols-3 gap-2.5
-                            ${isHighlight ? '[&_div.rounded-2xl]:!bg-white/8 [&_div.rounded-2xl]:!border-white/10 [&_.text-ink-900]:!text-white [&_.text-ink-500]:!text-white/60 [&_.text-ink-400]:!text-white/40' : ''}`
+    className: "grid grid-cols-1 md:grid-cols-3 gap-2.5"
   }, idea.tickers.map(t => /*#__PURE__*/React.createElement(TickerCard, {
     key: t.t,
     ticker: t.t,
-    why: t.why
+    why: t.why,
+    dark: isHighlight
   })))), /*#__PURE__*/React.createElement("div", {
     className: "flex items-start justify-between gap-4 flex-wrap"
   }, /*#__PURE__*/React.createElement("div", {

@@ -14,6 +14,7 @@ const ActionPlan = ({ rows }) => (
       </div>
       <span className="text-[10px] font-mono text-ink-400 tracking-wider px-2.5 py-1 rounded-full bg-cream-50 border border-ink-900/5">Quant Engine</span>
     </div>
+    <div className="mob-scroll-x"><div>
     <div className="grid grid-cols-[minmax(0,1fr)_72px_minmax(0,1fr)_minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1.6fr)] gap-3 px-1 pb-2.5 text-[9.5px] tracking-widest uppercase text-ink-400 font-mono border-b border-ink-900/8">
       <div>Тикер</div><div>Действие</div><div className="text-right">Цена</div><div className="text-right">Sell target</div><div className="text-right">Stop</div><div>Причина</div>
     </div>
@@ -33,6 +34,7 @@ const ActionPlan = ({ rows }) => (
         </div>
       ))}
     </div>
+    </div></div>
     <div className="mt-4 rounded-2xl bg-cream-50 border border-ink-900/5 px-4 py-3.5 flex items-start gap-3">
       <Icons.Sparkles size={14} className="text-gold-600 mt-0.5 flex-shrink-0" stroke={1.8}/>
       <p className="text-[12.5px] text-ink-700 leading-relaxed font-light">{window.DEEP.actionAI}</p>
