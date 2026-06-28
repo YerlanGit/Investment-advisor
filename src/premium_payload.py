@@ -125,10 +125,11 @@ def _map_deep(p: dict, meta: dict) -> dict:
         "sumStandalone": _num(wf, "sum_standalone_pp"),
     }
 
-    # sectors
+    # sectors — distinct on-brand colour per slice (was a single #1c1b1a for ALL,
+    # so the stacked bar + legend squares rendered as one indistinguishable black).
     sectors = [{"name": _txt(s, "name"), "pct": round(_num(s, "weight_pct")),
                 "warn": bool(_g(s, "warn") or _num(s, "weight_pct") >= 40),
-                "hue": "#1c1b1a"} for s in _list(p, "sectors")]
+                "hue": _sector_hue(_txt(s, "name"), i)} for i, s in enumerate(_list(p, "sectors"))]
 
     # factors
     factors = [{"name": _txt(f, "axis"), "port": _num(f, "beta"), "mkt": _num(f, "bench", default=1.0)}
@@ -310,8 +311,8 @@ def _map_base(p: dict, meta: dict) -> dict:
                  if _has_top else DASH),
     }
     sectors = [{"name": _txt(s, "name"), "pct": round(_num(s, "weight_pct")),
-                "warn": bool(_g(s, "warn") or _num(s, "weight_pct") >= 40), "hue": "#1c1b1a"}
-               for s in _list(p, "sectors")]
+                "warn": bool(_g(s, "warn") or _num(s, "weight_pct") >= 40), "hue": _sector_hue(_txt(s, "name"), i)}
+               for i, s in enumerate(_list(p, "sectors"))]
     wf = _g(p, "risk_waterfall", default={}) or {}
     riskDecomp = {
         "standalone": [{"t": _txt(c, "ticker"), "v": _num(c, "standalone_pp")} for c in _list(wf, "contributions")[:4]],
@@ -327,6 +328,7 @@ def _map_base(p: dict, meta: dict) -> dict:
         "meta": {**meta, "tier": "BASE", "engine": "MAC3"},
         "verdict": {"headline": _txt(p, "ai_verdict"), "sub": _txt(p, "ai_plain_summary"),
                     "riskIndex": round(_num(p, "risk_pct")),
+                    "riskTier": _txt(p, "risk_label"),   # real tier for the AI-insight card
                     # BLOCK 5 — portfolio FORWARD expected annual return + Sharpe.
                     "expReturn": _txt(p, "expected_return_annual"),
                     "expSharpe": _txt(p, "expected_sharpe"),
@@ -406,6 +408,28 @@ def _signal_obj(s: Any) -> dict:
             txt = txt[len(ic):].strip()
             break
     return {"ok": ok, "t": txt}
+
+
+# Distinct on-brand sector palette (warm cream/gold/ink/sage/rust theme).  A few
+# sectors get a SEMANTIC colour (Gold→gold, Silver→silver-grey, Bonds→calm sage);
+# the rest cycle through the palette by index so every slice is distinguishable.
+_SECTOR_PALETTE = ["#caa01a", "#3a3833", "#5d7c5c", "#c47358", "#9a7a10",
+                   "#7a9a78", "#a85a40", "#55524c", "#eac233", "#c4bfb5"]
+_SECTOR_NAMED = {
+    "gold": "#eac233", "золото": "#eac233",
+    "silver": "#9a958c", "серебро": "#9a958c",
+    "bonds": "#5d7c5c", "облигации": "#5d7c5c",
+    "technology": "#caa01a", "технологии": "#caa01a",
+    "semiconductors": "#9a7a10", "полупроводники": "#9a7a10",
+    "other": "#c4bfb5", "прочее": "#c4bfb5",
+}
+
+
+def _sector_hue(name: Any, i: int) -> str:
+    key = str(name or "").strip().lower()
+    if key in _SECTOR_NAMED:
+        return _SECTOR_NAMED[key]
+    return _SECTOR_PALETTE[i % len(_SECTOR_PALETTE)]
 
 
 def _warn_text(x: Any) -> str:
@@ -489,9 +513,14 @@ def _map_performance(p: dict) -> dict:
     (months/port/spx) aren't in the payload, so they're empty (chart degrades)."""
     prt = _g(p, "period_returns_table", default={}) or {}
     first = next(iter(prt.values()), {}) if isinstance(prt, dict) else {}
-    periods = [{"label": _txt(r, "label"), "p": _pct(_g(r, "portfolio")),
-                "s": _pct(_g(r, "benchmark")), "d": _pct(_g(r, "excess"))}
-               for r in _list(first, "periods")]
+    periods = []
+    for r in _list(first, "periods"):
+        _pp = _pct(_g(r, "portfolio"))
+        _ss = _pct(_g(r, "benchmark"))
+        _dd = _pct(_g(r, "excess"))
+        if not _dd:                       # source usually omits excess → derive p−s
+            _dd = round(_pp - _ss, 1)
+        periods.append({"label": _txt(r, "label"), "p": _pp, "s": _ss, "d": _dd})
     # Build a coarse equity curve from the period horizons so PerfChart has
     # real, NaN-free points (the payload has no monthly series).  0 → 1m → 3m …
     _ORD = {"1 мес": 1, "1м": 1, "3 мес": 3, "3м": 3, "6 мес": 6, "6м": 6,
@@ -500,9 +529,21 @@ def _map_performance(p: dict) -> dict:
     months = ["старт"] + [r["label"] for r in pts]
     port   = [0.0] + [r["p"] for r in pts]
     spx    = [0.0] + [r["s"] for r in pts]
+    # Headline 12-month summary — REAL data.  The component used to hardcode
+    # +14.2% / +5.1пп vs S&P / S&P +9.1% / vol 14.8%, which on an underperforming
+    # book CONTRADICTED reality (and the AI verdict «отстаёт от рынка»).  Pick the
+    # 12-month row and carry the true figures.
+    _p12 = next((r for r in periods if r["label"] in ("12 мес", "12М", "12м")),
+                (periods[-1] if periods else {}))
+    summary = {
+        "ret":     _p12.get("p", 0.0),
+        "spx":     _p12.get("s", 0.0),
+        "exc":     _p12.get("d", round(_p12.get("p", 0.0) - _p12.get("s", 0.0), 1)),
+        "volPort": round(_num(p, "volatility"), 1),
+    }
     return {"months": months, "port": port, "spx": spx,
             "vol": {"port": _num(p, "volatility"), "spx": 0},
-            "periods": periods}
+            "periods": periods, "summary": summary}
 
 
 def _pipe_step(s: Any) -> str:

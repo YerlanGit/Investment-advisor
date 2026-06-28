@@ -60,7 +60,7 @@ const HoldingRow = ({ h, open, onToggle }) => {
         </div>
       </button>
 
-      <div className="overflow-hidden transition-[max-height,opacity] duration-500 ease-out"
+      <div className="mob-detail overflow-hidden transition-[max-height,opacity] duration-500 ease-out"
            style={{ maxHeight: open?640:0, opacity: open?1:0 }}>
         <div className="px-5 pb-5 pt-1">
           <div className="rounded-3xl p-5 bg-white/70 border border-ink-900/5">
@@ -173,7 +173,8 @@ const Holdings = () => {
       <div className="grid grid-cols-12 gap-5 items-stretch">
         <div className="col-span-12 lg:col-span-8">
           <div className="glass-strong rounded-4xl shadow-card overflow-hidden">
-            <div className="mob-scroll-x"><div>
+            <div className="swipe-hint items-center gap-1 text-[10px] font-mono text-gold-700 bg-gold-400/15 rounded-full px-2.5 py-1 mb-2.5 w-max">↔ листайте таблицу</div>
+    <div className="mob-scroll-x"><div>
             <div className="grid grid-cols-[36px_minmax(0,1.9fr)_minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.1fr)_84px_36px] items-center gap-3 px-5 py-3 border-b border-ink-900/6 text-[9.5px] tracking-widest uppercase text-ink-500 font-mono">
               <div></div><div>Тикер · Имя</div><div>Класс</div><div>Вес</div><div>Риск</div><div>P/L</div><div className="text-right">Сигнал</div><div></div>
             </div>

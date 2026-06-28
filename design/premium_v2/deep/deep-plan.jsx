@@ -14,6 +14,7 @@ const ActionPlan = ({ rows }) => (
       </div>
       <span className="text-[10px] font-mono text-ink-400 tracking-wider px-2.5 py-1 rounded-full bg-cream-50 border border-ink-900/5">Quant Engine</span>
     </div>
+    <div className="swipe-hint items-center gap-1 text-[10px] font-mono text-gold-700 bg-gold-400/15 rounded-full px-2.5 py-1 mb-2.5 w-max">↔ листайте таблицу</div>
     <div className="mob-scroll-x"><div>
     <div className="grid grid-cols-[minmax(0,1fr)_72px_minmax(0,1fr)_minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1.6fr)] gap-3 px-1 pb-2.5 text-[9.5px] tracking-widest uppercase text-ink-400 font-mono border-b border-ink-900/8">
       <div>Тикер</div><div>Действие</div><div className="text-right">Цена</div><div className="text-right">Sell target</div><div className="text-right">Stop</div><div>Причина</div>
@@ -91,7 +92,7 @@ const PipeNode = ({ n, label, last }) => (
       <div className="text-[8.5px] tracking-widest uppercase text-ink-400 font-mono mb-1">{label}</div>
       <div className="text-[10.5px] text-ink-800 font-medium leading-tight">{n}</div>
     </div>
-    {!last && <div className="flex items-center justify-center w-5 flex-shrink-0"><Icons.ArrowR size={12} className="text-ink-300" stroke={2}/></div>}
+    {!last && <div className="hidden sm:flex items-center justify-center w-5 flex-shrink-0"><Icons.ArrowR size={12} className="text-ink-300" stroke={2}/></div>}
   </>
 );
 
@@ -141,7 +142,7 @@ const IdeaCard = ({ idea, open, onToggle, highlight }) => {
         <div className={`px-6 pb-6 pt-2 space-y-5 ${highlight?'border-t border-white/10':'border-t border-ink-900/6'}`}>
           <div className="pt-4">
             <div className={`text-[10px] tracking-widest uppercase font-mono mb-2.5 ${highlight?'text-white/40':'text-ink-400'}`}>Конвейер · Factor → Regime → Stress → RAG</div>
-            <div className={`flex items-stretch ${highlight ? '[&_div.rounded-xl]:!bg-white/8 [&_div.rounded-xl]:!border-white/10 [&_.text-ink-800]:!text-white [&_.text-ink-400]:!text-white/40 [&_svg]:!text-white/40' : ''}`}>
+            <div className={`flex flex-col sm:flex-row sm:items-stretch gap-1.5 sm:gap-0 ${highlight ? '[&_div.rounded-xl]:!bg-white/8 [&_div.rounded-xl]:!border-white/10 [&_.text-ink-800]:!text-white [&_.text-ink-400]:!text-white/40 [&_svg]:!text-white/40' : ''}`}>
               {idea.pipeline.map((s,i) => <PipeNode key={i} n={s} label={stages[i]} last={i===idea.pipeline.length-1}/>)}
             </div>
           </div>
