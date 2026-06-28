@@ -39,18 +39,25 @@ const PeriodRow = ({ p, isMax }) => (
 
 const Performance = () => {
   const p = window.PORTFOLIO.performance;
-  const s = p.summary || {};
+  // The period selector is now FUNCTIONAL: it drives the headline figures from
+  // the SELECTED period's real row (was dead — it changed state but nothing read
+  // it, so the chip highlighted but no number moved).
+  const periods = (p.periods||[]).map(x=>x.label);
+  const [period, setPeriod] = React.useState(periods.includes('12М') ? '12М' : (periods[periods.length-1] || '12М'));
+  const sel = (p.periods||[]).find(x=>x.label===period) || {};
+  const s = { ret: sel.p ?? (p.summary||{}).ret ?? 0,
+              exc: sel.d ?? (p.summary||{}).exc ?? 0,
+              spx: sel.s ?? (p.summary||{}).spx ?? 0,
+              volPort: (p.summary||{}).volPort };
   const fmt = (x) => `${x>=0?'+':'−'}${Math.abs(x)}`;
   const beats = (s.exc||0) >= 0;
-  const [period, setPeriod] = React.useState('12 мес');
-  const periods = ['1 мес','3 мес','YTD','6 мес','12 мес'];
 
   return (
     <section id="performance" className="rise" data-screen-label="03 Performance">
       <div className="flex items-end justify-between gap-4 flex-wrap mb-6">
         <div>
           <div className="flex items-center gap-2 text-[11px] tracking-widest uppercase text-ink-500 font-mono mb-2">
-            <span className="w-1.5 h-1.5 rounded-full bg-gold-400"/> Performance · 12 месяцев
+            <span className="w-1.5 h-1.5 rounded-full bg-gold-400"/> Performance · {period}
           </div>
           <h2 className="text-[40px] leading-[1.05] tracking-[-0.02em] font-light text-ink-900">
             Рост против рынка<span className="text-ink-400">.</span>
@@ -74,7 +81,7 @@ const Performance = () => {
         <div className="col-span-12 lg:col-span-8 glass-strong rounded-4xl shadow-card lift p-7">
           <div className="flex items-start justify-between gap-3 flex-wrap mb-4">
             <div>
-              <div className="text-ink-500 text-[12px] font-medium mb-1">Накопленная доходность · 12 мес</div>
+              <div className="text-ink-500 text-[12px] font-medium mb-1">Доходность за период · {period}</div>
               <div className="flex items-end gap-3 flex-wrap">
                 <span className="text-[48px] leading-none font-light num text-ink-900">{fmt(s.ret)}<span className="text-[28px] text-ink-500">%</span></span>
                 <span className={`px-2.5 py-1 rounded-full text-[11px] font-semibold mb-1.5 flex items-center gap-1 ${beats?'bg-sage-500/15 text-sage-600':'bg-rust-500/15 text-rust-600'}`}>
@@ -96,11 +103,11 @@ const Performance = () => {
 
         {/* Side cards */}
         <div className="col-span-12 lg:col-span-4 grid grid-cols-2 lg:grid-cols-1 gap-5">
-          <PerfSummaryCard label="Доходность" value={`${fmt(s.ret)}%`} sub="за 12 месяцев" accent="gold" IconC={Icons.TrendUp}/>
+          <PerfSummaryCard label="Доходность" value={`${fmt(s.ret)}%`} sub={`за ${period}`} accent="gold" IconC={Icons.TrendUp}/>
           <PerfSummaryCard label={beats?'Опережение':'Отставание'} value={`${fmt(s.exc)}пп`} sub={beats?'портфель быстрее рынка':'портфель медленнее рынка'} accent="dark" IconC={Icons.Bolt}/>
           <div className="col-span-2 lg:col-span-1 grid grid-cols-2 gap-3">
             <PerfSummaryCard label="Волатильность" value={`${s.volPort}%`} sub="год." accent="light"/>
-            <PerfSummaryCard label="S&P 500" value={`${fmt(s.spx)}%`} sub="за 12 мес" accent="light"/>
+            <PerfSummaryCard label="S&P 500" value={`${fmt(s.spx)}%`} sub={`за ${period}`} accent="light"/>
           </div>
         </div>
 
@@ -111,7 +118,7 @@ const Performance = () => {
             <div className="text-[11px] text-ink-500 font-mono">Портфель / S&P 500 / Опережение</div>
           </div>
           <div className="space-y-1">
-            {p.periods.map(pr => <PeriodRow key={pr.label} p={pr} isMax={pr.label === '12 мес'}/>)}
+            {p.periods.map(pr => <PeriodRow key={pr.label} p={pr} isMax={pr.label === period}/>)}
           </div>
         </div>
       </div>

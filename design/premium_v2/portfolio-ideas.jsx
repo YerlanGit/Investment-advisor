@@ -126,8 +126,11 @@ const IdeaCard = ({ idea, open, onToggle, isHighlight }) => {
             </div>
           </div>
 
-          {/* Effect + sources */}
+          {/* Effect + sources — render ONLY when there's content (BASE ideas
+              carry no effect/sources → was an empty «Ожидаемый эффект» box). */}
+          {((idea.effect && idea.effect.length>0) || (idea.sources && idea.sources.length>0)) && (
           <div className="flex items-start justify-between gap-4 flex-wrap">
+            {idea.effect && idea.effect.length>0 && (
             <div className={`rounded-2xl p-4 flex-1 min-w-[260px]
                             ${isHighlight?'bg-gold-400/10 border border-gold-400/30':'bg-gold-400/15 border border-gold-400/40'}`}>
               <div className={`text-[10px] tracking-widest uppercase font-mono mb-1.5
@@ -142,7 +145,8 @@ const IdeaCard = ({ idea, open, onToggle, isHighlight }) => {
                   </li>
                 ))}
               </ul>
-            </div>
+            </div>)}
+            {idea.sources && idea.sources.length>0 && (
             <div className="flex flex-wrap gap-1.5 items-start pt-1">
               {idea.sources.map(s => (
                 <span key={s} className={`px-2.5 py-1 rounded-full text-[10px] font-mono tracking-wider
@@ -150,8 +154,8 @@ const IdeaCard = ({ idea, open, onToggle, isHighlight }) => {
                   {s}
                 </span>
               ))}
-            </div>
-          </div>
+            </div>)}
+          </div>)}
         </div>
       </div>
     </div>

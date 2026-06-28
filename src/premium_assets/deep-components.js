@@ -386,11 +386,19 @@ const Waterfall = ({
     total,
     sumStandalone
   } = data;
+  // «Прочие» bridges the shown top-N standalone bars up to the FULL sum so the
+  // waterfall RECONCILES: ΣstandAlone + diversification = total (was detached).
+  const _shown = standalone.reduce((a, s) => a + s.v, 0);
+  const _other = Math.round((sumStandalone - _shown) * 10) / 10;
   const cols = [...standalone.map(s => ({
     t: s.t,
     v: s.v,
     kind: 'pos'
-  })), {
+  })), ...(_other > 0.5 ? [{
+    t: 'Прочие',
+    v: _other,
+    kind: 'pos'
+  }] : []), {
     t: 'Дивер-сификация',
     v: diversification,
     kind: 'neg'
@@ -399,15 +407,15 @@ const Waterfall = ({
     v: total,
     kind: 'total'
   }];
-  // Scale to the VISIBLE peak (running max of the shown bars ⊕ total), not the
-  // full sum_standalone — otherwise the shown bars fill only ~55% of the chart.
   let _run = 0,
     _peak = 0;
-  standalone.forEach(s => {
-    _run += s.v;
-    _peak = Math.max(_peak, _run);
+  cols.forEach(c => {
+    if (c.kind === 'pos') {
+      _run += c.v;
+      _peak = Math.max(_peak, _run);
+    }
   });
-  const maxV = Math.max(_peak, total) * 1.08;
+  const maxV = Math.max(_peak, total) * 1.06;
   const W = 520,
     H = height,
     padL = 32,
