@@ -36,17 +36,22 @@ const RiskGauge = ({ value=62, size=240, label='Индекс риска' }) => {
 // ── Waterfall: standalone bars + diversification (negative) + total
 const Waterfall = ({ data, height=200 }) => {
   const { standalone, diversification, total, sumStandalone } = data;
+  // «Прочие» bridges the shown top-N standalone bars up to the FULL sum so the
+  // waterfall RECONCILES: ΣstandAlone + diversification = total.  Without it the
+  // 4 shown bars (≈20) plus diversification landed at ≈7.7, not the 18.7 total —
+  // the diversification step looked detached/wrong.
+  const _shown = standalone.reduce((a,s)=>a+s.v, 0);
+  const _other = Math.round((sumStandalone - _shown)*10)/10;
   const cols = [
     ...standalone.map(s => ({ t:s.t, v:s.v, kind:'pos' })),
+    ...(_other > 0.5 ? [{ t:'Прочие', v:_other, kind:'pos' }] : []),
     { t:'Дивер-сификация', v:diversification, kind:'neg' },
     { t:'Итог', v:total, kind:'total' },
   ];
-  // Scale to the VISIBLE peak (running max of the shown bars ⊕ total), not the
-  // full sum_standalone — otherwise the 4 shown bars fill only ~55% of the chart
-  // and the top is a big empty gap.
+  // maxV = running peak of the standalone steps ⊕ total (fills the card; no gap).
   let _run = 0, _peak = 0;
-  standalone.forEach(s => { _run += s.v; _peak = Math.max(_peak, _run); });
-  const maxV = Math.max(_peak, total) * 1.08;
+  cols.forEach(c => { if (c.kind==='pos') { _run += c.v; _peak = Math.max(_peak, _run); } });
+  const maxV = Math.max(_peak, total) * 1.06;
   const W = 520, H = height, padL = 32, padR = 12, padT = 18, padB = 36;
   const innerW = W - padL - padR;
   const innerH = H - padT - padB;

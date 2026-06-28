@@ -310,11 +310,21 @@ const Waterfall = ({
     total,
     sumStandalone
   } = data;
+  // «Прочие» bridges the shown top-N standalone bars up to the FULL sum so the
+  // waterfall RECONCILES: ΣstandAlone + diversification = total.  Without it the
+  // 4 shown bars (≈20) plus diversification landed at ≈7.7, not the 18.7 total —
+  // the diversification step looked detached/wrong.
+  const _shown = standalone.reduce((a, s) => a + s.v, 0);
+  const _other = Math.round((sumStandalone - _shown) * 10) / 10;
   const cols = [...standalone.map(s => ({
     t: s.t,
     v: s.v,
     kind: 'pos'
-  })), {
+  })), ...(_other > 0.5 ? [{
+    t: 'Прочие',
+    v: _other,
+    kind: 'pos'
+  }] : []), {
     t: 'Дивер-сификация',
     v: diversification,
     kind: 'neg'
@@ -323,16 +333,16 @@ const Waterfall = ({
     v: total,
     kind: 'total'
   }];
-  // Scale to the VISIBLE peak (running max of the shown bars ⊕ total), not the
-  // full sum_standalone — otherwise the 4 shown bars fill only ~55% of the chart
-  // and the top is a big empty gap.
+  // maxV = running peak of the standalone steps ⊕ total (fills the card; no gap).
   let _run = 0,
     _peak = 0;
-  standalone.forEach(s => {
-    _run += s.v;
-    _peak = Math.max(_peak, _run);
+  cols.forEach(c => {
+    if (c.kind === 'pos') {
+      _run += c.v;
+      _peak = Math.max(_peak, _run);
+    }
   });
-  const maxV = Math.max(_peak, total) * 1.08;
+  const maxV = Math.max(_peak, total) * 1.06;
   const W = 520,
     H = height,
     padL = 32,
@@ -842,12 +852,7 @@ const RiskGaugeCard = ({
   className: "text-ink-500 text-[12px] font-medium"
 }, "Индекс риска"), /*#__PURE__*/React.createElement("h3", {
   className: "text-2xl font-semibold tracking-tight text-ink-900 leading-tight"
-}, "Сводный 0–100")), /*#__PURE__*/React.createElement("button", {
-  className: "w-9 h-9 rounded-full bg-ink-900/5 hover:bg-ink-900/10 flex items-center justify-center text-ink-700 transition",
-  "aria-label": "open"
-}, /*#__PURE__*/React.createElement(Icons.ArrowUR, {
-  size: 16
-}))), /*#__PURE__*/React.createElement("div", {
+}, "Сводный 0–100"))), /*#__PURE__*/React.createElement("div", {
   className: "flex-1 flex items-center justify-center -mt-2"
 }, /*#__PURE__*/React.createElement(RiskGauge, {
   value: value,
@@ -881,11 +886,7 @@ const RiskDecompCard = ({
   className: "flex items-center gap-2"
 }, /*#__PURE__*/React.createElement("span", {
   className: "px-2.5 py-1 rounded-full bg-cream-50 border border-ink-900/5 text-[10px] font-mono tracking-wider text-ink-700"
-}, "14.2%"), /*#__PURE__*/React.createElement("button", {
-  className: "w-9 h-9 rounded-full bg-ink-900/5 hover:bg-ink-900/10 flex items-center justify-center text-ink-700 transition"
-}, /*#__PURE__*/React.createElement(Icons.ArrowUR, {
-  size: 16
-})))), /*#__PURE__*/React.createElement("div", {
+}, data.total != null ? `${data.total}%` : '—'))), /*#__PURE__*/React.createElement("div", {
   className: "flex-1 flex items-center -mx-1"
 }, /*#__PURE__*/React.createElement(Waterfall, {
   data: data
@@ -965,11 +966,7 @@ const AIInsightCard = ({
 }, /*#__PURE__*/React.createElement(Icons.Sparkles, {
   size: 13,
   stroke: 1.8
-}), " AI · ", window.PORTFOLIO.meta.aiModel), /*#__PURE__*/React.createElement("button", {
-  className: "w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/70 transition"
-}, /*#__PURE__*/React.createElement(Icons.ArrowUR, {
-  size: 14
-}))), /*#__PURE__*/React.createElement("div", {
+}), " AI · ", window.PORTFOLIO.meta.aiModel)), /*#__PURE__*/React.createElement("div", {
   className: "mt-4 text-white text-[15px] leading-relaxed font-light"
 }, "Индекс ", /*#__PURE__*/React.createElement("span", {
   className: "text-gold-400 font-semibold num"
@@ -1343,11 +1340,20 @@ const PeriodRow = ({
 }, p.d >= 0 ? '+' : '−', Math.abs(p.d).toFixed(1), " пп"))));
 const Performance = () => {
   const p = window.PORTFOLIO.performance;
-  const s = p.summary || {};
+  // The period selector is now FUNCTIONAL: it drives the headline figures from
+  // the SELECTED period's real row (was dead — it changed state but nothing read
+  // it, so the chip highlighted but no number moved).
+  const periods = (p.periods || []).map(x => x.label);
+  const [period, setPeriod] = React.useState(periods.includes('12М') ? '12М' : periods[periods.length - 1] || '12М');
+  const sel = (p.periods || []).find(x => x.label === period) || {};
+  const s = {
+    ret: sel.p ?? (p.summary || {}).ret ?? 0,
+    exc: sel.d ?? (p.summary || {}).exc ?? 0,
+    spx: sel.s ?? (p.summary || {}).spx ?? 0,
+    volPort: (p.summary || {}).volPort
+  };
   const fmt = x => `${x >= 0 ? '+' : '−'}${Math.abs(x)}`;
   const beats = (s.exc || 0) >= 0;
-  const [period, setPeriod] = React.useState('12 мес');
-  const periods = ['1 мес', '3 мес', 'YTD', '6 мес', '12 мес'];
   return /*#__PURE__*/React.createElement("section", {
     id: "performance",
     className: "rise",
@@ -1358,7 +1364,7 @@ const Performance = () => {
     className: "flex items-center gap-2 text-[11px] tracking-widest uppercase text-ink-500 font-mono mb-2"
   }, /*#__PURE__*/React.createElement("span", {
     className: "w-1.5 h-1.5 rounded-full bg-gold-400"
-  }), " Performance · 12 месяцев"), /*#__PURE__*/React.createElement("h2", {
+  }), " Performance · ", period), /*#__PURE__*/React.createElement("h2", {
     className: "text-[40px] leading-[1.05] tracking-[-0.02em] font-light text-ink-900"
   }, "Рост против рынка", /*#__PURE__*/React.createElement("span", {
     className: "text-ink-400"
@@ -1379,7 +1385,7 @@ const Performance = () => {
     className: "flex items-start justify-between gap-3 flex-wrap mb-4"
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "text-ink-500 text-[12px] font-medium mb-1"
-  }, "Накопленная доходность · 12 мес"), /*#__PURE__*/React.createElement("div", {
+  }, "Доходность за период · ", period), /*#__PURE__*/React.createElement("div", {
     className: "flex items-end gap-3 flex-wrap"
   }, /*#__PURE__*/React.createElement("span", {
     className: "text-[48px] leading-none font-light num text-ink-900"
@@ -1413,7 +1419,7 @@ const Performance = () => {
   }, /*#__PURE__*/React.createElement(PerfSummaryCard, {
     label: "Доходность",
     value: `${fmt(s.ret)}%`,
-    sub: "за 12 месяцев",
+    sub: `за ${period}`,
     accent: "gold",
     IconC: Icons.TrendUp
   }), /*#__PURE__*/React.createElement(PerfSummaryCard, {
@@ -1432,7 +1438,7 @@ const Performance = () => {
   }), /*#__PURE__*/React.createElement(PerfSummaryCard, {
     label: "S&P 500",
     value: `${fmt(s.spx)}%`,
-    sub: "за 12 мес",
+    sub: `за ${period}`,
     accent: "light"
   }))), /*#__PURE__*/React.createElement("div", {
     className: "col-span-12 glass-strong rounded-4xl shadow-card p-6"
@@ -1447,7 +1453,7 @@ const Performance = () => {
   }, p.periods.map(pr => /*#__PURE__*/React.createElement(PeriodRow, {
     key: pr.label,
     p: pr,
-    isMax: pr.label === '12 мес'
+    isMax: pr.label === period
   }))))));
 };
 Object.assign(window, {
@@ -1610,9 +1616,9 @@ const IdeaCard = ({
     ticker: t.t,
     why: t.why,
     dark: isHighlight
-  })))), /*#__PURE__*/React.createElement("div", {
+  })))), (idea.effect && idea.effect.length > 0 || idea.sources && idea.sources.length > 0) && /*#__PURE__*/React.createElement("div", {
     className: "flex items-start justify-between gap-4 flex-wrap"
-  }, /*#__PURE__*/React.createElement("div", {
+  }, idea.effect && idea.effect.length > 0 && /*#__PURE__*/React.createElement("div", {
     className: `rounded-2xl p-4 flex-1 min-w-[260px]
                             ${isHighlight ? 'bg-gold-400/10 border border-gold-400/30' : 'bg-gold-400/15 border border-gold-400/40'}`
   }, /*#__PURE__*/React.createElement("div", {
@@ -1624,7 +1630,7 @@ const IdeaCard = ({
     key: i,
     className: `text-[12.5px] font-medium leading-tight
                                           ${isHighlight ? 'text-white' : 'text-ink-900'}`
-  }, e)))), /*#__PURE__*/React.createElement("div", {
+  }, e)))), idea.sources && idea.sources.length > 0 && /*#__PURE__*/React.createElement("div", {
     className: "flex flex-wrap gap-1.5 items-start pt-1"
   }, idea.sources.map(s => /*#__PURE__*/React.createElement("span", {
     key: s,

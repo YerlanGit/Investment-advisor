@@ -112,9 +112,6 @@ const RiskGaugeCard = ({ value, delta }) => (
         <div className="text-ink-500 text-[12px] font-medium">Индекс риска</div>
         <h3 className="text-2xl font-semibold tracking-tight text-ink-900 leading-tight">Сводный 0–100</h3>
       </div>
-      <button className="w-9 h-9 rounded-full bg-ink-900/5 hover:bg-ink-900/10 flex items-center justify-center text-ink-700 transition" aria-label="open">
-        <Icons.ArrowUR size={16}/>
-      </button>
     </div>
     <div className="flex-1 flex items-center justify-center -mt-2">
       <RiskGauge value={value} size={240}/>
@@ -141,11 +138,8 @@ const RiskDecompCard = ({ data }) => (
       </div>
       <div className="flex items-center gap-2">
         <span className="px-2.5 py-1 rounded-full bg-cream-50 border border-ink-900/5 text-[10px] font-mono tracking-wider text-ink-700">
-          14.2%
+          {data.total != null ? `${data.total}%` : '—'}
         </span>
-        <button className="w-9 h-9 rounded-full bg-ink-900/5 hover:bg-ink-900/10 flex items-center justify-center text-ink-700 transition">
-          <Icons.ArrowUR size={16}/>
-        </button>
       </div>
     </div>
     <div className="flex-1 flex items-center -mx-1">
@@ -201,9 +195,6 @@ const AIInsightCard = ({ verdict }) => (
       <div className="flex items-center gap-2 text-gold-400 text-[10px] font-mono tracking-widest uppercase">
         <Icons.Sparkles size={13} stroke={1.8}/> AI · {window.PORTFOLIO.meta.aiModel}
       </div>
-      <button className="w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/70 transition">
-        <Icons.ArrowUR size={14}/>
-      </button>
     </div>
     <div className="mt-4 text-white text-[15px] leading-relaxed font-light">
       Индекс <span className="text-gold-400 font-semibold num">{verdict.riskIndex}</span>
