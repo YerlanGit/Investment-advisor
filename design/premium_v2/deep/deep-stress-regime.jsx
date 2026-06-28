@@ -9,6 +9,7 @@ const StressTable = ({ rows }) => (
       </div>
       <span className="text-[10px] font-mono text-ink-400 tracking-wider px-2.5 py-1 rounded-full bg-cream-50 border border-ink-900/5">7 сценариев · не прогноз</span>
     </div>
+    <div className="mob-scroll-x"><div>
     <div className="grid grid-cols-[minmax(0,2.1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.4fr)_minmax(0,0.9fr)_minmax(0,1fr)] gap-3 px-1 pb-2.5 text-[9.5px] tracking-widest uppercase text-ink-400 font-mono border-b border-ink-900/8">
       <div>Сценарий</div><div className="text-right">Δ Портфель</div><div className="text-right">Δ Стоимость</div><div>Магнитуда</div><div className="text-right">Drawdown</div><div className="text-right">Восстановл.</div>
     </div>
@@ -27,6 +28,7 @@ const StressTable = ({ rows }) => (
         );
       })}
     </div>
+    </div></div>
     <div className="mt-4 rounded-2xl bg-cream-50 border border-ink-900/5 px-4 py-3.5 flex items-start gap-3">
       <Icons.Sparkles size={14} className="text-gold-600 mt-0.5 flex-shrink-0" stroke={1.8}/>
       <p className="text-[12.5px] text-ink-700 leading-relaxed font-light">{window.DEEP.stressAI}</p>

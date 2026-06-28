@@ -199,7 +199,7 @@ const Ideas = () => {
             <Icons.Sparkles size={18} stroke={1.7}/>
           </div>
           <div className="flex-1">
-            <div className="text-[10px] tracking-widest uppercase font-mono text-ink-700 mb-1">AI · Haiku · сводка</div>
+            <div className="text-[10px] tracking-widest uppercase font-mono text-ink-700 mb-1">AI · {window.PORTFOLIO.meta.aiModel} · сводка</div>
             <p className="text-[15px] text-ink-900 leading-relaxed font-light">
               Главная мысль одной строкой: <span className="font-medium">портфель зарабатывает</span>, но риск собран в одном углу — <span className="font-medium num">62%</span> в технологиях.
               Идеи ниже — как сохранить рост и сделать портфель устойчивее к просадке.

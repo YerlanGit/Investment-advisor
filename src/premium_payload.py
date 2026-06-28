@@ -166,12 +166,18 @@ def _map_deep(p: dict, meta: dict) -> dict:
                        "delta":  _eff_delta(key, _g(cell, "delta_pp")),
                        "tone": "pos" if fav is True else ("neg" if fav is False else "flat")})
 
-    # action plan
+    # action plan — score + hotspot are NOT on the action_plan rows; they live in
+    # score_breakdown (4-Pillar total) and assets (euler hotspot).  The mapper
+    # previously read non-existent score_total/hotspot keys → every row showed
+    # score 0 and hot=false.  Join them by ticker.
+    _score_by_t = {_txt(s, "ticker"): _num(s, "total") for s in _list(p, "score_breakdown")}
+    _hot_by_t = {_txt(a, "ticker"): bool(_g(a, "hotspot") or _g(a, "euler_extreme")) for a in assets}
     plan = [{"t": _txt(a, "ticker"), "action": _txt(a, "action").upper().split()[0] if _g(a, "action") else DASH,
              "price": _num(a, "price"),  # design calls price.toFixed → MUST be numeric
              "target": _txt(a, "sell_target") if _g(a, "sell_target") else _txt(a, "buy_zone"),
-             "stop": _txt(a, "stop_loss"), "score": _num(a, "score_total", default=0),
-             "hot": bool(_g(a, "hotspot"))} for a in _list(p, "action_plan")]
+             "stop": _txt(a, "stop_loss"),
+             "score": _score_by_t.get(_txt(a, "ticker"), 0.0),
+             "hot": _hot_by_t.get(_txt(a, "ticker"), False)} for a in _list(p, "action_plan")]
 
     # ideas (ai_ideas buckets → 4 cards)
     ideas = _map_ideas(p)
@@ -286,7 +292,23 @@ def _map_base(p: dict, meta: dict) -> dict:
         "fund": _fund_for(fmap, a), "note": _txt(a, "note") if _g(a, "note") else "",
     } for a in assets]
 
-    hot = (_list(p, "hotspots") or [{}])[0]
+    # Top risk hotspot = the asset with the largest Euler TRC.  The old mapper
+    # indexed the `hotspots` list (which is a list of STRINGS, not dicts) as a
+    # dict → the whole featured card rendered '–' / 0.  Derive it from assets.
+    _risky_h = [a for a in assets if not _g(a, "is_cash")]
+    _top = max(_risky_h, key=lambda a: _num(a, "euler_risk_pct"), default={}) if _risky_h else {}
+    _top_t = _txt(_top, "ticker")
+    _sig_by_t = {_txt(s, "ticker"): _txt(s, "action").upper() for s in _list(p, "score_breakdown")}
+    _has_top = bool(_top_t and _top_t != DASH)
+    topHotspot = {
+        "ticker": _top_t, "name": _top_t, "sector": _txt(_top, "asset_class"),
+        "weight": round(_num(_top, "weight_pct_num"), 1),
+        "riskShare": round(_num(_top, "euler_risk_pct"), 1),
+        "pnlPct": _pct(_g(_top, "pnl_pct")), "pnlUsd": _pct(_g(_top, "pnl_abs")),
+        "signal": _sig_by_t.get(_top_t) or (_txt(_top, "action").upper() if _g(_top, "action") else DASH),
+        "note": (f"Наибольший вклад в риск — {round(_num(_top, 'euler_risk_pct'), 1)}% общего риска портфеля"
+                 if _has_top else DASH),
+    }
     sectors = [{"name": _txt(s, "name"), "pct": round(_num(s, "weight_pct")),
                 "warn": bool(_g(s, "warn") or _num(s, "weight_pct") >= 40), "hue": "#1c1b1a"}
                for s in _list(p, "sectors")]
@@ -323,9 +345,7 @@ def _map_base(p: dict, meta: dict) -> dict:
             {"label": "NAV", "value": _txt(p, "total_value_usd"), "icon": "wallet"},
             {"label": "Профиль", "value": _txt(p, "risk_mandate_label"), "icon": "trendUp", "small": True},
         ],
-        "topHotspot": {"ticker": _txt(hot, "ticker"), "name": _txt(hot, "ticker"), "sector": DASH,
-                       "weight": _num(hot, "weight_pct"), "riskShare": _num(hot, "trc_pct"),
-                       "pnlPct": 0, "pnlUsd": 0, "signal": DASH, "note": _txt(hot, "reason")},
+        "topHotspot": topHotspot,
         "sectors": sectors, "riskDecomp": riskDecomp, "holdings": holdings,
         "performance": _map_performance(p),
         "ideas": _map_ideas(p, base=True),

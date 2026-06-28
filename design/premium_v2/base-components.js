@@ -1675,7 +1675,7 @@ const Ideas = () => {
     className: "flex-1"
   }, /*#__PURE__*/React.createElement("div", {
     className: "text-[10px] tracking-widest uppercase font-mono text-ink-700 mb-1"
-  }, "AI · Haiku · сводка"), /*#__PURE__*/React.createElement("p", {
+  }, "AI · ", window.PORTFOLIO.meta.aiModel, " · сводка"), /*#__PURE__*/React.createElement("p", {
     className: "text-[15px] text-ink-900 leading-relaxed font-light"
   }, "Главная мысль одной строкой: ", /*#__PURE__*/React.createElement("span", {
     className: "font-medium"
