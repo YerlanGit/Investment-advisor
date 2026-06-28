@@ -41,7 +41,12 @@ const Waterfall = ({ data, height=200 }) => {
     { t:'Дивер-сификация', v:diversification, kind:'neg' },
     { t:'Итог', v:total, kind:'total' },
   ];
-  const maxV = Math.max(sumStandalone, total) * 1.15;
+  // Scale to the VISIBLE peak (running max of the shown bars ⊕ total), not the
+  // full sum_standalone — otherwise the 4 shown bars fill only ~55% of the chart
+  // and the top is a big empty gap.
+  let _run = 0, _peak = 0;
+  standalone.forEach(s => { _run += s.v; _peak = Math.max(_peak, _run); });
+  const maxV = Math.max(_peak, total) * 1.08;
   const W = 520, H = height, padL = 32, padR = 12, padT = 18, padB = 36;
   const innerW = W - padL - padR;
   const innerH = H - padT - padB;
@@ -56,16 +61,16 @@ const Waterfall = ({ data, height=200 }) => {
       y0 = running;
       y1 = running + c.v;
       running = y1;
-      color = i === 0 ? '#1c1b1a' : i === 1 ? '#f5d04e' : '#3a3833';
+      color = '#1c1b1a';         // standalone bars — all «отдельно» (legend: black)
     } else if (c.kind === 'neg') {
       y0 = running;
       y1 = running + c.v;        // v is negative
       running = y1;
-      color = '#c47358';
+      color = '#c47358';         // «диверсификация» (legend: rust)
     } else {                     // total — floor at 0
       y0 = 0;
       y1 = c.v;
-      color = '#1c1b1a';
+      color = '#f5d04e';         // «итог» (legend: gold)
     }
     const top = Math.max(y0, y1);
     const bot = Math.min(y0, y1);

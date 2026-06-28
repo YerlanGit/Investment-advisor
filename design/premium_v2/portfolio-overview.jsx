@@ -91,11 +91,11 @@ const TopHotspotCard = ({ h }) => (
           </div>
           <div>
             <div className="text-white/40 text-[10px] tracking-wider uppercase">P/L</div>
-            <div className="text-gold-400 text-lg font-medium num">+{h.pnlPct}%</div>
+            <div className={`text-lg font-medium num ${h.pnlPct>=0?'text-sage-500':'text-rust-500'}`}>{h.pnlPct>=0?'+':'−'}{Math.abs(h.pnlPct)}%</div>
           </div>
           <div>
             <div className="text-white/40 text-[10px] tracking-wider uppercase">USD</div>
-            <div className="text-white text-lg font-medium num">+${(h.pnlUsd/1000).toFixed(2)}K</div>
+            <div className="text-white text-lg font-medium num">{h.pnlUsd>=0?'+':'−'}${Math.abs(h.pnlUsd)>=10000 ? (Math.abs(h.pnlUsd)/1000).toFixed(1)+'K' : Math.round(Math.abs(h.pnlUsd)).toLocaleString('ru-RU')}</div>
           </div>
         </div>
         <div className="mt-3 text-white/60 text-[11px] leading-snug">{h.note}</div>
@@ -199,18 +199,18 @@ const AIInsightCard = ({ verdict }) => (
        style={{ background:'linear-gradient(160deg, #1c1b1a 0%, #2a2825 100%)' }}>
     <div className="flex items-center justify-between">
       <div className="flex items-center gap-2 text-gold-400 text-[10px] font-mono tracking-widest uppercase">
-        <Icons.Sparkles size={13} stroke={1.8}/> AI · HAIKU
+        <Icons.Sparkles size={13} stroke={1.8}/> AI · {window.PORTFOLIO.meta.aiModel}
       </div>
       <button className="w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/70 transition">
         <Icons.ArrowUR size={14}/>
       </button>
     </div>
     <div className="mt-4 text-white text-[15px] leading-relaxed font-light">
-      Индекс <span className="text-gold-400 font-semibold num">62</span> — верх «умеренной» зоны.
-      Портфель соответствует профилю, но почти весь риск собран в <span className="text-white font-semibold">2 бумагах</span> из 9.
+      Индекс <span className="text-gold-400 font-semibold num">{verdict.riskIndex}</span>
+      {verdict.riskTier && verdict.riskTier!=='–' ? ` · ${verdict.riskTier}` : ''}. {verdict.sub}
     </div>
     <div className="mt-auto pt-4 flex items-center gap-2 flex-wrap">
-      <span className="px-2.5 py-1 rounded-full bg-white/8 text-white/70 text-[10px] font-mono tracking-wider">RAG: GS_Q2_2026</span>
+      <span className="px-2.5 py-1 rounded-full bg-white/8 text-white/70 text-[10px] font-mono tracking-wider">RAG · банки</span>
       <span className="px-2.5 py-1 rounded-full bg-white/8 text-white/70 text-[10px] font-mono tracking-wider">SEC EDGAR</span>
       <span className="px-2.5 py-1 rounded-full bg-white/8 text-white/70 text-[10px] font-mono tracking-wider">MAC3</span>
     </div>

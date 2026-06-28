@@ -1,10 +1,40 @@
 # AUDIT.md — RAMP Bot · Институциональный аудит и стратегия
 
-> **Версия:** 2026-06-28 (§−5 Premium V2 rollout + live-report audit) · **Базовый коммит:** `ed85a8d` (merge PR #47 → `main`)
+> **Версия:** 2026-06-28 (§−6 шаблон-данные/цвета/мобайл · §−5 Premium V2 rollout) · **Базовый коммит:** `ed85a8d` (merge PR #47 → `main`)
 > **Текущая ветка:** `claude/stoic-mccarthy-LM18P` — Premium V2 в проде (PR #66/#67 → `main`); коммиты на GitHub **Verified ✅** (linked `claude` account)
 > **Аудитор:** CTO / Lead Quant Architect / Lead UI / DevSecOps
 > **Верификация:** живые прод-отчёты 2026-06-09 → **2026-06-28** (`base/deep.html`, портфель U148046720) · pytest **480 passed, 10 skipped**
 > **Карты:** `REPORT_SECTIONS.md` (секция→builder→шаблон) · `REPORT_SECTIONS_AUDIT.md` (посекционный аудит живых отчётов)
+
+---
+
+## −6. Premium V2 — шаблонные данные, цвета, мобильный UX (2026-06-28, раунд 6) — Lead UI/Quant
+
+> **Контекст:** скриншоты пользователя (мобайл) выявили **template-данные вместо реальных**, чёрный
+> сектор-график, наложения чисел и неочевидный гор. скролл таблиц. **pytest 482 passed, 10 skipped.**
+
+### Было / Стало
+
+| # | Узел | Было | Стало | Файлы |
+|---|---|---|---|---|
+| T1 | AI-инсайт (BASE Overview) | ХАРДКОД «AI · HAIKU · Индекс 62 — верх умеренной зоны · 2 бумаги из 9 · RAG: GS_Q2_2026» | реальные `meta.aiModel` + `verdict.riskIndex/riskTier/sub` | `portfolio-overview.jsx` |
+| T2 | AI-сводка идей (BASE) | ХАРДКОД «…риск собран в одном углу — 62% в технологиях» | реальный `verdict.headline` | `portfolio-ideas.jsx` |
+| T3 | **Performance (BASE)** | ХАРДКОД +14.2% / **+5.1пп vs S&P** / S&P +9.1% / vol 14.8% — **противоречило реальности** (книга ОТСТАЁТ) | реальные: +14.3% / **−6.9пп (Отставание)** / S&P +21.2% / vol 18.7% (`performance.summary`) | `portfolio-performance.jsx`, `premium_payload.py` |
+| T4 | Период-таблица + excess | `+{p.toFixed}` → «+-10.8%»; `d` excess = 0; всегда зелёный | знак ±, цвет по знаку; `d = p − s` выводится | `portfolio-performance.jsx`, `premium_payload.py` |
+| C1 | **Сектор-график** | `hue=#1c1b1a` у ВСЕХ → весь чёрный, неразличимый | палитра `_sector_hue` (gold/sage/rust/ink + семантика Gold/Silver/Bonds) | `premium_payload.py` |
+| C2 | Waterfall цвета | i==1 жёлтый, Итог чёрный — против легенды | отдельно=чёрный, диверсификация=rust, итог=gold | `*-charts.jsx` |
+| C3 | Waterfall пустота | `maxV=max(sumStandalone,total)·1.15` → бары на 55% высоты | `maxV` по ВИДИМОМУ пику бар·1.08 | `*-charts.jsx` |
+| N1 | top-hotspot P/L | «+-2.7%», «+$-0.05K» (always-+) | знак ±, $ без K на <10k, цвет по знаку | `portfolio-overview.jsx` |
+| U1 | **Гор. скролл таблиц неочевиден** | пользователь не знал, что таблицу можно листать | CSS scroll-shadow (Lea Verou, без JS) + чип «↔ листайте таблицу» | `custom.css`, `*.jsx` |
+| U2 | Раскрытый фундаментал (holdings) | наследовал `max-content` ширину → пустые ячейки, видно 3 из 6 | `.mob-detail` sticky на ширину вьюпорта → все 6 метрик | `*-holdings.jsx`, `custom.css` |
+| U3 | DEEP конвейер идей | 4 узла сжаты/обрезаны на телефоне | стек вертикально `<sm`, стрелки скрыты | `deep-plan.jsx` |
+| U4 | Perf badge | «+5.1пп vs S&P» наезжал на легенду | `flex-wrap` шапки графика | `portfolio-performance.jsx` |
+
+**Принцип (закреплён):** премиум-маппер ЧИТАЕТ payload; компоненты НЕ хранят данных. Любой литерал-число/текст
+в JSX-компоненте = баг (template-leak). Математика проверена реальной: книга действительно отстаёт от S&P
+(+14.3% vs +21.2% = −6.9пп) — отчёт теперь честен и совпадает с AI-вердиктом.
+
+> **Деплой:** ветка `claude/stoic-mccarthy-LM18P`; прод из `main` — мержить PR'ом.
 
 ---
 

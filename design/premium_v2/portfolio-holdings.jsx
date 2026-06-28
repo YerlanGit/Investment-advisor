@@ -75,7 +75,7 @@ const HoldingRow = ({ h, open, onToggle, idx }) => {
       </button>
 
       {/* Expanded panel */}
-      <div className="overflow-hidden transition-[max-height,opacity] duration-500 ease-out"
+      <div className="mob-detail overflow-hidden transition-[max-height,opacity] duration-500 ease-out"
            style={{ maxHeight: open?720:0, opacity: open?1:0 }}>
         <div className="px-6 pb-6 pt-1">
           <div className="rounded-3xl p-5 bg-white/70 border border-ink-900/5">
@@ -155,7 +155,8 @@ const Holdings = () => {
       </div>
 
       <div className="glass-strong rounded-4xl shadow-card overflow-hidden">
-        <div className="mob-scroll-x"><div>
+        <div className="swipe-hint items-center gap-1 text-[10px] font-mono text-gold-700 bg-gold-400/15 rounded-full px-2.5 py-1 mb-2.5 w-max">↔ листайте таблицу</div>
+    <div className="mob-scroll-x"><div>
         {/* Table header */}
         <div className="grid grid-cols-[40px_minmax(0,2fr)_minmax(0,1.6fr)_repeat(4,minmax(0,1fr))_88px_40px] items-center gap-3 px-6 py-3.5 border-b border-ink-900/6 text-[10px] tracking-widest uppercase text-ink-500 font-mono">
           <div></div>

@@ -115,3 +115,22 @@ V1 (синий IBM-Plex) и V2-reskin (gold, текущий прод) сохра
 
 **Пересборка статики:** `design/premium_v2/build.sh`; CSS-шаг — Tailwind `content` glob `./design/**/*.jsx` работает
 из КОРНЯ репо (build.sh делает `cd design/premium_v2` → запускать tailwind отдельно из корня, либо чинить glob).
+
+## Round 6 (2026-06-28) — template-data, цвета, мобильный UX
+
+**Принцип «нет литералов в компонентах»:** премиум-маппер ЧИТАЕТ payload; React-компоненты НЕ хранят
+данных. Любое литерал-число/процент/текст в JSX = template-leak (баг). Найдены и устранены хардкоды:
+AI-инсайт (HAIKU/Индекс 62), AI-сводка идей (62% в технологиях), весь Performance-блок
+(+14.2%/+5.1пп/S&P +9.1%/vol 14.8% — противоречил реальности). Все → реальные `verdict.*` / `performance.summary`.
+
+**Новые ключи маппера:** `performance.summary {ret,exc,spx,volPort}` (реальные 12-мес); период `d = p − s`;
+`verdict.riskTier` (BASE); `sectors[].hue` через `_sector_hue` (палитра, не единый #1c1b1a).
+
+**Мобильный UX (`custom.css`):**
+- `.mob-scroll-x` — CSS scroll-shadow (Lea Verou, `background-attachment: local/scroll`, без JS): правая тень
+  видна пока есть прокрутка, гаснет в конце. Плюс чип `.swipe-hint` «↔ листайте таблицу» над каждой таблицей.
+- `.mob-detail` — раскрытый фундаментал в holdings: `position: sticky; left:0; width:88vw` — выходит из
+  гор. скролла строки, показывает все 6 метрик. DEEP-конвейер идей: стек вертикально `<sm`.
+
+**Цвета графиков:** waterfall — отдельно=#1c1b1a, диверсификация=#c47358, итог=#f5d04e (по легенде); `maxV`
+масштабируется по ВИДИМОМУ пику (не по полному sum_standalone) — нет пустоты сверху.

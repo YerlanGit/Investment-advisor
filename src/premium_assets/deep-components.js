@@ -399,7 +399,15 @@ const Waterfall = ({
     v: total,
     kind: 'total'
   }];
-  const maxV = Math.max(sumStandalone, total) * 1.15;
+  // Scale to the VISIBLE peak (running max of the shown bars ⊕ total), not the
+  // full sum_standalone — otherwise the shown bars fill only ~55% of the chart.
+  let _run = 0,
+    _peak = 0;
+  standalone.forEach(s => {
+    _run += s.v;
+    _peak = Math.max(_peak, _run);
+  });
+  const maxV = Math.max(_peak, total) * 1.08;
   const W = 520,
     H = height,
     padL = 32,
@@ -419,17 +427,17 @@ const Waterfall = ({
       y0 = running;
       y1 = running + c.v;
       running = y1;
-      color = i === 0 ? '#1c1b1a' : i === 1 ? '#f5d04e' : '#3a3833';
+      color = '#1c1b1a'; // standalone bars — all «отдельно» (legend: black)
     } else if (c.kind === 'neg') {
       y0 = running;
       y1 = running + c.v; // v is negative
       running = y1;
-      color = '#c47358';
+      color = '#c47358'; // «диверсификация» (legend: rust)
     } else {
       // total — floor at 0
       y0 = 0;
       y1 = c.v;
-      color = '#1c1b1a';
+      color = '#f5d04e'; // «итог» (legend: gold)
     }
     const top = Math.max(y0, y1);
     const bot = Math.min(y0, y1);
@@ -1522,7 +1530,7 @@ const HoldingRow = ({
   }, /*#__PURE__*/React.createElement(Icons.Chevron, {
     size: 13
   }))), /*#__PURE__*/React.createElement("div", {
-    className: "overflow-hidden transition-[max-height,opacity] duration-500 ease-out",
+    className: "mob-detail overflow-hidden transition-[max-height,opacity] duration-500 ease-out",
     style: {
       maxHeight: open ? 640 : 0,
       opacity: open ? 1 : 0
@@ -1689,6 +1697,8 @@ const Holdings = () => {
   }, /*#__PURE__*/React.createElement("div", {
     className: "glass-strong rounded-4xl shadow-card overflow-hidden"
   }, /*#__PURE__*/React.createElement("div", {
+    className: "swipe-hint items-center gap-1 text-[10px] font-mono text-gold-700 bg-gold-400/15 rounded-full px-2.5 py-1 mb-2.5 w-max"
+  }, "↔ листайте таблицу"), /*#__PURE__*/React.createElement("div", {
     className: "mob-scroll-x"
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "grid grid-cols-[36px_minmax(0,1.9fr)_minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.1fr)_84px_36px] items-center gap-3 px-5 py-3 border-b border-ink-900/6 text-[9.5px] tracking-widest uppercase text-ink-500 font-mono"
@@ -1920,6 +1930,8 @@ const StressTable = ({
 }, "Параметрические шоки факторов (ΔPnL = w′·B·shock) · горизонт 1 квартал")), /*#__PURE__*/React.createElement("span", {
   className: "text-[10px] font-mono text-ink-400 tracking-wider px-2.5 py-1 rounded-full bg-cream-50 border border-ink-900/5"
 }, "7 сценариев · не прогноз")), /*#__PURE__*/React.createElement("div", {
+  className: "swipe-hint items-center gap-1 text-[10px] font-mono text-gold-700 bg-gold-400/15 rounded-full px-2.5 py-1 mb-2.5 w-max"
+}, "↔ листайте таблицу"), /*#__PURE__*/React.createElement("div", {
   className: "mob-scroll-x"
 }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
   className: "grid grid-cols-[minmax(0,2.1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.4fr)_minmax(0,0.9fr)_minmax(0,1fr)] gap-3 px-1 pb-2.5 text-[9.5px] tracking-widest uppercase text-ink-400 font-mono border-b border-ink-900/8"
@@ -2137,6 +2149,8 @@ const ActionPlan = ({
 }, "ATR (Wilder RMA) · SMA50/200 · RSI(14) · MACD(12,26,9) · без внешних таргет-прайсов")), /*#__PURE__*/React.createElement("span", {
   className: "text-[10px] font-mono text-ink-400 tracking-wider px-2.5 py-1 rounded-full bg-cream-50 border border-ink-900/5"
 }, "Quant Engine")), /*#__PURE__*/React.createElement("div", {
+  className: "swipe-hint items-center gap-1 text-[10px] font-mono text-gold-700 bg-gold-400/15 rounded-full px-2.5 py-1 mb-2.5 w-max"
+}, "↔ листайте таблицу"), /*#__PURE__*/React.createElement("div", {
   className: "mob-scroll-x"
 }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
   className: "grid grid-cols-[minmax(0,1fr)_72px_minmax(0,1fr)_minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1.6fr)] gap-3 px-1 pb-2.5 text-[9.5px] tracking-widest uppercase text-ink-400 font-mono border-b border-ink-900/8"
@@ -2266,7 +2280,7 @@ const PipeNode = ({
 }, label), /*#__PURE__*/React.createElement("div", {
   className: "text-[10.5px] text-ink-800 font-medium leading-tight"
 }, n)), !last && /*#__PURE__*/React.createElement("div", {
-  className: "flex items-center justify-center w-5 flex-shrink-0"
+  className: "hidden sm:flex items-center justify-center w-5 flex-shrink-0"
 }, /*#__PURE__*/React.createElement(Icons.ArrowR, {
   size: 12,
   className: "text-ink-300",
@@ -2338,7 +2352,7 @@ const IdeaCard = ({
   }, /*#__PURE__*/React.createElement("div", {
     className: `text-[10px] tracking-widest uppercase font-mono mb-2.5 ${highlight ? 'text-white/40' : 'text-ink-400'}`
   }, "Конвейер · Factor → Regime → Stress → RAG"), /*#__PURE__*/React.createElement("div", {
-    className: `flex items-stretch ${highlight ? '[&_div.rounded-xl]:!bg-white/8 [&_div.rounded-xl]:!border-white/10 [&_.text-ink-800]:!text-white [&_.text-ink-400]:!text-white/40 [&_svg]:!text-white/40' : ''}`
+    className: `flex flex-col sm:flex-row sm:items-stretch gap-1.5 sm:gap-0 ${highlight ? '[&_div.rounded-xl]:!bg-white/8 [&_div.rounded-xl]:!border-white/10 [&_.text-ink-800]:!text-white [&_.text-ink-400]:!text-white/40 [&_svg]:!text-white/40' : ''}`
   }, idea.pipeline.map((s, i) => /*#__PURE__*/React.createElement(PipeNode, {
     key: i,
     n: s,

@@ -740,6 +740,34 @@ class PremiumMapperAuditTest(unittest.TestCase):
         self.assertEqual(drv[0]["tone"], "pos")             # ok → sage
         self.assertEqual(drv[1]["tone"], "warn")            # stale → gold
 
+    def test_sector_hues_are_distinct(self):
+        # Every sector used to get the same #1c1b1a → the stacked bar + legend
+        # rendered as one indistinguishable black block.
+        from premium_payload import build_design_data
+        p = {"sectors": [{"name": "Technology", "weight_pct": 49},
+                         {"name": "Semiconductors", "weight_pct": 15},
+                         {"name": "Bonds", "weight_pct": 9},
+                         {"name": "Gold", "weight_pct": 6}]}
+        hues = [s["hue"] for s in build_design_data(p, "base")["sectors"]]
+        self.assertEqual(len(set(hues)), 4)                  # all distinct
+        self.assertNotIn("#1c1b1a", hues)                    # not the old single black
+
+    def test_performance_summary_is_real_not_template(self):
+        # The component hardcoded +14.2% / +5.1пп vs S&P; on an underperforming
+        # book that CONTRADICTED reality.  The mapper now carries the true 12-month
+        # figures and derives the period excess (d = p − s).
+        from premium_payload import build_design_data
+        p = {"period_returns_table": {"S&P 500": {"periods": [
+                {"label": "1М",  "portfolio": "-10.8%", "benchmark": "-1.9%"},
+                {"label": "12М", "portfolio": "14.3%",  "benchmark": "21.2%"}]}},
+             "volatility": 0.187}
+        perf = build_design_data(p, "base")["performance"]
+        self.assertEqual(perf["summary"]["ret"], 14.3)
+        self.assertEqual(perf["summary"]["spx"], 21.2)
+        self.assertEqual(perf["summary"]["exc"], -6.9)       # underperformance, was +5.1 template
+        by = {r["label"]: r for r in perf["periods"]}
+        self.assertEqual(by["1М"]["d"], round(-10.8 - (-1.9), 1))   # excess derived
+
     def test_regime_signals_parsed_to_objects(self):
         # The DEEP component renders each confirm bullet as {ok, t}; the mapper
         # passed raw strings → b.t undefined → six icon-only rows with NO text.

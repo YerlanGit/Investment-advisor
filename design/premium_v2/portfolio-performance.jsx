@@ -23,15 +23,15 @@ const PeriodRow = ({ p, isMax }) => (
     <div className="flex-1 grid grid-cols-3 gap-2">
       <div className="flex items-center gap-2">
         <span className="w-2 h-2 rounded-full bg-gold-400"/>
-        <span className="text-[14px] font-semibold num text-ink-900">+{p.p.toFixed(1)}%</span>
+        <span className="text-[14px] font-semibold num text-ink-900">{p.p>=0?'+':'−'}{Math.abs(p.p).toFixed(1)}%</span>
       </div>
       <div className="flex items-center gap-2">
         <span className="w-2 h-2 rounded-full bg-ink-900"/>
-        <span className="text-[14px] num text-ink-700">+{p.s.toFixed(1)}%</span>
+        <span className="text-[14px] num text-ink-700">{p.s>=0?'+':'−'}{Math.abs(p.s).toFixed(1)}%</span>
       </div>
       <div className="flex items-center gap-2 justify-end">
         <span className="text-[12px] text-ink-500">Δ</span>
-        <span className="text-[14px] font-semibold num text-sage-600">+{p.d.toFixed(1)} пп</span>
+        <span className={`text-[14px] font-semibold num ${p.d>=0?'text-sage-600':'text-rust-600'}`}>{p.d>=0?'+':'−'}{Math.abs(p.d).toFixed(1)} пп</span>
       </div>
     </div>
   </div>
@@ -39,6 +39,9 @@ const PeriodRow = ({ p, isMax }) => (
 
 const Performance = () => {
   const p = window.PORTFOLIO.performance;
+  const s = p.summary || {};
+  const fmt = (x) => `${x>=0?'+':'−'}${Math.abs(x)}`;
+  const beats = (s.exc||0) >= 0;
   const [period, setPeriod] = React.useState('12 мес');
   const periods = ['1 мес','3 мес','YTD','6 мес','12 мес'];
 
@@ -69,13 +72,13 @@ const Performance = () => {
       <div className="grid grid-cols-12 gap-5">
         {/* Chart card */}
         <div className="col-span-12 lg:col-span-8 glass-strong rounded-4xl shadow-card lift p-7">
-          <div className="flex items-start justify-between mb-4">
+          <div className="flex items-start justify-between gap-3 flex-wrap mb-4">
             <div>
-              <div className="text-ink-500 text-[12px] font-medium mb-1">Накопленная доходность</div>
-              <div className="flex items-end gap-3">
-                <span className="text-[48px] leading-none font-light num text-ink-900">+14.2<span className="text-[28px] text-ink-500">%</span></span>
-                <span className="px-2.5 py-1 rounded-full bg-sage-500/15 text-sage-600 text-[11px] font-semibold mb-1.5 flex items-center gap-1">
-                  <Icons.TrendUp size={11} stroke={2.2}/> +5.1 пп vs S&P
+              <div className="text-ink-500 text-[12px] font-medium mb-1">Накопленная доходность · 12 мес</div>
+              <div className="flex items-end gap-3 flex-wrap">
+                <span className="text-[48px] leading-none font-light num text-ink-900">{fmt(s.ret)}<span className="text-[28px] text-ink-500">%</span></span>
+                <span className={`px-2.5 py-1 rounded-full text-[11px] font-semibold mb-1.5 flex items-center gap-1 ${beats?'bg-sage-500/15 text-sage-600':'bg-rust-500/15 text-rust-600'}`}>
+                  <Icons.TrendUp size={11} stroke={2.2}/> {fmt(s.exc)} пп vs S&P
                 </span>
               </div>
             </div>
@@ -93,11 +96,11 @@ const Performance = () => {
 
         {/* Side cards */}
         <div className="col-span-12 lg:col-span-4 grid grid-cols-2 lg:grid-cols-1 gap-5">
-          <PerfSummaryCard label="Доходность" value="+14.2%" sub="за 12 месяцев" accent="gold" IconC={Icons.TrendUp}/>
-          <PerfSummaryCard label="Опережение" value="+5.1пп" sub="портфель быстрее рынка" accent="dark" IconC={Icons.Bolt}/>
+          <PerfSummaryCard label="Доходность" value={`${fmt(s.ret)}%`} sub="за 12 месяцев" accent="gold" IconC={Icons.TrendUp}/>
+          <PerfSummaryCard label={beats?'Опережение':'Отставание'} value={`${fmt(s.exc)}пп`} sub={beats?'портфель быстрее рынка':'портфель медленнее рынка'} accent="dark" IconC={Icons.Bolt}/>
           <div className="col-span-2 lg:col-span-1 grid grid-cols-2 gap-3">
-            <PerfSummaryCard label="Волатильность" value="14.8%" sub="рынок 11.2%" accent="light"/>
-            <PerfSummaryCard label="S&P 500" value="+9.1%" sub="за 12 мес" accent="light"/>
+            <PerfSummaryCard label="Волатильность" value={`${s.volPort}%`} sub="год." accent="light"/>
+            <PerfSummaryCard label="S&P 500" value={`${fmt(s.spx)}%`} sub="за 12 мес" accent="light"/>
           </div>
         </div>
 

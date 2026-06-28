@@ -89,9 +89,28 @@
        component: on a phone it scrolls horizontally (its inner keeps natural
        width) instead of clipping the last column.  On desktop these are inert
        plain divs (rules live only inside this mobile @media block). */
-    #root .mob-scroll-x { overflow-x: auto !important; -webkit-overflow-scrolling: touch; max-width: 100%; }
+    /* P1 — SCROLL AFFORDANCE: a regular user doesn't know the table can be
+       swiped.  CSS-only «scrolling shadow» (Lea Verou) — a right-edge shadow that
+       is VISIBLE while there's more to scroll and fades out at the end (a
+       content-anchored `local` cover hides it; the shadow is viewport-anchored
+       `scroll`).  No JS.  Paired with the «↔ свайп» hint chip rendered above each
+       wide table in the component. */
+    #root .mob-scroll-x {
+      overflow-x: auto !important; -webkit-overflow-scrolling: touch; max-width: 100%;
+      background:
+        linear-gradient(to left, #fdfbf6 30%, rgba(253,251,246,0)) 100% 0 / 36px 100% no-repeat local,
+        radial-gradient(farthest-side at 100% 50%, rgba(80,65,35,0.20), rgba(80,65,35,0)) 100% 0 / 18px 100% no-repeat scroll;
+    }
     /* Inner takes its natural content width so every column keeps real room
        (no collapsed minmax(0,fr) tracks → no overlapping numerics) and the table
        scrolls horizontally within the card; full-width (≥100%) on desktop. */
     #root .mob-scroll-x > * { width: max-content !important; min-width: 100% !important; }
+    /* The swipe-hint chip is mobile-only (hidden ≥640px). */
+    #root .swipe-hint { display: inline-flex !important; }
+    /* P2 — the expandable holding detail breaks OUT of the table's horizontal
+       scroll: it sticks to the viewport-left at viewport width, so all six
+       fundamentals show in the 2-col grid without swiping the row (was inheriting
+       the table's max-content width → wide empty cells, half the metrics off-screen). */
+    #root .mob-detail { position: sticky !important; left: 0 !important; width: 88vw !important; max-width: 100% !important; }
   }
+  .swipe-hint { display: none; }

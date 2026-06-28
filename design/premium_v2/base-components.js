@@ -323,7 +323,16 @@ const Waterfall = ({
     v: total,
     kind: 'total'
   }];
-  const maxV = Math.max(sumStandalone, total) * 1.15;
+  // Scale to the VISIBLE peak (running max of the shown bars ⊕ total), not the
+  // full sum_standalone — otherwise the 4 shown bars fill only ~55% of the chart
+  // and the top is a big empty gap.
+  let _run = 0,
+    _peak = 0;
+  standalone.forEach(s => {
+    _run += s.v;
+    _peak = Math.max(_peak, _run);
+  });
+  const maxV = Math.max(_peak, total) * 1.08;
   const W = 520,
     H = height,
     padL = 32,
@@ -343,17 +352,17 @@ const Waterfall = ({
       y0 = running;
       y1 = running + c.v;
       running = y1;
-      color = i === 0 ? '#1c1b1a' : i === 1 ? '#f5d04e' : '#3a3833';
+      color = '#1c1b1a'; // standalone bars — all «отдельно» (legend: black)
     } else if (c.kind === 'neg') {
       y0 = running;
       y1 = running + c.v; // v is negative
       running = y1;
-      color = '#c47358';
+      color = '#c47358'; // «диверсификация» (legend: rust)
     } else {
       // total — floor at 0
       y0 = 0;
       y1 = c.v;
-      color = '#1c1b1a';
+      color = '#f5d04e'; // «итог» (legend: gold)
     }
     const top = Math.max(y0, y1);
     const bot = Math.min(y0, y1);
@@ -812,12 +821,12 @@ const TopHotspotCard = ({
 }, h.weight, "%")), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
   className: "text-white/40 text-[10px] tracking-wider uppercase"
 }, "P/L"), /*#__PURE__*/React.createElement("div", {
-  className: "text-gold-400 text-lg font-medium num"
-}, "+", h.pnlPct, "%")), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  className: `text-lg font-medium num ${h.pnlPct >= 0 ? 'text-sage-500' : 'text-rust-500'}`
+}, h.pnlPct >= 0 ? '+' : '−', Math.abs(h.pnlPct), "%")), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
   className: "text-white/40 text-[10px] tracking-wider uppercase"
 }, "USD"), /*#__PURE__*/React.createElement("div", {
   className: "text-white text-lg font-medium num"
-}, "+$", (h.pnlUsd / 1000).toFixed(2), "K"))), /*#__PURE__*/React.createElement("div", {
+}, h.pnlUsd >= 0 ? '+' : '−', "$", Math.abs(h.pnlUsd) >= 10000 ? (Math.abs(h.pnlUsd) / 1000).toFixed(1) + 'K' : Math.round(Math.abs(h.pnlUsd)).toLocaleString('ru-RU')))), /*#__PURE__*/React.createElement("div", {
   className: "mt-3 text-white/60 text-[11px] leading-snug"
 }, h.note))));
 
@@ -956,7 +965,7 @@ const AIInsightCard = ({
 }, /*#__PURE__*/React.createElement(Icons.Sparkles, {
   size: 13,
   stroke: 1.8
-}), " AI · HAIKU"), /*#__PURE__*/React.createElement("button", {
+}), " AI · ", window.PORTFOLIO.meta.aiModel), /*#__PURE__*/React.createElement("button", {
   className: "w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/70 transition"
 }, /*#__PURE__*/React.createElement(Icons.ArrowUR, {
   size: 14
@@ -964,13 +973,11 @@ const AIInsightCard = ({
   className: "mt-4 text-white text-[15px] leading-relaxed font-light"
 }, "Индекс ", /*#__PURE__*/React.createElement("span", {
   className: "text-gold-400 font-semibold num"
-}, "62"), " — верх «умеренной» зоны. Портфель соответствует профилю, но почти весь риск собран в ", /*#__PURE__*/React.createElement("span", {
-  className: "text-white font-semibold"
-}, "2 бумагах"), " из 9."), /*#__PURE__*/React.createElement("div", {
+}, verdict.riskIndex), verdict.riskTier && verdict.riskTier !== '–' ? ` · ${verdict.riskTier}` : '', ". ", verdict.sub), /*#__PURE__*/React.createElement("div", {
   className: "mt-auto pt-4 flex items-center gap-2 flex-wrap"
 }, /*#__PURE__*/React.createElement("span", {
   className: "px-2.5 py-1 rounded-full bg-white/8 text-white/70 text-[10px] font-mono tracking-wider"
-}, "RAG: GS_Q2_2026"), /*#__PURE__*/React.createElement("span", {
+}, "RAG · банки"), /*#__PURE__*/React.createElement("span", {
   className: "px-2.5 py-1 rounded-full bg-white/8 text-white/70 text-[10px] font-mono tracking-wider"
 }, "SEC EDGAR"), /*#__PURE__*/React.createElement("span", {
   className: "px-2.5 py-1 rounded-full bg-white/8 text-white/70 text-[10px] font-mono tracking-wider"
@@ -1159,7 +1166,7 @@ const HoldingRow = ({
   }, /*#__PURE__*/React.createElement(Icons.Chevron, {
     size: 14
   }))), /*#__PURE__*/React.createElement("div", {
-    className: "overflow-hidden transition-[max-height,opacity] duration-500 ease-out",
+    className: "mob-detail overflow-hidden transition-[max-height,opacity] duration-500 ease-out",
     style: {
       maxHeight: open ? 720 : 0,
       opacity: open ? 1 : 0
@@ -1259,6 +1266,8 @@ const Holdings = () => {
   }, f)))), /*#__PURE__*/React.createElement("div", {
     className: "glass-strong rounded-4xl shadow-card overflow-hidden"
   }, /*#__PURE__*/React.createElement("div", {
+    className: "swipe-hint items-center gap-1 text-[10px] font-mono text-gold-700 bg-gold-400/15 rounded-full px-2.5 py-1 mb-2.5 w-max"
+  }, "↔ листайте таблицу"), /*#__PURE__*/React.createElement("div", {
     className: "mob-scroll-x"
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "grid grid-cols-[40px_minmax(0,2fr)_minmax(0,1.6fr)_repeat(4,minmax(0,1fr))_88px_40px] items-center gap-3 px-6 py-3.5 border-b border-ink-900/6 text-[10px] tracking-widest uppercase text-ink-500 font-mono"
@@ -1319,21 +1328,24 @@ const PeriodRow = ({
   className: "w-2 h-2 rounded-full bg-gold-400"
 }), /*#__PURE__*/React.createElement("span", {
   className: "text-[14px] font-semibold num text-ink-900"
-}, "+", p.p.toFixed(1), "%")), /*#__PURE__*/React.createElement("div", {
+}, p.p >= 0 ? '+' : '−', Math.abs(p.p).toFixed(1), "%")), /*#__PURE__*/React.createElement("div", {
   className: "flex items-center gap-2"
 }, /*#__PURE__*/React.createElement("span", {
   className: "w-2 h-2 rounded-full bg-ink-900"
 }), /*#__PURE__*/React.createElement("span", {
   className: "text-[14px] num text-ink-700"
-}, "+", p.s.toFixed(1), "%")), /*#__PURE__*/React.createElement("div", {
+}, p.s >= 0 ? '+' : '−', Math.abs(p.s).toFixed(1), "%")), /*#__PURE__*/React.createElement("div", {
   className: "flex items-center gap-2 justify-end"
 }, /*#__PURE__*/React.createElement("span", {
   className: "text-[12px] text-ink-500"
 }, "Δ"), /*#__PURE__*/React.createElement("span", {
-  className: "text-[14px] font-semibold num text-sage-600"
-}, "+", p.d.toFixed(1), " пп"))));
+  className: `text-[14px] font-semibold num ${p.d >= 0 ? 'text-sage-600' : 'text-rust-600'}`
+}, p.d >= 0 ? '+' : '−', Math.abs(p.d).toFixed(1), " пп"))));
 const Performance = () => {
   const p = window.PORTFOLIO.performance;
+  const s = p.summary || {};
+  const fmt = x => `${x >= 0 ? '+' : '−'}${Math.abs(x)}`;
+  const beats = (s.exc || 0) >= 0;
   const [period, setPeriod] = React.useState('12 мес');
   const periods = ['1 мес', '3 мес', 'YTD', '6 мес', '12 мес'];
   return /*#__PURE__*/React.createElement("section", {
@@ -1364,21 +1376,21 @@ const Performance = () => {
   }, /*#__PURE__*/React.createElement("div", {
     className: "col-span-12 lg:col-span-8 glass-strong rounded-4xl shadow-card lift p-7"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "flex items-start justify-between mb-4"
+    className: "flex items-start justify-between gap-3 flex-wrap mb-4"
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "text-ink-500 text-[12px] font-medium mb-1"
-  }, "Накопленная доходность"), /*#__PURE__*/React.createElement("div", {
-    className: "flex items-end gap-3"
+  }, "Накопленная доходность · 12 мес"), /*#__PURE__*/React.createElement("div", {
+    className: "flex items-end gap-3 flex-wrap"
   }, /*#__PURE__*/React.createElement("span", {
     className: "text-[48px] leading-none font-light num text-ink-900"
-  }, "+14.2", /*#__PURE__*/React.createElement("span", {
+  }, fmt(s.ret), /*#__PURE__*/React.createElement("span", {
     className: "text-[28px] text-ink-500"
   }, "%")), /*#__PURE__*/React.createElement("span", {
-    className: "px-2.5 py-1 rounded-full bg-sage-500/15 text-sage-600 text-[11px] font-semibold mb-1.5 flex items-center gap-1"
+    className: `px-2.5 py-1 rounded-full text-[11px] font-semibold mb-1.5 flex items-center gap-1 ${beats ? 'bg-sage-500/15 text-sage-600' : 'bg-rust-500/15 text-rust-600'}`
   }, /*#__PURE__*/React.createElement(Icons.TrendUp, {
     size: 11,
     stroke: 2.2
-  }), " +5.1 пп vs S&P"))), /*#__PURE__*/React.createElement("div", {
+  }), " ", fmt(s.exc), " пп vs S&P"))), /*#__PURE__*/React.createElement("div", {
     className: "flex items-center gap-3"
   }, /*#__PURE__*/React.createElement("div", {
     className: "flex items-center gap-1.5 text-[11px] text-ink-700"
@@ -1400,26 +1412,26 @@ const Performance = () => {
     className: "col-span-12 lg:col-span-4 grid grid-cols-2 lg:grid-cols-1 gap-5"
   }, /*#__PURE__*/React.createElement(PerfSummaryCard, {
     label: "Доходность",
-    value: "+14.2%",
+    value: `${fmt(s.ret)}%`,
     sub: "за 12 месяцев",
     accent: "gold",
     IconC: Icons.TrendUp
   }), /*#__PURE__*/React.createElement(PerfSummaryCard, {
-    label: "Опережение",
-    value: "+5.1пп",
-    sub: "портфель быстрее рынка",
+    label: beats ? 'Опережение' : 'Отставание',
+    value: `${fmt(s.exc)}пп`,
+    sub: beats ? 'портфель быстрее рынка' : 'портфель медленнее рынка',
     accent: "dark",
     IconC: Icons.Bolt
   }), /*#__PURE__*/React.createElement("div", {
     className: "col-span-2 lg:col-span-1 grid grid-cols-2 gap-3"
   }, /*#__PURE__*/React.createElement(PerfSummaryCard, {
     label: "Волатильность",
-    value: "14.8%",
-    sub: "рынок 11.2%",
+    value: `${s.volPort}%`,
+    sub: "год.",
     accent: "light"
   }), /*#__PURE__*/React.createElement(PerfSummaryCard, {
     label: "S&P 500",
-    value: "+9.1%",
+    value: `${fmt(s.spx)}%`,
     sub: "за 12 мес",
     accent: "light"
   }))), /*#__PURE__*/React.createElement("div", {
@@ -1680,11 +1692,9 @@ const Ideas = () => {
     className: "text-[10px] tracking-widest uppercase font-mono text-ink-700 mb-1"
   }, "AI · ", window.PORTFOLIO.meta.aiModel, " · сводка"), /*#__PURE__*/React.createElement("p", {
     className: "text-[15px] text-ink-900 leading-relaxed font-light"
-  }, "Главная мысль одной строкой: ", /*#__PURE__*/React.createElement("span", {
-    className: "font-medium"
-  }, "портфель зарабатывает"), ", но риск собран в одном углу — ", /*#__PURE__*/React.createElement("span", {
-    className: "font-medium num"
-  }, "62%"), " в технологиях. Идеи ниже — как сохранить рост и сделать портфель устойчивее к просадке.")))), /*#__PURE__*/React.createElement("div", {
+  }, window.PORTFOLIO.verdict.headline, " ", /*#__PURE__*/React.createElement("span", {
+    className: "text-ink-600"
+  }, "Идеи ниже — как улучшить позиционирование портфеля."))))), /*#__PURE__*/React.createElement("div", {
     className: "grid grid-cols-1 lg:grid-cols-2 gap-5"
   }, ideas.map((idea, i) => /*#__PURE__*/React.createElement(IdeaCard, {
     key: idea.n,
