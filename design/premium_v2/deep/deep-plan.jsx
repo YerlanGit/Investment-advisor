@@ -16,16 +16,27 @@ const ActionPlan = ({ rows }) => (
     </div>
     <div className="swipe-hint items-center gap-1 text-[10px] font-mono text-gold-700 bg-gold-400/15 rounded-full px-2.5 py-1 mb-2.5 w-max">↔ листайте таблицу</div>
     <div className="mob-scroll-x"><div>
-    <div className="grid grid-cols-[minmax(0,1fr)_72px_minmax(0,1fr)_minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1.6fr)] gap-3 px-1 pb-2.5 text-[9.5px] tracking-widest uppercase text-ink-400 font-mono border-b border-ink-900/8">
-      <div>Тикер</div><div>Действие</div><div className="text-right">Цена</div><div className="text-right">Sell target</div><div className="text-right">Stop</div><div>Причина</div>
+    <div className="grid grid-cols-[minmax(0,1fr)_72px_minmax(0,1.25fr)_minmax(0,0.9fr)_minmax(0,1.3fr)_minmax(0,0.9fr)_minmax(0,1.45fr)] gap-3 px-1 pb-2.5 text-[9.5px] tracking-widest uppercase text-ink-400 font-mono border-b border-ink-900/8">
+      <div>Тикер</div><div>Действие</div><div className="text-right">Количество</div><div className="text-right">Цена</div><div className="text-right">Sell target</div><div className="text-right">Stop</div><div>Причина</div>
     </div>
     <div className="divide-y divide-ink-900/5">
-      {rows.map((r,i) => (
-        <div key={i} className={`grid grid-cols-[minmax(0,1fr)_72px_minmax(0,1fr)_minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1.6fr)] gap-3 items-center px-1 py-3 ${r.defer?'opacity-65':''}`}>
+      {rows.map((r,i) => {
+        const hasQty = r.qty != null && r.qty !== 0;
+        const sell = (r.qty != null && r.qty < 0) || (r.dw != null && r.dw < 0);
+        const qtyTone = !hasQty ? 'text-ink-400' : sell ? 'text-rust-600' : 'text-sage-600';
+        return (
+        <div key={i} className={`grid grid-cols-[minmax(0,1fr)_72px_minmax(0,1.25fr)_minmax(0,0.9fr)_minmax(0,1.3fr)_minmax(0,0.9fr)_minmax(0,1.45fr)] gap-3 items-center px-1 py-3 ${r.defer?'opacity-65':''}`}>
           <div className="text-[13.5px] font-bold num text-ink-900 flex items-center gap-1.5">
             {r.t}{r.hot && <span className="text-[10px]" title="Hotspot TRC > 20%">🔥</span>}
           </div>
           <div><span className={`px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wider ${actionChipCls[r.action]}`}>{r.action}</span></div>
+          <div className="text-right leading-tight">
+            <div className={`text-[12.5px] num font-semibold ${qtyTone}`}>
+              {hasQty ? `${r.qty>0?'+':'−'}${Math.abs(r.qty).toLocaleString('ru-RU')} шт` : '—'}
+            </div>
+            {(r.dw != null && Math.abs(r.dw) >= 0.05) &&
+              <div className={`text-[10px] num ${sell?'text-rust-500':'text-sage-500'}`}>{r.dw>0?'+':'−'}{Math.abs(r.dw).toFixed(1)} пп</div>}
+          </div>
           <div className="text-right text-[12px] num text-ink-700">{r.price.toFixed(2)}</div>
           <div className="text-right text-[12px] num text-sage-600">{r.target}</div>
           <div className="text-right text-[12px] num text-rust-600">{r.stop}</div>
@@ -33,7 +44,8 @@ const ActionPlan = ({ rows }) => (
             Score {r.score>0?'+':''}{r.score.toFixed(1)}{r.hot && ' · Hotspot TRC>20%'}{r.defer && ' · отложено (turnover cap)'}
           </div>
         </div>
-      ))}
+        );
+      })}
     </div>
     </div></div>
     <div className="mt-4 rounded-2xl bg-cream-50 border border-ink-900/5 px-4 py-3.5 flex items-start gap-3">

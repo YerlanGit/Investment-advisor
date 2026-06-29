@@ -299,6 +299,12 @@ def get_critical_fundamentals(ticker: str) -> dict:
     assets = total_assets[0] or 0
     liabilities = total_liabs[0] or 0
     equity = equities[0] or 0
+    # Balance-sheet-identity fallback: some filers (e.g. ORCL) don't tag a
+    # standalone us-gaap:Liabilities element, which left Total Liabilities = 0 and
+    # therefore Debt/Assets = 0% in the report.  Assets = Liabilities + Equity, so
+    # recover Liabilities = Assets − Equity when the direct tag is missing.
+    if not liabilities and assets and equity and assets > equity:
+        liabilities = assets - equity
 
     # Determine filing date from the tag with the most recent annual period
     filing_date = None

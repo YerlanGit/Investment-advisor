@@ -227,12 +227,21 @@ def _build_mock_sparklines() -> dict:
                     0.99,   1.12,   1.20,   1.28,   1.30,   1.34]
     mdd_pts    = [-0.040, -0.055, -0.072, -0.095, -0.110, -0.128,
                    -0.115, -0.108, -0.105, -0.100, -0.110, -0.128]
+    # Raw points too (scaled) — the Premium V2 KPI cards redraw these with the
+    # design's own <Sparkline>; mirrors the production keys from
+    # tg_bot._build_kpi_sparklines so the smoke render exercises the same path.
+    _pts = {
+        "cvar_pts":   [round(x * 100, 2) for x in cvar_pts],
+        "sharpe_pts": [round(x, 3) for x in sharpe_pts],
+        "mdd_pts":    [round(x * 100, 2) for x in mdd_pts],
+    }
     try:
         from tg_bot import _sparkline_svg
         return {
             "cvar_svg":   _sparkline_svg(cvar_pts,   color="#3F8F5F", invert=True),
             "sharpe_svg": _sparkline_svg(sharpe_pts, color="#9A7A10", invert=False),
             "mdd_svg":    _sparkline_svg(mdd_pts,    color="#C0492F", invert=True),
+            **_pts,
         }
     except Exception:
         # Inline minimal SVG fallback so the smoke render still shows
@@ -254,6 +263,7 @@ def _build_mock_sparklines() -> dict:
             "cvar_svg":   _fallback(cvar_pts,   "#3F8F5F"),
             "sharpe_svg": _fallback(sharpe_pts, "#9A7A10"),
             "mdd_svg":    _fallback(mdd_pts,    "#C0492F"),
+            **_pts,
         }
 
 

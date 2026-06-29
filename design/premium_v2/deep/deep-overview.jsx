@@ -8,35 +8,35 @@ const HeroStat = ({ value, label, IconC, small }) => (
   </div>
 );
 
-// Risk gauge card (49 / умеренный)
-const GaugeCard = ({ v }) => (
-  <div className="glass-strong rounded-4xl p-6 shadow-card lift flex flex-col">
-    <div className="flex items-start justify-between">
-      <div>
-        <div className="text-ink-500 text-[12px] font-medium">Индекс риска</div>
-        <h3 className="text-xl font-semibold tracking-tight text-ink-900 leading-tight">Сводный 0–100</h3>
-      </div>
-      <span className="px-2.5 py-1 rounded-full bg-gold-400/25 text-gold-700 text-[10px] font-mono font-bold tracking-wider uppercase">{v.riskTier}</span>
-    </div>
-    <div className="flex-1 flex items-center justify-center py-2">
-      <RiskGauge value={v.riskIndex} size={210}/>
-    </div>
-    {(v.expReturn && v.expReturn !== '–') && (
-      <div className="flex items-center justify-center gap-4 mb-2 text-center">
+// Compact risk-index gauge for the HERO right column (moved up from the main
+// grid — user request «перенеси Индекс риска в эту зону»).  Horizontal layout:
+// gauge on the left, tier + forward return/Sharpe on the right.
+const HeroGaugeCard = ({ v }) => (
+  <div className="glass-strong rounded-4xl p-5 shadow-card lift flex items-center gap-5">
+    <div className="flex-shrink-0"><RiskGauge value={v.riskIndex} size={150}/></div>
+    <div className="flex flex-col gap-2.5 min-w-0">
+      <div className="flex items-center gap-2 flex-wrap">
         <div>
-          <div className="text-[10px] text-ink-500 font-medium uppercase tracking-wider">Ожид. доходность (год.)</div>
-          <div className="num text-2xl font-light text-sage-600 leading-none mt-1">{v.expReturn}</div>
+          <div className="text-ink-500 text-[10px] font-medium tracking-widest uppercase">Индекс риска</div>
+          <h3 className="text-base font-semibold tracking-tight text-ink-900 leading-tight">Сводный 0–100</h3>
         </div>
-        {(v.expSharpe && v.expSharpe !== '–') && (
-          <div>
-            <div className="text-[10px] text-ink-500 font-medium uppercase tracking-wider">Фвд-Sharpe</div>
-            <div className="num text-2xl font-light text-ink-900 leading-none mt-1">{v.expSharpe}</div>
-          </div>
-        )}
+        {(v.riskTier && v.riskTier !== '–') &&
+          <span className="px-2 py-0.5 rounded-full bg-gold-400/25 text-gold-700 text-[9px] font-mono font-bold tracking-wider uppercase">{v.riskTier}</span>}
       </div>
-    )}
-    <div className="text-[11px] text-ink-500 text-center font-light">
-      Рассчитан для профиля <span className="text-ink-900 font-medium">{window.DEEP.meta.profile}</span>
+      {(v.expReturn && v.expReturn !== '–') && (
+        <div className="flex items-center gap-4">
+          <div>
+            <div className="text-[9px] text-ink-500 font-medium uppercase tracking-wider">Ожид. дох. (год.)</div>
+            <div className="num text-lg font-light text-sage-600 leading-none mt-0.5">{v.expReturn}</div>
+          </div>
+          {(v.expSharpe && v.expSharpe !== '–') && (
+            <div>
+              <div className="text-[9px] text-ink-500 font-medium uppercase tracking-wider">Фвд-Sharpe</div>
+              <div className="num text-lg font-light text-ink-900 leading-none mt-0.5">{v.expSharpe}</div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   </div>
 );
@@ -100,17 +100,30 @@ const MandateCard = ({ m }) => (
   </div>
 );
 
-// KPI card
+// KPI card — value + a prominent 12-month trend chart (user request «добавь
+// графики к показателям»).  Draws the design <Sparkline> from the real numeric
+// series; falls back to the server-rendered SVG if only that is present.
 const KpiCard = ({ k }) => {
   const border = { normal:'#5d7c5c', good:'#caa01a', watch:'#c47358' }[k.status];
+  const hasPts = Array.isArray(k.pts) && k.pts.length >= 2;
   return (
     <div className="glass-strong rounded-4xl p-6 shadow-card lift flex flex-col"
          style={{ borderTop:`2px solid ${border}` }}>
-      <div className="text-[10px] tracking-widest uppercase text-ink-500 font-mono mb-3">{k.name}</div>
-      <div className="flex items-end justify-between gap-3 mb-3">
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-[10px] tracking-widest uppercase text-ink-500 font-mono">{k.name}</div>
         <span className="text-[40px] leading-none font-light num text-ink-900 tracking-tight">{k.value}</span>
-        <div className="flex-1 h-9 max-w-[130px]">
-          <Sparkline points={k.pts} color={k.color} gradId={`spk-${k.key}`}/>
+      </div>
+      {/* trend chart — how the metric moved over the last 12 months */}
+      <div className="rounded-2xl bg-cream-50/70 border border-ink-900/5 px-3 pt-2 pb-1.5 mb-3">
+        <div className="flex items-center justify-between text-[8.5px] tracking-widest uppercase text-ink-400 font-mono mb-0.5">
+          <span>Динамика · 12 мес</span><span>сейчас</span>
+        </div>
+        <div className="h-12">
+          {hasPts
+            ? <Sparkline points={k.pts} color={k.color} height={44} width={300} gradId={`spk-${k.key}`}/>
+            : (k.svg
+                ? <div className="w-full h-full" dangerouslySetInnerHTML={{ __html: k.svg }}/>
+                : <div className="w-full h-full flex items-center justify-center text-[9px] text-ink-300 font-mono">нет истории</div>)}
         </div>
       </div>
       <div className="text-[10.5px] text-ink-400 font-mono leading-snug mb-4">{k.sub}</div>
@@ -191,30 +204,33 @@ const Overview = () => {
   const v = p.verdict;
   return (
     <section id="overview" className="rise" data-screen-label="01 Overview">
-      <div className="flex items-start justify-between gap-8 flex-wrap mb-8">
-        <div className="flex-1 min-w-[480px]">
+      <div className="flex items-start justify-between gap-x-10 gap-y-6 flex-wrap mb-8">
+        <div className="flex-1 min-w-[280px] max-w-[760px]">
           <div className="flex items-center gap-2 text-[11px] tracking-widest uppercase text-ink-500 font-mono mb-3">
             <span className="w-1.5 h-1.5 rounded-full bg-gold-400"/>
             Portfolio Risk Report · Tier {p.meta.tier}
           </div>
-          <h1 className="text-[54px] leading-[1.04] tracking-[-0.03em] font-light text-ink-900 max-w-[820px]">
+          <h1 className="text-[clamp(32px,4.4vw,54px)] leading-[1.05] tracking-[-0.03em] font-light text-ink-900">
             {v.headline}<span className="text-ink-400">.</span>
           </h1>
-          <p className="text-[18px] text-ink-500 mt-3 max-w-[620px] font-light">{v.sub}</p>
+          <p className="text-[17px] text-ink-500 mt-3 max-w-[620px] font-light">{v.sub}</p>
         </div>
-        <div className="flex items-end gap-2 pt-4 divide-x divide-ink-900/10">
-          {p.heroStats.map((s,i) => {
-            const IconC = { briefcase: Icons.Briefcase, wallet: Icons.Wallet, shield: Icons.Shield }[s.icon];
-            return <HeroStat key={i} value={s.value} label={s.label} IconC={IconC} small={s.small}/>;
-          })}
+        {/* Right column — hero stat triplet + risk-index gauge moved up here */}
+        <div className="flex flex-col gap-4 w-full lg:w-auto lg:min-w-[380px] lg:max-w-[460px]">
+          <div className="flex items-end justify-start lg:justify-end gap-1 divide-x divide-ink-900/10">
+            {p.heroStats.map((s,i) => {
+              const IconC = { briefcase: Icons.Briefcase, wallet: Icons.Wallet, shield: Icons.Shield }[s.icon] || Icons.Briefcase;
+              return <HeroStat key={i} value={s.value} label={s.label} IconC={IconC} small={s.small}/>;
+            })}
+          </div>
+          <HeroGaugeCard v={v}/>
         </div>
       </div>
 
-      {/* main grid: gauge / verdict / mandate */}
-      <div className="grid grid-cols-12 gap-5 mb-5">
-        <div className="col-span-12 lg:col-span-3"><GaugeCard v={v}/></div>
-        <div className="col-span-12 lg:col-span-5"><VerdictCard v={v}/></div>
-        <div className="col-span-12 lg:col-span-4"><MandateCard m={p.mandate}/></div>
+      {/* main grid: verdict / mandate (gauge moved to hero) */}
+      <div className="grid grid-cols-12 gap-5 mb-5 items-stretch">
+        <div className="col-span-12 lg:col-span-7"><VerdictCard v={v}/></div>
+        <div className="col-span-12 lg:col-span-5"><MandateCard m={p.mandate}/></div>
       </div>
 
       {/* KPI strip */}

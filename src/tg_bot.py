@@ -568,6 +568,13 @@ def _build_kpi_sparklines(results: dict) -> Optional[dict]:
             "cvar_svg":   _sparkline_svg(cvar_pts,   color="#3F8F5F", invert=True),
             "sharpe_svg": _sparkline_svg(sharpe_pts, color="#9A7A10", invert=False),
             "mdd_svg":    _sparkline_svg(mdd_pts,    color="#C0492F", invert=True),
+            # Raw series too — the Premium V2 KPI cards redraw these with the
+            # design's own <Sparkline> (theme colour + gradient).  Scaled ×100 so
+            # the React component plots them as percent-points (CVaR/MaxDD) and a
+            # ratio (Sharpe) on a clean numeric axis.
+            "cvar_pts":   [round(x * 100, 2) for x in cvar_pts],
+            "sharpe_pts": [round(x, 3) for x in sharpe_pts],
+            "mdd_pts":    [round(x * 100, 2) for x in mdd_pts],
         }
     except Exception as exc:
         logger.warning("kpi_sparklines build failed: %s", exc)

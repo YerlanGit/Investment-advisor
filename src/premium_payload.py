@@ -72,15 +72,20 @@ def _list(obj: Any, *path) -> list:
 def _kpi(p: dict, key: str, name: str, val_key: str, note_key: str,
          spark_key: str, status: str, color: str, sub: str) -> dict:
     spark = _g(p, "kpi_sparklines", spark_key, default="")
-    # Sparkline SVG is server-rendered; the design wants a points array. We pass
-    # the SVG through as `svg` AND keep `pts` empty (the component tolerates it).
+    # The Premium KPI card redraws the trend with the design's own <Sparkline>
+    # (theme colour + gradient), so we feed it the REAL numeric series the engine
+    # now exposes alongside the SVG (kpi_sparklines.<metric>_pts).  The SVG is
+    # kept as a fallback for any payload that only carries the rendered image.
+    pts_key = spark_key.replace("_svg", "_pts")
+    pts = _g(p, "kpi_sparklines", pts_key, default=None)
+    pts = [x for x in pts if isinstance(x, (int, float))] if isinstance(pts, list) else []
     return {
         "key": key, "name": name,
         "value": _txt(p, val_key),
         "status": status, "color": color,
         "sub": sub if sub != DASH else _txt(p, val_key + "_dollar"),
         "ai": _txt(p, note_key),
-        "pts": [], "svg": spark,
+        "pts": pts, "svg": spark,
     }
 
 
@@ -98,6 +103,7 @@ def _map_deep(p: dict, meta: dict) -> dict:
     fmap = _fund_map(p)
     holdings = []
     for a in assets:
+        fund = _fund_for(fmap, a)
         holdings.append({
             "t": _txt(a, "ticker"), "name": _txt(a, "name") if _g(a, "name") else _txt(a, "ticker"),
             "cls": _txt(a, "asset_class"),
@@ -106,7 +112,11 @@ def _map_deep(p: dict, meta: dict) -> dict:
             "pnlUsd": _num(a, "pnl_abs_num", default=_pct(_g(a, "pnl_abs"))),
             "signal": _txt(a, "action").upper() if _g(a, "action") else DASH,
             "status": "HOTSPOT" if _g(a, "euler_extreme") else "",
-            "fund": _fund_for(fmap, a),
+            "fund": fund,
+            # Short, rule-based fundamental read-out composed from the SEC metrics
+            # (user request: «добавь короткий вывод по Фундаменталу»).  Falls back
+            # to the engine note when there's no SEC coverage.
+            "fundNote": _fund_verdict(fund) or (_txt(a, "note") if _g(a, "note") else ""),
             "note": _txt(a, "note") if _g(a, "note") else "",
         })
     conc = sorted(
@@ -177,6 +187,12 @@ def _map_deep(p: dict, meta: dict) -> dict:
              "price": _num(a, "price"),  # design calls price.toFixed → MUST be numeric
              "target": _txt(a, "sell_target") if _g(a, "sell_target") else _txt(a, "buy_zone"),
              "stop": _txt(a, "stop_loss"),
+             # Quantity to trade (user request «добавить столбец количество»): the
+             # engine ships qty_delta (whole units, signed) and delta_w_pp (target
+             # weight change in pp).  We surface both so «сколько продать/сократить»
+             # is explicit — units for the order, pp for the portfolio impact.
+             "qty": _qty_int(_g(a, "qty_delta")),
+             "dw": _num(a, "delta_w_pp"),
              "score": _score_by_t.get(_txt(a, "ticker"), 0.0),
              "hot": _hot_by_t.get(_txt(a, "ticker"), False)} for a in _list(p, "action_plan")]
 
@@ -270,7 +286,9 @@ def _map_deep(p: dict, meta: dict) -> dict:
         "sectorWarn": [_warn_text(x) for x in _list(p, "sector_warnings")][:3] or [DASH],
         "holdingsAI": _txt(p, "ai_holdings_comment"),
         "factors": factors, "factorCoverage": _coverage(p), "factorAI": _txt(p, "ai_factor_comment"),
-        "scores": scores, "scoresNote": _txt(p, "ai_4pillar_comment"), "scoresAI": _txt(p, "ai_4pillar_comment"),
+        # scoresNote dropped — it duplicated scoresAI verbatim (same
+        # ai_4pillar_comment rendered twice).  The AI box keeps the comment once.
+        "scores": scores, "scoresNote": "", "scoresAI": _txt(p, "ai_4pillar_comment"),
         "stress": stress, "stressAI": _txt(p, "ai_stress_comment"),
         "effect": effect, "effectVerdict": _txt(ee, "verdict", "headline"), "effectAI": _txt(p, "ai_effect_comment"),
         "actionPlan": plan, "actionAI": _txt(p, "ai_action_comment"),
@@ -480,6 +498,70 @@ def _fund_for(fmap: dict, a: Any) -> dict:
         "atr":    atr if atr and atr not in (DASH, "—", "-") else "н/д",
         "z":      sec.get("z", "н/д"),
     }
+
+
+def _qty_int(v: Any):
+    """Action-plan quantity → signed int (units), or None when unavailable."""
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, (int, float)):
+        return int(v)
+    try:
+        return int(round(float(str(v).replace("−", "-").replace(" ", "").replace(",", "."))))
+    except (TypeError, ValueError):
+        return None
+
+
+def _fund_verdict(fund: dict) -> str:
+    """Compose a short, rule-based fundamental read-out from the SEC metrics.
+
+    Reads the already-formatted strings on `fund` (roe / margin / debt / growth /
+    z), parses the numbers defensively (skips 'н/д'), and returns one plain
+    Russian sentence — strengths first, then the main caveat.  Returns '' when no
+    SEC field is usable (ETFs / cash / EM proxies), so the caller can fall back to
+    the engine note.  This is text composition over existing data — no finance
+    math, no engine import (keeps the mapper's anti-corruption boundary)."""
+    def f(key):
+        v = fund.get(key)
+        if v is None or str(v).strip() in ("н/д", DASH, "—", "-", ""):
+            return None
+        try:
+            return float(str(v).replace("−", "-").replace("%", "").replace("+", "")
+                         .replace(",", ".").strip())
+        except (TypeError, ValueError):
+            return None
+    roe, margin, debt, growth, z = f("roe"), f("margin"), f("debt"), f("growth"), f("z")
+    if all(x is None for x in (roe, margin, debt, growth, z)):
+        return ""
+    strengths, risks = [], []
+    if roe is not None:
+        (strengths if roe >= 18 else risks).append(
+            f"высокая рентабельность капитала (ROE {roe:.0f}%)" if roe >= 18
+            else (f"слабая рентабельность (ROE {roe:.0f}%)" if roe < 8 else None))
+    if margin is not None and margin >= 25:
+        strengths.append(f"маржинальность {margin:.0f}%")
+    if growth is not None:
+        (strengths if growth >= 12 else risks).append(
+            f"рост выручки +{growth:.0f}% г/г" if growth >= 12
+            else (f"выручка снижается ({growth:.0f}% г/г)" if growth < 0 else None))
+    if debt is not None:
+        if debt >= 60:
+            risks.append(f"высокая долговая нагрузка (долг/активы {debt:.0f}%)")
+        elif debt <= 25:
+            strengths.append("низкий долг")
+    if z is not None:
+        if z < 1.8:
+            risks.append(f"зона риска по Altman-Z ({z:.1f})")
+        elif z >= 3:
+            strengths.append(f"запас прочности по Altman-Z ({z:.1f})")
+    strengths = [s for s in strengths if s]
+    risks = [r for r in risks if r]
+    parts = []
+    if strengths:
+        parts.append("Сильные стороны: " + ", ".join(strengths[:3]))
+    if risks:
+        parts.append(("Риски: " if not strengths else "риски: ") + ", ".join(risks[:2]))
+    return (". ".join(parts) + ".") if parts else ""
 
 
 def _coverage(p: dict) -> float:
