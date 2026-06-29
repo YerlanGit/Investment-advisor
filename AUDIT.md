@@ -1,10 +1,41 @@
 # AUDIT.md — RAMP Bot · Институциональный аудит и стратегия
 
-> **Версия:** 2026-06-29 (§−8 перенос гейджа/периодный график/чистка · §−7 кнопки/waterfall/боксы · §−6 шаблон-данные) · **Базовый коммит:** `ed85a8d` (merge PR #47 → `main`)
+> **Версия:** 2026-06-29 (§−9 DEEP: гейдж/KPI-графики/фундаментал/факторы/план · §−8 BASE: гейдж/график/чистка · §−7 кнопки/waterfall) · **Базовый коммит:** `ed85a8d` (merge PR #47 → `main`)
 > **Текущая ветка:** `claude/base-report-improvements-z9ndut` — Premium V2 в проде (PR #66/#67 → `main`); коммиты на GitHub **Verified ✅** (linked `claude` account)
 > **Аудитор:** CTO / Lead Quant Architect / Lead UI / DevSecOps
-> **Верификация:** живые прод-отчёты 2026-06-09 → **2026-06-28** (`base/deep.html`, портфель U148046720); раунд 8 — рендер-верификация Playwright/Chromium (BASE, 1М/3М/6М/12М/YTD, десктоп+390px) · pytest **480 passed, 10 skipped**
+> **Верификация:** живые прод-отчёты 2026-06-09 → **2026-06-28** (`base/deep.html`, портфель U148046720); раунды 8–9 — рендер-верификация Playwright/Chromium (BASE+DEEP, десктоп+390px, все секции) · pytest **480 passed, 10 skipped**
 > **Карты:** `REPORT_SECTIONS.md` (секция→builder→шаблон) · `REPORT_SECTIONS_AUDIT.md` (посекционный аудит живых отчётов)
+
+---
+
+## −9. Premium V2 DEEP — гейдж в hero, графики KPI, фундаментал, факторы, план (2026-06-29, раунд 9) — Lead UI/Quant
+
+> **Контекст:** замечания пользователя по DEEP-отчёту (скриншоты list1–5): перенести «Индекс риска», добавить
+> графики к KPI, починить/раскрыть фундаментал, объяснить нулевые бета-факторы рынка, раскрыть F·V·T·C и убрать
+> дубль ИИ-комментария, добавить колонку «Количество» в Action Plan, общая чистка + мобайл. **pytest 480 passed.**
+
+### Было / Стало
+
+| # | Узел | Было | Стало | Файлы |
+|---|---|---|---|---|
+| D1 | **«Индекс риска» (DEEP)** | высокая карточка в сетке; справа от заголовка пусто | компактный `HeroGaugeCard` в правой колонке hero; ряд → Verdict(7)+Mandate(5) | `deep-overview.jsx` |
+| D2 | **KPI-карты (CVaR/Sharpe/MaxDD)** | пустой бокс «здесь должны быть графики» (`pts:[]`) | крупный тренд 12 мес через `<Sparkline>`; движок отдаёт сырые `*_pts`, фоллбэк на SVG | `deep-overview.jsx`, `tg_bot.py`, `premium_payload.py`, `html_renderer.py` |
+| D3 | **Фундаментал-подписи** | «Долг/А», «Маржа», «Рост г/г», «Altman-Z» — непонятно | «Долг/Активы», «Опер. маржа», «Рост выручки», «ATR·день» + тултипы-расшифровки | `deep-holdings.jsx` |
+| D4 | **Вывод по фундаменталу** | не было | `fundNote` — правило-ориентированная фраза из метрик SEC (сильные стороны / риски) | `premium_payload.py`, `deep-holdings.jsx` |
+| D5 | **Долг/Активы = 0% (ORCL)** | тег `us-gaap:Liabilities` отсутствует у части эмитентов → 0% | фоллбэк `Liabilities = Assets − Equity` (балансовое тождество) | `finance/sec_edgar.py` |
+| D6 | **Факторы: «Рынок» = 0** | колонка «Рынок» 0 у всех кроме Market — вопрос пользователя | колонка «S&P 500» + сноска: Market = S&P 500 по построению, сигнал — `Наклон Δ`. Данные корректны | `deep-factors.jsx` |
+| D7 | **F·V·T·C нераскрыты** | «F Фундамент · V Оценка…» | полные Fundamentals·Valuation·Technical·Credit + `PillarLegend` с метриками каждого столпа | `deep-factors.jsx` |
+| D8 | **Дубль ИИ-комментария (4-Pillar)** | `scoresNote` == `scoresAI` (один `ai_4pillar_comment` дважды) | `scoresNote=""`, рендерится один раз | `premium_payload.py`, `deep-factors.jsx` |
+| D9 | **Action Plan: нет количества** | непонятно «сколько продать/сократить» | колонка **«Количество»** — units (`qty_delta`) + Δ веса (`delta_w_pp`, пп), цвет по знаку | `deep-plan.jsx`, `premium_payload.py` |
+| D10 | Мобайл (DEEP) | — | hero/`clamp()`/`grid-cols-2`; 4-Pillar и Legend ровно стекаются; нет гор. переполнения @390 | `deep-*.jsx` |
+
+**Логика ИИ-комментариев (Note 1):** структурный дубль был один — `scoresNote` (4-Pillar). Остальные секции
+тянут РАЗНЫЕ ключи `ai_*` (risk/holdings/factor/stress/effect/action/regime) — не дублируются. Фундаментал-вывод
+`fundNote` детерминирован (правила, не LLM) → не конфликтует с метриками в той же карточке. Факторная «нулевая
+бета рынка» — не баг, а свойство модели (Market = S&P 500); снято пояснением, движок не трогали.
+
+> **Деплой:** ветка `claude/base-report-improvements-z9ndut`; пересборка `design/premium_v2/build.sh`
+> (Tailwind из КОРНЯ), синк base+deep в `src/premium_assets/`.
 
 ---
 

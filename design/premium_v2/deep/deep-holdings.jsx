@@ -16,9 +16,9 @@ const HBar = ({ value, max, color, height=4 }) => (
   </div>
 );
 
-const FundCell = ({ label, value, warn }) => (
-  <div className="rounded-2xl bg-cream-50 border border-ink-900/5 px-3 py-2.5">
-    <div className="text-[9.5px] uppercase tracking-wider text-ink-500 font-mono">{label}</div>
+const FundCell = ({ label, value, warn, hint }) => (
+  <div className="rounded-2xl bg-cream-50 border border-ink-900/5 px-3 py-2.5" title={hint||undefined}>
+    <div className="text-[9.5px] uppercase tracking-wider text-ink-500 font-mono leading-tight">{label}</div>
     <div className={`text-[14px] font-semibold num mt-0.5 ${warn?'text-rust-600':'text-ink-900'}`}>{value}</div>
   </div>
 );
@@ -71,18 +71,20 @@ const HoldingRow = ({ h, open, onToggle }) => {
               </div>
               <span className="text-[10px] font-mono text-ink-400 tracking-wider px-2.5 py-1 rounded-full bg-cream-50 border border-ink-900/5">{h.cls}</span>
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
-              <FundCell label="ROE"        value={h.fund.roe}/>
-              <FundCell label="Маржа"      value={h.fund.margin}/>
-              <FundCell label="Долг/А"     value={h.fund.debt}/>
-              <FundCell label="Рост г/г"   value={h.fund.growth}/>
-              <FundCell label="ATR"        value={h.fund.atr} warn={atrWarn}/>
-              <FundCell label="Altman-Z"   value={h.fund.z}/>
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+              <FundCell label="ROE"            value={h.fund.roe}    hint="Рентабельность собственного капитала (чистая прибыль ÷ капитал)"/>
+              <FundCell label="Опер. маржа"    value={h.fund.margin} hint="Операционная маржа — операционная прибыль ÷ выручка"/>
+              <FundCell label="Долг / Активы"  value={h.fund.debt}   hint="Долговая нагрузка: суммарный долг ÷ активы. 0% = долг не найден в отчётности или его нет"/>
+              <FundCell label="Рост выручки"   value={h.fund.growth} hint="Рост выручки год к году"/>
+              <FundCell label="ATR · день"     value={h.fund.atr} warn={atrWarn} hint="Average True Range — средний дневной диапазон цены, % (волатильность бумаги)"/>
+              <FundCell label="Altman-Z"       value={h.fund.z}      hint="Z-score Альтмана (риск банкротства): > 3 — безопасно, 1.8–3 — серая зона, < 1.8 — риск"/>
             </div>
-            <div className="mt-4 flex items-start gap-3 text-[13px] text-ink-700 leading-relaxed">
-              <Icons.Sparkles size={14} className="text-gold-600 mt-1 flex-shrink-0" stroke={1.8}/>
-              <p className="font-light">{h.note} <span className="text-ink-400 font-mono text-[11px]">[SEC EDGAR] [Quant Engine]</span></p>
-            </div>
+            {(h.fundNote || h.note) && (
+              <div className="mt-4 flex items-start gap-3 text-[13px] text-ink-700 leading-relaxed">
+                <Icons.Sparkles size={14} className="text-gold-600 mt-1 flex-shrink-0" stroke={1.8}/>
+                <p className="font-light"><span className="text-ink-500 font-medium">Вывод: </span>{h.fundNote || h.note} <span className="text-ink-400 font-mono text-[11px]">[SEC EDGAR] [Quant Engine]</span></p>
+              </div>
+            )}
           </div>
         </div>
       </div>
