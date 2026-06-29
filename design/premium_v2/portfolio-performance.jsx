@@ -17,40 +17,96 @@ const PerfSummaryCard = ({ label, value, sub, accent, IconC }) => (
 );
 
 const PeriodRow = ({ p, isMax }) => (
-  <div className={`flex items-center gap-4 px-5 py-3 rounded-2xl transition-colors hover:bg-cream-50
+  <div className={`flex items-center gap-3 sm:gap-4 px-3 sm:px-5 py-3 rounded-2xl transition-colors hover:bg-cream-50
                    ${isMax?'bg-cream-50':''}`}>
-    <div className="w-16 text-[12px] font-medium text-ink-500">{p.label}</div>
-    <div className="flex-1 grid grid-cols-3 gap-2">
+    <div className="w-12 sm:w-16 text-[12px] font-medium text-ink-500 flex-shrink-0">{p.label}</div>
+    <div className="flex-1 grid grid-cols-3 gap-2 min-w-0">
       <div className="flex items-center gap-2">
-        <span className="w-2 h-2 rounded-full bg-gold-400"/>
-        <span className="text-[14px] font-semibold num text-ink-900">{p.p>=0?'+':'−'}{Math.abs(p.p).toFixed(1)}%</span>
+        <span className="w-2 h-2 rounded-full bg-gold-400 flex-shrink-0"/>
+        <span className="text-[14px] font-semibold num text-ink-900 whitespace-nowrap">{p.p>=0?'+':'−'}{Math.abs(p.p).toFixed(1)}%</span>
       </div>
       <div className="flex items-center gap-2">
-        <span className="w-2 h-2 rounded-full bg-ink-900"/>
-        <span className="text-[14px] num text-ink-700">{p.s>=0?'+':'−'}{Math.abs(p.s).toFixed(1)}%</span>
+        <span className="w-2 h-2 rounded-full bg-ink-900 flex-shrink-0"/>
+        <span className="text-[14px] num text-ink-700 whitespace-nowrap">{p.s>=0?'+':'−'}{Math.abs(p.s).toFixed(1)}%</span>
       </div>
-      <div className="flex items-center gap-2 justify-end">
+      <div className="flex items-center gap-1.5 justify-end">
         <span className="text-[12px] text-ink-500">Δ</span>
-        <span className={`text-[14px] font-semibold num ${p.d>=0?'text-sage-600':'text-rust-600'}`}>{p.d>=0?'+':'−'}{Math.abs(p.d).toFixed(1)} пп</span>
+        <span className={`text-[14px] font-semibold num whitespace-nowrap ${p.d>=0?'text-sage-600':'text-rust-600'}`}>{p.d>=0?'+':'−'}{Math.abs(p.d).toFixed(1)} пп</span>
       </div>
     </div>
   </div>
 );
 
+// Horizon (in months) for a period label.  'YTD' → 'YTD'; unknown → null.
+// Handles '1м'/'1 мес'/'1M'/'12М' etc.
+const _perfMonths = (label) => {
+  const t = String(label || '').toLowerCase();
+  if (t.includes('ytd')) return 'YTD';
+  const d = t.replace(/[^0-9]/g, '');
+  return d ? parseInt(d, 10) : null;
+};
+
+// Order periods 1<3<6<12, YTD last (sources sometimes emit YTD between 3 and 6).
+const _perfOrder = (a, b) => {
+  const va = _perfMonths(a.label), vb = _perfMonths(b.label);
+  const ka = va === 'YTD' ? 99 : (va || 50);
+  const kb = vb === 'YTD' ? 99 : (vb || 50);
+  return ka - kb;
+};
+
 const Performance = () => {
   const p = window.PORTFOLIO.performance;
-  // The period selector is now FUNCTIONAL: it drives the headline figures from
-  // the SELECTED period's real row (was dead — it changed state but nothing read
-  // it, so the chip highlighted but no number moved).
-  const periods = (p.periods||[]).map(x=>x.label);
-  const [period, setPeriod] = React.useState(periods.includes('12М') ? '12М' : (periods[periods.length-1] || '12М'));
-  const sel = (p.periods||[]).find(x=>x.label===period) || {};
-  const s = { ret: sel.p ?? (p.summary||{}).ret ?? 0,
-              exc: sel.d ?? (p.summary||{}).exc ?? 0,
-              spx: sel.s ?? (p.summary||{}).spx ?? 0,
-              volPort: (p.summary||{}).volPort };
-  const fmt = (x) => `${x>=0?'+':'−'}${Math.abs(x)}`;
-  const beats = (s.exc||0) >= 0;
+  // Periods sorted into a logical horizon order for BOTH the selector and table.
+  const periods = [...(p.periods || [])].sort(_perfOrder);
+  const labels  = periods.map(x => x.label);
+  // Default to the 12-month view (longest cumulative window), else the last.
+  const defLabel = labels.find(l => _perfMonths(l) === 12) || labels[labels.length-1] || '';
+  const [period, setPeriod] = React.useState(defLabel);
+  const sel = periods.find(x => x.label === period) || {};
+
+  const volPort = (p.summary || {}).volPort ?? (p.vol || {}).port;
+  const s = { ret: sel.p ?? 0,
+              exc: sel.d ?? ((sel.p ?? 0) - (sel.s ?? 0)),
+              spx: sel.s ?? 0,
+              volPort };
+  const fmt  = (x) => `${x>=0?'+':'−'}${Math.abs(Number(x)||0).toFixed(1)}`;
+  const beats = (s.exc || 0) >= 0;
+
+  // Calendar months elapsed this year — positions the YTD window's x-axis.
+  const ytdMonths = (() => {
+    const g = String((window.PORTFOLIO.meta || {}).generated || '');
+    const mm = g.match(/\.(\d{2})\.\d{4}/);          // dd.MM.yyyy → month
+    return mm ? Math.max(1, parseInt(mm[1], 10)) : 6;
+  })();
+
+  // Build a REAL cumulative curve for the SELECTED window by exact nesting of the
+  // period endpoints: cumulative over [window-start … −h] = (1+r_window)/(1+r_h)−1.
+  // No interpolation — every point is algebra over the SAME figures shown in the
+  // breakdown table, so the chart's endpoint == the headline == its table row.
+  const series = React.useMemo(() => {
+    const byMonth = {};
+    periods.forEach(r => { const m = _perfMonths(r.label); if (m !== 'YTD' && m) byMonth[m] = r; });
+    const selM = _perfMonths(period);
+    const span = selM === 'YTD' ? ytdMonths : selM;
+    const rM = (sel.p || 0) / 100, sM = (sel.s || 0) / 100;
+    if (!span || !isFinite(span)) {
+      return { xs: [0, 1], labels: ['старт', 'сейчас'], port: [0, sel.p || 0], spx: [0, sel.s || 0] };
+    }
+    const nested = [1, 3, 6, 12].filter(h => h < span && byMonth[h]).sort((a, b) => b - a);
+    const pts = [{ off: span, port: 0, spx: 0 }];
+    nested.forEach(h => {
+      const rh = (byMonth[h].p || 0) / 100, sh = (byMonth[h].s || 0) / 100;
+      pts.push({ off: h, port: ((1+rM)/(1+rh) - 1) * 100, spx: ((1+sM)/(1+sh) - 1) * 100 });
+    });
+    pts.push({ off: 0, port: sel.p || 0, spx: sel.s || 0 });
+    return {
+      xs:     pts.map(pt => (span - pt.off) / span),
+      labels: pts.map((pt, i) => i === 0 ? 'старт' : (i === pts.length-1 ? 'сейчас' : `−${pt.off}М`)),
+      port:   pts.map(pt => pt.port),
+      spx:    pts.map(pt => pt.spx),
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [period]);
 
   return (
     <section id="performance" className="rise" data-screen-label="03 Performance">
@@ -59,14 +115,14 @@ const Performance = () => {
           <div className="flex items-center gap-2 text-[11px] tracking-widest uppercase text-ink-500 font-mono mb-2">
             <span className="w-1.5 h-1.5 rounded-full bg-gold-400"/> Performance · {period}
           </div>
-          <h2 className="text-[40px] leading-[1.05] tracking-[-0.02em] font-light text-ink-900">
+          <h2 className="text-[clamp(28px,3.4vw,40px)] leading-[1.05] tracking-[-0.02em] font-light text-ink-900">
             Рост против рынка<span className="text-ink-400">.</span>
           </h2>
           <p className="text-[15px] text-ink-500 mt-2 font-light">Накопленная доходность портфеля в сравнении с S&P 500.</p>
         </div>
 
-        <div className="flex items-center gap-1 p-1 rounded-full bg-white/60 border border-ink-900/8 backdrop-blur-md">
-          {periods.map(pr => (
+        <div className="flex items-center gap-1 p-1 rounded-full bg-white/60 border border-ink-900/8 backdrop-blur-md flex-wrap">
+          {labels.map(pr => (
             <button key={pr} onClick={()=>setPeriod(pr)}
               className={`px-3.5 py-1.5 rounded-full text-[12px] font-medium transition-colors
                           ${period===pr?'bg-ink-900 text-white':'text-ink-700 hover:bg-ink-900/5'}`}>
@@ -98,7 +154,7 @@ const Performance = () => {
               </div>
             </div>
           </div>
-          <PerfChart months={p.months} port={p.port} spx={p.spx}/>
+          <PerfChart labels={series.labels} port={series.port} spx={series.spx} xs={series.xs}/>
         </div>
 
         {/* Side cards */}
@@ -106,7 +162,7 @@ const Performance = () => {
           <PerfSummaryCard label="Доходность" value={`${fmt(s.ret)}%`} sub={`за ${period}`} accent="gold" IconC={Icons.TrendUp}/>
           <PerfSummaryCard label={beats?'Опережение':'Отставание'} value={`${fmt(s.exc)}пп`} sub={beats?'портфель быстрее рынка':'портфель медленнее рынка'} accent="dark" IconC={Icons.Bolt}/>
           <div className="col-span-2 lg:col-span-1 grid grid-cols-2 gap-3">
-            <PerfSummaryCard label="Волатильность" value={`${s.volPort}%`} sub="год." accent="light"/>
+            <PerfSummaryCard label="Волатильность" value={volPort!=null ? `${volPort}%` : '—'} sub="год." accent="light"/>
             <PerfSummaryCard label="S&P 500" value={`${fmt(s.spx)}%`} sub={`за ${period}`} accent="light"/>
           </div>
         </div>
@@ -118,7 +174,7 @@ const Performance = () => {
             <div className="text-[11px] text-ink-500 font-mono">Портфель / S&P 500 / Опережение</div>
           </div>
           <div className="space-y-1">
-            {p.periods.map(pr => <PeriodRow key={pr.label} p={pr} isMax={pr.label === period}/>)}
+            {periods.map(pr => <PeriodRow key={pr.label} p={pr} isMax={pr.label === period}/>)}
           </div>
         </div>
       </div>

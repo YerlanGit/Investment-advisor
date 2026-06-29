@@ -1,3 +1,4 @@
+function _extends() { return _extends = Object.assign ? Object.assign.bind() : function (n) { for (var e = 1; e < arguments.length; e++) { var t = arguments[e]; for (var r in t) ({}).hasOwnProperty.call(t, r) && (n[r] = t[r]); } return n; }, _extends.apply(null, arguments); }
 /* Lucide-style thin-stroke icons as React components (1.5 stroke). */
 
 const Icon = ({
@@ -127,10 +128,9 @@ const Icons = {
   }), /*#__PURE__*/React.createElement("path", {
     d: "M3.5 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.65 4.36A9 9 0 0 0 20.5 15"
   })),
-  Dot: p => /*#__PURE__*/React.createElement(Icon, {
-    ...p,
+  Dot: p => /*#__PURE__*/React.createElement(Icon, _extends({}, p, {
     viewBox: "0 0 8 8"
-  }, /*#__PURE__*/React.createElement("circle", {
+  }), /*#__PURE__*/React.createElement("circle", {
     cx: "4",
     cy: "4",
     r: "3",
@@ -296,7 +296,7 @@ const RiskGauge = ({
     fontSize: size * 0.062,
     fill: "#6b6862",
     letterSpacing: "0.08em"
-  }, "/ 100 · ", zone.toUpperCase()));
+  }, "/ 100 \xB7 ", zone.toUpperCase()));
 };
 
 // ── Waterfall: standalone bars + diversification (negative) + total
@@ -478,30 +478,66 @@ const SectorBar = ({
 };
 
 // ── Performance line chart (port vs SPX)
+// `port`/`spx` are cumulative % series for the SELECTED window; `labels` are the
+// x-axis ticks; optional `xs` gives each point's 0..1 horizontal position (real
+// elapsed-time spacing).  The domain always includes the 0% baseline and is
+// sign-aware, so a losing window (all-negative) renders correctly with a visible
+// zero line and signed axis labels.
 const PerfChart = ({
-  months,
-  port,
-  spx,
-  height = 240
+  labels = [],
+  port = [],
+  spx = [],
+  xs = null,
+  height = 248
 }) => {
+  const n = Math.max(port.length, spx.length);
   const W = 720,
     H = height,
-    padL = 36,
-    padR = 20,
-    padT = 24,
-    padB = 32;
+    padL = 42,
+    padR = 60,
+    padT = 26,
+    padB = 34;
   const innerW = W - padL - padR;
   const innerH = H - padT - padB;
-  const all = [...port, ...spx];
-  const maxV = Math.max(...all) * 1.15;
-  const minV = Math.min(0, Math.min(...all));
-  const span = maxV - minV;
-  const px = i => padL + i / (months.length - 1) * innerW;
-  const py = v => padT + (1 - (v - minV) / span) * innerH;
-  const path = arr => arr.map((v, i) => `${i === 0 ? 'M' : 'L'} ${px(i).toFixed(1)} ${py(v).toFixed(1)}`).join(' ');
-  const area = arr => `${path(arr)} L ${px(arr.length - 1)} ${py(0)} L ${px(0)} ${py(0)} Z`;
-  const ticksY = [0, maxV / 4, maxV / 2, 3 * maxV / 4, maxV].map(v => Math.round(v));
-  const lastIdx = months.length - 1;
+
+  // Sign-aware domain that always brackets 0 with a little headroom.
+  const all = [...port, ...spx, 0];
+  let vmin = Math.min(...all),
+    vmax = Math.max(...all);
+  const range = vmax - vmin || 1;
+  vmax += range * 0.14;
+  if (vmin < 0) vmin -= range * 0.10;
+  const span = vmax - vmin || 1;
+  const xfrac = i => xs && xs.length === n ? xs[i] : n > 1 ? i / (n - 1) : 0;
+  const px = i => padL + xfrac(i) * innerW;
+  const py = v => padT + (1 - (v - vmin) / span) * innerH;
+  const line = arr => arr.map((v, i) => `${i === 0 ? 'M' : 'L'} ${px(i).toFixed(1)} ${py(v).toFixed(1)}`).join(' ');
+  const area = arr => `${line(arr)} L ${px(arr.length - 1).toFixed(1)} ${py(0).toFixed(1)} L ${px(0).toFixed(1)} ${py(0).toFixed(1)} Z`;
+
+  // Evenly-spaced y ticks across the real (signed) domain.  Tick labels gain a
+  // decimal when the window is small (a ±2% range as integers duplicates to
+  // "+2% +2% +1% +1%").  End-value labels always carry one decimal so they read
+  // identically to the headline (+14.2%, not +14%).
+  const NT = 4;
+  const ticksY = Array.from({
+    length: NT + 1
+  }, (_, k) => vmin + span * k / NT);
+  const tickDec = span / NT < 1.5 ? 1 : 0;
+  // Sign-aware %, guarding against a "−0%" when a tiny negative rounds to zero.
+  const signedPct = (v, dec) => {
+    const r = Math.abs(v).toFixed(dec);
+    return `${v < 0 && parseFloat(r) !== 0 ? '−' : '+'}${r}%`;
+  };
+  const fmtTick = v => signedPct(v, tickDec);
+  const last = n - 1;
+  const fmtPct = v => signedPct(v, 1);
+
+  // Keep the port/spx end-labels from colliding when the two lines are close.
+  const portY = py(port[last]),
+    spxY = py(spx[last]);
+  const collide = Math.abs(portY - spxY) < 16;
+  const portLabelY = collide && portY >= spxY ? portY + 7 : portY - 9;
+  const spxLabelY = collide && portY >= spxY ? spxY - 9 : spxY + 14;
   return /*#__PURE__*/React.createElement("svg", {
     viewBox: `0 0 ${W} ${H}`,
     className: "w-full h-auto",
@@ -551,11 +587,18 @@ const PerfChart = ({
     fontSize: "9",
     fontFamily: "JetBrains Mono",
     fill: "#9a958c"
-  }, "+", t, "%"))), months.map((m, i) => /*#__PURE__*/React.createElement("text", {
+  }, fmtTick(t)))), /*#__PURE__*/React.createElement("line", {
+    x1: padL,
+    y1: py(0),
+    x2: W - padR,
+    y2: py(0),
+    stroke: "#1c1b1a",
+    strokeOpacity: ".18"
+  }), labels.map((m, i) => /*#__PURE__*/React.createElement("text", {
     key: i,
     x: px(i),
     y: H - 10,
-    textAnchor: "middle",
+    textAnchor: i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle',
     fontSize: "10",
     fontFamily: "Manrope",
     fill: "#9a958c"
@@ -563,7 +606,7 @@ const PerfChart = ({
     d: area(spx),
     fill: "url(#gradSpx)"
   }), /*#__PURE__*/React.createElement("path", {
-    d: path(spx),
+    d: line(spx),
     fill: "none",
     stroke: "#1c1b1a",
     strokeOpacity: ".55",
@@ -573,57 +616,41 @@ const PerfChart = ({
     d: area(port),
     fill: "url(#gradPort)"
   }), /*#__PURE__*/React.createElement("path", {
-    d: path(port),
+    d: line(port),
     fill: "none",
     stroke: "#caa01a",
-    strokeWidth: "2.2"
+    strokeWidth: "2.4"
   }), /*#__PURE__*/React.createElement("circle", {
-    cx: px(lastIdx),
-    cy: py(port[lastIdx]),
-    r: "5",
-    fill: "#f5d04e",
-    stroke: "#caa01a",
-    strokeWidth: "1.5"
-  }), /*#__PURE__*/React.createElement("circle", {
-    cx: px(lastIdx),
-    cy: py(spx[lastIdx]),
+    cx: px(last),
+    cy: spxY,
     r: "4",
     fill: "#fff",
     stroke: "#1c1b1a",
     strokeWidth: "1.5"
-  }), /*#__PURE__*/React.createElement("g", null, /*#__PURE__*/React.createElement("rect", {
-    x: px(lastIdx) - 4,
-    y: py(port[lastIdx]) - 26,
-    width: "56",
-    height: "18",
-    rx: "9",
-    fill: "#1c1b1a"
+  }), /*#__PURE__*/React.createElement("circle", {
+    cx: px(last),
+    cy: portY,
+    r: "5",
+    fill: "#f5d04e",
+    stroke: "#caa01a",
+    strokeWidth: "1.6"
   }), /*#__PURE__*/React.createElement("text", {
-    x: px(lastIdx) + 24,
-    y: py(port[lastIdx]) - 13,
-    textAnchor: "middle",
+    x: px(last) + 9,
+    y: portLabelY,
+    textAnchor: "start",
+    fontSize: "12",
+    fontFamily: "JetBrains Mono",
+    fontWeight: "700",
+    fill: "#caa01a"
+  }, fmtPct(port[last])), /*#__PURE__*/React.createElement("text", {
+    x: px(last) + 9,
+    y: spxLabelY,
+    textAnchor: "start",
     fontSize: "11",
     fontFamily: "JetBrains Mono",
     fontWeight: "500",
-    fill: "#f5d04e"
-  }, "+", port[lastIdx], "%"), /*#__PURE__*/React.createElement("rect", {
-    x: px(lastIdx) - 4,
-    y: py(spx[lastIdx]) + 8,
-    width: "56",
-    height: "18",
-    rx: "9",
-    fill: "#fff",
-    stroke: "#1c1b1a",
-    strokeOpacity: ".15"
-  }), /*#__PURE__*/React.createElement("text", {
-    x: px(lastIdx) + 24,
-    y: py(spx[lastIdx]) + 20,
-    textAnchor: "middle",
-    fontSize: "11",
-    fontFamily: "JetBrains Mono",
-    fontWeight: "500",
-    fill: "#3a3833"
-  }, "+", spx[lastIdx], "%")));
+    fill: "#6b6862"
+  }, fmtPct(spx[last])));
 };
 
 // ── Mini sparkline (used in KPI cards)
@@ -759,19 +786,22 @@ const FactorPill = ({
   }, valTxt)));
 };
 
-// ── Hero stat (big number with thin label, e.g. "9 Позиции")
+// ── Hero stat (big number with thin label, e.g. "9 Позиции").  `small` renders a
+// long textual value (e.g. the mandate profile «Умеренно-агрессивный») compactly
+// so it doesn't blow up to the 5xl numeric size and break the hero row.
 const HeroStat = ({
   value,
   label,
-  IconC
+  IconC,
+  small
 }) => /*#__PURE__*/React.createElement("div", {
-  className: "flex flex-col items-center gap-1 px-4"
+  className: "flex flex-col items-center gap-1 px-3 sm:px-4"
 }, /*#__PURE__*/React.createElement(IconC, {
   size: 18,
   className: "text-ink-500 mb-1",
   stroke: 1.4
 }), /*#__PURE__*/React.createElement("div", {
-  className: "text-5xl font-light tracking-tight num leading-none text-ink-900"
+  className: `font-light tracking-tight num text-ink-900 ${small ? 'text-base font-semibold leading-tight text-center max-w-[130px] pt-1.5' : 'text-5xl leading-none'}`
 }, value), /*#__PURE__*/React.createElement("div", {
   className: "text-[12px] text-ink-500 font-medium tracking-tight"
 }, label));
@@ -798,7 +828,7 @@ const TopHotspotCard = ({
   stroke: 2
 }), " Hotspot"), /*#__PURE__*/React.createElement("div", {
   className: "absolute top-5 right-5 text-white/40 text-[10px] font-mono tracking-widest"
-}, "RISK · ", h.riskShare, "%"), /*#__PURE__*/React.createElement("div", {
+}, "RISK \xB7 ", h.riskShare, "%"), /*#__PURE__*/React.createElement("div", {
   className: "absolute inset-0 flex items-center justify-center pt-2"
 }, /*#__PURE__*/React.createElement("div", {
   className: "text-white num font-light tracking-tight",
@@ -826,7 +856,7 @@ const TopHotspotCard = ({
   className: "grid grid-cols-3 gap-2 mt-4 pt-3 border-t border-white/10"
 }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
   className: "text-white/40 text-[10px] tracking-wider uppercase"
-}, "Вес"), /*#__PURE__*/React.createElement("div", {
+}, "\u0412\u0435\u0441"), /*#__PURE__*/React.createElement("div", {
   className: "text-white text-lg font-medium num"
 }, h.weight, "%")), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
   className: "text-white/40 text-[10px] tracking-wider uppercase"
@@ -840,36 +870,38 @@ const TopHotspotCard = ({
   className: "mt-3 text-white/60 text-[11px] leading-snug"
 }, h.note))));
 
-// ── Risk gauge card
-const RiskGaugeCard = ({
+// ── Compact risk-index gauge for the hero (moved up from the main grid so the
+// headline verdict and its risk score read together — user request «перемести
+// Индекс Риска в это пространство»).  Horizontal layout fills the hero's right
+// column without the tall empty card the gauge used to leave at the grid bottom.
+const HeroRiskGauge = ({
   value,
-  delta
+  delta,
+  profile
 }) => /*#__PURE__*/React.createElement("div", {
-  className: "glass-strong rounded-4xl p-6 shadow-card lift h-full min-h-[420px] flex flex-col"
+  className: "glass-strong rounded-4xl p-5 shadow-card lift flex items-center gap-5"
 }, /*#__PURE__*/React.createElement("div", {
-  className: "flex items-center justify-between"
-}, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-  className: "text-ink-500 text-[12px] font-medium"
-}, "Индекс риска"), /*#__PURE__*/React.createElement("h3", {
-  className: "text-2xl font-semibold tracking-tight text-ink-900 leading-tight"
-}, "Сводный 0–100"))), /*#__PURE__*/React.createElement("div", {
-  className: "flex-1 flex items-center justify-center -mt-2"
+  className: "flex-shrink-0"
 }, /*#__PURE__*/React.createElement(RiskGauge, {
   value: value,
-  size: 240
+  size: 148
 })), /*#__PURE__*/React.createElement("div", {
-  className: "flex items-center justify-between gap-2"
-}, /*#__PURE__*/React.createElement("div", {
-  className: "flex items-center gap-2 px-3 py-1.5 rounded-full bg-cream-50 border border-ink-900/5 text-[11px] text-ink-700"
+  className: "flex flex-col gap-2.5 min-w-0"
+}, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  className: "text-ink-500 text-[10px] font-medium tracking-widest uppercase"
+}, "\u0418\u043D\u0434\u0435\u043A\u0441 \u0440\u0438\u0441\u043A\u0430"), /*#__PURE__*/React.createElement("h3", {
+  className: "text-lg font-semibold tracking-tight text-ink-900 leading-tight"
+}, "\u0421\u0432\u043E\u0434\u043D\u044B\u0439 0\u2013100")), delta !== undefined && delta !== null && /*#__PURE__*/React.createElement("div", {
+  className: "flex items-center gap-2 px-3 py-1.5 rounded-full bg-cream-50 border border-ink-900/5 text-[11px] text-ink-700 w-fit"
 }, /*#__PURE__*/React.createElement(Icons.Pulse, {
   size: 13,
   stroke: 1.8
-}), /*#__PURE__*/React.createElement("span", null, "За месяц ", delta > 0 ? '+' : '', delta, " пт")), /*#__PURE__*/React.createElement("button", {
-  className: "flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-ink-900 text-white text-[11px] font-medium hover:bg-ink-800 transition"
+}), /*#__PURE__*/React.createElement("span", null, "\u0417\u0430 \u043C\u0435\u0441\u044F\u0446 ", delta > 0 ? '+' : '', delta, " \u043F\u0442")), /*#__PURE__*/React.createElement("button", {
+  className: "flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-ink-900 text-white text-[11px] font-medium hover:bg-ink-800 transition w-fit"
 }, /*#__PURE__*/React.createElement(Icons.Refresh, {
   size: 12,
   stroke: 2
-}), " Пересчитать")));
+}), " \u041F\u0435\u0440\u0435\u0441\u0447\u0438\u0442\u0430\u0442\u044C")));
 
 // ── Risk decomposition card
 const RiskDecompCard = ({
@@ -877,79 +909,77 @@ const RiskDecompCard = ({
 }) => /*#__PURE__*/React.createElement("div", {
   className: "glass-strong rounded-4xl p-6 shadow-card lift h-full min-h-[420px] flex flex-col"
 }, /*#__PURE__*/React.createElement("div", {
-  className: "flex items-start justify-between"
+  className: "flex items-start justify-between gap-3"
 }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-  className: "text-ink-500 text-[12px] font-medium"
-}, "Декомпозиция"), /*#__PURE__*/React.createElement("h3", {
+  className: "text-ink-500 text-[10px] font-medium tracking-widest uppercase"
+}, "\u0414\u0435\u043A\u043E\u043C\u043F\u043E\u0437\u0438\u0446\u0438\u044F"), /*#__PURE__*/React.createElement("h3", {
   className: "text-2xl font-semibold tracking-tight text-ink-900 leading-tight"
-}, "Риск портфеля")), /*#__PURE__*/React.createElement("div", {
-  className: "flex items-center gap-2"
-}, /*#__PURE__*/React.createElement("span", {
-  className: "px-2.5 py-1 rounded-full bg-cream-50 border border-ink-900/5 text-[10px] font-mono tracking-wider text-ink-700"
+}, "\u0420\u0438\u0441\u043A \u043F\u043E\u0440\u0442\u0444\u0435\u043B\u044F"), /*#__PURE__*/React.createElement("div", {
+  className: "text-[11px] text-ink-400 mt-1"
+}, "\u0412\u043A\u043B\u0430\u0434 \u043F\u043E\u0437\u0438\u0446\u0438\u0439 \u0432 \u0432\u043E\u043B\u0430\u0442\u0438\u043B\u044C\u043D\u043E\u0441\u0442\u044C, %")), /*#__PURE__*/React.createElement("div", {
+  className: "text-right flex-shrink-0"
+}, /*#__PURE__*/React.createElement("div", {
+  className: "text-[10px] text-ink-400 tracking-wider uppercase"
+}, "\u0418\u0442\u043E\u0433"), /*#__PURE__*/React.createElement("div", {
+  className: "text-xl font-semibold num text-ink-900 leading-none mt-0.5"
 }, data.total != null ? `${data.total}%` : '—'))), /*#__PURE__*/React.createElement("div", {
-  className: "flex-1 flex items-center -mx-1"
+  className: "flex-1 flex items-center justify-center -mx-1 my-2"
 }, /*#__PURE__*/React.createElement(Waterfall, {
   data: data
 })), /*#__PURE__*/React.createElement("div", {
-  className: "flex items-center gap-4 text-[11px] text-ink-500 pt-2 border-t border-ink-900/5"
+  className: "flex items-center justify-center gap-5 text-[11px] text-ink-500 pt-3 border-t border-ink-900/5"
 }, /*#__PURE__*/React.createElement("span", {
   className: "flex items-center gap-1.5"
 }, /*#__PURE__*/React.createElement("span", {
   className: "w-2 h-2 rounded-full bg-ink-900"
-}), " отдельно"), /*#__PURE__*/React.createElement("span", {
+}), " \u043E\u0442\u0434\u0435\u043B\u044C\u043D\u043E"), /*#__PURE__*/React.createElement("span", {
   className: "flex items-center gap-1.5"
 }, /*#__PURE__*/React.createElement("span", {
   className: "w-2 h-2 rounded-full bg-rust-500"
-}), " диверсификация"), /*#__PURE__*/React.createElement("span", {
+}), " \u0434\u0438\u0432\u0435\u0440\u0441\u0438\u0444\u0438\u043A\u0430\u0446\u0438\u044F"), /*#__PURE__*/React.createElement("span", {
   className: "flex items-center gap-1.5"
 }, /*#__PURE__*/React.createElement("span", {
   className: "w-2 h-2 rounded-full bg-gold-400"
-}), " итог")));
+}), " \u0438\u0442\u043E\u0433")));
 
 // ── Sector mix card
 const SectorMixCard = ({
   sectors
-}) => /*#__PURE__*/React.createElement("div", {
-  className: "glass-strong rounded-4xl p-6 shadow-card lift h-full flex flex-col min-h-[200px]"
-}, /*#__PURE__*/React.createElement("div", {
-  className: "flex items-start justify-between mb-1"
-}, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-  className: "text-ink-500 text-[12px] font-medium"
-}, "Структура"), /*#__PURE__*/React.createElement("h3", {
-  className: "text-xl font-semibold tracking-tight text-ink-900 leading-tight"
-}, "По секторам")), /*#__PURE__*/React.createElement("div", {
-  className: "px-2.5 py-1 rounded-full bg-rust-500/12 text-rust-600 text-[10px] font-semibold tracking-wider uppercase flex items-center gap-1"
-}, /*#__PURE__*/React.createElement(Icons.Warning, {
-  size: 11,
-  stroke: 2
-}), " Перевес IT")), /*#__PURE__*/React.createElement("div", {
-  className: "mt-3"
-}, /*#__PURE__*/React.createElement(SectorBar, {
-  sectors: sectors
-})), /*#__PURE__*/React.createElement("div", {
-  className: "grid grid-cols-2 gap-x-4 gap-y-2 mt-4"
-}, sectors.map(s => {
-  const IconC = sectorIcon(s.name);
+}) => {
+  const overweight = (sectors || []).find(s => s.warn);
   return /*#__PURE__*/React.createElement("div", {
-    key: s.name,
-    className: "flex items-center gap-2.5 group"
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "w-6 h-6 rounded-lg flex items-center justify-center",
-    style: {
-      background: s.hue + '25'
-    }
-  }, /*#__PURE__*/React.createElement(IconC, {
-    size: 12,
-    className: "text-ink-700",
-    stroke: 1.6
-  })), /*#__PURE__*/React.createElement("div", {
-    className: "flex-1 min-w-0"
+    className: "glass-strong rounded-4xl p-6 shadow-card lift h-full flex flex-col min-h-[200px]"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "text-[11px] text-ink-700 font-medium truncate"
-  }, s.name)), /*#__PURE__*/React.createElement("div", {
-    className: "text-[12px] font-semibold num text-ink-900"
-  }, s.pct, "%"));
-})));
+    className: "flex items-start justify-between gap-3 mb-1"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "text-ink-500 text-[10px] font-medium tracking-widest uppercase"
+  }, "\u0421\u0442\u0440\u0443\u043A\u0442\u0443\u0440\u0430"), /*#__PURE__*/React.createElement("h3", {
+    className: "text-xl font-semibold tracking-tight text-ink-900 leading-tight"
+  }, "\u041F\u043E \u0441\u0435\u043A\u0442\u043E\u0440\u0430\u043C")), overweight && /*#__PURE__*/React.createElement("div", {
+    className: "px-2.5 py-1 rounded-full bg-rust-500/12 text-rust-600 text-[10px] font-semibold tracking-wider uppercase flex items-center gap-1 flex-shrink-0"
+  }, /*#__PURE__*/React.createElement(Icons.Warning, {
+    size: 11,
+    stroke: 2
+  }), " \u041F\u0435\u0440\u0435\u0432\u0435\u0441")), /*#__PURE__*/React.createElement("div", {
+    className: "mt-4"
+  }, /*#__PURE__*/React.createElement(SectorBar, {
+    sectors: sectors
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "grid grid-cols-2 gap-x-5 gap-y-2.5 mt-5"
+  }, sectors.map(s => /*#__PURE__*/React.createElement("div", {
+    key: s.name,
+    className: "flex items-center gap-2.5"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "w-2.5 h-2.5 rounded-full flex-shrink-0",
+    style: {
+      background: s.hue
+    }
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "flex-1 min-w-0 text-[11px] text-ink-700 font-medium truncate"
+  }, s.name), /*#__PURE__*/React.createElement("div", {
+    className: "text-[12px] font-semibold num text-ink-900 tabular-nums"
+  }, s.pct, "%")))));
+};
 
 // ── Quick AI insight (dark pill row, echoes the reference "Onboarding Task" mini cards style)
 const AIInsightCard = ({
@@ -966,15 +996,15 @@ const AIInsightCard = ({
 }, /*#__PURE__*/React.createElement(Icons.Sparkles, {
   size: 13,
   stroke: 1.8
-}), " AI · ", window.PORTFOLIO.meta.aiModel)), /*#__PURE__*/React.createElement("div", {
+}), " AI \xB7 ", window.PORTFOLIO.meta.aiModel)), /*#__PURE__*/React.createElement("div", {
   className: "mt-4 text-white text-[15px] leading-relaxed font-light"
-}, "Индекс ", /*#__PURE__*/React.createElement("span", {
+}, "\u0418\u043D\u0434\u0435\u043A\u0441 ", /*#__PURE__*/React.createElement("span", {
   className: "text-gold-400 font-semibold num"
 }, verdict.riskIndex), verdict.riskTier && verdict.riskTier !== '–' ? ` · ${verdict.riskTier}` : '', ". ", verdict.sub), /*#__PURE__*/React.createElement("div", {
   className: "mt-auto pt-4 flex items-center gap-2 flex-wrap"
 }, /*#__PURE__*/React.createElement("span", {
   className: "px-2.5 py-1 rounded-full bg-white/8 text-white/70 text-[10px] font-mono tracking-wider"
-}, "RAG · банки"), /*#__PURE__*/React.createElement("span", {
+}, "RAG \xB7 \u0431\u0430\u043D\u043A\u0438"), /*#__PURE__*/React.createElement("span", {
   className: "px-2.5 py-1 rounded-full bg-white/8 text-white/70 text-[10px] font-mono tracking-wider"
 }, "SEC EDGAR"), /*#__PURE__*/React.createElement("span", {
   className: "px-2.5 py-1 rounded-full bg-white/8 text-white/70 text-[10px] font-mono tracking-wider"
@@ -989,61 +1019,56 @@ const Hero = () => {
     className: "rise",
     "data-screen-label": "01 Overview"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "flex items-start justify-between gap-8 flex-wrap mb-6"
+    className: "flex items-start justify-between gap-x-10 gap-y-6 flex-wrap mb-8"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "flex-1 min-w-[480px]"
+    className: "flex-1 min-w-[280px] max-w-[820px]"
   }, /*#__PURE__*/React.createElement("div", {
     className: "flex items-center gap-2 text-[11px] tracking-widest uppercase text-ink-500 font-mono mb-3"
   }, /*#__PURE__*/React.createElement("span", {
     className: "w-1.5 h-1.5 rounded-full bg-gold-400"
-  }), "Portfolio Risk Report · Tier ", p.meta.tier), /*#__PURE__*/React.createElement("h1", {
-    className: "text-[58px] leading-[1.02] tracking-[-0.03em] font-light text-ink-900 max-w-[860px]"
+  }), "Portfolio Risk Report \xB7 Tier ", p.meta.tier), /*#__PURE__*/React.createElement("h1", {
+    className: "text-[clamp(32px,4.6vw,56px)] leading-[1.05] tracking-[-0.03em] font-light text-ink-900"
   }, v.headline, /*#__PURE__*/React.createElement("span", {
     className: "text-ink-400"
   }, ".")), /*#__PURE__*/React.createElement("p", {
-    className: "text-[18px] text-ink-500 mt-3 max-w-[640px] font-light"
+    className: "text-[17px] text-ink-500 mt-3 max-w-[640px] font-light"
   }, v.sub)), /*#__PURE__*/React.createElement("div", {
-    className: "flex items-end gap-2 pt-4 divide-x divide-ink-900/10"
+    className: "flex flex-col gap-4 w-full lg:w-auto lg:min-w-[360px] lg:max-w-[440px]"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-end justify-start lg:justify-end gap-1 divide-x divide-ink-900/10"
   }, p.heroStats.map((s, i) => {
     const IconC = {
       briefcase: Icons.Briefcase,
       trendUp: Icons.TrendUp,
       wallet: Icons.Wallet
-    }[s.icon];
+    }[s.icon] || Icons.Briefcase;
     return /*#__PURE__*/React.createElement(HeroStat, {
       key: i,
       value: s.value,
       label: s.label,
-      IconC: IconC
+      IconC: IconC,
+      small: s.small
     });
+  })), /*#__PURE__*/React.createElement(HeroRiskGauge, {
+    value: v.riskIndex,
+    delta: v.riskTrendDelta,
+    profile: p.meta.profile
   }))), /*#__PURE__*/React.createElement("div", {
-    className: "flex items-end gap-6 flex-wrap mb-10"
-  }, p.factorPills.map((f, i) => /*#__PURE__*/React.createElement(FactorPill, {
-    key: i,
-    ...f
-  })), /*#__PURE__*/React.createElement("div", {
-    className: "flex-1 min-w-[160px] flex flex-col gap-2"
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "text-[12px] text-ink-500 font-medium"
-  }, "Прочие метрики"), /*#__PURE__*/React.createElement("div", {
-    className: "h-7 rounded-full hatch border border-ink-900/8"
-  }))), /*#__PURE__*/React.createElement("div", {
-    className: "grid grid-cols-12 gap-5"
+    className: "grid grid-cols-2 sm:flex sm:flex-wrap items-end gap-x-8 gap-y-5 mb-10"
+  }, p.factorPills.map((f, i) => /*#__PURE__*/React.createElement(FactorPill, _extends({
+    key: i
+  }, f)))), /*#__PURE__*/React.createElement("div", {
+    className: "grid grid-cols-12 gap-5 items-stretch"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "col-span-12 lg:col-span-3"
+    className: "col-span-12 sm:col-span-6 lg:col-span-3"
   }, /*#__PURE__*/React.createElement(TopHotspotCard, {
     h: p.topHotspot
   })), /*#__PURE__*/React.createElement("div", {
-    className: "col-span-12 sm:col-span-6 lg:col-span-3"
+    className: "col-span-12 sm:col-span-6 lg:col-span-5"
   }, /*#__PURE__*/React.createElement(RiskDecompCard, {
     data: p.riskDecomp
   })), /*#__PURE__*/React.createElement("div", {
-    className: "col-span-12 sm:col-span-6 lg:col-span-3"
-  }, /*#__PURE__*/React.createElement(RiskGaugeCard, {
-    value: v.riskIndex,
-    delta: v.riskTrendDelta
-  })), /*#__PURE__*/React.createElement("div", {
-    className: "col-span-12 lg:col-span-3 grid grid-rows-2 gap-5"
+    className: "col-span-12 lg:col-span-4 grid grid-rows-[1fr_auto] gap-5"
   }, /*#__PURE__*/React.createElement(SectorMixCard, {
     sectors: p.sectors
   }), /*#__PURE__*/React.createElement(AIInsightCard, {
@@ -1176,11 +1201,11 @@ const HoldingRow = ({
     className: "flex items-start justify-between gap-4 mb-4"
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "text-[11px] tracking-widest uppercase text-ink-500 font-mono"
-  }, "Фундаментал · SEC EDGAR"), /*#__PURE__*/React.createElement("div", {
+  }, "\u0424\u0443\u043D\u0434\u0430\u043C\u0435\u043D\u0442\u0430\u043B \xB7 SEC EDGAR"), /*#__PURE__*/React.createElement("div", {
     className: "text-[15px] text-ink-900 font-medium mt-0.5"
   }, h.name)), /*#__PURE__*/React.createElement("button", {
     className: "flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-ink-900 text-white text-[11px] font-medium hover:bg-ink-800 transition"
-  }, "Открыть бумагу ", /*#__PURE__*/React.createElement(Icons.ArrowR, {
+  }, "\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u0431\u0443\u043C\u0430\u0433\u0443 ", /*#__PURE__*/React.createElement(Icons.ArrowR, {
     size: 12,
     stroke: 2.2
   }))), /*#__PURE__*/React.createElement("div", {
@@ -1189,13 +1214,13 @@ const HoldingRow = ({
     label: "ROE",
     value: h.fund.roe
   }), /*#__PURE__*/React.createElement(FundCell, {
-    label: "Маржа",
+    label: "\u041C\u0430\u0440\u0436\u0430",
     value: h.fund.margin
   }), /*#__PURE__*/React.createElement(FundCell, {
-    label: "Долг/А",
+    label: "\u0414\u043E\u043B\u0433/\u0410",
     value: h.fund.debt
   }), /*#__PURE__*/React.createElement(FundCell, {
-    label: "Рост г/г",
+    label: "\u0420\u043E\u0441\u0442 \u0433/\u0433",
     value: h.fund.growth
   }), /*#__PURE__*/React.createElement(FundCell, {
     label: "ATR",
@@ -1247,13 +1272,13 @@ const Holdings = () => {
     className: "flex items-center gap-2 text-[11px] tracking-widest uppercase text-ink-500 font-mono mb-2"
   }, /*#__PURE__*/React.createElement("span", {
     className: "w-1.5 h-1.5 rounded-full bg-gold-400"
-  }), " Holdings · 9 позиций"), /*#__PURE__*/React.createElement("h2", {
+  }), " Holdings \xB7 9 \u043F\u043E\u0437\u0438\u0446\u0438\u0439"), /*#__PURE__*/React.createElement("h2", {
     className: "text-[40px] leading-[1.05] tracking-[-0.02em] font-light text-ink-900"
-  }, "Что вы держите", /*#__PURE__*/React.createElement("span", {
+  }, "\u0427\u0442\u043E \u0432\u044B \u0434\u0435\u0440\u0436\u0438\u0442\u0435", /*#__PURE__*/React.createElement("span", {
     className: "text-ink-400"
   }, ".")), /*#__PURE__*/React.createElement("p", {
     className: "text-[15px] text-ink-500 mt-2 font-light"
-  }, "Нажмите на строку, чтобы увидеть фундаментал бумаги.")), /*#__PURE__*/React.createElement("div", {
+  }, "\u041D\u0430\u0436\u043C\u0438\u0442\u0435 \u043D\u0430 \u0441\u0442\u0440\u043E\u043A\u0443, \u0447\u0442\u043E\u0431\u044B \u0443\u0432\u0438\u0434\u0435\u0442\u044C \u0444\u0443\u043D\u0434\u0430\u043C\u0435\u043D\u0442\u0430\u043B \u0431\u0443\u043C\u0430\u0433\u0438.")), /*#__PURE__*/React.createElement("div", {
     className: "flex items-center gap-2 flex-wrap"
   }, filters.map(f => /*#__PURE__*/React.createElement("button", {
     key: f,
@@ -1264,13 +1289,13 @@ const Holdings = () => {
     className: "glass-strong rounded-4xl shadow-card overflow-hidden"
   }, /*#__PURE__*/React.createElement("div", {
     className: "swipe-hint items-center gap-1 text-[10px] font-mono text-gold-700 bg-gold-400/15 rounded-full px-2.5 py-1 mb-2.5 w-max"
-  }, "↔ листайте таблицу"), /*#__PURE__*/React.createElement("div", {
+  }, "\u2194 \u043B\u0438\u0441\u0442\u0430\u0439\u0442\u0435 \u0442\u0430\u0431\u043B\u0438\u0446\u0443"), /*#__PURE__*/React.createElement("div", {
     className: "mob-scroll-x"
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "grid grid-cols-[40px_minmax(0,2fr)_minmax(0,1.6fr)_repeat(4,minmax(0,1fr))_88px_40px] items-center gap-3 px-6 py-3.5 border-b border-ink-900/6 text-[10px] tracking-widest uppercase text-ink-500 font-mono"
-  }, /*#__PURE__*/React.createElement("div", null), /*#__PURE__*/React.createElement("div", null, "Тикер · Имя"), /*#__PURE__*/React.createElement("div", null, "Класс"), /*#__PURE__*/React.createElement("div", null, "Вес"), /*#__PURE__*/React.createElement("div", null, "Риск"), /*#__PURE__*/React.createElement("div", null, "Beta"), /*#__PURE__*/React.createElement("div", null, "P/L"), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("div", null), /*#__PURE__*/React.createElement("div", null, "\u0422\u0438\u043A\u0435\u0440 \xB7 \u0418\u043C\u044F"), /*#__PURE__*/React.createElement("div", null, "\u041A\u043B\u0430\u0441\u0441"), /*#__PURE__*/React.createElement("div", null, "\u0412\u0435\u0441"), /*#__PURE__*/React.createElement("div", null, "\u0420\u0438\u0441\u043A"), /*#__PURE__*/React.createElement("div", null, "Beta"), /*#__PURE__*/React.createElement("div", null, "P/L"), /*#__PURE__*/React.createElement("div", {
     className: "text-right"
-  }, "Сигнал"), /*#__PURE__*/React.createElement("div", null)), /*#__PURE__*/React.createElement("div", {
+  }, "\u0421\u0438\u0433\u043D\u0430\u043B"), /*#__PURE__*/React.createElement("div", null)), /*#__PURE__*/React.createElement("div", {
     className: "divide-y divide-ink-900/5"
   }, rows.map((h, i) => /*#__PURE__*/React.createElement(HoldingRow, {
     key: h.t,
@@ -1280,7 +1305,7 @@ const Holdings = () => {
     onToggle: () => setOpenIdx(openIdx === i ? -1 : i)
   })), rows.length === 0 && /*#__PURE__*/React.createElement("div", {
     className: "px-6 py-12 text-center text-ink-500 text-[14px]"
-  }, "Ничего не подходит под фильтр «", filter, "»."))))));
+  }, "\u041D\u0438\u0447\u0435\u0433\u043E \u043D\u0435 \u043F\u043E\u0434\u0445\u043E\u0434\u0438\u0442 \u043F\u043E\u0434 \u0444\u0438\u043B\u044C\u0442\u0440 \xAB", filter, "\xBB."))))));
 };
 Object.assign(window, {
   Holdings
@@ -1313,47 +1338,125 @@ const PeriodRow = ({
   p,
   isMax
 }) => /*#__PURE__*/React.createElement("div", {
-  className: `flex items-center gap-4 px-5 py-3 rounded-2xl transition-colors hover:bg-cream-50
+  className: `flex items-center gap-3 sm:gap-4 px-3 sm:px-5 py-3 rounded-2xl transition-colors hover:bg-cream-50
                    ${isMax ? 'bg-cream-50' : ''}`
 }, /*#__PURE__*/React.createElement("div", {
-  className: "w-16 text-[12px] font-medium text-ink-500"
+  className: "w-12 sm:w-16 text-[12px] font-medium text-ink-500 flex-shrink-0"
 }, p.label), /*#__PURE__*/React.createElement("div", {
-  className: "flex-1 grid grid-cols-3 gap-2"
+  className: "flex-1 grid grid-cols-3 gap-2 min-w-0"
 }, /*#__PURE__*/React.createElement("div", {
   className: "flex items-center gap-2"
 }, /*#__PURE__*/React.createElement("span", {
-  className: "w-2 h-2 rounded-full bg-gold-400"
+  className: "w-2 h-2 rounded-full bg-gold-400 flex-shrink-0"
 }), /*#__PURE__*/React.createElement("span", {
-  className: "text-[14px] font-semibold num text-ink-900"
+  className: "text-[14px] font-semibold num text-ink-900 whitespace-nowrap"
 }, p.p >= 0 ? '+' : '−', Math.abs(p.p).toFixed(1), "%")), /*#__PURE__*/React.createElement("div", {
   className: "flex items-center gap-2"
 }, /*#__PURE__*/React.createElement("span", {
-  className: "w-2 h-2 rounded-full bg-ink-900"
+  className: "w-2 h-2 rounded-full bg-ink-900 flex-shrink-0"
 }), /*#__PURE__*/React.createElement("span", {
-  className: "text-[14px] num text-ink-700"
+  className: "text-[14px] num text-ink-700 whitespace-nowrap"
 }, p.s >= 0 ? '+' : '−', Math.abs(p.s).toFixed(1), "%")), /*#__PURE__*/React.createElement("div", {
-  className: "flex items-center gap-2 justify-end"
+  className: "flex items-center gap-1.5 justify-end"
 }, /*#__PURE__*/React.createElement("span", {
   className: "text-[12px] text-ink-500"
-}, "Δ"), /*#__PURE__*/React.createElement("span", {
-  className: `text-[14px] font-semibold num ${p.d >= 0 ? 'text-sage-600' : 'text-rust-600'}`
-}, p.d >= 0 ? '+' : '−', Math.abs(p.d).toFixed(1), " пп"))));
+}, "\u0394"), /*#__PURE__*/React.createElement("span", {
+  className: `text-[14px] font-semibold num whitespace-nowrap ${p.d >= 0 ? 'text-sage-600' : 'text-rust-600'}`
+}, p.d >= 0 ? '+' : '−', Math.abs(p.d).toFixed(1), " \u043F\u043F"))));
+
+// Horizon (in months) for a period label.  'YTD' → 'YTD'; unknown → null.
+// Handles '1м'/'1 мес'/'1M'/'12М' etc.
+const _perfMonths = label => {
+  const t = String(label || '').toLowerCase();
+  if (t.includes('ytd')) return 'YTD';
+  const d = t.replace(/[^0-9]/g, '');
+  return d ? parseInt(d, 10) : null;
+};
+
+// Order periods 1<3<6<12, YTD last (sources sometimes emit YTD between 3 and 6).
+const _perfOrder = (a, b) => {
+  const va = _perfMonths(a.label),
+    vb = _perfMonths(b.label);
+  const ka = va === 'YTD' ? 99 : va || 50;
+  const kb = vb === 'YTD' ? 99 : vb || 50;
+  return ka - kb;
+};
 const Performance = () => {
   const p = window.PORTFOLIO.performance;
-  // The period selector is now FUNCTIONAL: it drives the headline figures from
-  // the SELECTED period's real row (was dead — it changed state but nothing read
-  // it, so the chip highlighted but no number moved).
-  const periods = (p.periods || []).map(x => x.label);
-  const [period, setPeriod] = React.useState(periods.includes('12М') ? '12М' : periods[periods.length - 1] || '12М');
-  const sel = (p.periods || []).find(x => x.label === period) || {};
+  // Periods sorted into a logical horizon order for BOTH the selector and table.
+  const periods = [...(p.periods || [])].sort(_perfOrder);
+  const labels = periods.map(x => x.label);
+  // Default to the 12-month view (longest cumulative window), else the last.
+  const defLabel = labels.find(l => _perfMonths(l) === 12) || labels[labels.length - 1] || '';
+  const [period, setPeriod] = React.useState(defLabel);
+  const sel = periods.find(x => x.label === period) || {};
+  const volPort = (p.summary || {}).volPort ?? (p.vol || {}).port;
   const s = {
-    ret: sel.p ?? (p.summary || {}).ret ?? 0,
-    exc: sel.d ?? (p.summary || {}).exc ?? 0,
-    spx: sel.s ?? (p.summary || {}).spx ?? 0,
-    volPort: (p.summary || {}).volPort
+    ret: sel.p ?? 0,
+    exc: sel.d ?? (sel.p ?? 0) - (sel.s ?? 0),
+    spx: sel.s ?? 0,
+    volPort
   };
-  const fmt = x => `${x >= 0 ? '+' : '−'}${Math.abs(x)}`;
+  const fmt = x => `${x >= 0 ? '+' : '−'}${Math.abs(Number(x) || 0).toFixed(1)}`;
   const beats = (s.exc || 0) >= 0;
+
+  // Calendar months elapsed this year — positions the YTD window's x-axis.
+  const ytdMonths = (() => {
+    const g = String((window.PORTFOLIO.meta || {}).generated || '');
+    const mm = g.match(/\.(\d{2})\.\d{4}/); // dd.MM.yyyy → month
+    return mm ? Math.max(1, parseInt(mm[1], 10)) : 6;
+  })();
+
+  // Build a REAL cumulative curve for the SELECTED window by exact nesting of the
+  // period endpoints: cumulative over [window-start … −h] = (1+r_window)/(1+r_h)−1.
+  // No interpolation — every point is algebra over the SAME figures shown in the
+  // breakdown table, so the chart's endpoint == the headline == its table row.
+  const series = React.useMemo(() => {
+    const byMonth = {};
+    periods.forEach(r => {
+      const m = _perfMonths(r.label);
+      if (m !== 'YTD' && m) byMonth[m] = r;
+    });
+    const selM = _perfMonths(period);
+    const span = selM === 'YTD' ? ytdMonths : selM;
+    const rM = (sel.p || 0) / 100,
+      sM = (sel.s || 0) / 100;
+    if (!span || !isFinite(span)) {
+      return {
+        xs: [0, 1],
+        labels: ['старт', 'сейчас'],
+        port: [0, sel.p || 0],
+        spx: [0, sel.s || 0]
+      };
+    }
+    const nested = [1, 3, 6, 12].filter(h => h < span && byMonth[h]).sort((a, b) => b - a);
+    const pts = [{
+      off: span,
+      port: 0,
+      spx: 0
+    }];
+    nested.forEach(h => {
+      const rh = (byMonth[h].p || 0) / 100,
+        sh = (byMonth[h].s || 0) / 100;
+      pts.push({
+        off: h,
+        port: ((1 + rM) / (1 + rh) - 1) * 100,
+        spx: ((1 + sM) / (1 + sh) - 1) * 100
+      });
+    });
+    pts.push({
+      off: 0,
+      port: sel.p || 0,
+      spx: sel.s || 0
+    });
+    return {
+      xs: pts.map(pt => (span - pt.off) / span),
+      labels: pts.map((pt, i) => i === 0 ? 'старт' : i === pts.length - 1 ? 'сейчас' : `−${pt.off}М`),
+      port: pts.map(pt => pt.port),
+      spx: pts.map(pt => pt.spx)
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [period]);
   return /*#__PURE__*/React.createElement("section", {
     id: "performance",
     className: "rise",
@@ -1364,15 +1467,15 @@ const Performance = () => {
     className: "flex items-center gap-2 text-[11px] tracking-widest uppercase text-ink-500 font-mono mb-2"
   }, /*#__PURE__*/React.createElement("span", {
     className: "w-1.5 h-1.5 rounded-full bg-gold-400"
-  }), " Performance · ", period), /*#__PURE__*/React.createElement("h2", {
-    className: "text-[40px] leading-[1.05] tracking-[-0.02em] font-light text-ink-900"
-  }, "Рост против рынка", /*#__PURE__*/React.createElement("span", {
+  }), " Performance \xB7 ", period), /*#__PURE__*/React.createElement("h2", {
+    className: "text-[clamp(28px,3.4vw,40px)] leading-[1.05] tracking-[-0.02em] font-light text-ink-900"
+  }, "\u0420\u043E\u0441\u0442 \u043F\u0440\u043E\u0442\u0438\u0432 \u0440\u044B\u043D\u043A\u0430", /*#__PURE__*/React.createElement("span", {
     className: "text-ink-400"
   }, ".")), /*#__PURE__*/React.createElement("p", {
     className: "text-[15px] text-ink-500 mt-2 font-light"
-  }, "Накопленная доходность портфеля в сравнении с S&P 500.")), /*#__PURE__*/React.createElement("div", {
-    className: "flex items-center gap-1 p-1 rounded-full bg-white/60 border border-ink-900/8 backdrop-blur-md"
-  }, periods.map(pr => /*#__PURE__*/React.createElement("button", {
+  }, "\u041D\u0430\u043A\u043E\u043F\u043B\u0435\u043D\u043D\u0430\u044F \u0434\u043E\u0445\u043E\u0434\u043D\u043E\u0441\u0442\u044C \u043F\u043E\u0440\u0442\u0444\u0435\u043B\u044F \u0432 \u0441\u0440\u0430\u0432\u043D\u0435\u043D\u0438\u0438 \u0441 S&P 500.")), /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center gap-1 p-1 rounded-full bg-white/60 border border-ink-900/8 backdrop-blur-md flex-wrap"
+  }, labels.map(pr => /*#__PURE__*/React.createElement("button", {
     key: pr,
     onClick: () => setPeriod(pr),
     className: `px-3.5 py-1.5 rounded-full text-[12px] font-medium transition-colors
@@ -1385,7 +1488,7 @@ const Performance = () => {
     className: "flex items-start justify-between gap-3 flex-wrap mb-4"
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "text-ink-500 text-[12px] font-medium mb-1"
-  }, "Доходность за период · ", period), /*#__PURE__*/React.createElement("div", {
+  }, "\u0414\u043E\u0445\u043E\u0434\u043D\u043E\u0441\u0442\u044C \u0437\u0430 \u043F\u0435\u0440\u0438\u043E\u0434 \xB7 ", period), /*#__PURE__*/React.createElement("div", {
     className: "flex items-end gap-3 flex-wrap"
   }, /*#__PURE__*/React.createElement("span", {
     className: "text-[48px] leading-none font-light num text-ink-900"
@@ -1396,13 +1499,13 @@ const Performance = () => {
   }, /*#__PURE__*/React.createElement(Icons.TrendUp, {
     size: 11,
     stroke: 2.2
-  }), " ", fmt(s.exc), " пп vs S&P"))), /*#__PURE__*/React.createElement("div", {
+  }), " ", fmt(s.exc), " \u043F\u043F vs S&P"))), /*#__PURE__*/React.createElement("div", {
     className: "flex items-center gap-3"
   }, /*#__PURE__*/React.createElement("div", {
     className: "flex items-center gap-1.5 text-[11px] text-ink-700"
   }, /*#__PURE__*/React.createElement("span", {
     className: "w-3 h-1 rounded-full bg-gold-400"
-  }), " Ваш портфель"), /*#__PURE__*/React.createElement("div", {
+  }), " \u0412\u0430\u0448 \u043F\u043E\u0440\u0442\u0444\u0435\u043B\u044C"), /*#__PURE__*/React.createElement("div", {
     className: "flex items-center gap-1.5 text-[11px] text-ink-500"
   }, /*#__PURE__*/React.createElement("span", {
     className: "w-3 h-[2px] bg-ink-900",
@@ -1411,13 +1514,14 @@ const Performance = () => {
       backgroundSize: '4px 2px'
     }
   }), " S&P 500"))), /*#__PURE__*/React.createElement(PerfChart, {
-    months: p.months,
-    port: p.port,
-    spx: p.spx
+    labels: series.labels,
+    port: series.port,
+    spx: series.spx,
+    xs: series.xs
   })), /*#__PURE__*/React.createElement("div", {
     className: "col-span-12 lg:col-span-4 grid grid-cols-2 lg:grid-cols-1 gap-5"
   }, /*#__PURE__*/React.createElement(PerfSummaryCard, {
-    label: "Доходность",
+    label: "\u0414\u043E\u0445\u043E\u0434\u043D\u043E\u0441\u0442\u044C",
     value: `${fmt(s.ret)}%`,
     sub: `за ${period}`,
     accent: "gold",
@@ -1431,9 +1535,9 @@ const Performance = () => {
   }), /*#__PURE__*/React.createElement("div", {
     className: "col-span-2 lg:col-span-1 grid grid-cols-2 gap-3"
   }, /*#__PURE__*/React.createElement(PerfSummaryCard, {
-    label: "Волатильность",
-    value: `${s.volPort}%`,
-    sub: "год.",
+    label: "\u0412\u043E\u043B\u0430\u0442\u0438\u043B\u044C\u043D\u043E\u0441\u0442\u044C",
+    value: volPort != null ? `${volPort}%` : '—',
+    sub: "\u0433\u043E\u0434.",
     accent: "light"
   }), /*#__PURE__*/React.createElement(PerfSummaryCard, {
     label: "S&P 500",
@@ -1446,11 +1550,11 @@ const Performance = () => {
     className: "flex items-center justify-between mb-3 px-2"
   }, /*#__PURE__*/React.createElement("div", {
     className: "text-[13px] font-semibold text-ink-900"
-  }, "Разбивка по периодам"), /*#__PURE__*/React.createElement("div", {
+  }, "\u0420\u0430\u0437\u0431\u0438\u0432\u043A\u0430 \u043F\u043E \u043F\u0435\u0440\u0438\u043E\u0434\u0430\u043C"), /*#__PURE__*/React.createElement("div", {
     className: "text-[11px] text-ink-500 font-mono"
-  }, "Портфель / S&P 500 / Опережение")), /*#__PURE__*/React.createElement("div", {
+  }, "\u041F\u043E\u0440\u0442\u0444\u0435\u043B\u044C / S&P 500 / \u041E\u043F\u0435\u0440\u0435\u0436\u0435\u043D\u0438\u0435")), /*#__PURE__*/React.createElement("div", {
     className: "space-y-1"
-  }, p.periods.map(pr => /*#__PURE__*/React.createElement(PeriodRow, {
+  }, periods.map(pr => /*#__PURE__*/React.createElement(PeriodRow, {
     key: pr.label,
     p: pr,
     isMax: pr.label === period
@@ -1548,7 +1652,7 @@ const IdeaCard = ({
   })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: `text-[10px] tracking-widest uppercase font-mono mb-0.5
                               ${isHighlight ? 'text-white/50' : 'text-ink-400'}`
-  }, "Идея ", idea.n, " · ", idea.cat), /*#__PURE__*/React.createElement("div", {
+  }, "\u0418\u0434\u0435\u044F ", idea.n, " \xB7 ", idea.cat), /*#__PURE__*/React.createElement("div", {
     className: `flex items-center gap-1 ${isHighlight ? 'text-gold-400' : 'text-rust-600'}`
   }, /*#__PURE__*/React.createElement("span", {
     className: `w-1.5 h-1.5 rounded-full ${tone.dot}`
@@ -1572,7 +1676,7 @@ const IdeaCard = ({
   }, /*#__PURE__*/React.createElement("div", {
     className: `text-[10px] tracking-widest uppercase font-mono mb-2
                           ${isHighlight ? 'text-white/40' : 'text-ink-400'}`
-  }, "Идеи по замене — нет в портфеле"), /*#__PURE__*/React.createElement("div", {
+  }, "\u0418\u0434\u0435\u0438 \u043F\u043E \u0437\u0430\u043C\u0435\u043D\u0435 \u2014 \u043D\u0435\u0442 \u0432 \u043F\u043E\u0440\u0442\u0444\u0435\u043B\u0435"), /*#__PURE__*/React.createElement("div", {
     className: "grid grid-cols-3 gap-2"
   }, idea.tickers.map(t => /*#__PURE__*/React.createElement("div", {
     key: t.t,
@@ -1594,7 +1698,7 @@ const IdeaCard = ({
   }, /*#__PURE__*/React.createElement("div", {
     className: `text-[10px] tracking-widest uppercase font-mono mb-2.5
                             ${isHighlight ? 'text-white/40' : 'text-ink-400'}`
-  }, "Конвейер · Factor → Regime → RAG"), /*#__PURE__*/React.createElement("div", {
+  }, "\u041A\u043E\u043D\u0432\u0435\u0439\u0435\u0440 \xB7 Factor \u2192 Regime \u2192 RAG"), /*#__PURE__*/React.createElement("div", {
     className: `flex items-center ${isHighlight ? '[&_div.rounded-2xl]:!bg-white/8 [&_div.rounded-2xl]:!border-white/10 [&_.text-ink-900]:!text-white [&_.text-ink-400]:!text-white/40 [&_svg]:!text-white/40' : ''}`
   }, /*#__PURE__*/React.createElement(PipelineNode, {
     label: "Factor",
@@ -1609,7 +1713,7 @@ const IdeaCard = ({
   }))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: `text-[10px] tracking-widest uppercase font-mono mb-2.5
                             ${isHighlight ? 'text-white/40' : 'text-ink-400'}`
-  }, "Почему именно эти бумаги"), /*#__PURE__*/React.createElement("div", {
+  }, "\u041F\u043E\u0447\u0435\u043C\u0443 \u0438\u043C\u0435\u043D\u043D\u043E \u044D\u0442\u0438 \u0431\u0443\u043C\u0430\u0433\u0438"), /*#__PURE__*/React.createElement("div", {
     className: "grid grid-cols-1 md:grid-cols-3 gap-2.5"
   }, idea.tickers.map(t => /*#__PURE__*/React.createElement(TickerCard, {
     key: t.t,
@@ -1624,7 +1728,7 @@ const IdeaCard = ({
   }, /*#__PURE__*/React.createElement("div", {
     className: `text-[10px] tracking-widest uppercase font-mono mb-1.5
                               ${isHighlight ? 'text-gold-400' : 'text-gold-700'}`
-  }, "Ожидаемый эффект"), /*#__PURE__*/React.createElement("ul", {
+  }, "\u041E\u0436\u0438\u0434\u0430\u0435\u043C\u044B\u0439 \u044D\u0444\u0444\u0435\u043A\u0442"), /*#__PURE__*/React.createElement("ul", {
     className: "space-y-1"
   }, idea.effect.map((e, i) => /*#__PURE__*/React.createElement("li", {
     key: i,
@@ -1657,25 +1761,25 @@ const Ideas = () => {
     className: "flex items-center gap-2 text-[11px] tracking-widest uppercase text-ink-500 font-mono mb-2"
   }, /*#__PURE__*/React.createElement("span", {
     className: "w-1.5 h-1.5 rounded-full bg-gold-400"
-  }), " AI Ideas · 4 идеи"), /*#__PURE__*/React.createElement("h2", {
+  }), " AI Ideas \xB7 4 \u0438\u0434\u0435\u0438"), /*#__PURE__*/React.createElement("h2", {
     className: "text-[40px] leading-[1.05] tracking-[-0.02em] font-light text-ink-900"
-  }, "Идеи на основе данных", /*#__PURE__*/React.createElement("span", {
+  }, "\u0418\u0434\u0435\u0438 \u043D\u0430 \u043E\u0441\u043D\u043E\u0432\u0435 \u0434\u0430\u043D\u043D\u044B\u0445", /*#__PURE__*/React.createElement("span", {
     className: "text-ink-400"
   }, ".")), /*#__PURE__*/React.createElement("p", {
     className: "text-[15px] text-ink-500 mt-2 font-light max-w-[640px]"
-  }, "На основе портфеля, отчётности SEC и обзоров инвестбанков. Нажмите на карточку, чтобы раскрыть детали.")), /*#__PURE__*/React.createElement("div", {
+  }, "\u041D\u0430 \u043E\u0441\u043D\u043E\u0432\u0435 \u043F\u043E\u0440\u0442\u0444\u0435\u043B\u044F, \u043E\u0442\u0447\u0451\u0442\u043D\u043E\u0441\u0442\u0438 SEC \u0438 \u043E\u0431\u0437\u043E\u0440\u043E\u0432 \u0438\u043D\u0432\u0435\u0441\u0442\u0431\u0430\u043D\u043A\u043E\u0432. \u041D\u0430\u0436\u043C\u0438\u0442\u0435 \u043D\u0430 \u043A\u0430\u0440\u0442\u043E\u0447\u043A\u0443, \u0447\u0442\u043E\u0431\u044B \u0440\u0430\u0441\u043A\u0440\u044B\u0442\u044C \u0434\u0435\u0442\u0430\u043B\u0438.")), /*#__PURE__*/React.createElement("div", {
     className: "flex items-center gap-2"
   }, /*#__PURE__*/React.createElement("button", {
     className: "flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-white/60 border border-ink-900/8 text-ink-700 text-[12px] font-medium hover:bg-white transition"
   }, /*#__PURE__*/React.createElement(Icons.Download, {
     size: 13,
     stroke: 1.8
-  }), " Экспорт PDF"), /*#__PURE__*/React.createElement("button", {
+  }), " \u042D\u043A\u0441\u043F\u043E\u0440\u0442 PDF"), /*#__PURE__*/React.createElement("button", {
     className: "flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-ink-900 text-white text-[12px] font-medium hover:bg-ink-800 transition"
   }, /*#__PURE__*/React.createElement(Icons.Sparkles, {
     size: 13,
     stroke: 1.8
-  }), " Применить идею"))), /*#__PURE__*/React.createElement("div", {
+  }), " \u041F\u0440\u0438\u043C\u0435\u043D\u0438\u0442\u044C \u0438\u0434\u0435\u044E"))), /*#__PURE__*/React.createElement("div", {
     className: "rounded-4xl p-6 mb-6 relative overflow-hidden",
     style: {
       background: 'linear-gradient(120deg, #fbf3d9 0%, #f6ebc0 100%)'
@@ -1696,11 +1800,11 @@ const Ideas = () => {
     className: "flex-1"
   }, /*#__PURE__*/React.createElement("div", {
     className: "text-[10px] tracking-widest uppercase font-mono text-ink-700 mb-1"
-  }, "AI · ", window.PORTFOLIO.meta.aiModel, " · сводка"), /*#__PURE__*/React.createElement("p", {
+  }, "AI \xB7 ", window.PORTFOLIO.meta.aiModel, " \xB7 \u0441\u0432\u043E\u0434\u043A\u0430"), /*#__PURE__*/React.createElement("p", {
     className: "text-[15px] text-ink-900 leading-relaxed font-light"
   }, window.PORTFOLIO.verdict.headline, " ", /*#__PURE__*/React.createElement("span", {
     className: "text-ink-600"
-  }, "Идеи ниже — как улучшить позиционирование портфеля."))))), /*#__PURE__*/React.createElement("div", {
+  }, "\u0418\u0434\u0435\u0438 \u043D\u0438\u0436\u0435 \u2014 \u043A\u0430\u043A \u0443\u043B\u0443\u0447\u0448\u0438\u0442\u044C \u043F\u043E\u0437\u0438\u0446\u0438\u043E\u043D\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0435 \u043F\u043E\u0440\u0442\u0444\u0435\u043B\u044F."))))), /*#__PURE__*/React.createElement("div", {
     className: "grid grid-cols-1 lg:grid-cols-2 gap-5"
   }, ideas.map((idea, i) => /*#__PURE__*/React.createElement(IdeaCard, {
     key: idea.n,
@@ -1718,7 +1822,7 @@ const Ideas = () => {
     className: "text-[12.5px] text-ink-500 leading-relaxed font-light"
   }, /*#__PURE__*/React.createElement("span", {
     className: "text-ink-700 font-medium"
-  }, "Это аналитические идеи, а не инвестиционная рекомендация."), " Расчёты основаны на исторических данных и публичной отчётности; они не учитывают вашу налоговую ситуацию, горизонт и цели. Окончательное решение — за вами или вашим финансовым консультантом.")));
+  }, "\u042D\u0442\u043E \u0430\u043D\u0430\u043B\u0438\u0442\u0438\u0447\u0435\u0441\u043A\u0438\u0435 \u0438\u0434\u0435\u0438, \u0430 \u043D\u0435 \u0438\u043D\u0432\u0435\u0441\u0442\u0438\u0446\u0438\u043E\u043D\u043D\u0430\u044F \u0440\u0435\u043A\u043E\u043C\u0435\u043D\u0434\u0430\u0446\u0438\u044F."), " \u0420\u0430\u0441\u0447\u0451\u0442\u044B \u043E\u0441\u043D\u043E\u0432\u0430\u043D\u044B \u043D\u0430 \u0438\u0441\u0442\u043E\u0440\u0438\u0447\u0435\u0441\u043A\u0438\u0445 \u0434\u0430\u043D\u043D\u044B\u0445 \u0438 \u043F\u0443\u0431\u043B\u0438\u0447\u043D\u043E\u0439 \u043E\u0442\u0447\u0451\u0442\u043D\u043E\u0441\u0442\u0438; \u043E\u043D\u0438 \u043D\u0435 \u0443\u0447\u0438\u0442\u044B\u0432\u0430\u044E\u0442 \u0432\u0430\u0448\u0443 \u043D\u0430\u043B\u043E\u0433\u043E\u0432\u0443\u044E \u0441\u0438\u0442\u0443\u0430\u0446\u0438\u044E, \u0433\u043E\u0440\u0438\u0437\u043E\u043D\u0442 \u0438 \u0446\u0435\u043B\u0438. \u041E\u043A\u043E\u043D\u0447\u0430\u0442\u0435\u043B\u044C\u043D\u043E\u0435 \u0440\u0435\u0448\u0435\u043D\u0438\u0435 \u2014 \u0437\u0430 \u0432\u0430\u043C\u0438 \u0438\u043B\u0438 \u0432\u0430\u0448\u0438\u043C \u0444\u0438\u043D\u0430\u043D\u0441\u043E\u0432\u044B\u043C \u043A\u043E\u043D\u0441\u0443\u043B\u044C\u0442\u0430\u043D\u0442\u043E\u043C.")));
 };
 Object.assign(window, {
   Ideas
@@ -1792,7 +1896,7 @@ const TopBar = ({
     stroke: 1.8
   }), " ", /*#__PURE__*/React.createElement("span", {
     className: "hidden lg:inline"
-  }, "Найти бумагу…")), /*#__PURE__*/React.createElement("button", {
+  }, "\u041D\u0430\u0439\u0442\u0438 \u0431\u0443\u043C\u0430\u0433\u0443\u2026")), /*#__PURE__*/React.createElement("button", {
     className: "w-9 h-9 rounded-full bg-white/70 border border-ink-900/8 flex items-center justify-center text-ink-700 hover:bg-white transition relative"
   }, /*#__PURE__*/React.createElement(Icons.Bell, {
     size: 15,
@@ -1811,7 +1915,7 @@ const TopBar = ({
     }
   }, /*#__PURE__*/React.createElement("div", {
     className: "w-full h-full flex items-center justify-center text-ink-900 text-[11px] font-bold"
-  }, "YК")))), /*#__PURE__*/React.createElement("div", {
+  }, "Y\u041A")))), /*#__PURE__*/React.createElement("div", {
     className: "max-w-[1480px] mx-auto mt-3 flex items-center justify-between text-[10px] font-mono tracking-wider text-ink-400 uppercase gap-3 flex-wrap"
   }, /*#__PURE__*/React.createElement("div", {
     className: "flex items-center gap-3 flex-wrap"
@@ -1819,11 +1923,11 @@ const TopBar = ({
     className: "flex items-center gap-1.5"
   }, /*#__PURE__*/React.createElement("span", {
     className: "w-1.5 h-1.5 rounded-full bg-sage-500 animate-pulse"
-  }), " Risk Engine · ", meta.engine), /*#__PURE__*/React.createElement("span", {
+  }), " Risk Engine \xB7 ", meta.engine), /*#__PURE__*/React.createElement("span", {
     className: "opacity-30"
-  }, "/"), /*#__PURE__*/React.createElement("span", null, "ID · ", meta.id), /*#__PURE__*/React.createElement("span", {
+  }, "/"), /*#__PURE__*/React.createElement("span", null, "ID \xB7 ", meta.id), /*#__PURE__*/React.createElement("span", {
     className: "opacity-30"
-  }, "/"), /*#__PURE__*/React.createElement("span", null, "Session · ", meta.session)), /*#__PURE__*/React.createElement("span", null, "Generated ", meta.generated)));
+  }, "/"), /*#__PURE__*/React.createElement("span", null, "Session \xB7 ", meta.session)), /*#__PURE__*/React.createElement("span", null, "Generated ", meta.generated)));
 };
 const Footer = () => /*#__PURE__*/React.createElement("footer", {
   className: "mt-16 mb-8"
@@ -1833,21 +1937,21 @@ const Footer = () => /*#__PURE__*/React.createElement("footer", {
   className: "max-w-[520px]"
 }, /*#__PURE__*/React.createElement("div", {
   className: "text-[10px] tracking-widest uppercase text-ink-400 font-mono mb-2"
-}, "Источники данных"), /*#__PURE__*/React.createElement("p", {
+}, "\u0418\u0441\u0442\u043E\u0447\u043D\u0438\u043A\u0438 \u0434\u0430\u043D\u043D\u044B\u0445"), /*#__PURE__*/React.createElement("p", {
   className: "text-[13px] text-ink-700 leading-relaxed font-light"
 }, /*#__PURE__*/React.createElement("span", {
   className: "font-medium"
-}, "SEC EDGAR"), " · публичная отчётность · ", /*#__PURE__*/React.createElement("span", {
+}, "SEC EDGAR"), " \xB7 \u043F\u0443\u0431\u043B\u0438\u0447\u043D\u0430\u044F \u043E\u0442\u0447\u0451\u0442\u043D\u043E\u0441\u0442\u044C \xB7 ", /*#__PURE__*/React.createElement("span", {
   className: "font-medium"
-}, "Quant Engine MAC3"), " · расчёт риска и сигналов ·", /*#__PURE__*/React.createElement("span", {
+}, "Quant Engine MAC3"), " \xB7 \u0440\u0430\u0441\u0447\u0451\u0442 \u0440\u0438\u0441\u043A\u0430 \u0438 \u0441\u0438\u0433\u043D\u0430\u043B\u043E\u0432 \xB7", /*#__PURE__*/React.createElement("span", {
   className: "font-medium"
-}, " Factor Engine"), " · ", /*#__PURE__*/React.createElement("span", {
+}, " Factor Engine"), " \xB7 ", /*#__PURE__*/React.createElement("span", {
   className: "font-medium"
-}, "Regime Model"), " · ", /*#__PURE__*/React.createElement("span", {
+}, "Regime Model"), " \xB7 ", /*#__PURE__*/React.createElement("span", {
   className: "font-medium"
-}, "Goldman Sachs"), " Q2 2026 · ", /*#__PURE__*/React.createElement("span", {
+}, "Goldman Sachs"), " Q2 2026 \xB7 ", /*#__PURE__*/React.createElement("span", {
   className: "font-medium"
-}, "Morgan Stanley"), " Tech Outlook 2026 · ", /*#__PURE__*/React.createElement("span", {
+}, "Morgan Stanley"), " Tech Outlook 2026 \xB7 ", /*#__PURE__*/React.createElement("span", {
   className: "font-medium"
 }, "JPMorgan"), " Strategy Q2 2026.")), /*#__PURE__*/React.createElement("div", {
   className: "flex items-center gap-2 flex-wrap"
@@ -1856,25 +1960,25 @@ const Footer = () => /*#__PURE__*/React.createElement("footer", {
 }, /*#__PURE__*/React.createElement(Icons.Download, {
   size: 13,
   stroke: 1.8
-}), " Скачать PDF"), /*#__PURE__*/React.createElement("button", {
+}), " \u0421\u043A\u0430\u0447\u0430\u0442\u044C PDF"), /*#__PURE__*/React.createElement("button", {
   className: "flex items-center gap-1.5 px-4 py-2 rounded-full bg-white border border-ink-900/8 text-ink-700 text-[12px] font-medium hover:bg-cream-50 transition"
 }, /*#__PURE__*/React.createElement(Icons.Share, {
   size: 13,
   stroke: 1.8
-}), " Поделиться"), /*#__PURE__*/React.createElement("button", {
+}), " \u041F\u043E\u0434\u0435\u043B\u0438\u0442\u044C\u0441\u044F"), /*#__PURE__*/React.createElement("button", {
   className: "flex items-center gap-1.5 px-4 py-2 rounded-full bg-ink-900 text-white text-[12px] font-medium hover:bg-ink-800 transition"
 }, /*#__PURE__*/React.createElement(Icons.Sparkles, {
   size: 13,
   stroke: 1.8
-}), " Новый расчёт"))), /*#__PURE__*/React.createElement("div", {
+}), " \u041D\u043E\u0432\u044B\u0439 \u0440\u0430\u0441\u0447\u0451\u0442"))), /*#__PURE__*/React.createElement("div", {
   className: "text-center text-[10px] tracking-widest uppercase text-ink-400 font-mono mt-6"
-}, "Portfolio Risk Report · BASE Tier · ", window.PORTFOLIO.meta.id, " · v2026.5"));
+}, "Portfolio Risk Report \xB7 BASE Tier \xB7 ", window.PORTFOLIO.meta.id, " \xB7 v2026.5"));
 
 // Floating action button (echoes reference pattern — bottom right luxury chip)
 const Fab = () => /*#__PURE__*/React.createElement("div", {
   className: "fixed bottom-6 right-6 z-50 flex flex-col items-end gap-2"
 }, /*#__PURE__*/React.createElement("button", {
-  title: "Пересчитать риск",
+  title: "\u041F\u0435\u0440\u0435\u0441\u0447\u0438\u0442\u0430\u0442\u044C \u0440\u0438\u0441\u043A",
   className: "w-14 h-14 rounded-full bg-ink-900 text-gold-400 shadow-card-lg flex items-center justify-center hover:scale-105 transition"
 }, /*#__PURE__*/React.createElement(Icons.Sparkles, {
   size: 20,

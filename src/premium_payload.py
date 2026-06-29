@@ -509,8 +509,14 @@ def _find(rows: list, key: str, val: str) -> dict:
 
 def _map_performance(p: dict) -> dict:
     """v3 period_returns_table (dict-of-benchmarks) → design performance block.
-    `periods` MUST be a list ([{label,p,s,d}]); the equity-curve arrays
-    (months/port/spx) aren't in the payload, so they're empty (chart degrades)."""
+
+    The chart curve is NOT carried here: the payload has no monthly series, so the
+    PerfChart component derives a REAL cumulative curve for the selected window by
+    exact nesting of the period endpoints (cum[start..−h] = (1+r_window)/(1+r_h)−1).
+    That keeps the chart, the headline and the breakdown table reading the SAME
+    numbers, and makes the period selector drive the chart.  We therefore only ship
+    `periods` ([{label,p,s,d}]), annualised `vol`, and a `summary` (volatility +
+    12-month headline figures for any non-chart consumer)."""
     prt = _g(p, "period_returns_table", default={}) or {}
     first = next(iter(prt.values()), {}) if isinstance(prt, dict) else {}
     periods = []
@@ -521,29 +527,18 @@ def _map_performance(p: dict) -> dict:
         if not _dd:                       # source usually omits excess → derive p−s
             _dd = round(_pp - _ss, 1)
         periods.append({"label": _txt(r, "label"), "p": _pp, "s": _ss, "d": _dd})
-    # Build a coarse equity curve from the period horizons so PerfChart has
-    # real, NaN-free points (the payload has no monthly series).  0 → 1m → 3m …
-    _ORD = {"1 мес": 1, "1м": 1, "3 мес": 3, "3м": 3, "6 мес": 6, "6м": 6,
-            "12 мес": 12, "12м": 12, "YTD": 9}
-    pts = sorted(periods, key=lambda r: _ORD.get(r["label"], 99))
-    months = ["старт"] + [r["label"] for r in pts]
-    port   = [0.0] + [r["p"] for r in pts]
-    spx    = [0.0] + [r["s"] for r in pts]
-    # Headline 12-month summary — REAL data.  The component used to hardcode
-    # +14.2% / +5.1пп vs S&P / S&P +9.1% / vol 14.8%, which on an underperforming
-    # book CONTRADICTED reality (and the AI verdict «отстаёт от рынка»).  Pick the
-    # 12-month row and carry the true figures.
+    _vol = round(_num(p, "volatility"), 1)
+    # 12-month headline summary — REAL data (the component reads summary.volPort
+    # for the period-independent annualised volatility card).
     _p12 = next((r for r in periods if r["label"] in ("12 мес", "12М", "12м")),
                 (periods[-1] if periods else {}))
     summary = {
         "ret":     _p12.get("p", 0.0),
         "spx":     _p12.get("s", 0.0),
         "exc":     _p12.get("d", round(_p12.get("p", 0.0) - _p12.get("s", 0.0), 1)),
-        "volPort": round(_num(p, "volatility"), 1),
+        "volPort": _vol,
     }
-    return {"months": months, "port": port, "spx": spx,
-            "vol": {"port": _num(p, "volatility"), "spx": 0},
-            "periods": periods, "summary": summary}
+    return {"vol": {"port": _vol, "spx": 0}, "periods": periods, "summary": summary}
 
 
 def _pipe_step(s: Any) -> str:
