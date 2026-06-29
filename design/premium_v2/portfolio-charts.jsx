@@ -143,22 +143,53 @@ const SectorBar = ({ sectors }) => {
 };
 
 // ── Performance line chart (port vs SPX)
-const PerfChart = ({ months, port, spx, height=240 }) => {
-  const W = 720, H = height, padL = 36, padR = 20, padT = 24, padB = 32;
+// `port`/`spx` are cumulative % series for the SELECTED window; `labels` are the
+// x-axis ticks; optional `xs` gives each point's 0..1 horizontal position (real
+// elapsed-time spacing).  The domain always includes the 0% baseline and is
+// sign-aware, so a losing window (all-negative) renders correctly with a visible
+// zero line and signed axis labels.
+const PerfChart = ({ labels=[], port=[], spx=[], xs=null, height=248 }) => {
+  const n = Math.max(port.length, spx.length);
+  const W = 720, H = height, padL = 42, padR = 60, padT = 26, padB = 34;
   const innerW = W - padL - padR;
   const innerH = H - padT - padB;
-  const all = [...port, ...spx];
-  const maxV = Math.max(...all) * 1.15;
-  const minV = Math.min(0, Math.min(...all));
-  const span = maxV - minV;
-  const px = (i) => padL + (i/(months.length-1)) * innerW;
-  const py = (v) => padT + (1 - (v - minV)/span) * innerH;
 
-  const path = (arr) => arr.map((v,i)=> `${i===0?'M':'L'} ${px(i).toFixed(1)} ${py(v).toFixed(1)}`).join(' ');
-  const area = (arr) => `${path(arr)} L ${px(arr.length-1)} ${py(0)} L ${px(0)} ${py(0)} Z`;
+  // Sign-aware domain that always brackets 0 with a little headroom.
+  const all = [...port, ...spx, 0];
+  let vmin = Math.min(...all), vmax = Math.max(...all);
+  const range = (vmax - vmin) || 1;
+  vmax += range * 0.14;
+  if (vmin < 0) vmin -= range * 0.10;
+  const span = (vmax - vmin) || 1;
 
-  const ticksY = [0, maxV/4, maxV/2, (3*maxV)/4, maxV].map(v => Math.round(v));
-  const lastIdx = months.length - 1;
+  const xfrac = (i) => (xs && xs.length === n) ? xs[i] : (n > 1 ? i/(n-1) : 0);
+  const px = (i) => padL + xfrac(i) * innerW;
+  const py = (v) => padT + (1 - (v - vmin)/span) * innerH;
+
+  const line = (arr) => arr.map((v,i)=> `${i===0?'M':'L'} ${px(i).toFixed(1)} ${py(v).toFixed(1)}`).join(' ');
+  const area = (arr) => `${line(arr)} L ${px(arr.length-1).toFixed(1)} ${py(0).toFixed(1)} L ${px(0).toFixed(1)} ${py(0).toFixed(1)} Z`;
+
+  // Evenly-spaced y ticks across the real (signed) domain.  Tick labels gain a
+  // decimal when the window is small (a ±2% range as integers duplicates to
+  // "+2% +2% +1% +1%").  End-value labels always carry one decimal so they read
+  // identically to the headline (+14.2%, not +14%).
+  const NT = 4;
+  const ticksY = Array.from({length: NT+1}, (_,k) => vmin + span * k/NT);
+  const tickDec = (span / NT) < 1.5 ? 1 : 0;
+  // Sign-aware %, guarding against a "−0%" when a tiny negative rounds to zero.
+  const signedPct = (v, dec) => {
+    const r = Math.abs(v).toFixed(dec);
+    return `${(v < 0 && parseFloat(r) !== 0) ? '−' : '+'}${r}%`;
+  };
+  const fmtTick = (v) => signedPct(v, tickDec);
+  const last = n - 1;
+  const fmtPct = (v) => signedPct(v, 1);
+
+  // Keep the port/spx end-labels from colliding when the two lines are close.
+  const portY = py(port[last]), spxY = py(spx[last]);
+  const collide = Math.abs(portY - spxY) < 16;
+  const portLabelY = collide && portY >= spxY ? portY + 7 : portY - 9;
+  const spxLabelY  = collide && portY >= spxY ? spxY  - 9 : spxY  + 14;
 
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto" preserveAspectRatio="xMidYMid meet">
@@ -172,38 +203,37 @@ const PerfChart = ({ months, port, spx, height=240 }) => {
           <stop offset="100%" stopColor="#1c1b1a" stopOpacity="0"/>
         </linearGradient>
       </defs>
-      {/* gridlines */}
+      {/* gridlines + signed y labels */}
       {ticksY.map((t,i) => (
         <g key={i}>
           <line x1={padL} y1={py(t)} x2={W-padR} y2={py(t)}
                 stroke="#1c1b1a" strokeOpacity=".06" strokeDasharray="2 4"/>
           <text x={padL-8} y={py(t)+3} textAnchor="end" fontSize="9"
-                fontFamily="JetBrains Mono" fill="#9a958c">+{t}%</text>
+                fontFamily="JetBrains Mono" fill="#9a958c">{fmtTick(t)}</text>
         </g>
       ))}
+      {/* emphasised 0% baseline */}
+      <line x1={padL} y1={py(0)} x2={W-padR} y2={py(0)} stroke="#1c1b1a" strokeOpacity=".18"/>
       {/* x labels */}
-      {months.map((m,i) => (
-        <text key={i} x={px(i)} y={H-10} textAnchor="middle" fontSize="10"
+      {labels.map((m,i) => (
+        <text key={i} x={px(i)} y={H-10}
+              textAnchor={i===0?'start':(i===n-1?'end':'middle')} fontSize="10"
               fontFamily="Manrope" fill="#9a958c">{m}</text>
       ))}
       {/* SPX area+line */}
       <path d={area(spx)} fill="url(#gradSpx)"/>
-      <path d={path(spx)} fill="none" stroke="#1c1b1a" strokeOpacity=".55" strokeWidth="1.5" strokeDasharray="4 4"/>
+      <path d={line(spx)} fill="none" stroke="#1c1b1a" strokeOpacity=".55" strokeWidth="1.5" strokeDasharray="4 4"/>
       {/* Port area+line */}
       <path d={area(port)} fill="url(#gradPort)"/>
-      <path d={path(port)} fill="none" stroke="#caa01a" strokeWidth="2.2"/>
+      <path d={line(port)} fill="none" stroke="#caa01a" strokeWidth="2.4"/>
       {/* end points */}
-      <circle cx={px(lastIdx)} cy={py(port[lastIdx])} r="5" fill="#f5d04e" stroke="#caa01a" strokeWidth="1.5"/>
-      <circle cx={px(lastIdx)} cy={py(spx[lastIdx])}  r="4" fill="#fff"    stroke="#1c1b1a" strokeWidth="1.5"/>
-      {/* end labels */}
-      <g>
-        <rect x={px(lastIdx)-4} y={py(port[lastIdx])-26} width="56" height="18" rx="9" fill="#1c1b1a"/>
-        <text x={px(lastIdx)+24} y={py(port[lastIdx])-13} textAnchor="middle"
-              fontSize="11" fontFamily="JetBrains Mono" fontWeight="500" fill="#f5d04e">+{port[lastIdx]}%</text>
-        <rect x={px(lastIdx)-4} y={py(spx[lastIdx])+8} width="56" height="18" rx="9" fill="#fff" stroke="#1c1b1a" strokeOpacity=".15"/>
-        <text x={px(lastIdx)+24} y={py(spx[lastIdx])+20} textAnchor="middle"
-              fontSize="11" fontFamily="JetBrains Mono" fontWeight="500" fill="#3a3833">+{spx[lastIdx]}%</text>
-      </g>
+      <circle cx={px(last)} cy={spxY}  r="4" fill="#fff"    stroke="#1c1b1a" strokeWidth="1.5"/>
+      <circle cx={px(last)} cy={portY} r="5" fill="#f5d04e" stroke="#caa01a" strokeWidth="1.6"/>
+      {/* end value labels — anchored to the RIGHT of the marker inside padR so they never clip */}
+      <text x={px(last)+9} y={portLabelY} textAnchor="start"
+            fontSize="12" fontFamily="JetBrains Mono" fontWeight="700" fill="#caa01a">{fmtPct(port[last])}</text>
+      <text x={px(last)+9} y={spxLabelY} textAnchor="start"
+            fontSize="11" fontFamily="JetBrains Mono" fontWeight="500" fill="#6b6862">{fmtPct(spx[last])}</text>
     </svg>
   );
 };
