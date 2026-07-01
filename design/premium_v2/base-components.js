@@ -1248,6 +1248,16 @@ const FundCell = ({
 }, label), /*#__PURE__*/React.createElement("div", {
   className: "text-[14px] font-semibold num text-ink-900 mt-0.5"
 }, value));
+
+// Robust sector/class matchers for the holdings filters.  Production tags each
+// holding with a GICS-style `sector` (English: "Technology"/"Semiconductors"/…)
+// AND an asset `cls` (Russian: "Акции США"/"Облигации"/…).  The old filters
+// compared `cls` against SECTOR names → never matched (bug: "Ничего не подходит
+// под фильтр «Технологии»").  These matchers read `sector` first and fall back
+// to `cls`, tolerant of English/Russian, so they work on real + sample data.
+const _blob = h => `${h.sector || ''} ${h.cls || ''}`.toLowerCase();
+const _isTech = h => /tech|semicond|communicat|software|internet|технолог|полупровод|коммуникац|софт/.test(_blob(h));
+const _isDefensive = h => /health|staple|utilit|consumer defensive|bond|treasur|gold|silver|precious|здрав|потреб|коммунал|облигац|золот|серебр|драгмет/.test(_blob(h)) || ['Облигации', 'Ден. средства', 'Сырьё'].includes(h.cls);
 const Holdings = () => {
   const [openIdx, setOpenIdx] = React.useState(0);
   const [filter, setFilter] = React.useState('Все');
@@ -1256,8 +1266,8 @@ const Holdings = () => {
   const rows = all.filter(h => {
     if (filter === 'Все') return true;
     if (filter === 'HOTSPOT') return h.status === 'HOTSPOT';
-    if (filter === 'Технологии') return h.cls === 'Технологии';
-    if (filter === 'Защитные') return ['Здравоохранение', 'Потреб. товары', 'Облигации'].includes(h.cls);
+    if (filter === 'Технологии') return _isTech(h);
+    if (filter === 'Защитные') return _isDefensive(h);
     if (filter === 'Доходные') return h.pnlPct >= 10;
     if (filter === 'В минусе') return h.pnlPct < 0;
     return true;

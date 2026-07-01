@@ -831,6 +831,13 @@ def build_payload(results: dict, tier: str,
                 "weight_pct_num": float(weight_pct),  # raw % for concentration math
                 "weight_extreme":_flag(weight_pct, kind="weight"),
                 "asset_class":   asset_class,
+                # Per-asset GICS-style sector (from SEC/engine Fundamental_Sector)
+                # — distinct from asset_class; drives the holdings sector filters.
+                # Empty for cash / proxy rows with no fundamental sector.
+                "sector":        ("" if is_cash else
+                                  (str(row.get("Fundamental_Sector") or "").strip()
+                                   if str(row.get("Fundamental_Sector") or "").strip()
+                                      not in ("", "default", "EM_Proxy") else "")),
                 "is_cash":       is_cash,
                 "euler_risk":    f"{euler:.1f}%",
                 "euler_risk_pct": float(euler),   # numeric TRC% — the cover top-5 table MUST sort on this, not the formatted string (else "9.6%" > "33.9%" lexicographically and the true #4 is dropped)

@@ -107,6 +107,7 @@ def _map_deep(p: dict, meta: dict) -> dict:
         holdings.append({
             "t": _txt(a, "ticker"), "name": _txt(a, "name") if _g(a, "name") else _txt(a, "ticker"),
             "cls": _txt(a, "asset_class"),
+            "sector": _txt(a, "sector") if _g(a, "sector") else "",
             "w": _num(a, "weight_pct_num"), "risk": _num(a, "euler_risk_pct"),
             "pnlPct": _num(a, "pnl_pct_num", default=_pct(_g(a, "pnl_pct"))),
             "pnlUsd": _num(a, "pnl_abs_num", default=_pct(_g(a, "pnl_abs"))),
@@ -303,7 +304,11 @@ def _map_base(p: dict, meta: dict) -> dict:
     fmap = _fund_map(p)
     holdings = [{
         "t": _txt(a, "ticker"), "name": _txt(a, "name") if _g(a, "name") else _txt(a, "ticker"),
-        "cls": _txt(a, "asset_class"), "w": _num(a, "weight_pct_num"),
+        "cls": _txt(a, "asset_class"),
+        # GICS-style sector (may be ""), separate from the asset class — the
+        # holdings sector filters (Технологии/Защитные) read this, not `cls`.
+        "sector": _txt(a, "sector") if _g(a, "sector") else "",
+        "w": _num(a, "weight_pct_num"),
         "beta": _num(a, "beta"), "risk": _num(a, "euler_risk_pct"),
         "pnlPct": _pct(_g(a, "pnl_pct")), "pnlUsd": _pct(_g(a, "pnl_abs")),
         "status": "HOTSPOT" if _g(a, "euler_extreme") else "",
