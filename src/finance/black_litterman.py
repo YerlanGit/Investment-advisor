@@ -168,16 +168,22 @@ def black_litterman(
             base = np.diag(P @ (tau * sigma) @ P.T)
             omega = np.diag(base * (1.0 - confidences) / confidences)
 
-        # Posterior mean (Idzorek 2005, eq. 10).
+        # Posterior mean — He & Litterman (1999) closed form:
+        #     μ = π + τΣ·Pᵀ·(P·τΣ·Pᵀ + Ω)⁻¹·(Q − P·π)
+        # This is algebraically identical to the Idzorek (2005, eq. 10) form
+        # used previously, but inverts ONLY the k×k view matrix (k = #views,
+        # typically 1–5) via np.linalg.solve — never the n×n (τΣ).  On an
+        # ill-conditioned factor-model Σ the old chained inv(τΣ)/inv(posterior_cov)
+        # amplified float error; this form is strictly more stable (Sprint-3 #9).
         try:
-            tau_sigma_inv = np.linalg.inv(tau * sigma)
-            omega_inv     = np.linalg.inv(omega)
-            posterior_cov_inv = tau_sigma_inv + P.T @ omega_inv @ P
-            posterior_cov     = np.linalg.inv(posterior_cov_inv)
-            posterior_mu      = posterior_cov @ (tau_sigma_inv @ pi + P.T @ omega_inv @ Q)
-            active_views      = int(len(Q))
+            ts        = tau * sigma                       # n×n
+            view_cov  = P @ ts @ P.T + omega              # k×k (PSD + diag Ω)
+            rhs       = Q - P @ pi                         # k
+            adjust    = ts @ P.T @ np.linalg.solve(view_cov, rhs)   # n
+            posterior_mu = pi + adjust
+            active_views = int(len(Q))
         except np.linalg.LinAlgError:
-            # Singular; fall back to prior (no views folded in → stays 0).
+            # Singular k×k view matrix; fall back to prior (no views → stays 0).
             posterior_mu = pi.copy()
 
     # Target weights: w* = (δ Σ)⁻¹ μ_BL  (long-only, normalised, capped turnover).

@@ -122,10 +122,18 @@ class PortLogReturnsTest(unittest.TestCase):
         self.assertTrue(np.isfinite(series.values).all())
 
     def test_tg_bot_has_no_weighted_log_recompute(self) -> None:
-        """H3: the `@ weights` portfolio log recompute must be gone from the bot."""
-        src = (Path(__file__).resolve().parent.parent / "src" / "tg_bot.py").read_text()
-        self.assertNotIn("@ _np.array(weights)", src)
-        self.assertIn('results.get("port_log_returns")', src)
+        """H3 + Sprint-1 #3: the bot must NOT recompute the weighted portfolio
+        log-returns.  The cap-weighted series math now lives in the finance layer
+        (finance.portfolio_series), which consumes the engine's precomputed
+        results["port_log_returns"]; the bot only delegates to it."""
+        src_root = Path(__file__).resolve().parent.parent / "src"
+        bot = (src_root / "tg_bot.py").read_text()
+        self.assertNotIn("@ _np.array(weights)", bot)
+        # Bot delegates the series math to the finance core (SoC).
+        self.assertIn("compute_equity_curve_series", bot)
+        # The engine-series consumption lives in the finance layer now.
+        fin = (src_root / "finance" / "portfolio_series.py").read_text()
+        self.assertIn('results.get("port_log_returns")', fin)
 
 
 if __name__ == "__main__":

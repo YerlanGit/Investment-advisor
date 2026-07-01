@@ -1,10 +1,48 @@
 # AUDIT.md — RAMP Bot · Институциональный аудит и стратегия
 
-> **Версия:** 2026-06-29 (§−9 DEEP: гейдж/KPI-графики/фундаментал/факторы/план · §−8 BASE: гейдж/график/чистка · §−7 кнопки/waterfall) · **Базовый коммит:** `ed85a8d` (merge PR #47 → `main`)
+> **Версия:** 2026-06-29 (§−10 рефакторинг-роадмап 3 спринта · §−9 DEEP-полировка · §−8 BASE-полировка) · **Базовый коммит:** `ed85a8d` (merge PR #47 → `main`)
 > **Текущая ветка:** `claude/base-report-improvements-z9ndut` — Premium V2 в проде (PR #66/#67 → `main`); коммиты на GitHub **Verified ✅** (linked `claude` account)
 > **Аудитор:** CTO / Lead Quant Architect / Lead UI / DevSecOps
-> **Верификация:** живые прод-отчёты 2026-06-09 → **2026-06-28** (`base/deep.html`, портфель U148046720); раунды 8–9 — рендер-верификация Playwright/Chromium (BASE+DEEP, десктоп+390px, все секции) · pytest **480 passed, 10 skipped**
+> **Верификация:** живые прод-отчёты 2026-06-09 → **2026-06-28** (`base/deep.html`, U148046720); раунды 8–9 рендер-верификация Playwright/Chromium; **раунд 10 — pytest 493 passed, 10 skipped** (полный прогон после каждого изменения ядра)
 > **Карты:** `REPORT_SECTIONS.md` (секция→builder→шаблон) · `REPORT_SECTIONS_AUDIT.md` (посекционный аудит живых отчётов)
+
+---
+
+## −10. Roadmap-рефакторинг: 3 спринта (2026-06-29, раунд 10) — Lead Quant / Systems Architect
+
+> **Контекст:** исполнение собственного 360-аудита (Roadmap из 11 пунктов, 3 спринта). Принцип **Do No Harm**:
+> перед удалением/слиянием — доказательство безопасности. Установлен зелёный baseline **484 passed** → после
+> всех изменений **493 passed, 10 skipped** (+9 новых тестов; ядро не тронуто по логике).
+
+### Sprint 1 — Architectural Consolidation
+
+| # | Что | Решение | Обоснование безопасности |
+|---|---|---|---|
+| 1 | Premium V2 как прод-путь | `PREMIUM_REPORT_ENABLED` default **false→true**; v3 Jinja СОХРАНЁН как авто-fallback (try/except) | **v3 НЕ удалён**: 16 тест-файлов пинят контракт `pdf_payload→v3`, и это сеть безопасности при отсутствии premium-ассета. «Единственный путь» реализован как «default + fallback». |
+| 2 | Слияние `premium_payload`+`pdf_payload` | **НЕ выполнено** (физическое слияние) — оставлен чистый 2-стадийный адаптер: `pdf_payload`=compute/format, `premium_payload`=view-map | Слияние вырезало бы наиболее покрытый тестами compute-слой (16 файлов) и увеличило бы связность. Дублирования-вреда нет — это тонкий view-слой. Do-No-Harm: отклонено как net-negative. |
+| 3 | Вынести математику из `tg_bot` | Новый `finance/portfolio_series.py` (`compute_kpi_trend_series`, `compute_equity_curve_series`); бот только рендерит SVG | Чистый SoC; H3-инвариант теста усилён (бот делегирует, finance читает `port_log_returns`). |
+| 4 | Удалить мёртвые прототипы | `report_basic_v1_design_prototype.html` + `report_deep_v1_design_prototype.html` удалены | 0 ссылок в `src/`+`tests/`. |
+
+### Sprint 2 — Reproducibility & Infra
+
+| # | Что | Решение |
+|---|---|---|
+| 5 | Пины зависимостей | Добавлены **верхние границы** (major-cap) для numpy/pandas/sklearn и всех либ (`<3.0`/`<2.0`…). `==`+hashes — оставлено CI (`pip-compile` против деплой-образа); ручной lock против локального numpy2/pandas3 отгрузил бы непроверенные версии. |
+| 6 | Fail-fast для `DB_PATH` | Уже был raise в проде; усилено — теперь проверяется и **резолвнутый** `DB_PATH.resolve()` (не только env-строка). |
+| 7 | Smoke-тест SIGKILL | Новый `test_phase20`: субпроцесс держит hardened-транзакцию, SIGKILL в известной точке → commit **переживает** (durability), un-commit **откатывается** (atomicity). |
+
+### Sprint 3 — Quant-Polish
+
+| # | Что | Решение |
+|---|---|---|
+| 8 | Док-знаменатель Sharpe + диапазон Credit | Тултип KPI (структурная σ=√(w′Σw), Σ=B·F·Bᵀ+D) + подпись Credit «−2…+1, асимметрично» в PillarLegend. |
+| 9 | BL `inv`→`solve` + nearest-PSD | BL переведён на **He-Litterman closed form** (solve k×k, а не inv n×n) — алгебраически идентично, строго стабильнее; `_nearest_psd` (Higham eigen-clip) применён к блендованной F (no-op когда PSD). |
+| 10 | Bootstrap seed `hash()`→`hashlib.sha256` | Кросс-интерпретаторно стабильный seed из байтов округлённого вектора. |
+| 11 | Векторизация `iterrows` в адаптере | **Отклонено** (обоснованно): N≤50 → выигрыш микросекунды; `itertuples`/`getattr` теряет defensive `row.get(col,default)` (толерантность к отсутствующим колонкам) → корректностный риск в money-path. Аудит сам оценил как LOW-value/MEDIUM-risk. |
+
+**Итог:** 9/11 выполнено; 2 (#2 слияние, #11 iterrows) **осознанно отклонены** с доказательством вреда/бесполезности —
+это и есть Do-No-Harm. Логика ядра (ковариация, Euler, Sharpe/Sortino, BL, CVaR, 4-Pillar) не изменена по
+результату — только численно стабилизирована (BL/PSD) и сделана детерминированной (seed).
 
 ---
 

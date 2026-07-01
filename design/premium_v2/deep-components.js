@@ -1210,6 +1210,14 @@ const MandateCard = ({
 // KPI card — value + a prominent 12-month trend chart (user request «добавь
 // графики к показателям»).  Draws the design <Sparkline> from the real numeric
 // series; falls back to the server-rendered SVG if only that is present.
+// Per-metric methodology note (hover) — makes the denominators explicit
+// (Sprint-3 #8): Sharpe/Sortino use the STRUCTURAL factor volatility σ, not a
+// realised sample vol.
+const _KPI_METHOD = {
+  sharpe: 'Знаменатель — структурная (факторная) волатильность σ = √(w′Σw), Σ = B·F·Bᵀ + D; числитель — геом. годовая доходность − валютно-сопоставленная RFR.',
+  cvar: 'Средний убыток в худшие 5% дней (1-дневный горизонт), эмпирически + bootstrap-CI.',
+  dd: 'Максимальная просадка пик→дно по реконструированной кривой капитала exp(Σ log-доходностей).'
+};
 const KpiCard = ({
   k
 }) => {
@@ -1227,7 +1235,8 @@ const KpiCard = ({
   }, /*#__PURE__*/React.createElement("div", {
     className: "flex items-center justify-between mb-2"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "text-[10px] tracking-widest uppercase text-ink-500 font-mono"
+    className: "text-[10px] tracking-widest uppercase text-ink-500 font-mono cursor-help",
+    title: _KPI_METHOD[k.key] || undefined
   }, k.name), /*#__PURE__*/React.createElement("span", {
     className: "text-[40px] leading-none font-light num text-ink-900 tracking-tight"
   }, k.value)), /*#__PURE__*/React.createElement("div", {
@@ -1824,11 +1833,15 @@ const PILLARS = [{
   ru: 'Техника',
   metrics: 'тренд SMA50/200 · RSI(14) · MACD(12,26,9)',
   color: '#9a7a10'
-}, {
+},
+// Credit is intentionally ASYMMETRIC (−2…+1): weak credit can drag the score
+// hard, but strong credit only earns a modest upside — it never rescues a
+// poor F/V/T on its own.
+{
   k: 'C',
   name: 'Credit',
   ru: 'Кредит',
-  metrics: 'Altman-Z · покрытие процентов · долговая нагрузка',
+  metrics: 'Altman-Z · покрытие процентов · долг (диапазон −2…+1, асимметрично)',
   color: '#c47358'
 }];
 const PillarLegend = () => /*#__PURE__*/React.createElement("div", {

@@ -626,9 +626,25 @@ class PremiumMapperTest(unittest.TestCase):
         for idea in d["ideas"]:
             self.assertIn(idea["tone"], {"grow", "rebalance", "rotation", "hedge"})
 
-    def test_feature_flag_default_off_routes_to_v3(self):
+    def test_feature_flag_default_now_premium(self):
+        # Sprint-1 #1: Premium V2 is the PRODUCTION DEFAULT — an unset flag routes
+        # to the React shell, not v3.
         import os, importlib, html_renderer
         os.environ.pop("PREMIUM_REPORT_ENABLED", None)
+        importlib.reload(html_renderer)
+        try:
+            self.assertTrue(html_renderer.PREMIUM_REPORT_ENABLED)
+            html = html_renderer.render_report_html(html_renderer._mock_payload("deep"),
+                                                    user_id="x", tier="deep")
+            self.assertIn('id="root"', html)         # Premium V2 React shell
+        finally:
+            importlib.reload(html_renderer)
+
+    def test_feature_flag_false_routes_to_v3_fallback(self):
+        # v3 is RETAINED as the explicit fallback: forcing the flag off must still
+        # render the classic Jinja pipeline (resilience net).
+        import os, importlib, html_renderer
+        os.environ["PREMIUM_REPORT_ENABLED"] = "false"
         importlib.reload(html_renderer)
         try:
             self.assertFalse(html_renderer.PREMIUM_REPORT_ENABLED)
@@ -636,6 +652,7 @@ class PremiumMapperTest(unittest.TestCase):
                                                     user_id="x", tier="deep")
             self.assertNotIn('id="root"', html)      # v3 Jinja, not the React shell
         finally:
+            os.environ.pop("PREMIUM_REPORT_ENABLED", None)
             importlib.reload(html_renderer)
 
     def test_feature_flag_on_routes_to_premium(self):

@@ -34,7 +34,10 @@ const PILLARS = [
   { k:'F', name:'Fundamentals', ru:'Фундамент', metrics:'ROE · опер. маржа · рост выручки · долг/активы · FCF-маржа', color:'#5d7c5c' },
   { k:'V', name:'Valuation',    ru:'Оценка',    metrics:'P/E и P/S относительно сектора и собственной истории',      color:'#caa01a' },
   { k:'T', name:'Technical',    ru:'Техника',   metrics:'тренд SMA50/200 · RSI(14) · MACD(12,26,9)',                color:'#9a7a10' },
-  { k:'C', name:'Credit',       ru:'Кредит',    metrics:'Altman-Z · покрытие процентов · долговая нагрузка',         color:'#c47358' },
+  // Credit is intentionally ASYMMETRIC (−2…+1): weak credit can drag the score
+  // hard, but strong credit only earns a modest upside — it never rescues a
+  // poor F/V/T on its own.
+  { k:'C', name:'Credit',       ru:'Кредит',    metrics:'Altman-Z · покрытие процентов · долг (диапазон −2…+1, асимметрично)', color:'#c47358' },
 ];
 
 const PillarLegend = () => (

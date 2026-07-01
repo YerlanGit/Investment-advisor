@@ -1,4 +1,5 @@
 import os
+import hashlib
 import pandas as pd
 import numpy as np
 import logging
@@ -127,6 +128,32 @@ def orthogonalize_factors_hierarchical(f_data: "pd.DataFrame") -> "pd.DataFrame"
         except Exception:
             continue
     return out
+
+
+def _nearest_psd(mat: "np.ndarray", floor: float = 1e-12) -> "np.ndarray":
+    """
+    Project a symmetric matrix onto the nearest positive-semi-definite matrix
+    (Higham-style eigenvalue clipping).
+
+    Sprint-3 #9: the factor covariance F is a blend (0.7·EWMA + 0.3·Ledoit-Wolf)
+    and is NOT guaranteed PSD; a non-PSD F can produce slightly negative w'Σw and
+    biased per-asset MCTR/ERC.  This symmetrises F and clamps negative eigenvalues
+    to `floor`, then rebuilds it.  When F is already PSD the operation is a no-op
+    within float tolerance, so production decompositions are unchanged in the
+    common case — it only repairs the rare degenerate blend.
+    """
+    M = np.asarray(mat, dtype=float)
+    if M.ndim != 2 or M.shape[0] != M.shape[1] or M.size == 0:
+        return M
+    M = 0.5 * (M + M.T)                      # symmetrise
+    try:
+        w, V = np.linalg.eigh(M)
+    except np.linalg.LinAlgError:
+        return M
+    if np.all(w >= -floor):                  # already PSD → leave untouched
+        return M
+    w_clipped = np.clip(w, floor, None)
+    return (V * w_clipped) @ V.T
 
 
 class MAC3RiskEngine:
@@ -368,12 +395,17 @@ class MAC3RiskEngine:
         Returns: {'point': float, 'lo95': float, 'hi95': float}
         """
         if seed is None:
-            # Round to 6 decimals so floating-point noise on identical
-            # inputs across runs doesn't change the seed.
+            # Sprint-3 #10: derive the seed with hashlib.sha256, NOT the builtin
+            # hash().  Python's hash() of containers is salted per-process for
+            # some types and its algorithm is an implementation detail — so the
+            # same return window could seed differently across interpreters /
+            # versions, breaking the "same input → same CI" contract.  sha256 of
+            # the rounded byte buffer is stable on every Python/OS.  Round to 6
+            # decimals first so float noise on identical inputs can't move it.
             try:
                 arr = np.round(np.asarray(returns, dtype=float), 6)
-                key = tuple(arr.tolist())
-                seed = int(abs(hash(key)) % 100_000_000)
+                digest = hashlib.sha256(np.ascontiguousarray(arr).tobytes()).digest()
+                seed = int.from_bytes(digest[:8], "big") % 100_000_000
             except (TypeError, ValueError):
                 seed = 42       # fall back if returns is exotic (object dtype)
         rng = np.random.default_rng(seed)
@@ -758,6 +790,10 @@ class MAC3RiskEngine:
             cov_factors = 0.7 * cov_factors_ewma + 0.3 * cov_factors_shrunk
         except Exception:
             cov_factors = cov_factors_ewma
+        # Sprint-3 #9: the EWMA+LW blend is not guaranteed PSD — project it onto
+        # the nearest PSD matrix so Σ = B·F·Bᵀ + D stays PSD (well-defined ERC,
+        # no negative w'Σw).  No-op within tolerance when the blend is already PSD.
+        cov_factors = _nearest_psd(cov_factors)
 
         # ── BLOCK 4.6: factor-multicollinearity diagnostic (read-only) ───────
         # The structural model ALREADY avoids double-counting correlated risk:

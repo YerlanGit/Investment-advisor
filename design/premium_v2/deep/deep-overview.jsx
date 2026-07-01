@@ -103,6 +103,15 @@ const MandateCard = ({ m }) => (
 // KPI card — value + a prominent 12-month trend chart (user request «добавь
 // графики к показателям»).  Draws the design <Sparkline> from the real numeric
 // series; falls back to the server-rendered SVG if only that is present.
+// Per-metric methodology note (hover) — makes the denominators explicit
+// (Sprint-3 #8): Sharpe/Sortino use the STRUCTURAL factor volatility σ, not a
+// realised sample vol.
+const _KPI_METHOD = {
+  sharpe: 'Знаменатель — структурная (факторная) волатильность σ = √(w′Σw), Σ = B·F·Bᵀ + D; числитель — геом. годовая доходность − валютно-сопоставленная RFR.',
+  cvar:   'Средний убыток в худшие 5% дней (1-дневный горизонт), эмпирически + bootstrap-CI.',
+  dd:     'Максимальная просадка пик→дно по реконструированной кривой капитала exp(Σ log-доходностей).',
+};
+
 const KpiCard = ({ k }) => {
   const border = { normal:'#5d7c5c', good:'#caa01a', watch:'#c47358' }[k.status];
   const hasPts = Array.isArray(k.pts) && k.pts.length >= 2;
@@ -110,7 +119,8 @@ const KpiCard = ({ k }) => {
     <div className="glass-strong rounded-4xl p-6 shadow-card lift flex flex-col"
          style={{ borderTop:`2px solid ${border}` }}>
       <div className="flex items-center justify-between mb-2">
-        <div className="text-[10px] tracking-widest uppercase text-ink-500 font-mono">{k.name}</div>
+        <div className="text-[10px] tracking-widest uppercase text-ink-500 font-mono cursor-help"
+             title={_KPI_METHOD[k.key] || undefined}>{k.name}</div>
         <span className="text-[40px] leading-none font-light num text-ink-900 tracking-tight">{k.value}</span>
       </div>
       {/* trend chart — how the metric moved over the last 12 months */}

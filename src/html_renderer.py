@@ -521,12 +521,16 @@ MOCK_DATA: dict = {}   # lazily filled by the CLI / smoke entry-point below.
 DEEP_VERSION  = os.getenv("REPORT_DEEP_VERSION",  "v3").lower()
 BASIC_VERSION = os.getenv("REPORT_BASIC_VERSION", "v3").lower()
 
-# Premium V2 feature flag (routing layer — see PREMIUM_DESIGN.md).  When ON, the
-# report is rendered through the Premium V2 React design (premium_renderer) via
-# the data mapper (premium_payload); when OFF (default) the classic v3 Jinja
-# pipeline is used unchanged.  Default OFF so production delivery never changes
-# unless explicitly enabled.
-PREMIUM_REPORT_ENABLED = os.getenv("PREMIUM_REPORT_ENABLED", "false").strip().lower() in (
+# Premium V2 routing (see PREMIUM_DESIGN.md).  Sprint-1 #1: Premium V2 is now the
+# PRODUCTION DEFAULT — the code default flips OFF→ON to match the live deploy,
+# which already sets PREMIUM_REPORT_ENABLED=true.  The classic v3 Jinja pipeline
+# is RETAINED as the automatic fallback (render_report_html wraps the premium
+# path in try/except → v3) and is exercised by the test suite; set
+# PREMIUM_REPORT_ENABLED=false to force it.  We deliberately do NOT delete v3:
+# 16 test files pin the pdf_payload→v3 contract and it is the resilience net if a
+# premium asset is ever missing.  So "Premium is the only production path" is
+# realised as "Premium is the default, v3 is the safety fallback".
+PREMIUM_REPORT_ENABLED = os.getenv("PREMIUM_REPORT_ENABLED", "true").strip().lower() in (
     "1", "true", "yes", "on")
 
 
