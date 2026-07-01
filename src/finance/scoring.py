@@ -105,19 +105,24 @@ def fundamentals_score(*,
                        debt_to_assets_z: Optional[float],
                        revenue_growth_z: Optional[float],
                        fcf_margin_z: Optional[float] = None,
-                       macro_alignment: float = 0.0) -> float:
+                       macro_alignment: float = 0.0,
+                       momentum: Optional[float] = None) -> float:
     """
     Aggregate sector-relative fundamental Z-scores into a -2..+2 contribution.
 
     Each Z-score component clips at ±1 per metric so no single line item can
     dominate.  Debt/Assets is sign-flipped (lower leverage is better).
 
-      ROE Z   :  +1 / −1
-      OpM Z   :  +1 / −1
-      D/A Z   :  +0.5 / −1   (asymmetric — high leverage punished harder)
-      RG Z    :  +1 / −1
-      FCF Z   :  +1 / −1     (only when SEC FCF margin is available)
-      Macro   :  ±0.5         (regime alignment from regime.py)
+      ROE Z    :  +1 / −1
+      OpM Z    :  +1 / −1
+      D/A Z    :  +0.5 / −1   (asymmetric — high leverage punished harder)
+      RG Z     :  +1 / −1
+      FCF Z    :  +1 / −1     (only when SEC FCF margin is available)
+      Macro    :  ±0.5         (regime alignment from regime.py)
+      Momentum :  ±0.5         (4-Pillar #3 — YoY margin-trend; rewards an
+                                IMPROVING business over a good-but-flat one.
+                                `momentum` ∈ [-1, 1] from SEC; None → no effect
+                                so pre-existing callers stay byte-identical.)
 
     Final value clipped to -2..+2.
     """
@@ -141,6 +146,9 @@ def fundamentals_score(*,
     # BLOCK 4.7: coerce a non-finite macro tilt to 0 BEFORE it enters the sum —
     # otherwise a NaN regime-alignment poisons the whole pillar (and Total).
     s += float(np.clip(_finite(macro_alignment, 0.0), -0.5, 0.5))
+    # 4-Pillar #3: bounded fundamental-momentum bonus (margins improving YoY).
+    if momentum is not None:
+        s += float(np.clip(_finite(momentum, 0.0), -1.0, 1.0)) * 0.5
     return float(np.clip(s, -2.0, 2.0))
 
 

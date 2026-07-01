@@ -580,10 +580,15 @@ def _score_one_asset(out, row, ticker, sector, perf, technicals,
     fcf_z = _sector_z(row.get("SEC_FCF_Margin"),           sector, perf, "SEC_FCF_Margin",         dynamic=_dyn)
     if fundamentals_applicable:
         macro_align = _macro_alignment(sector, regime)
+        # 4-Pillar #3 — YoY margin-trend momentum (темпы изменения фундаментала).
+        # Absent (older payloads / no SEC coverage) → None → F stays unchanged.
+        _mom_raw = row.get("SEC_Fundamental_Momentum")
+        momentum = float(_mom_raw) if pd.notna(_mom_raw) else None
         f_score = fundamentals_score(
             roe_z=roe_z, op_margin_z=opm_z,
             debt_to_assets_z=dta_z, revenue_growth_z=rg_z,
             fcf_margin_z=fcf_z, macro_alignment=macro_align,
+            momentum=momentum,
         )
     else:
         # No financial statements → neutral F; regime tilt is shown
