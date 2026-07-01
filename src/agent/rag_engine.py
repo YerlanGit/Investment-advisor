@@ -22,8 +22,10 @@ import re
 import time
 from datetime import datetime, timezone
 
-import chromadb
-from chromadb.utils import embedding_functions
+# chromadb is imported LAZILY inside __init__ (like pymupdf4llm below): the
+# pure ingest helpers (_chunk_markdown / _extract_bank / _extract_tickers) and
+# module import must not require the heavy vector-store dep — only actually
+# opening a collection does.
 
 # pymupdf4llm is needed ONLY for PDF ingestion (ingest_pdf).  The bot's hot
 # path only QUERIES ChromaDB, so it is imported LAZILY inside ingest_pdf — a
@@ -45,6 +47,8 @@ PREFETCH_MULTIPLIER = 5
 
 class FinancialRAG:
     def __init__(self, db_path: str = "data/chroma_db"):
+        import chromadb                                    # lazy (see module top)
+        from chromadb.utils import embedding_functions
         self.db_path = db_path
         os.makedirs(db_path, exist_ok=True)
         self.chroma_client = chromadb.PersistentClient(path=str(self.db_path))
@@ -140,6 +144,75 @@ class FinancialRAG:
         mtime = os.path.getmtime(file_path)
         return datetime.fromtimestamp(mtime, tz=timezone.utc), "file_mtime"
 
+    # ── Bank / ticker extraction + section-aware chunking (RAG #в) ────────────
+
+    # Known bank issuers → canonical label (filename + cover-page detection).
+    _BANK_PATTERNS = [
+        ("Goldman Sachs",  r"goldman|gs\b|\bgs_"),
+        ("Morgan Stanley", r"morgan\s*stanley|\bms_|\bms\b"),
+        ("JPMorgan",       r"jp\s*morgan|jpm|j\.p\.\s*morgan"),
+        ("Bank of America",r"bank\s*of\s*america|bofa|merrill"),
+        ("Barclays",       r"barclays"),
+        ("UBS",            r"\bubs\b"),
+        ("Citi",           r"citi(group|bank)?"),
+        ("Wells Fargo",    r"wells\s*fargo"),
+        ("Deutsche Bank",  r"deutsche"),
+        ("HSBC",           r"hsbc"),
+    ]
+
+    @classmethod
+    def _extract_bank(cls, filename: str, md_text: str) -> str:
+        """Canonical issuing bank from the filename first, then the cover page."""
+        hay = f"{filename}\n{md_text[:1500]}".lower()
+        for label, pat in cls._BANK_PATTERNS:
+            if re.search(pat, hay):
+                return label
+        return "Unknown"
+
+    @staticmethod
+    def _extract_tickers(text: str) -> str:
+        """Comma-joined uppercase tickers mentioned in a chunk (for filtering).
+
+        ChromaDB metadata must be scalar, so we store a comma-wrapped string
+        (",AAPL,MSFT,") that a `$contains` document filter or a substring check
+        can match precisely without partial hits."""
+        # $NVDA or bare 2–5-letter all-caps tokens; drop common English words.
+        cand = set(re.findall(r"\$?([A-Z]{2,5})\b", text))
+        _STOP = {"THE","AND","FOR","USD","EPS","GDP","CEO","CFO","ETF","USA",
+                 "Q1","Q2","Q3","Q4","YOY","EBIT","FED","ECB","API","PDF","AI"}
+        tickers = sorted(t for t in cand if t not in _STOP)[:25]
+        return ("," + ",".join(tickers) + ",") if tickers else ""
+
+    @staticmethod
+    def _chunk_markdown(md_text: str, *, max_chars: int = 1200,
+                        overlap: int = 150, min_chars: int = 150) -> list[tuple[str, str]]:
+        """Section-aware, size-bounded chunks → list of (heading, chunk_text).
+
+        Splits on Markdown headings (keeps the section title as metadata), then
+        sub-splits any section longer than `max_chars` into overlapping windows
+        so no single embedding is truncated (the old header-only split produced
+        multi-page chunks that embedded poorly).  Short fragments are dropped."""
+        sections = re.split(r'\n(?=#{1,3}\s)', md_text)
+        out: list[tuple[str, str]] = []
+        for sec in sections:
+            sec = sec.strip()
+            if len(sec) < min_chars:
+                continue
+            first_nl = sec.find("\n")
+            heading = (sec[:first_nl] if first_nl > 0 else sec)[:120].lstrip("# ").strip()
+            if len(sec) <= max_chars:
+                out.append((heading, sec))
+                continue
+            start = 0
+            while start < len(sec):
+                piece = sec[start:start + max_chars]
+                if len(piece) >= min_chars:
+                    out.append((heading, piece))
+                if start + max_chars >= len(sec):
+                    break
+                start += max_chars - overlap
+        return out
+
     # ── Recency scoring ──────────────────────────────────────────────────────
 
     @staticmethod
@@ -188,18 +261,18 @@ class FinancialRAG:
         doc_ts = int(doc_dt.timestamp())
         print(f"[RAG] Дата документа: {doc_dt.strftime('%Y-%m-%d')} (источник: {method})")
 
-        # ── Нарезаем по Markdown-заголовкам ────────────────────────────────
-        raw_chunks = re.split(r'\n(?=#{1,3}\s)', md_text)
+        # ── Section-aware, size-bounded chunking + rich metadata ───────────
+        bank = self._extract_bank(filename, md_text)
+        sized = self._chunk_markdown(md_text)
 
         chunks, metadatas, ids = [], [], []
-        for i, chunk in enumerate(raw_chunks):
-            chunk = chunk.strip()
-            if len(chunk) < 150:
-                continue
-
+        for i, (heading, chunk) in enumerate(sized):
             meta = doc_metadata.copy()
             meta.update({
                 "source":         filename,
+                "bank":           doc_metadata.get("bank") or bank,
+                "section":        heading or "—",
+                "tickers":        self._extract_tickers(chunk),   # ",AAPL,MSFT,"
                 "chunk_index":    i,
                 "doc_timestamp":  doc_ts,   # ← ключевое поле для ранжирования
                 "doc_date_str":   doc_dt.strftime("%Y-%m-%d"),
@@ -224,6 +297,7 @@ class FinancialRAG:
         query: str,
         n_results: int = 3,
         half_life_days: int = 365,
+        ticker: str | None = None,
     ) -> str:
         """
         Retrieves n_results chunks ranked by:
@@ -231,12 +305,19 @@ class FinancialRAG:
 
         half_life_days (default 365): через сколько дней документ теряет
         половину своей «актуальности». Уменьшите до 180 для быстрых рынков.
+
+        ticker (RAG #в): when given, SOFT-filter to chunks that actually mention
+        the ticker (metadata `tickers` OR document text) so a per-holding query
+        pulls notes about THAT name — but falls back to the unfiltered top set
+        when the ticker has no coverage (never returns empty just because a
+        name isn't in the library).
         """
         if self.collection.count() == 0:
             return "NO PDF DATA AVAILABLE. База отчетов пуста."
 
-        # Запрашиваем больше результатов для ре-ранжирования
-        prefetch = min(n_results * PREFETCH_MULTIPLIER, self.collection.count())
+        # Запрашиваем больше результатов для ре-ранжирования (шире при фильтре).
+        mult = PREFETCH_MULTIPLIER * (3 if ticker else 1)
+        prefetch = min(n_results * mult, self.collection.count())
 
         results = self.collection.query(
             query_texts=[query],
@@ -262,14 +343,29 @@ class FinancialRAG:
 
         # Сортировка: лучшие наверх
         scored.sort(key=lambda x: x[0], reverse=True)
+
+        # Soft ticker filter — keep only chunks mentioning the name, but fall
+        # back to the unfiltered ranking when nothing matches.
+        if ticker:
+            tk = ticker.upper().split(".")[0]
+            def _mentions(item):
+                _, _, _, doc, meta = item
+                return (f",{tk}," in (meta.get("tickers") or "")) or (tk in doc.upper())
+            matched = [s for s in scored if _mentions(s)]
+            if matched:
+                scored = matched
+
         top = scored[:n_results]
 
         # ── Build context string ───────────────────────────────────────────
         context = ""
         for combined, sem, rec, doc, meta in top:
+            bank_sec = " · ".join(x for x in [meta.get("bank"), meta.get("section")]
+                                  if x and x not in ("—", "Unknown"))
             context += (
                 f"\n--- [{meta.get('doc_date_str', '?')}] "
-                f"{meta.get('source', '?')} "
+                f"{meta.get('source', '?')}"
+                f"{(' — ' + bank_sec) if bank_sec else ''} "
                 f"(актуальность: {rec:.0%}, схожесть: {sem:.0%}, "
                 f"итог: {combined:.0%}) ---\n"
             )
@@ -292,9 +388,12 @@ class FinancialRAG:
             if src not in seen:
                 seen[src] = {
                     "source":     src,
+                    "bank":       meta.get("bank", "Unknown"),
                     "date":       meta.get("doc_date_str", "unknown"),
                     "timestamp":  meta.get("doc_timestamp", 0),
                     "method":     meta.get("date_method", "?"),
+                    "chunks":     0,
                 }
+            seen[src]["chunks"] += 1
 
         return sorted(seen.values(), key=lambda x: x["timestamp"], reverse=True)

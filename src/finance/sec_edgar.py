@@ -433,6 +433,26 @@ def get_extended_fundamentals(ticker: str) -> dict:
         out["fcf"]        = cfo[0] - capex[0]
         out["fcf_margin"] = (cfo[0] - capex[0]) / rev0
 
+    # ── Fundamental momentum (YoY DIRECTION of margins) ─────────────────────
+    # 4-Pillar #3: the F-pillar scores LEVEL z-scores (ROE / margin NOW).  This
+    # captures the TREND (темпы изменения) — an IMPROVING business ranks above a
+    # merely good-but-flat one.  Continuous operating- ⊕ net-margin YoY delta,
+    # scaled so ±3pp margin change ≈ ±1, averaged and bounded to [-1, 1].
+    # DISTINCT from Piotroski (Credit pillar: a binary solvency/quality
+    # composite) — no double-count.  No extra network call (reuses the 2 annual
+    # readings already pulled above).
+    def _at(lst, i):
+        return lst[i] if (lst is not None and len(lst) > i) else None
+    _mom = []
+    _oi0, _oi1 = _at(op_income, 0),  _at(op_income, 1)
+    _ni0, _ni1 = _at(net_income, 0), _at(net_income, 1)
+    if None not in (_oi0, _oi1, rev0, rev1) and rev0 > 0 and rev1 > 0:
+        _mom.append(max(-1.0, min(1.0, ((_oi0 / rev0) - (_oi1 / rev1)) / 0.03)))
+    if None not in (_ni0, _ni1, rev0, rev1) and rev0 > 0 and rev1 > 0:
+        _mom.append(max(-1.0, min(1.0, ((_ni0 / rev0) - (_ni1 / rev1)) / 0.03)))
+    if _mom:
+        out["fundamental_momentum"] = round(sum(_mom) / len(_mom), 4)
+
     # ── Interest Coverage = EBIT / InterestExpense ──────────────────────────
     if op_income[0] is not None and interest_exp[0] and interest_exp[0] > 0:
         out["interest_coverage"] = op_income[0] / interest_exp[0]
@@ -683,6 +703,8 @@ def batch_fundamental_scan(
                 "SEC_Altman_Z":           ext.get("altman_z"),
                 "SEC_Altman_Zone":        ext.get("altman_zone"),
                 "SEC_Piotroski_F":        ext.get("piotroski_f"),
+                # 4-Pillar #3 — YoY margin-trend momentum for the F-pillar bonus.
+                "SEC_Fundamental_Momentum": ext.get("fundamental_momentum"),
                 "SEC_Long_Term_Debt":     ext.get("long_term_debt"),
                 # V-pillar inputs (used by scoring_orchestrator to compute P/E and P/B)
                 "SEC_Net_Income":         ext.get("net_income"),
