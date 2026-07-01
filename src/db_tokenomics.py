@@ -70,6 +70,16 @@ def assert_persistent_state() -> None:
             problems.append(f"{name} is not defined")
         elif val == ":memory:" or val.startswith(_EPHEMERAL_PREFIXES):
             problems.append(f"{name}={val} points at ephemeral storage")
+    # Sprint-2 #6: also validate the RESOLVED path actually in use, not just the
+    # env-var string — a relative or defaulted path can still resolve INTO an
+    # ephemeral prefix (e.g. the repo-local default lands at /app/data on Cloud
+    # Run).  Checking the absolute resolved path closes that gap.
+    try:
+        resolved = str(DB_PATH.resolve())
+        if resolved.startswith(_EPHEMERAL_PREFIXES):
+            problems.append(f"resolved DB_PATH={resolved} is on ephemeral storage")
+    except Exception:                       # never mask the real problem list
+        pass
     if problems:
         raise RuntimeError(
             "Persistent DB path is not defined — refusing to start on ephemeral "

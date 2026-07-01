@@ -16,6 +16,29 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 
+def _render_v3(payload, tier, **kw):
+    """Render via the classic v3 Jinja pipeline.
+
+    Sprint-1 #1 flipped the production default to Premium V2, so tests that
+    assert v3-TEMPLATE structure must force the fallback explicitly.  Sets
+    PREMIUM_REPORT_ENABLED=false, reloads html_renderer so the module-level flag
+    picks it up, renders, then restores the previous environment.
+    """
+    import os, importlib
+    import html_renderer as _hr
+    prev = os.environ.get("PREMIUM_REPORT_ENABLED")
+    os.environ["PREMIUM_REPORT_ENABLED"] = "false"
+    try:
+        _hr = importlib.reload(_hr)
+        return _hr.render_report_html(payload, tier=tier, **kw)
+    finally:
+        if prev is None:
+            os.environ.pop("PREMIUM_REPORT_ENABLED", None)
+        else:
+            os.environ["PREMIUM_REPORT_ENABLED"] = prev
+        importlib.reload(_hr)
+
+
 # ── Task 7: live regime quadrant dot (R1) ─────────────────────────────────────
 
 class RegimeDotCoordsTest(unittest.TestCase):
@@ -592,7 +615,7 @@ class MandatePanelMovedToCoverTest(unittest.TestCase):
             self.assertLess(i_inc, i_kpi, f"{tpl}: panel must be on the cover")
 
     def test_renders_once_in_cover_position(self):
-        from html_renderer import render_report_html, _mock_payload
+        from html_renderer import _mock_payload
         for tier in ("base", "deep"):
             p = _mock_payload(tier)
             p["mandate_compliance"] = {
@@ -601,7 +624,7 @@ class MandatePanelMovedToCoverTest(unittest.TestCase):
                 "leveraged": False, "margin_debt_pct": 0.0,
                 "rows": [{"key": "Stocks_US", "label": "Акции США",
                           "actual": 80.0, "lo": 30, "hi": 60, "status": "over"}]}
-            html = render_report_html(p, user_id=1, report_type="T", tier=tier)
+            html = _render_v3(p, tier, user_id=1, report_type="T")
             self.assertEqual(html.count("Соответствие мандату"), 1)
             self.assertLess(html.find("Соответствие мандату"),
                             html.find("Ключевые показатели риска"))
@@ -613,7 +636,7 @@ class MandatePanelCoverPlacementTest(unittest.TestCase):
     """Замечание 1: panel sits AFTER the AI comments (cover), polished + mobile."""
 
     def _render(self, tier):
-        from html_renderer import render_report_html, _mock_payload
+        from html_renderer import _mock_payload
         p = _mock_payload(tier)
         p["ai_bullets"] = ["Инсайт A", "Инсайт B"]
         p["mandate_compliance"] = {
@@ -622,7 +645,7 @@ class MandatePanelCoverPlacementTest(unittest.TestCase):
             "leveraged": True, "margin_debt_pct": 16.0,
             "rows": [{"key": "Stocks_US", "label": "Акции США", "actual": 80.0,
                       "lo": 30, "hi": 60, "status": "over"}]}
-        return render_report_html(p, user_id=1, report_type="T", tier=tier)
+        return _render_v3(p, tier, user_id=1, report_type="T")
 
     def test_panel_after_bullets_before_kpi_once(self):
         for tier in ("base", "deep"):

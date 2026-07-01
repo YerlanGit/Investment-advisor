@@ -332,82 +332,18 @@ def _format_portfolio_preview(df) -> str:
 
 def _build_equity_curve_svg(results: dict) -> str:
     """
-    Inline equity-curve SVG: portfolio vs profile-benchmark daily log returns.
+    Inline equity-curve SVG: portfolio vs benchmark daily log returns.
 
-    Important fix vs the prior version: when bm_name == "Профильный бенчмарк"
-    the bm_ticker_map used to leak `None` and the benchmark line was never
-    drawn even though the data was already loaded.  We now look the actual
-    ticker up via PROFILE_BENCH_TICKER (or any concrete benchmark name → its
-    Tradernet ETF proxy) and fall back to SPY when the profile benchmark is
-    unknown but the portfolio has data.
-
-    Also: when ANY required input is missing we return a labelled empty-state
-    SVG instead of "" so the user sees WHY the chart is empty.
+    SoC (Sprint-1 #3): the cap-weighted return math + benchmark selection now
+    live in `finance.portfolio_series.compute_equity_curve_series`.  This bot
+    helper is pure UI — it asks the finance layer for the numeric series and
+    renders them (or a labelled empty-state SVG when the data is missing).
     """
     try:
-        history = results.get("history_result")
-        bm_data = results.get("benchmark_comparison") or {}
-        perf    = results.get("performance_table")
-        if perf is None or perf.empty:
+        from finance.portfolio_series import compute_equity_curve_series
+        port_log, bm_log, _bm_name = compute_equity_curve_series(results)
+        if port_log is None or len(port_log) == 0:
             return equity_curve_svg([])  # empty-state w/ "нет данных"
-
-        prices = getattr(history, "data", None)
-        if prices is None or prices.empty:
-            return equity_curve_svg([])
-
-        # H3 (Phase-3): the portfolio daily log-return stream is computed by
-        # the engine and shipped in results["port_log_returns"].  The bot no
-        # longer recomputes `log(prices/prices.shift) @ weights` — all
-        # portfolio math lives in the finance layer.
-        import numpy as _np
-        port_series = results.get("port_log_returns")
-        if port_series is None or len(port_series) == 0:
-            return equity_curve_svg([])
-        port_log = _np.asarray(getattr(port_series, "values", port_series), dtype=float)
-        port_log = port_log[_np.isfinite(port_log)]
-        if port_log.size == 0:
-            return equity_curve_svg([])
-
-        # Pick the benchmark — concrete name first, then profile benchmark
-        # (resolved through its actual ticker mapping).
-        bm_concrete_map = {
-            "S&P 500":      "SPY.US",
-            "Nasdaq 100":   "QQQ.US",
-            "Russell 2000": "IWM.US",
-            "MSCI EM":      "EEM.US",
-            "EM Bonds":     "EMB.US",
-        }
-        bm_log: _np.ndarray | None = None
-        chosen_bm_name: str | None = None
-        # Prefer 'Профильный бенчмарк' when present — match it back to its
-        # actual ETF via the Phase-5 lookup helper.
-        if "Профильный бенчмарк" in bm_data:
-            try:
-                from profile_manager import PROFILE_BENCH_TICKER  # type: ignore
-                # PROFILE_BENCH_TICKER maps profile_name → ETF; we don't have
-                # the profile name at this depth, so we resolve via the user
-                # context downstream.  Fall back to first concrete benchmark.
-                pass
-            except Exception:
-                pass
-            # Heuristic: the profile benchmark's prices were already fetched
-            # in BENCHMARK_EXTRA — pick the first concrete ETF that loaded.
-            for name, ticker in bm_concrete_map.items():
-                if ticker in prices.columns:
-                    chosen_bm_name = name
-                    bm_series = prices[ticker].dropna()
-                    bm_log = _np.log(bm_series / bm_series.shift(1)).dropna().values
-                    break
-        else:
-            for name in bm_data.keys():
-                ticker = bm_concrete_map.get(name)
-                if ticker and ticker in prices.columns:
-                    chosen_bm_name = name
-                    bm_series = prices[ticker].dropna()
-                    bm_log = _np.log(bm_series / bm_series.shift(1)).dropna().values
-                    break
-        if chosen_bm_name:
-            logger.info("Equity curve benchmark = %s", chosen_bm_name)
         return equity_curve_svg(port_log, bm_log)
     except Exception as exc:
         logger.warning("equity_curve_svg build failed: %s", exc)
@@ -480,98 +416,30 @@ def _sparkline_svg(values: list[float], color: str = "#9A7A10",
 
 def _build_kpi_sparklines(results: dict) -> Optional[dict]:
     """
-    Compute 3 monthly trend series (CVaR / Sharpe / MaxDD) and render them as
-    inline SVG sparklines for the KPI cards.
+    Render the CVaR / Sharpe / MaxDD trend series as inline SVG sparklines.
 
-    Window: last 252 trading days, sampled at ~12 evenly-spaced snapshots.
-    For each snapshot, compute the metric over a trailing 60-day window of
-    cap-weighted portfolio daily log returns.
-
-    Returns dict {cvar_svg, sharpe_svg, mdd_svg} when there is enough history
-    (≥ 90 daily obs), else None — template's `{% if data.kpi_sparklines %}`
-    guard then hides the chart cells cleanly.
+    SoC (Sprint-1 #3): the rolling-window MATH now lives in
+    `finance.portfolio_series.compute_kpi_trend_series`; this bot helper is pure
+    UI — it renders the returned numeric series as SVGs and passes the scaled
+    raw points through for the Premium V2 KPI cards (which redraw with their own
+    <Sparkline>).  Returns None when there is not enough history so the
+    template's `{% if data.kpi_sparklines %}` guard hides the cells cleanly.
     """
     try:
-        history = results.get("history_result")
-        perf    = results.get("performance_table")
-        if perf is None or perf.empty or history is None:
+        from finance.portfolio_series import compute_kpi_trend_series
+        series = compute_kpi_trend_series(results)
+        if not series:
             return None
-        prices = getattr(history, "data", None)
-        if prices is None or prices.empty or len(prices) < 90:
-            return None
-
-        import numpy as _np
-        total_val = float(results.get("total_value") or 1.0)
-        cols:    list[str]   = []
-        weights: list[float] = []
-        for _, row in perf.iterrows():
-            t  = str(row.get("Ticker", "")).strip()
-            cv = float(row.get("Current_Value", 0) or 0)
-            if not t or cv <= 0:
-                continue
-            # perf carries the broker's ORIGINAL tickers; the price frame is
-            # keyed by RESOLVED tickers (e.g. AAPL → AAPL.US).  Match exact
-            # first, then fall back to the base symbol before the dot — the
-            # missing fallback left `cols` empty and silently killed every
-            # sparkline.
-            if t in prices.columns:
-                col = t
-            else:
-                base = t.split(".")[0]
-                col  = next((c for c in prices.columns
-                             if c.split(".")[0] == base), None)
-            if col is not None:
-                cols.append(col)
-                weights.append(cv / total_val)
-        if not cols:
-            return None
-
-        w        = _np.array(weights)
-        daily_lr = _np.log(prices[cols] / prices[cols].shift(1)).dropna()
-        if len(daily_lr) < 60:
-            return None
-        port_lr  = (daily_lr * w).sum(axis=1)
-
-        if len(port_lr) > 252:
-            port_lr = port_lr.iloc[-252:]
-
-        n      = len(port_lr)
-        step   = max(1, n // 12)
-        if step < 5:
-            return None
-        snap_indices = [step * (i + 1) - 1 for i in range(12) if step * (i + 1) - 1 < n]
-
-        cvar_pts, sharpe_pts, mdd_pts = [], [], []
-        for end in snap_indices:
-            win = port_lr.iloc[max(0, end - 60):end + 1]
-            if len(win) < 30:
-                continue
-            # CVaR 95% — mean of bottom 5% returns
-            cutoff = max(1, int(len(win) * 0.05))
-            cvar_pts.append(float(win.sort_values().iloc[:cutoff].mean()))
-            # Sharpe annualised (sparkline uses RFR=0 — it's a trend visual,
-            # not the headline number, which is wired separately to data.sharpe)
-            std = float(win.std())
-            sharpe_pts.append(float(win.mean()) / std * (252 ** 0.5) if std > 0 else 0.0)
-            # Max drawdown over the trailing window.
-            # M-8: `win` holds LOG returns — reconstruct the equity curve with
-            # exp(cumsum), not (1+r).cumprod() (which treats logs as simple
-            # returns and systematically understates the drawdown).
-            eq   = _np.exp(win.cumsum())
-            dd   = (eq / eq.cummax() - 1).min()
-            mdd_pts.append(float(dd))
-
-        if len(cvar_pts) < 3:
-            return None
-
+        cvar_pts   = series["cvar_pts"]
+        sharpe_pts = series["sharpe_pts"]
+        mdd_pts    = series["mdd_pts"]
         return {
             "cvar_svg":   _sparkline_svg(cvar_pts,   color="#3F8F5F", invert=True),
             "sharpe_svg": _sparkline_svg(sharpe_pts, color="#9A7A10", invert=False),
             "mdd_svg":    _sparkline_svg(mdd_pts,    color="#C0492F", invert=True),
             # Raw series too — the Premium V2 KPI cards redraw these with the
-            # design's own <Sparkline> (theme colour + gradient).  Scaled ×100 so
-            # the React component plots them as percent-points (CVaR/MaxDD) and a
-            # ratio (Sharpe) on a clean numeric axis.
+            # design's own <Sparkline>.  Scaled ×100 so the React component plots
+            # them as percent-points (CVaR/MaxDD) and a ratio (Sharpe).
             "cvar_pts":   [round(x * 100, 2) for x in cvar_pts],
             "sharpe_pts": [round(x, 3) for x in sharpe_pts],
             "mdd_pts":    [round(x * 100, 2) for x in mdd_pts],

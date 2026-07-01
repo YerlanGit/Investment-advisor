@@ -227,3 +227,19 @@ mock тоже отдаёт `_pts` (smoke).
 **Мобайл/математика:** 4-Pillar (`grid-cols-1 sm:2 lg:3`) и `PillarLegend` (`sm:2 lg:4`) ровно стекаются;
 гор. переполнения нет (`scrollWidth==390`). Дубли ИИ-комментариев по секциям — единственный был `scoresNote`
 (остальные `ai_*` различны); KPI-pts/qty/fundNote сверены на синтетическом payload.
+
+## Round 10 (2026-06-29) — Premium как прод-default + quant-полировка (Roadmap Sprint 1–3)
+
+- **Premium V2 — производственный DEFAULT.** `PREMIUM_REPORT_ENABLED` в `html_renderer.py` переключён
+  `false→true`. v3 Jinja СОХРАНЁН как авто-fallback (обёртка try/except в `render_report_html`) и остаётся
+  под тестами — НЕ удалён (16 тест-файлов пинят `pdf_payload→v3`, это сеть безопасности). Форс v3:
+  `PREMIUM_REPORT_ENABLED=false`.
+- **Адаптер НЕ слит** физически: сохранён чистый 2-стадийный контракт `pdf_payload` (compute/format) →
+  `premium_payload` (view-map). Слияние вырезало бы покрытый тестами compute-слой — отклонено (Do-No-Harm).
+- **Математика вынесена из бота** в `finance/portfolio_series.py`: `compute_kpi_trend_series` /
+  `compute_equity_curve_series`. `tg_bot._build_kpi_sparklines` / `_build_equity_curve_svg` теперь только рендерят.
+- **Методология в UI (#8):** тултип KPI-карты раскрывает знаменатель Sharpe/Sortino = структурная σ=√(w′Σw),
+  Σ=B·F·Bᵀ+D; `PillarLegend` помечает Credit как «−2…+1, асимметрично».
+- **Удалены** мёртвые прототипы `report_{basic,deep}_v1_design_prototype.html`.
+- Тесты: **493 passed, 10 skipped** (+`test_phase20`: SIGKILL-персистентность, BL solve-паритет, nearest-PSD,
+  sha256-seed, SoC портфельных серий). Полный прогон после каждого изменения ядра.
