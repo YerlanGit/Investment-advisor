@@ -154,12 +154,20 @@ MACRO_SERIES_CATALOG: list[SeriesSpec] = [
     #     T10YIE (breakeven).  Derived realized-inflation is a follow-up.
     #   • ISM PMI (NAPM) — discontinued by FRED (ISM licensing); returns HTTP
     #     400 on every call (see module docstring).  No free replacement series.
+    # §−13 M-1 (freshness noise): freshness is measured from the OBSERVATION
+    # date, and FRED stamps slow series at the PERIOD START — the May UNRATE
+    # print carries obs-date 05-01 but publishes ~Jun 5, so the freshest
+    # possible monthly print is already 35–65 days "old"; a Q1 GDP third
+    # estimate (obs 01-01, published late June) is 150–180 days "old".  The
+    # old 45/120-day windows therefore flagged perfectly-current series
+    # `stale` most of the cycle (the perpetual warn-checkers in DEEP).
+    # Window = period length + publish/revision lag + buffer.
     SeriesSpec(
         key                     = "unemployment",
         series_id               = "UNRATE",
         label                   = "US Unemployment Rate",
         unit                    = "%",
-        freshness_calendar_days = 45,   # monthly release + ~1-week lag
+        freshness_calendar_days = 75,   # 31 (month) + ~10 (publish lag) + buffer
         sanity_range            = (1.0, 25.0),
         publish_cadence         = "monthly",
     ),
@@ -168,7 +176,7 @@ MACRO_SERIES_CATALOG: list[SeriesSpec] = [
         series_id               = "A191RL1Q225SBEA",   # Real GDP, % change SAAR
         label                   = "Real GDP growth (SAAR)",
         unit                    = "%",
-        freshness_calendar_days = 120,  # quarterly release + revision lag
+        freshness_calendar_days = 210,  # 92 (quarter) + ~90 (3rd estimate) + buffer
         sanity_range            = (-15.0, 15.0),
         publish_cadence         = "quarterly",
     ),

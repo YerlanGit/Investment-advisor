@@ -149,7 +149,10 @@ class FinancialRAG:
     # Known bank issuers → canonical label (filename + cover-page detection).
     _BANK_PATTERNS = [
         ("Goldman Sachs",  r"goldman|gs\b|\bgs_"),
-        ("Morgan Stanley", r"morgan\s*stanley|\bms_|\bms\b"),
+        # §−14 C-8: bare `\bms\b` dropped — «MS» — обычное сокращение в тексте
+        # (Microsoft, миллисекунды); имя банка требует полного «morgan stanley»
+        # или файлового префикса ms_.
+        ("Morgan Stanley", r"morgan\s*stanley|\bms_"),
         ("JPMorgan",       r"jp\s*morgan|jpm|j\.p\.\s*morgan"),
         ("Bank of America",r"bank\s*of\s*america|bofa|merrill"),
         ("Barclays",       r"barclays"),

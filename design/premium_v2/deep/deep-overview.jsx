@@ -67,6 +67,14 @@ const VerdictCard = ({ v }) => (
   </div>
 );
 
+// Русская плюрализация: 1 нарушение · 2–4 нарушения · 5+ нарушений (§−14 C-6).
+const _plural = (n, one, few, many) => {
+  const n10 = n % 10, n100 = n % 100;
+  if (n10 === 1 && n100 !== 11) return one;
+  if (n10 >= 2 && n10 <= 4 && (n100 < 12 || n100 > 14)) return few;
+  return many;
+};
+
 // Mandate compliance card
 const MandateCard = ({ m }) => (
   <div className="glass-strong rounded-4xl p-6 shadow-card lift flex flex-col">
@@ -77,7 +85,7 @@ const MandateCard = ({ m }) => (
       </div>
       {m.violations > 0
         ? <span className="px-2.5 py-1 rounded-full bg-rust-500/12 text-rust-600 text-[10px] font-semibold tracking-wider uppercase flex items-center gap-1 flex-shrink-0">
-            <Icons.Warning size={11} stroke={2}/> {m.violations} нарушение
+            <Icons.Warning size={11} stroke={2}/> {m.violations} {_plural(m.violations, 'нарушение', 'нарушения', 'нарушений')}
           </span>
         : <span className="px-2.5 py-1 rounded-full bg-sage-500/15 text-sage-600 text-[10px] font-semibold tracking-wider uppercase flex-shrink-0">соответствует</span>}
     </div>

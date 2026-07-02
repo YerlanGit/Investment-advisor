@@ -608,6 +608,11 @@ def _adapt_period_returns(raw: Optional[dict]) -> dict:
                 "portfolio": _format_pnl_pct(port) if port is not None else "—",
                 "benchmark": _format_pnl_pct(bm)   if bm   is not None else "—",
                 "excess":    f"{exc*100:+.1f} пп"  if exc  is not None else "—",
+                # §−14 A-1: numeric twins in PERCENT — the premium mapper reads
+                # these directly instead of parsing the «+8.8%»-style strings.
+                "portfolio_num": (round(port * 100, 2) if port is not None else None),
+                "benchmark_num": (round(bm   * 100, 2) if bm   is not None else None),
+                "excess_num":    (round(exc  * 100, 2) if exc  is not None else None),
             })
         out[bm_name] = {
             "periods":      rows,
@@ -848,6 +853,17 @@ def build_payload(results: dict, tier: str,
                 "mvar_bps":      f"{mvar*10000:.0f}" if mvar is not None else "—",
                 "pnl_pct":       _format_pnl_pct(ret_pct),
                 "pnl_abs":       _format_pnl_abs(pnl_abs),
+                # §−14 A-1: RAW numeric twins for every formatted figure the
+                # premium mapper consumes.  The mapper used to re-parse the
+                # display strings («+40.4%» → 40.4) — a fragile round-trip that
+                # bred the historical mapping bugs.  Numbers travel as numbers;
+                # the formatted keys above stay for the Jinja fallback.
+                # Units match what the mapper's string-parse produced: pnl_pct_num
+                # in PERCENT (ret_pct is a decimal → ×100), pnl_abs_num in dollars.
+                "pnl_pct_num":   round(float(ret_pct) * 100, 2),
+                "pnl_abs_num":   round(float(pnl_abs), 2),
+                "beta_num":      beta_mkt,                       # None when unknown
+                "atr_pct_num":   atr_pct,                        # None when unknown
                 # Cash positions never carry a real P&L — colour them
                 # neutrally so a margin-debt (negative-weight) USD row
                 # does not render as "green/profit" (it isn't).
@@ -1110,6 +1126,15 @@ def build_payload(results: dict, tier: str,
         "max_drawdown":      mdd_str,
         "volatility":        vol_str,
         "risk_free_rate":    rfr_str,
+        # §−14 A-1: numeric twins (same PERCENT/ratio units the mapper's
+        # string-parse produced) — the premium mapper reads these instead of
+        # re-parsing the display strings.  NaN → None (JSON-safe).
+        "cvar_num":          round(cvar_raw * 100, 2),
+        "sharpe_num":        (None if math.isnan(sharpe_raw)  else round(sharpe_raw, 3)),
+        "sortino_num":       (None if math.isnan(sortino_raw) else round(sortino_raw, 3)),
+        "var_95_daily_num":  round(var_raw * 100, 2),
+        "max_drawdown_num":  round(mdd_raw * 100, 2),
+        "volatility_num":    round(vol_raw * 100, 2),
         # BLOCK 5 — portfolio FORWARD expected annual return & ex-ante Sharpe.
         "expected_return_annual": exp_ret_str,
         "expected_return_pct_num": exp_ret_num,          # numeric (chart-safe)
@@ -1372,6 +1397,7 @@ def build_payload(results: dict, tier: str,
                 # supplies it from perf_df.Current_Price so the column is
                 # no longer a row of dashes.
                 "price":       f"{px:.2f}" if px is not None else "—",
+                "price_num":   px,                    # §−14 A-1: raw numeric twin
                 "buy_zone":    f"{buy_zone[0]:.2f} – {buy_zone[1]:.2f}" if buy_zone else "—",
                 "sell_zone":   f"{sell_zone[0]:.2f} – {sell_zone[1]:.2f}" if sell_zone else "—",
                 "take_target": f"{tgt:.2f}"  if tgt  is not None else "—",

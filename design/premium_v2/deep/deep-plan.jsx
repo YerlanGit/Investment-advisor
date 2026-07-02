@@ -24,6 +24,14 @@ const ActionPlan = ({ rows }) => (
         const hasQty = r.qty != null && r.qty !== 0;
         const sell = (r.qty != null && r.qty < 0) || (r.dw != null && r.dw < 0);
         const qtyTone = !hasQty ? 'text-ink-400' : sell ? 'text-rust-600' : 'text-sage-600';
+        // §−14 A-2: qty/dw идут из Black-Litterman-оптимизатора, а чип действия —
+        // из 4-Pillar-скоринга; направления МОГУТ расходиться (честные данные двух
+        // движков).  При противоречии красим Δw нейтрально и помечаем источник BL,
+        // чтобы зелёный «+0.3 пп» не читался как ошибка под TRIM-чипом.
+        const dwPos = r.dw != null && r.dw > 0;
+        const contradicts = (['SELL','TRIM'].includes(r.action) && dwPos) ||
+                            (['BUY','STRONG'].includes(r.action) && r.dw != null && r.dw < 0);
+        const dwTone = contradicts ? 'text-ink-400' : (sell ? 'text-rust-500' : 'text-sage-500');
         return (
         <div key={i} className={`grid grid-cols-[minmax(0,1fr)_72px_minmax(0,1.25fr)_minmax(0,0.9fr)_minmax(0,1.3fr)_minmax(0,0.9fr)_minmax(0,1.45fr)] gap-3 items-center px-1 py-3 ${r.defer?'opacity-65':''}`}>
           <div className="text-[13.5px] font-bold num text-ink-900 flex items-center gap-1.5">
@@ -35,7 +43,9 @@ const ActionPlan = ({ rows }) => (
               {hasQty ? `${r.qty>0?'+':'−'}${Math.abs(r.qty).toLocaleString('ru-RU')} шт` : '—'}
             </div>
             {(r.dw != null && Math.abs(r.dw) >= 0.05) &&
-              <div className={`text-[10px] num ${sell?'text-rust-500':'text-sage-500'}`}>{r.dw>0?'+':'−'}{Math.abs(r.dw).toFixed(1)} пп</div>}
+              <div className={`text-[10px] num ${dwTone}`}
+                   title="Δ веса по Black-Litterman-оптимизатору (может расходиться с сигналом 4-Pillar)">
+                BL {r.dw>0?'+':'−'}{Math.abs(r.dw).toFixed(1)} пп</div>}
           </div>
           <div className="text-right text-[12px] num text-ink-700">{r.price.toFixed(2)}</div>
           <div className="text-right text-[12px] num text-sage-600">{r.target}</div>

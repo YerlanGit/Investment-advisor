@@ -185,7 +185,7 @@ def _map_deep(p: dict, meta: dict) -> dict:
     _score_by_t = {_txt(s, "ticker"): _num(s, "total") for s in _list(p, "score_breakdown")}
     _hot_by_t = {_txt(a, "ticker"): bool(_g(a, "hotspot") or _g(a, "euler_extreme")) for a in assets}
     plan = [{"t": _txt(a, "ticker"), "action": _txt(a, "action").upper().split()[0] if _g(a, "action") else DASH,
-             "price": _num(a, "price"),  # design calls price.toFixed → MUST be numeric
+             "price": _num(a, "price_num", default=_num(a, "price")),  # §−14 A-1: numeric twin first
              "target": _txt(a, "sell_target") if _g(a, "sell_target") else _txt(a, "buy_zone"),
              "stop": _txt(a, "stop_loss"),
              # Quantity to trade (user request «добавить столбец количество»): the
@@ -313,8 +313,10 @@ def _map_base(p: dict, meta: dict) -> dict:
         # holdings sector filters (Технологии/Защитные) read this, not `cls`.
         "sector": _txt(a, "sector") if _g(a, "sector") else "",
         "w": _num(a, "weight_pct_num"),
-        "beta": _num(a, "beta"), "risk": _num(a, "euler_risk_pct"),
-        "pnlPct": _pct(_g(a, "pnl_pct")), "pnlUsd": _pct(_g(a, "pnl_abs")),
+        "beta": _num(a, "beta_num", default=_num(a, "beta")), "risk": _num(a, "euler_risk_pct"),
+        # §−14 A-1: prefer RAW numeric twins; string-parse is the legacy fallback.
+        "pnlPct": _num(a, "pnl_pct_num", default=_pct(_g(a, "pnl_pct"))),
+        "pnlUsd": _num(a, "pnl_abs_num", default=_pct(_g(a, "pnl_abs"))),
         "status": "HOTSPOT" if _g(a, "euler_extreme") else "",
         "signal": _txt(a, "action").upper() if _g(a, "action") else DASH,
         "fund": _fund_for(fmap, a), "note": _txt(a, "note") if _g(a, "note") else "",
@@ -332,7 +334,8 @@ def _map_base(p: dict, meta: dict) -> dict:
         "ticker": _top_t, "name": _top_t, "sector": _txt(_top, "asset_class"),
         "weight": round(_num(_top, "weight_pct_num"), 1),
         "riskShare": round(_num(_top, "euler_risk_pct"), 1),
-        "pnlPct": _pct(_g(_top, "pnl_pct")), "pnlUsd": _pct(_g(_top, "pnl_abs")),
+        "pnlPct": _num(_top, "pnl_pct_num", default=_pct(_g(_top, "pnl_pct"))),
+        "pnlUsd": _num(_top, "pnl_abs_num", default=_pct(_g(_top, "pnl_abs"))),
         "signal": _sig_by_t.get(_top_t) or (_txt(_top, "action").upper() if _g(_top, "action") else DASH),
         "note": (f"Наибольший вклад в риск — {round(_num(_top, 'euler_risk_pct'), 1)}% общего риска портфеля"
                  if _has_top else DASH),
@@ -680,13 +683,14 @@ def _map_performance(p: dict) -> dict:
     first = next(iter(prt.values()), {}) if isinstance(prt, dict) else {}
     periods = []
     for r in _list(first, "periods"):
-        _pp = _pct(_g(r, "portfolio"))
-        _ss = _pct(_g(r, "benchmark"))
-        _dd = _pct(_g(r, "excess"))
+        # §−14 A-1: numeric twins first; string-parse is the legacy fallback.
+        _pp = _num(r, "portfolio_num", default=_pct(_g(r, "portfolio")))
+        _ss = _num(r, "benchmark_num", default=_pct(_g(r, "benchmark")))
+        _dd = _num(r, "excess_num",    default=_pct(_g(r, "excess")))
         if not _dd:                       # source usually omits excess → derive p−s
             _dd = round(_pp - _ss, 1)
         periods.append({"label": _txt(r, "label"), "p": _pp, "s": _ss, "d": _dd})
-    _vol = round(_num(p, "volatility"), 1)
+    _vol = round(_num(p, "volatility_num", default=_num(p, "volatility")), 1)
     # 12-month headline summary — REAL data (the component reads summary.volPort
     # for the period-independent annualised volatility card).
     _p12 = next((r for r in periods if r["label"] in ("12 мес", "12М", "12м")),

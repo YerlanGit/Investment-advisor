@@ -1163,6 +1163,15 @@ const VerdictCard = ({
   className: "text-white/35 font-mono"
 }, " [", b.src, "]"))))));
 
+// Русская плюрализация: 1 нарушение · 2–4 нарушения · 5+ нарушений (§−14 C-6).
+const _plural = (n, one, few, many) => {
+  const n10 = n % 10,
+    n100 = n % 100;
+  if (n10 === 1 && n100 !== 11) return one;
+  if (n10 >= 2 && n10 <= 4 && (n100 < 12 || n100 > 14)) return few;
+  return many;
+};
+
 // Mandate compliance card
 const MandateCard = ({
   m
@@ -1179,7 +1188,7 @@ const MandateCard = ({
 }, /*#__PURE__*/React.createElement(Icons.Warning, {
   size: 11,
   stroke: 2
-}), " ", m.violations, " \u043D\u0430\u0440\u0443\u0448\u0435\u043D\u0438\u0435") : /*#__PURE__*/React.createElement("span", {
+}), " ", m.violations, " ", _plural(m.violations, 'нарушение', 'нарушения', 'нарушений')) : /*#__PURE__*/React.createElement("span", {
   className: "px-2.5 py-1 rounded-full bg-sage-500/15 text-sage-600 text-[10px] font-semibold tracking-wider uppercase flex-shrink-0"
 }, "\u0441\u043E\u043E\u0442\u0432\u0435\u0442\u0441\u0442\u0432\u0443\u0435\u0442")), /*#__PURE__*/React.createElement("div", {
   className: "text-[10.5px] text-ink-400 font-mono mb-2"
@@ -2286,6 +2295,13 @@ const ActionPlan = ({
   const hasQty = r.qty != null && r.qty !== 0;
   const sell = r.qty != null && r.qty < 0 || r.dw != null && r.dw < 0;
   const qtyTone = !hasQty ? 'text-ink-400' : sell ? 'text-rust-600' : 'text-sage-600';
+  // §−14 A-2: qty/dw идут из Black-Litterman-оптимизатора, а чип действия —
+  // из 4-Pillar-скоринга; направления МОГУТ расходиться (честные данные двух
+  // движков).  При противоречии красим Δw нейтрально и помечаем источник BL,
+  // чтобы зелёный «+0.3 пп» не читался как ошибка под TRIM-чипом.
+  const dwPos = r.dw != null && r.dw > 0;
+  const contradicts = ['SELL', 'TRIM'].includes(r.action) && dwPos || ['BUY', 'STRONG'].includes(r.action) && r.dw != null && r.dw < 0;
+  const dwTone = contradicts ? 'text-ink-400' : sell ? 'text-rust-500' : 'text-sage-500';
   return /*#__PURE__*/React.createElement("div", {
     key: i,
     className: `grid grid-cols-[minmax(0,1fr)_72px_minmax(0,1.25fr)_minmax(0,0.9fr)_minmax(0,1.3fr)_minmax(0,0.9fr)_minmax(0,1.45fr)] gap-3 items-center px-1 py-3 ${r.defer ? 'opacity-65' : ''}`
@@ -2301,8 +2317,9 @@ const ActionPlan = ({
   }, /*#__PURE__*/React.createElement("div", {
     className: `text-[12.5px] num font-semibold ${qtyTone}`
   }, hasQty ? `${r.qty > 0 ? '+' : '−'}${Math.abs(r.qty).toLocaleString('ru-RU')} шт` : '—'), r.dw != null && Math.abs(r.dw) >= 0.05 && /*#__PURE__*/React.createElement("div", {
-    className: `text-[10px] num ${sell ? 'text-rust-500' : 'text-sage-500'}`
-  }, r.dw > 0 ? '+' : '−', Math.abs(r.dw).toFixed(1), " \u043F\u043F")), /*#__PURE__*/React.createElement("div", {
+    className: `text-[10px] num ${dwTone}`,
+    title: "\u0394 \u0432\u0435\u0441\u0430 \u043F\u043E Black-Litterman-\u043E\u043F\u0442\u0438\u043C\u0438\u0437\u0430\u0442\u043E\u0440\u0443 (\u043C\u043E\u0436\u0435\u0442 \u0440\u0430\u0441\u0445\u043E\u0434\u0438\u0442\u044C\u0441\u044F \u0441 \u0441\u0438\u0433\u043D\u0430\u043B\u043E\u043C 4-Pillar)"
+  }, "BL ", r.dw > 0 ? '+' : '−', Math.abs(r.dw).toFixed(1), " \u043F\u043F")), /*#__PURE__*/React.createElement("div", {
     className: "text-right text-[12px] num text-ink-700"
   }, r.price.toFixed(2)), /*#__PURE__*/React.createElement("div", {
     className: "text-right text-[12px] num text-sage-600"
@@ -2774,6 +2791,11 @@ const TopBar = ({
 };
 const Footer = () => {
   const p = window.DEEP;
+  // §−14 C-6: ChromaDB (банковский RAG) в списке источников — только когда RAG
+  // реально консультировался (quality несёт «✓ … RAG …»); при выключенном/пустом
+  // RAG источник не заявляется (футер был статичным — вводил в заблуждение).
+  const ragOn = (p.quality || []).some(q => typeof q === 'string' && q.includes('✓') && /rag/i.test(q));
+  const sources = ['Tradernet', 'SEC EDGAR', 'FRED', 'Quant Engine MAC3'].concat(ragOn ? ['ChromaDB (GS / MS / JPM)'] : []).concat([p.meta.aiModel]).join(' · ');
   return /*#__PURE__*/React.createElement("footer", {
     className: "mt-16 mb-8"
   }, /*#__PURE__*/React.createElement("div", {
@@ -2818,7 +2840,7 @@ const Footer = () => {
     className: "text-[12px] text-ink-500 leading-relaxed font-light"
   }, /*#__PURE__*/React.createElement("span", {
     className: "text-ink-700 font-medium"
-  }, "\u042D\u0442\u043E \u0430\u043D\u0430\u043B\u0438\u0442\u0438\u0447\u0435\u0441\u043A\u0438\u0439 \u043C\u0430\u0442\u0435\u0440\u0438\u0430\u043B, \u0430 \u043D\u0435 \u0438\u043D\u0434\u0438\u0432\u0438\u0434\u0443\u0430\u043B\u044C\u043D\u0430\u044F \u0438\u043D\u0432\u0435\u0441\u0442\u0438\u0446\u0438\u043E\u043D\u043D\u0430\u044F \u0440\u0435\u043A\u043E\u043C\u0435\u043D\u0434\u0430\u0446\u0438\u044F."), " \u0420\u0430\u0441\u0447\u0451\u0442\u044B \u043E\u0441\u043D\u043E\u0432\u0430\u043D\u044B \u043D\u0430 \u0438\u0441\u0442\u043E\u0440\u0438\u0447\u0435\u0441\u043A\u0438\u0445 \u0434\u0430\u043D\u043D\u044B\u0445 \u0438 \u043F\u0443\u0431\u043B\u0438\u0447\u043D\u043E\u0439 \u043E\u0442\u0447\u0451\u0442\u043D\u043E\u0441\u0442\u0438; \u043E\u043D\u0438 \u043D\u0435 \u0443\u0447\u0438\u0442\u044B\u0432\u0430\u044E\u0442 \u0432\u0430\u0448\u0443 \u043D\u0430\u043B\u043E\u0433\u043E\u0432\u0443\u044E \u0441\u0438\u0442\u0443\u0430\u0446\u0438\u044E, \u0433\u043E\u0440\u0438\u0437\u043E\u043D\u0442 \u0438 \u0446\u0435\u043B\u0438. \u0418\u0441\u0442\u043E\u0447\u043D\u0438\u043A\u0438: Tradernet \xB7 SEC EDGAR \xB7 FRED \xB7 Quant Engine MAC3 \xB7 ChromaDB (GS / MS / JPM) \xB7 ", p.meta.aiModel, "."))), /*#__PURE__*/React.createElement("div", {
+  }, "\u042D\u0442\u043E \u0430\u043D\u0430\u043B\u0438\u0442\u0438\u0447\u0435\u0441\u043A\u0438\u0439 \u043C\u0430\u0442\u0435\u0440\u0438\u0430\u043B, \u0430 \u043D\u0435 \u0438\u043D\u0434\u0438\u0432\u0438\u0434\u0443\u0430\u043B\u044C\u043D\u0430\u044F \u0438\u043D\u0432\u0435\u0441\u0442\u0438\u0446\u0438\u043E\u043D\u043D\u0430\u044F \u0440\u0435\u043A\u043E\u043C\u0435\u043D\u0434\u0430\u0446\u0438\u044F."), " \u0420\u0430\u0441\u0447\u0451\u0442\u044B \u043E\u0441\u043D\u043E\u0432\u0430\u043D\u044B \u043D\u0430 \u0438\u0441\u0442\u043E\u0440\u0438\u0447\u0435\u0441\u043A\u0438\u0445 \u0434\u0430\u043D\u043D\u044B\u0445 \u0438 \u043F\u0443\u0431\u043B\u0438\u0447\u043D\u043E\u0439 \u043E\u0442\u0447\u0451\u0442\u043D\u043E\u0441\u0442\u0438; \u043E\u043D\u0438 \u043D\u0435 \u0443\u0447\u0438\u0442\u044B\u0432\u0430\u044E\u0442 \u0432\u0430\u0448\u0443 \u043D\u0430\u043B\u043E\u0433\u043E\u0432\u0443\u044E \u0441\u0438\u0442\u0443\u0430\u0446\u0438\u044E, \u0433\u043E\u0440\u0438\u0437\u043E\u043D\u0442 \u0438 \u0446\u0435\u043B\u0438. \u0418\u0441\u0442\u043E\u0447\u043D\u0438\u043A\u0438: ", sources, "."))), /*#__PURE__*/React.createElement("div", {
     className: "text-center text-[10px] tracking-widest uppercase text-ink-400 font-mono mt-6"
   }, "Portfolio Risk Report \xB7 DEEP Tier \xB7 ", p.meta.id, " \xB7 v2026.6"));
 };

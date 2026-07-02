@@ -2023,10 +2023,15 @@ class PeriodReturnsAdaptTest(unittest.TestCase):
             "n_days_total": 252}}
 
     def test_rows_become_formatted_strings(self) -> None:
+        # §−14 A-1: rows now ALSO carry numeric twins (portfolio_num/…) next to
+        # the formatted strings — assert the formatted subset + the twins.
         from pdf_payload import _adapt_period_returns
         rows = _adapt_period_returns(self._engine_pr())["S&P 500"]["periods"]
-        self.assertEqual(rows[0], {"label": "1М", "portfolio": "+2.0%",
-                                   "benchmark": "+1.4%", "excess": "+0.6 пп"})
+        expected = {"label": "1М", "portfolio": "+2.0%",
+                    "benchmark": "+1.4%", "excess": "+0.6 пп"}
+        self.assertEqual({k: rows[0][k] for k in expected}, expected)
+        self.assertAlmostEqual(rows[0]["portfolio_num"], 2.0, places=2)
+        self.assertAlmostEqual(rows[0]["excess_num"], 0.6, places=2)
         self.assertEqual(rows[2]["label"], "YTD")
         self.assertEqual(rows[2]["portfolio"], "+7.1%")
 
@@ -2034,8 +2039,12 @@ class PeriodReturnsAdaptTest(unittest.TestCase):
         """A period with too little history must show '—', never a fake 0%."""
         from pdf_payload import _adapt_period_returns
         rows = _adapt_period_returns(self._engine_pr())["S&P 500"]["periods"]
-        self.assertEqual(rows[1], {"label": "12М", "portfolio": "—",
-                                   "benchmark": "—", "excess": "—"})
+        expected = {"label": "12М", "portfolio": "—",
+                    "benchmark": "—", "excess": "—"}
+        self.assertEqual({k: rows[1][k] for k in expected}, expected)
+        # §−14 A-1: numeric twins must be None (not 0) for the missing period.
+        self.assertIsNone(rows[1]["portfolio_num"])
+        self.assertIsNone(rows[1]["excess_num"])
 
     def test_window_metadata_preserved(self) -> None:
         from pdf_payload import _adapt_period_returns

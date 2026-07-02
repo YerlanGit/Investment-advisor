@@ -67,6 +67,14 @@ const TopBar = ({ active }) => {
 
 const Footer = () => {
   const p = window.DEEP;
+  // §−14 C-6: ChromaDB (банковский RAG) в списке источников — только когда RAG
+  // реально консультировался (quality несёт «✓ … RAG …»); при выключенном/пустом
+  // RAG источник не заявляется (футер был статичным — вводил в заблуждение).
+  const ragOn = (p.quality || []).some(q =>
+    typeof q === 'string' && q.includes('✓') && /rag/i.test(q));
+  const sources = ['Tradernet', 'SEC EDGAR', 'FRED', 'Quant Engine MAC3']
+    .concat(ragOn ? ['ChromaDB (GS / MS / JPM)'] : [])
+    .concat([p.meta.aiModel]).join(' · ');
   return (
     <footer className="mt-16 mb-8">
       <div className="rounded-4xl p-7 glass-strong shadow-card">
@@ -96,7 +104,7 @@ const Footer = () => {
         <div className="mt-6 pt-5 border-t border-ink-900/8 flex items-start gap-3">
           <Icons.Warning size={15} className="text-rust-500 mt-0.5 flex-shrink-0" stroke={1.8}/>
           <p className="text-[12px] text-ink-500 leading-relaxed font-light">
-            <span className="text-ink-700 font-medium">Это аналитический материал, а не индивидуальная инвестиционная рекомендация.</span> Расчёты основаны на исторических данных и публичной отчётности; они не учитывают вашу налоговую ситуацию, горизонт и цели. Источники: Tradernet · SEC EDGAR · FRED · Quant Engine MAC3 · ChromaDB (GS / MS / JPM) · {p.meta.aiModel}.
+            <span className="text-ink-700 font-medium">Это аналитический материал, а не индивидуальная инвестиционная рекомендация.</span> Расчёты основаны на исторических данных и публичной отчётности; они не учитывают вашу налоговую ситуацию, горизонт и цели. Источники: {sources}.
           </p>
         </div>
       </div>
