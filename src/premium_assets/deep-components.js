@@ -1169,19 +1169,29 @@ const MandateCard = ({
 }) => /*#__PURE__*/React.createElement("div", {
   className: "glass-strong rounded-4xl p-6 shadow-card lift flex flex-col"
 }, /*#__PURE__*/React.createElement("div", {
-  className: "flex items-start justify-between mb-1"
+  className: "flex items-start justify-between mb-1 gap-2"
 }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
   className: "text-ink-500 text-[12px] font-medium"
 }, "\u0421\u043E\u043E\u0442\u0432\u0435\u0442\u0441\u0442\u0432\u0438\u0435 \u043C\u0430\u043D\u0434\u0430\u0442\u0443"), /*#__PURE__*/React.createElement("h3", {
   className: "text-xl font-semibold tracking-tight text-ink-900 leading-tight"
-}, m.profile)), /*#__PURE__*/React.createElement("span", {
-  className: "px-2.5 py-1 rounded-full bg-rust-500/12 text-rust-600 text-[10px] font-semibold tracking-wider uppercase flex items-center gap-1"
+}, m.profile)), m.violations > 0 ? /*#__PURE__*/React.createElement("span", {
+  className: "px-2.5 py-1 rounded-full bg-rust-500/12 text-rust-600 text-[10px] font-semibold tracking-wider uppercase flex items-center gap-1 flex-shrink-0"
 }, /*#__PURE__*/React.createElement(Icons.Warning, {
   size: 11,
   stroke: 2
-}), " ", m.violations, " \u043D\u0430\u0440\u0443\u0448\u0435\u043D\u0438\u0435")), /*#__PURE__*/React.createElement("div", {
-  className: "text-[10.5px] text-ink-400 font-mono mb-4"
-}, "\u0446\u0435\u043B\u0435\u0432\u0430\u044F \u0432\u043E\u043B\u0430\u0442. \u2248", m.targetVol, "% \xB7 \u043E\u0442\u043A\u043B\u043E\u043D\u0435\u043D\u0438\u0435 \u043E\u0442 \u043E\u0440\u0438\u0435\u043D\u0442\u0438\u0440\u0430 \u2264", m.trackingCap, "%"), /*#__PURE__*/React.createElement("div", {
+}), " ", m.violations, " \u043D\u0430\u0440\u0443\u0448\u0435\u043D\u0438\u0435") : /*#__PURE__*/React.createElement("span", {
+  className: "px-2.5 py-1 rounded-full bg-sage-500/15 text-sage-600 text-[10px] font-semibold tracking-wider uppercase flex-shrink-0"
+}, "\u0441\u043E\u043E\u0442\u0432\u0435\u0442\u0441\u0442\u0432\u0443\u0435\u0442")), /*#__PURE__*/React.createElement("div", {
+  className: "text-[10.5px] text-ink-400 font-mono mb-2"
+}, "\u0446\u0435\u043B\u0435\u0432\u0430\u044F \u0432\u043E\u043B\u0430\u0442. \u2248", m.targetVol, "% \xB7 \u043E\u0442\u043A\u043B\u043E\u043D\u0435\u043D\u0438\u0435 \u043E\u0442 \u043E\u0440\u0438\u0435\u043D\u0442\u0438\u0440\u0430 \u2264", m.trackingCap, "%"), m.leveraged && /*#__PURE__*/React.createElement("div", {
+  className: "flex items-center gap-2 rounded-2xl bg-rust-500/10 border border-rust-500/30 px-3 py-2 mb-3"
+}, /*#__PURE__*/React.createElement(Icons.Warning, {
+  size: 13,
+  className: "text-rust-600 flex-shrink-0",
+  stroke: 2
+}), /*#__PURE__*/React.createElement("span", {
+  className: "text-[11px] text-rust-600 font-medium"
+}, "\u041C\u0430\u0440\u0436\u0438\u043D\u0430\u043B\u044C\u043D\u044B\u0439 \u0434\u043E\u043B\u0433 ", m.marginPct > 0 ? `≈${m.marginPct}% NAV` : 'обнаружен', " \u2014 \u043F\u043E\u0437\u0438\u0446\u0438\u0438 \u0447\u0430\u0441\u0442\u0438\u0447\u043D\u043E \u043A\u0443\u043F\u043B\u0435\u043D\u044B \u0432 \u0434\u043E\u043B\u0433")), /*#__PURE__*/React.createElement("div", {
   className: "space-y-3.5 mt-auto"
 }, m.rows.map((r, i) => {
   const tone = {
@@ -1334,7 +1344,7 @@ const MiniBar = ({
 }, /*#__PURE__*/React.createElement("div", {
   className: "rounded-full",
   style: {
-    width: `${Math.min(100, value / max * 100)}%`,
+    width: `${Math.max(0, Math.min(100, value / max * 100))}%`,
     height: '100%',
     background: color
   }
@@ -1487,7 +1497,7 @@ const HBar = ({
 }, /*#__PURE__*/React.createElement("div", {
   className: "rounded-full",
   style: {
-    width: `${Math.min(100, value / max * 100)}%`,
+    width: `${Math.max(0, Math.min(100, value / max * 100))}%`,
     height: '100%',
     background: color
   }
@@ -1628,20 +1638,23 @@ const SectorMix = ({
   warns
 }) => {
   let acc = 0;
+  // Бейдж «Перевес» — только когда есть реальный warn-сектор или предупреждение
+  // движка (был хардкод «Перевес IT», рисовался всегда — template-literal).
+  const hasOverweight = (sectors || []).some(s => s.warn) || (warns || []).some(w => w && w !== '–');
   return /*#__PURE__*/React.createElement("div", {
     className: "glass-strong rounded-4xl p-6 shadow-card lift flex flex-col h-full"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "flex items-start justify-between mb-4"
+    className: "flex items-start justify-between mb-4 gap-2"
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "text-ink-500 text-[12px] font-medium"
   }, "\u0421\u0442\u0440\u0443\u043A\u0442\u0443\u0440\u0430"), /*#__PURE__*/React.createElement("h3", {
     className: "text-xl font-semibold tracking-tight text-ink-900 leading-tight"
-  }, "\u041F\u043E \u0441\u0435\u043A\u0442\u043E\u0440\u0430\u043C")), /*#__PURE__*/React.createElement("span", {
-    className: "px-2.5 py-1 rounded-full bg-rust-500/12 text-rust-600 text-[10px] font-semibold tracking-wider uppercase flex items-center gap-1"
+  }, "\u041F\u043E \u0441\u0435\u043A\u0442\u043E\u0440\u0430\u043C")), hasOverweight && /*#__PURE__*/React.createElement("span", {
+    className: "px-2.5 py-1 rounded-full bg-rust-500/12 text-rust-600 text-[10px] font-semibold tracking-wider uppercase flex items-center gap-1 flex-shrink-0"
   }, /*#__PURE__*/React.createElement(Icons.Warning, {
     size: 11,
     stroke: 2
-  }), " \u041F\u0435\u0440\u0435\u0432\u0435\u0441 IT")), /*#__PURE__*/React.createElement("svg", {
+  }), " \u041F\u0435\u0440\u0435\u0432\u0435\u0441")), /*#__PURE__*/React.createElement("svg", {
     viewBox: "0 0 320 18",
     className: "w-full h-3.5 mb-4",
     preserveAspectRatio: "none"
@@ -1682,7 +1695,7 @@ const SectorMix = ({
     className: `text-[12px] font-semibold num ${s.warn ? 'text-gold-700' : 'text-ink-900'}`
   }, s.pct, "%")))), /*#__PURE__*/React.createElement("div", {
     className: "mt-4 space-y-2"
-  }, warns.map((w, i) => /*#__PURE__*/React.createElement("div", {
+  }, (warns || []).filter(w => w && w !== '–').map((w, i) => /*#__PURE__*/React.createElement("div", {
     key: i,
     className: "flex items-start gap-2 rounded-2xl bg-gold-400/12 border border-gold-400/35 px-3 py-2"
   }, /*#__PURE__*/React.createElement(Icons.Warning, {

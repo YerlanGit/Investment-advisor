@@ -70,18 +70,30 @@ const VerdictCard = ({ v }) => (
 // Mandate compliance card
 const MandateCard = ({ m }) => (
   <div className="glass-strong rounded-4xl p-6 shadow-card lift flex flex-col">
-    <div className="flex items-start justify-between mb-1">
+    <div className="flex items-start justify-between mb-1 gap-2">
       <div>
         <div className="text-ink-500 text-[12px] font-medium">Соответствие мандату</div>
         <h3 className="text-xl font-semibold tracking-tight text-ink-900 leading-tight">{m.profile}</h3>
       </div>
-      <span className="px-2.5 py-1 rounded-full bg-rust-500/12 text-rust-600 text-[10px] font-semibold tracking-wider uppercase flex items-center gap-1">
-        <Icons.Warning size={11} stroke={2}/> {m.violations} нарушение
-      </span>
+      {m.violations > 0
+        ? <span className="px-2.5 py-1 rounded-full bg-rust-500/12 text-rust-600 text-[10px] font-semibold tracking-wider uppercase flex items-center gap-1 flex-shrink-0">
+            <Icons.Warning size={11} stroke={2}/> {m.violations} нарушение
+          </span>
+        : <span className="px-2.5 py-1 rounded-full bg-sage-500/15 text-sage-600 text-[10px] font-semibold tracking-wider uppercase flex-shrink-0">соответствует</span>}
     </div>
-    <div className="text-[10.5px] text-ink-400 font-mono mb-4">
+    <div className="text-[10.5px] text-ink-400 font-mono mb-2">
       целевая волат. ≈{m.targetVol}% · отклонение от ориентира ≤{m.trackingCap}%
     </div>
+    {/* Маржинальный долг — рендерится ТОЛЬКО на реально левереджёванном счёте
+        (кэш < 0); на обычном портфеле упоминаний плеча нет (правило §−13). */}
+    {m.leveraged && (
+      <div className="flex items-center gap-2 rounded-2xl bg-rust-500/10 border border-rust-500/30 px-3 py-2 mb-3">
+        <Icons.Warning size={13} className="text-rust-600 flex-shrink-0" stroke={2}/>
+        <span className="text-[11px] text-rust-600 font-medium">
+          Маржинальный долг {m.marginPct > 0 ? `≈${m.marginPct}% NAV` : 'обнаружен'} — позиции частично куплены в долг
+        </span>
+      </div>
+    )}
     <div className="space-y-3.5 mt-auto">
       {m.rows.map((r,i) => {
         const tone = { ok:'text-ink-900', over:'text-rust-600', under:'text-gold-700' }[r.state];
@@ -184,7 +196,7 @@ const ConcentrationCard = ({ rows }) => (
 
 const MiniBar = ({ value, max=30, color='#1c1b1a', height=4 }) => (
   <div className="w-full bg-ink-900/8 rounded-full overflow-hidden" style={{ height }}>
-    <div className="rounded-full" style={{ width:`${Math.min(100,(value/max)*100)}%`, height:'100%', background:color }}/>
+    <div className="rounded-full" style={{ width:`${Math.max(0, Math.min(100,(value/max)*100))}%`, height:'100%', background:color }}/>
   </div>
 );
 

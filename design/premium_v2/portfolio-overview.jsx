@@ -146,7 +146,7 @@ const RiskDecompCard = ({ data }) => (
       </div>
       <div className="text-right flex-shrink-0">
         <div className="text-[10px] text-ink-400 tracking-wider uppercase">Итог</div>
-        <div className="text-xl font-semibold num text-ink-900 leading-none mt-0.5">{data.total != null ? `${data.total}%` : '—'}</div>
+        <div className="text-xl font-semibold num text-ink-900 leading-none mt-0.5">{data.total != null ? `${Number(data.total).toFixed(1)}%` : '—'}</div>
       </div>
     </div>
     <div className="flex-1 flex items-center justify-center -mx-1 my-2">
@@ -240,6 +240,16 @@ const Hero = () => {
             })}
           </div>
           <HeroRiskGauge value={v.riskIndex} delta={v.riskTrendDelta} profile={p.meta.profile}/>
+          {/* Маржинальный долг — только на реально левереджёванном счёте
+              (кэш < 0); иначе упоминания плеча скрыты (правило §−13). */}
+          {(p.leverage && p.leverage.on) && (
+            <div className="flex items-center gap-2 rounded-2xl bg-rust-500/10 border border-rust-500/30 px-3.5 py-2">
+              <Icons.Warning size={13} className="text-rust-600 flex-shrink-0" stroke={2}/>
+              <span className="text-[11.5px] text-rust-600 font-medium">
+                Маржинальный долг {p.leverage.marginPct > 0 ? `≈${p.leverage.marginPct}% NAV` : 'обнаружен'} — часть позиций куплена в долг
+              </span>
+            </div>
+          )}
         </div>
       </div>
 

@@ -591,10 +591,14 @@ class PremiumMapperTest(unittest.TestCase):
         d = build_design_data({}, "deep")          # empty payload → no KeyError
         self.assertEqual(len(d), 29)
 
-    def test_base_contract_is_exactly_11_keys(self):
+    def test_base_contract_is_exactly_12_keys(self):
+        # §−13: +`leverage` {on, marginPct} — маржа-индикатор, рендерится ТОЛЬКО
+        # на левереджёванном счёте (отрицательный кэш).
         from premium_payload import build_design_data
         b = build_design_data({}, "base")
-        self.assertEqual(len(b), 11)
+        self.assertEqual(len(b), 12)
+        self.assertIn("leverage", b)
+        self.assertFalse(b["leverage"]["on"])   # пустой payload → плечо скрыто
 
     def test_none_payload_defensive_dash(self):
         from premium_payload import build_design_data

@@ -21,7 +21,7 @@ const SignalChip = ({ signal }) => {
 
 // Mini horizontal bar showing weight or risk share
 const MiniBar = ({ value, max=30, color='#1c1b1a', height=4 }) => {
-  const pct = Math.min(100, (value/max)*100);
+  const pct = Math.max(0, Math.min(100, (value/max)*100));  // clamp: маржинальный кэш даёт отрицательный вес
   return (
     <div className="w-full bg-ink-900/8 rounded-full overflow-hidden" style={{height}}>
       <div className="rounded-full" style={{ width:`${pct}%`, height:'100%', background:color }}/>

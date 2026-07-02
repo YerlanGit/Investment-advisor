@@ -922,7 +922,7 @@ const RiskDecompCard = ({
   className: "text-[10px] text-ink-400 tracking-wider uppercase"
 }, "\u0418\u0442\u043E\u0433"), /*#__PURE__*/React.createElement("div", {
   className: "text-xl font-semibold num text-ink-900 leading-none mt-0.5"
-}, data.total != null ? `${data.total}%` : '—'))), /*#__PURE__*/React.createElement("div", {
+}, data.total != null ? `${Number(data.total).toFixed(1)}%` : '—'))), /*#__PURE__*/React.createElement("div", {
   className: "flex-1 flex items-center justify-center -mx-1 my-2"
 }, /*#__PURE__*/React.createElement(Waterfall, {
   data: data
@@ -1053,7 +1053,15 @@ const Hero = () => {
     value: v.riskIndex,
     delta: v.riskTrendDelta,
     profile: p.meta.profile
-  }))), /*#__PURE__*/React.createElement("div", {
+  }), p.leverage && p.leverage.on && /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center gap-2 rounded-2xl bg-rust-500/10 border border-rust-500/30 px-3.5 py-2"
+  }, /*#__PURE__*/React.createElement(Icons.Warning, {
+    size: 13,
+    className: "text-rust-600 flex-shrink-0",
+    stroke: 2
+  }), /*#__PURE__*/React.createElement("span", {
+    className: "text-[11.5px] text-rust-600 font-medium"
+  }, "\u041C\u0430\u0440\u0436\u0438\u043D\u0430\u043B\u044C\u043D\u044B\u0439 \u0434\u043E\u043B\u0433 ", p.leverage.marginPct > 0 ? `≈${p.leverage.marginPct}% NAV` : 'обнаружен', " \u2014 \u0447\u0430\u0441\u0442\u044C \u043F\u043E\u0437\u0438\u0446\u0438\u0439 \u043A\u0443\u043F\u043B\u0435\u043D\u0430 \u0432 \u0434\u043E\u043B\u0433")))), /*#__PURE__*/React.createElement("div", {
     className: "grid grid-cols-2 sm:flex sm:flex-wrap items-end gap-x-8 gap-y-5 mb-10"
   }, p.factorPills.map((f, i) => /*#__PURE__*/React.createElement(FactorPill, _extends({
     key: i
@@ -1112,7 +1120,7 @@ const MiniBar = ({
   color = '#1c1b1a',
   height = 4
 }) => {
-  const pct = Math.min(100, value / max * 100);
+  const pct = Math.max(0, Math.min(100, value / max * 100)); // clamp: маржинальный кэш даёт отрицательный вес
   return /*#__PURE__*/React.createElement("div", {
     className: "w-full bg-ink-900/8 rounded-full overflow-hidden",
     style: {
