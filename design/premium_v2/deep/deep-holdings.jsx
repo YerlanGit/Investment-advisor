@@ -12,7 +12,7 @@ const SignalChip = ({ signal }) => {
 
 const HBar = ({ value, max, color, height=4 }) => (
   <div className="w-full bg-ink-900/8 rounded-full overflow-hidden" style={{ height }}>
-    <div className="rounded-full" style={{ width:`${Math.min(100,(value/max)*100)}%`, height:'100%', background:color }}/>
+    <div className="rounded-full" style={{ width:`${Math.max(0, Math.min(100,(value/max)*100))}%`, height:'100%', background:color }}/>
   </div>
 );
 
@@ -94,16 +94,22 @@ const HoldingRow = ({ h, open, onToggle }) => {
 
 const SectorMix = ({ sectors, warns }) => {
   let acc = 0;
+  // Бейдж «Перевес» — только когда есть реальный warn-сектор или предупреждение
+  // движка (был хардкод «Перевес IT», рисовался всегда — template-literal).
+  const hasOverweight = (sectors || []).some(s => s.warn) ||
+                        (warns || []).some(w => w && w !== '–');
   return (
     <div className="glass-strong rounded-4xl p-6 shadow-card lift flex flex-col h-full">
-      <div className="flex items-start justify-between mb-4">
+      <div className="flex items-start justify-between mb-4 gap-2">
         <div>
           <div className="text-ink-500 text-[12px] font-medium">Структура</div>
           <h3 className="text-xl font-semibold tracking-tight text-ink-900 leading-tight">По секторам</h3>
         </div>
-        <span className="px-2.5 py-1 rounded-full bg-rust-500/12 text-rust-600 text-[10px] font-semibold tracking-wider uppercase flex items-center gap-1">
-          <Icons.Warning size={11} stroke={2}/> Перевес IT
-        </span>
+        {hasOverweight && (
+          <span className="px-2.5 py-1 rounded-full bg-rust-500/12 text-rust-600 text-[10px] font-semibold tracking-wider uppercase flex items-center gap-1 flex-shrink-0">
+            <Icons.Warning size={11} stroke={2}/> Перевес
+          </span>
+        )}
       </div>
       {/* stacked bar */}
       <svg viewBox="0 0 320 18" className="w-full h-3.5 mb-4" preserveAspectRatio="none">
@@ -123,7 +129,7 @@ const SectorMix = ({ sectors, warns }) => {
         ))}
       </div>
       <div className="mt-4 space-y-2">
-        {warns.map((w,i) => (
+        {(warns || []).filter(w => w && w !== '–').map((w,i) => (
           <div key={i} className="flex items-start gap-2 rounded-2xl bg-gold-400/12 border border-gold-400/35 px-3 py-2">
             <Icons.Warning size={12} className="text-gold-700 mt-0.5 flex-shrink-0" stroke={2}/>
             <p className="text-[10.5px] text-gold-700 leading-snug font-medium">{w}</p>

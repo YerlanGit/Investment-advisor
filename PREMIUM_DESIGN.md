@@ -243,3 +243,17 @@ mock тоже отдаёт `_pts` (smoke).
 - **Удалены** мёртвые прототипы `report_{basic,deep}_v1_design_prototype.html`.
 - Тесты: **493 passed, 10 skipped** (+`test_phase20`: SIGKILL-персистентность, BL solve-паритет, nearest-PSD,
   sha256-seed, SoC портфельных серий). Полный прогон после каждого изменения ядра.
+
+## Round 11 (2026-07-02) — leverage-правило, восстановленные пиллы, полировка
+
+- **Leverage-правило:** маппер шлёт `leverage {on, marginPct}` (BASE, 12-й ключ контракта) и
+  `mandate.leveraged/marginPct` (DEEP) из `mandate_compliance` с fallback по знаку суммарного cash-веса.
+  UI (маржа-чип в hero BASE / бейдж в MandateCard DEEP) рендерится **ТОЛЬКО при отрицательном кэше** —
+  на нелевереджёванном портфеле упоминаний плеча нет.
+- **BASE factorPills восстановлены:** в проде `factor_betas` — DEEP-only → строка была пуста. Fallback
+  `_base_factor_pills` синтезирует пиллы из реального payload: Tech-доля / Hotspots (% риска) /
+  Диверсификация (% эффект) / взвешенная Beta.
+- Полировка: clamp отрицательной ширины HBar/MiniBar (маржинальный USD), условный бейдж «Перевес»
+  (DEEP SectorMix, был хардкод), sage-чип «соответствует» при 0 нарушений, `toFixed(1)` на итоге декомпозиции.
+- Верификация: live-данные 07-01/07-02 через новый бандл — 0 ошибок/утечек, no overflow @390.
+  Тесты: **505 passed, 10 skipped** (контракт BASE обновлён 11→12 ключей).

@@ -250,11 +250,15 @@ def _map_deep(p: dict, meta: dict) -> dict:
     mc = _g(p, "mandate_compliance", default={}) or {}
     _tv = _num(mc, "target_vol_pct")
     _tc = _num(mc, "target_te_pct")
+    _lev = _leverage_info(p, assets)
     mandate = {
         "profile": _txt(p, "risk_mandate_label"),
         "targetVol": round(_tv, 1) if _tv else DASH,
         "trackingCap": round(_tc, 1) if _tc else DASH,
         "violations": int(_num(mc, "breaches", default=0)),
+        # Маржа рендерится ТОЛЬКО при leveraged (правило §−13: без отрицательного
+        # кэша упоминания плеча скрыты).
+        "leveraged": _lev["on"], "marginPct": _lev["marginPct"],
         "rows": [{"label": _txt(r, "label"), "value": round(_num(r, "actual"), 1),
                   "lo": _num(r, "lo"), "hi": _num(r, "hi"), "state": _txt(r, "status")}
                  for r in _list(mc, "rows")],
@@ -362,8 +366,7 @@ def _map_base(p: dict, meta: dict) -> dict:
             "dd": _kpi_obj("Max Drawdown", "max_drawdown", "%", _txt(p, "mdd_dollar")),
             "vol": _kpi_obj("Волатильность", "volatility", "%", "год."),
         },
-        "factorPills": [{"label": _txt(f, "axis"), "value": _num(f, "beta"), "accent": "gold",
-                         "warn": bool(_g(f, "missing")), "cap": 0} for f in _list(p, "factor_betas")[:5]],
+        "factorPills": _base_factor_pills(p, assets, sectors, riskDecomp),
         "heroStats": [
             # BASE Hero icon map only has {briefcase, trendUp, wallet} (no shield).
             {"label": "Позиции", "value": _g(p, "holdings_count", default=DASH), "icon": "briefcase"},
@@ -372,12 +375,81 @@ def _map_base(p: dict, meta: dict) -> dict:
         ],
         "topHotspot": topHotspot,
         "sectors": sectors, "riskDecomp": riskDecomp, "holdings": holdings,
+        # Показывается ТОЛЬКО при leverage.on (отрицательный кэш) — правило §−13.
+        "leverage": _leverage_info(p, assets),
         "performance": _map_performance(p),
         "ideas": _map_ideas(p, base=True),
     }
 
 
 # ── shared helpers ────────────────────────────────────────────────────────────
+
+def _leverage_info(p: dict, assets: list) -> dict:
+    """Margin/leverage indicator — {'on': bool, 'marginPct': float}.
+
+    Business rule (аудит §−13): leverage/долг показывается ТОЛЬКО когда счёт
+    реально маржинальный (кэш-баланс отрицательный); на нелевереджёванном
+    портфеле все упоминания плеча скрываются.  Источник — engine'овский
+    mandate_compliance (leveraged / margin_debt_pct); fallback — знак суммарного
+    веса cash-позиций (надёжен даже на тонком payload)."""
+    mc = _g(p, "mandate_compliance", default={}) or {}
+    lev = bool(_g(mc, "leveraged"))
+    margin = _num(mc, "margin_debt_pct")
+    if not lev:
+        cash_w = sum(_num(a, "weight_pct_num") for a in assets if _g(a, "is_cash"))
+        if cash_w < -0.05:                     # отрицательный кэш = маржа
+            lev, margin = True, (margin or round(-cash_w, 1))
+    return {"on": lev, "marginPct": round(margin, 1) if margin else 0.0}
+
+
+# Sector names counted as the «tech complex» for the hero Tech-share pill.
+_TECH_SECTOR_RE = ("tech", "semicond", "полупровод", "технолог")
+
+
+def _base_factor_pills(p: dict, assets: list, sectors: list, wf: dict) -> list:
+    """BASE hero factor pills.
+
+    Primary source — factor_betas (β по осям).  In production the engine wires
+    factor_betas ТОЛЬКО для DEEP (tg_bot `if tier == TIER_DEEP`), so the BASE
+    strip rendered EMPTY on live reports (потерянный параметр, аудит §−13).
+    Fallback: synthesize the strip from data ALREADY in the payload — tech
+    share, hotspot risk share, diversification effect, weighted market beta.
+    Every number is real (no template literals)."""
+    fb = _list(p, "factor_betas")
+    if fb:
+        return [{"label": _txt(f, "axis"), "value": _num(f, "beta"), "accent": "gold",
+                 "warn": bool(_g(f, "missing")), "cap": 0} for f in fb[:5]]
+    pills: list = []
+    # 1. Tech-доля (Technology + Semiconductors, % of invested book)
+    tech = sum(_num(s, "pct") for s in sectors
+               if any(k in str(_g(s, "name") or "").lower() for k in _TECH_SECTOR_RE))
+    if tech > 0:
+        pills.append({"label": "Tech-доля", "value": round(tech), "cap": 100,
+                      "accent": "gold", "warn": tech >= 40, "suffix": "%"})
+    # 2. Hotspots — какой % риска сидит в hotspot-позициях (Euler TRC)
+    hot = sum(_num(a, "euler_risk_pct") for a in assets if _g(a, "euler_extreme"))
+    if hot > 0:
+        pills.append({"label": "Hotspots", "value": round(hot), "cap": 100,
+                      "accent": "dark", "warn": hot >= 40,
+                      "display": f"{hot:.0f}", "suffix": "% риска"})
+    # 3. Диверсификация — сколько риска гасится (benefit / Σstandalone)
+    ss, dv = _num(wf, "sumStandalone"), abs(_num(wf, "diversification"))
+    if ss > 0 and dv > 0:
+        eff = round(dv / ss * 100)
+        pills.append({"label": "Диверсификация", "value": eff, "cap": 100,
+                      "accent": "mute", "warn": False,
+                      "display": f"{eff}", "suffix": "% эффект"})
+    # 4. Beta — взвешенная рыночная бета рисковой части книги
+    bw = [(_num(a, "beta"), _num(a, "weight_pct_num")) for a in assets
+          if not _g(a, "is_cash") and _num(a, "weight_pct_num") > 0]
+    tot_w = sum(w for _, w in bw)
+    if tot_w > 0:
+        beta = sum(b * w for b, w in bw) / tot_w
+        if beta:
+            pills.append({"label": "Beta", "value": round(beta * 100), "cap": 200,
+                          "accent": "mute", "warn": abs(beta) > 1.5,
+                          "display": f"{beta:.2f}", "raw": True})
+    return pills
 
 # Expected-effect cards: which metric keys are stored as FRACTIONS (×100 = %).
 # risk_index → integer points; sharpe → bare ratio; everything else → percent.
