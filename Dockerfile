@@ -24,9 +24,16 @@ RUN apt-get update \
 WORKDIR /app
 
 # ── Python dependencies (cached layer — only rebuilds on requirements change) ─
-COPY requirements.txt .
+# §−14 B-3: install from the HASH-LOCKED resolution.  requirements.lock is
+# generated on linux/py3.11 (same platform as this image) via
+#   pip-compile --generate-hashes --strip-extras -o requirements.lock requirements.txt
+# --require-hashes freezes both versions AND artifact hashes: a silently
+# republished wheel or resolver drift now FAILS the build instead of shipping an
+# unvetted math library.  requirements.txt remains the human intent file (major
+# caps); regenerate the lock whenever it changes (CI verifies consistency).
+COPY requirements.txt requirements.lock ./
 RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -r requirements.txt
+    && pip install --no-cache-dir --require-hashes -r requirements.lock
 
 # ── Application source ────────────────────────────────────────────────────────
 COPY src/ ./src/
