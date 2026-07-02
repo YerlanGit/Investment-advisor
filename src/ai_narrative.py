@@ -479,6 +479,61 @@ def _summarise_for_prompt(results: dict) -> dict:
         # the model can quote the actual gross-exposure / leverage-ratio when
         # warning about a margin-funded book (cash leg < 0 → is_leveraged).
         "leverage": _leverage_for_prompt(results.get("leverage_metrics")),
+        # Factor-variance decomposition + факторные двойники (additive layer,
+        # finance/factor_decomposition) — grounds ai_factor_comment in the
+        # SAME numbers the report's «Источники риска» panel shows, вместо
+        # догадок по одной лишь Beta_Market.
+        "factor_decomposition": _factor_decomposition_for_prompt(results),
+    }
+
+
+def _factor_decomposition_for_prompt(results: dict) -> dict:
+    """
+    Compact view of portfolio_metrics["factor_decomposition"] for the prompt.
+
+    Keys (все проценты уже округлены движком — модель цитирует verbatim):
+      var_shares    — {источник риска: % дисперсии портфеля} (знак сохранён;
+                      отрицательный = фактор-хедж),
+      idio_pct      — % дисперсии, не объяснённый ни одним фактором,
+      betas         — портфельные β по осям (шкала таблицы отчёта),
+      top_drivers   — {фактор: "TICKER w·β, ..."} топ-вклады w·β,
+      twins         — пары «факторных двойников» (systematic corr ≥ 0.90):
+                      одна факторная ставка куплена дважды,
+      most_unique   — топ-3 позиции по доле СОБСТВЕННОГО (идио) риска —
+                      кандидаты «истинных диверсификаторов»/уникальных ставок.
+    """
+    fd = (results.get("portfolio_metrics") or {}).get("factor_decomposition") or {}
+    if not fd:
+        return {}
+    drivers = {
+        _safe_text(f, 20): ", ".join(
+            f"{_safe_ticker(d.get('ticker'))} {_safe_round(d.get('contribution'), 2)}"
+            for d in rows[:3]
+        )
+        for f, rows in (fd.get("driven_by") or {}).items()
+    }
+    unique = [u for u in (fd.get("unique_risk") or [])
+              if u.get("unique_risk_pct") is not None and (u.get("weight_pct") or 0) >= 2.0]
+    unique.sort(key=lambda u: -(u.get("unique_risk_pct") or 0))
+    return {
+        "var_shares": {_safe_text(g.get("source"), 44): g.get("share_pct")
+                       for g in (fd.get("group_shares") or [])},
+        "idio_pct":   fd.get("idio_pct"),
+        "betas":      {_safe_text(k, 20): v
+                       for k, v in (fd.get("betas_covered") or {}).items()},
+        "top_drivers": drivers,
+        "twins": [
+            {"pair": [_safe_ticker(p) for p in (t.get("pair") or [])],
+             "corr": t.get("systematic_corr"),
+             "combined_weight_pct": t.get("combined_weight_pct")}
+            for t in (fd.get("twins") or [])
+        ],
+        "most_unique": [
+            {"ticker": _safe_ticker(u.get("ticker")),
+             "unique_risk_pct": u.get("unique_risk_pct"),
+             "weight_pct": u.get("weight_pct")}
+            for u in unique[:3]
+        ],
     }
 
 
@@ -904,10 +959,17 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
         '  "ai_sector_comment": "≤170 знаков — какие секторы перевешены и недовешены. '
         'Назови субсектора (напр. внутри Tech: софт vs полупроводники). '
         'Укажи риск ротации при режиме [см. ai_regime_comment]",\n'
-        '  "ai_factor_comment": "≤220 знаков — назови Value β (чувствительность к дешёвым акциям): '
-        'положительный = портфель любит дешёвые акции, отрицательный = наоборот. '
-        f'Режим {regime_label}: Barclays рекомендует Value>Growth — совпадает ли портфель? '
-        'Назови конкретный фактор для наращивания и тикеры для этого [Quant Engine][Barclays]",\n'
+        '  "ai_factor_comment": "≤400 знаков — институциональный факторный анализ СТРОГО по '
+        'summary.factor_decomposition (цитируй его числа verbatim), 4 шага через «;»: '
+        '(1) ИСТОЧНИК РИСКА: источник с максимальной долей var_shares — «X% дисперсии — <источник> '
+        '(драйверы: тикеры из top_drivers)»; если idio_pct заметен (>15%) — упомяни специфику бумаг; '
+        '(2) СКРЫТАЯ КОНЦЕНТРАЦИЯ: если twins непуст — назови пару, corr и суммарный вес: одна и та же '
+        'факторная ставка куплена ДВАЖДЫ — это концентрация, а не диверсификация; '
+        '(3) НАКЛОН vs РЕЖИМ: возьми выразительную бету из betas (напр. Value<0 = против дешёвых акций) '
+        f'и сверь с режимом {regime_label} и рекомендацией Barclays/GS для него; '
+        '(4) ЧЕГО НЕ ХВАТАЕТ: фактор с β≈0, который диверсифицировал бы (Value/Size/Commodities/Low Vol), '
+        'или «истинный диверсификатор» из most_unique — и КОНКРЕТНОЕ действие с тикером '
+        '[Quant Engine][Barclays]",\n'
         '  "ai_4pillar_comment": "≤240 знаков — 4-Pillar (F=фундаментал, V=оценка, T=техника, '
         'C=кредит). ВАЖНО про V простыми словами: оценка сравнивается с НОРМОЙ СЕКТОРА, а не '
         'со всем рынком — у технологий P/E высокий ОТ ПРИРОДЫ (платим за рост), поэтому V≈0 у '
@@ -985,6 +1047,40 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
 
 
 # ── Fallback narrative (no API key / failure path) — RUSSIAN ─────────────────
+
+def _fallback_factor_comment(results: dict) -> str:
+    """
+    Deterministic factor commentary from factor_decomposition — the same
+    4-step recipe the LLM follows (источник риска → двойники → идио), so the
+    «Источники риска» panel keeps an explanation even on the no-API path.
+    Empty string when the engine skipped the decomposition (template hides).
+    """
+    fd = (results.get("portfolio_metrics") or {}).get("factor_decomposition") or {}
+    groups = fd.get("group_shares") or []
+    if not groups:
+        return ""
+    top = max(groups, key=lambda g: abs(g.get("share_pct") or 0))
+    driven = fd.get("driven_by") or {}
+    drivers: dict[str, float] = {}
+    for f in (top.get("factors") or []):
+        for d in (driven.get(f) or []):
+            t = _safe_ticker(d.get("ticker"))
+            if t:
+                drivers[t] = drivers.get(t, 0.0) + abs(float(d.get("contribution") or 0))
+    top_drv = ", ".join(t for t, _ in sorted(drivers.items(), key=lambda kv: -kv[1])[:3])
+    parts = [f"{top.get('share_pct')}% дисперсии портфеля — {top.get('source')}"
+             + (f" (драйверы: {top_drv})" if top_drv else "")]
+    twins = fd.get("twins") or []
+    if twins:
+        t0 = twins[0]
+        pair = "+".join(_safe_ticker(p) for p in (t0.get("pair") or []))
+        parts.append(f"{pair} двигаются как одна ставка (corr {t0.get('systematic_corr')}, "
+                     f"вес {t0.get('combined_weight_pct')}%) — концентрация, а не диверсификация")
+    idio = fd.get("idio_pct")
+    if idio is not None and idio > 15:
+        parts.append(f"{idio}% риска — специфика отдельных бумаг, факторами не объясняется")
+    return "; ".join(parts) + " [Quant Engine]."
+
 
 def _fallback_narrative(results: dict, tier: str) -> dict:
     metrics = results.get("portfolio_metrics") or {}
@@ -1083,7 +1179,9 @@ def _fallback_narrative(results: dict, tier: str) -> dict:
         "ai_regime_comment":        "",
         "ai_holdings_comment":      "",
         "ai_sector_comment":        "",
-        "ai_factor_comment":        "",
+        # Deterministic factor summary (источник риска → двойники → идио) —
+        # keeps the DEEP «Источники риска» panel explained on the no-API path.
+        "ai_factor_comment":        _fallback_factor_comment(results) if tier == "deep" else "",
         "ai_4pillar_comment":       "",
         "ai_stress_comment":        "",
         "ai_action_comment":        "",
@@ -1422,7 +1520,11 @@ def generate_narrative(results: dict, tier: str = "base",
             "ai_regime_comment":        _comment("ai_regime_comment"),
             "ai_holdings_comment":      _comment("ai_holdings_comment"),
             "ai_sector_comment":        _comment("ai_sector_comment", 200),
-            "ai_factor_comment":        _comment("ai_factor_comment"),
+            # DEEP factor comment follows the 4-step institutional recipe
+            # (источник риска; двойники; наклон vs режим; чего не хватает) —
+            # needs more room than the default 250 (soft-trim, word boundary).
+            "ai_factor_comment":        _comment("ai_factor_comment",
+                                                 420 if tier == "deep" else 250),
             "ai_4pillar_comment":       _comment("ai_4pillar_comment"),
             "ai_stress_comment":        validate_stress_comment(_comment("ai_stress_comment")),
             "ai_action_comment":        _comment("ai_action_comment"),

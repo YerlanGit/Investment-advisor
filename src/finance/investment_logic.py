@@ -655,9 +655,13 @@ class MAC3RiskEngine:
     def calculate_structural_risk(self, data, asset_tickers, weights_dict):
         """
         Ядро MAC3: Построение факторной модели и декомпозиция Эйлера.
-        Облигации и Кэш в asset_tickers не передаются! 
+        Облигации и Кэш в asset_tickers не передаются!
         Но weights_dict содержит их доли от ОБЩЕГО портфеля, поэтому сумма весов asset_tickers < 1.0.
         """
+        # Reset the additive-analytics slot up-front: the early returns below
+        # (no data / no factors / short history / zero weights) must never
+        # leave a STALE decomposition from a previous call on the engine.
+        self._last_factor_decomposition = {}
         resolved_assets = self.resolve_tickers(asset_tickers)
 
         # Restrict to columns we actually need and drop all-NaN columns BEFORE
@@ -865,6 +869,26 @@ class MAC3RiskEngine:
         for i, asset in enumerate(valid_originals):
             exposures_report[asset]['Euler_Risk_Contribution_Pct'] = erc_pct[i] * 100
 
+        # ── Additive analytics layer: factor-VARIANCE decomposition (по
+        # источникам риска, а не по активам) + marginal overlap («факторные
+        # двойники» + unique-risk share).  Pure add-on из отдельного модуля —
+        # читает ТЕ ЖЕ B/F/D/w, что структурная модель уже построила, ничего
+        # не мутирует; любая ошибка деградирует в {} (тот же graceful-паттерн,
+        # что и κ-диагностика BLOCK 4.6 выше).
+        try:
+            from finance.factor_decomposition import build_factor_decomposition
+            self._last_factor_decomposition = build_factor_decomposition(
+                B=B,
+                F=cov_factors,
+                D=np.asarray(specific_variances, dtype=float),
+                weights=weights,
+                factor_names=list(f_data.columns),
+                asset_names=list(valid_originals),
+            )
+        except Exception as exc:
+            logger.debug("Factor decomposition skipped: %s", exc)
+            self._last_factor_decomposition = {}
+
         # 6. Хвостовые метрики
         # `port_returns_daily` carries LOG returns in the REPORTING CURRENCY
         # (H2 pre-converted the price matrix → a_data is base-currency log
@@ -988,6 +1012,9 @@ class MAC3RiskEngine:
             # BLOCK 4.6: factor-multicollinearity diagnostic (κ + max|corr|),
             # surfaced to the CoVe panel so collinear factors are visible.
             "factor_diagnostics": getattr(self, "_last_factor_diagnostic", {}),
+            # Additive layer (finance/factor_decomposition): дисперсия по
+            # ИСТОЧНИКАМ риска + факторные двойники; {} когда не определена.
+            "factor_decomposition": getattr(self, "_last_factor_decomposition", {}),
         }
 
         return cov_df, pd.DataFrame(exposures_report).T, portfolio_metrics

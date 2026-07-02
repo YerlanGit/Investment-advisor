@@ -130,6 +130,7 @@
 | Выбор главного бенчмарка | фильтр `user_bench_ticker` → слот «Профильный бенчмарк» | `build_payload` | Выбор юзера активирован (Sprint 5/Task 8): `tg_bot._resolve_bench_ticker` |
 | Мульти-период 1м/3м/6м/12м/YTD | `period_returns_table` | `_adapt_period_returns` | `period_returns.py` |
 | Equity curve / факторный радар | `equity_curve_svg`, `factor_radar_svg`, `factor_betas` | `tg_bot._build_*` | Ridge-беты движка |
+| **Источники риска (декомпозиция дисперсии)** + факторные двойники (DEEP) | `factor_variance{rows,systematic_pct,idio_pct,twins}` → premium `factorVariance` | `pdf_payload._build_factor_variance` | **Additive layer** `finance/factor_decomposition.py`: Euler по ФАКТОРАМ (σ²=bᵀFb+wᵀDw, b=Bᵀw), группы «Рыночная бета/Стили/EM/Ставки/Сырьё/Идио»; «двойники» = пары с systematic-corr ≥ 0.90 (`TWIN_CORR_THRESHOLD`); отрицательная доля = фактор-хедж. Хук: `calculate_structural_risk` → `portfolio_metrics["factor_decomposition"]` (graceful {}). AI: `_factor_decomposition_for_prompt` → 4-шаговый `ai_factor_comment` (источник риска → двойники → наклон vs режим → чего не хватает) + детерминированный фолбэк `_fallback_factor_comment` |
 
 ---
 

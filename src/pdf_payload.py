@@ -1199,6 +1199,9 @@ def build_payload(results: dict, tier: str,
         "sector_complex":       sector_complex,   # top combined group (e.g. Tech-комплекс)
         "asset_concentration":  asset_concentration,
         "risk_waterfall":       risk_waterfall,
+        # Factor-variance decomposition (источники риска + факторные двойники)
+        # — additive layer; None hides the DEEP sub-block.
+        "factor_variance":      _build_factor_variance(results),
         # Multi-period performance table {bm_name: {periods: [...], window_*}}
         "period_returns_table": period_returns_table,
         # Stress scenarios (parametric factor shocks — list of dicts)
@@ -1604,6 +1607,59 @@ def _build_sector_warnings(weight_pairs: list[tuple[str, float]],
     # Sort by overage descending so the worst is first.
     warnings.sort(key=lambda d: d["overage_pp"], reverse=True)
     return warnings
+
+
+# ── Factor-variance decomposition (источники риска; additive layer) ─────────
+
+def _build_factor_variance(results: dict) -> Optional[dict]:
+    """
+    Display-ready view of portfolio_metrics["factor_decomposition"]
+    (finance/factor_decomposition — Euler по факторам + факторные двойники).
+
+    Rows: агрегированные «источники риска» (Рыночная бета / Стилевые наклоны /
+    EM / Ставки / Сырьё / Идиосинкратика) с долей дисперсии и топ-драйверами
+    (тикеры, чей w·β доминирует в осях группы).  Twins: пары с систематической
+    корреляцией ≥ 0.90 — одна факторная ставка, купленная дважды.
+
+    Returns None when the engine skipped the decomposition — templates hide
+    the block then (same contract as risk_waterfall).
+    """
+    fd = (results.get("portfolio_metrics") or {}).get("factor_decomposition") or {}
+    groups = fd.get("group_shares") or []
+    if not groups:
+        return None
+
+    driven = fd.get("driven_by") or {}
+    rows: list[dict] = []
+    for g in groups:
+        # Merge per-factor driver lists of the group into one ticker ranking
+        # (w·β contributions summed across the group's axes).
+        acc: dict[str, float] = {}
+        for f in (g.get("factors") or []):
+            for d in (driven.get(f) or []):
+                t = str(d.get("ticker", "")).strip()
+                if t:
+                    acc[t] = acc.get(t, 0.0) + _safe_float(d.get("contribution"), 0.0)
+        top = sorted(acc.items(), key=lambda kv: -abs(kv[1]))[:3]
+        rows.append({
+            "source":    g.get("source", ""),
+            "share_pct": _safe_float(g.get("share_pct"), 0.0),
+            "drivers":   ", ".join(t for t, _ in top),
+        })
+    rows.sort(key=lambda r: -r["share_pct"])
+
+    twins = [{
+        "pair_label":          " ↔ ".join(str(x) for x in (t.get("pair") or [])),
+        "systematic_corr":     _safe_float(t.get("systematic_corr"), 0.0),
+        "combined_weight_pct": _safe_float(t.get("combined_weight_pct"), 0.0),
+    } for t in (fd.get("twins") or [])]
+
+    return {
+        "rows":           rows,
+        "systematic_pct": _safe_float(fd.get("systematic_pct"), 0.0),
+        "idio_pct":       _safe_float(fd.get("idio_pct"), 0.0),
+        "twins":          twins,
+    }
 
 
 # ── Risk waterfall (standalone vs diversified) ───────────────────────────────

@@ -2635,6 +2635,42 @@
       </div>
     </div>
 
+    {# ── Источники риска: факторная декомпозиция дисперсии (additive layer,
+       finance/factor_decomposition).  Доли Euler по факторным группам +
+       идиосинкратика; знак сохранён (отрицательная доля = фактор-хедж).
+       Блок скрыт целиком, когда движок пропустил декомпозицию. #}
+    {% if data.factor_variance %}
+    <div style="margin-top:14px; padding-top:12px; border-top:1px solid var(--line, #e3e0d8);">
+      <div style="font-size:10.5px; font-weight:700; color:var(--ink); margin-bottom:2px;">Откуда берётся риск — декомпозиция дисперсии по источникам</div>
+      <div style="font-size:9px; color:var(--ink-60); margin-bottom:8px;">
+        σ² = bᵀFb + wᵀDw (Euler по факторам) · систематика {{ "%.1f" | format(data.factor_variance.systematic_pct) }}%
+        · специфика бумаг {{ "%.1f" | format(data.factor_variance.idio_pct) }}%
+      </div>
+      <table class="factor-table">
+        <thead>
+          <tr><th>Источник риска</th><th>Доля дисперсии</th><th>Драйверы</th></tr>
+        </thead>
+        <tbody>
+          {% for row in data.factor_variance.rows %}
+          <tr>
+            <td>{{ row.source }}</td>
+            <td class="{% if row.share_pct < -0.05 %}delta-neg{% endif %}">{{ "%.1f" | format(row.share_pct) }}%{% if row.share_pct < -0.05 %} (хедж){% endif %}</td>
+            <td>{{ row.drivers or "—" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% if data.factor_variance.twins %}
+      <div style="margin-top:8px; font-size:9.5px; color:var(--ink-60); line-height:1.5;">
+        <b style="color:var(--ink);">Факторные двойники</b> (систематическая корреляция ≥ 0.90 — одна и та же факторная ставка куплена дважды; концентрация, а не диверсификация):
+        {% for tw in data.factor_variance.twins %}
+        <span style="white-space:nowrap;">{{ tw.pair_label }} · corr {{ "%.2f" | format(tw.systematic_corr) }} · вес {{ "%.1f" | format(tw.combined_weight_pct) }}%{% if not loop.last %}; {% endif %}</span>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
+
     {% if data.ai_factor_comment %}
     <div class="conc-ai" style="margin-top:14px;">
       <div class="ai-body">
