@@ -959,14 +959,16 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
         '  "ai_sector_comment": "≤170 знаков — какие секторы перевешены и недовешены. '
         'Назови субсектора (напр. внутри Tech: софт vs полупроводники). '
         'Укажи риск ротации при режиме [см. ai_regime_comment]",\n'
-        '  "ai_factor_comment": "≤400 знаков — институциональный факторный анализ СТРОГО по '
-        'summary.factor_decomposition (цитируй его числа verbatim), 4 шага через «;»: '
-        '(1) ИСТОЧНИК РИСКА: источник с максимальной долей var_shares — «X% дисперсии — <источник> '
-        '(драйверы: тикеры из top_drivers)»; если idio_pct заметен (>15%) — упомяни специфику бумаг; '
-        '(2) СКРЫТАЯ КОНЦЕНТРАЦИЯ: если twins непуст — назови пару, corr и суммарный вес: одна и та же '
+        '  "ai_factor_comment": "≤560 знаков — ЕДИНЫЙ вывод, связывающий ОБЕ иллюстрации секции: '
+        '(A) радар β (betas — наклоны портфеля к рынку) И (B) «Откуда берётся риск» '
+        '(var_shares — доли дисперсии, twins). СТРОГО по summary.factor_decomposition, числа verbatim. '
+        '4 шага через «;», ЗАКОНЧИ мысль (НЕ обрывай на полуслове, уложись в лимит): '
+        '(1) ИСТОЧНИК РИСКА [из B]: источник с макс. долей var_shares — «X% дисперсии — <источник> '
+        '(драйверы: тикеры из top_drivers, с их β из betas)»; если idio_pct > 15% — упомяни специфику бумаг; '
+        '(2) СКРЫТАЯ КОНЦЕНТРАЦИЯ [из B, twins]: если twins непуст — пара, corr и суммарный вес: одна и та же '
         'факторная ставка куплена ДВАЖДЫ — это концентрация, а не диверсификация; '
-        '(3) НАКЛОН vs РЕЖИМ: возьми выразительную бету из betas (напр. Value<0 = против дешёвых акций) '
-        f'и сверь с режимом {regime_label} и рекомендацией Barclays/GS для него; '
+        '(3) НАКЛОН vs РЕЖИМ [из A]: выразительная бета из betas (напр. Value<0 = против дешёвых акций) '
+        f'сверена с режимом {regime_label} и рекомендацией Barclays/GS для него; '
         '(4) ЧЕГО НЕ ХВАТАЕТ: фактор с β≈0, который диверсифицировал бы (Value/Size/Commodities/Low Vol), '
         'или «истинный диверсификатор» из most_unique — и КОНКРЕТНОЕ действие с тикером '
         '[Quant Engine][Barclays]",\n'
@@ -1520,11 +1522,12 @@ def generate_narrative(results: dict, tier: str = "base",
             "ai_regime_comment":        _comment("ai_regime_comment"),
             "ai_holdings_comment":      _comment("ai_holdings_comment"),
             "ai_sector_comment":        _comment("ai_sector_comment", 200),
-            # DEEP factor comment follows the 4-step institutional recipe
-            # (источник риска; двойники; наклон vs режим; чего не хватает) —
-            # needs more room than the default 250 (soft-trim, word boundary).
+            # DEEP factor comment ties BOTH illustrations together (β-radar +
+            # variance decomposition) via the 4-step institutional recipe —
+            # needs headroom so the closing thought isn't clipped mid-sentence
+            # (soft-trim still guards the hard ceiling at a WORD boundary).
             "ai_factor_comment":        _comment("ai_factor_comment",
-                                                 420 if tier == "deep" else 250),
+                                                 640 if tier == "deep" else 250),
             "ai_4pillar_comment":       _comment("ai_4pillar_comment"),
             "ai_stress_comment":        validate_stress_comment(_comment("ai_stress_comment")),
             "ai_action_comment":        _comment("ai_action_comment"),
