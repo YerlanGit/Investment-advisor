@@ -1839,48 +1839,91 @@ const FactorTable = ({
 // Отвечает «откуда берётся риск ПО ИСТОЧНИКАМ» (Euler по факторам), дополняя
 // TRC-разложение по активам.  Отрицательная доля = фактор-хедж.  Блок целиком
 // скрыт, когда движок пропустил декомпозицию (factorVariance == null).
+// Один ряд-«метр»: источник риска, дорожка-бар, доля дисперсии.  Верстается
+// адаптивно — на мобильном лейбл+% в строке, бар во всю ширину под ними;
+// на sm+ единый выровненный ряд «лейбл · бар · %».  Драйверы и чип «хедж»
+// живут в подписи под баром с выравниванием по колонке лейбла.
+const VarianceRow = ({
+  r,
+  maxAbs
+}) => {
+  const neg = r.pct < 0;
+  const w = Math.max(Math.min(Math.abs(r.pct) / maxAbs * 100, 100), 1.5);
+  const fill = neg ? '#7a9a78' : '#caa01a';
+  const pctCls = neg ? 'text-sage-600' : 'text-ink-900';
+  return /*#__PURE__*/React.createElement("div", {
+    className: "py-2.5"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-3"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-baseline justify-between gap-2 sm:block sm:w-[35%] sm:shrink-0 min-w-0"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "text-[11.5px] text-ink-800 font-medium leading-tight truncate"
+  }, r.source), /*#__PURE__*/React.createElement("span", {
+    className: `sm:hidden text-[12px] num font-semibold tabular-nums shrink-0 ${pctCls}`
+  }, r.pct, "%")), /*#__PURE__*/React.createElement("div", {
+    className: "flex-1 min-w-0 h-2 rounded-full bg-ink-900/5 relative overflow-hidden"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "absolute inset-y-0 left-0 rounded-full",
+    style: {
+      width: `${w}%`,
+      background: fill
+    }
+  })), /*#__PURE__*/React.createElement("span", {
+    className: `hidden sm:block sm:w-[52px] text-right text-[12px] num font-semibold tabular-nums shrink-0 ${pctCls}`
+  }, r.pct, "%")), (r.drivers || neg) && /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center gap-1.5 mt-1 sm:pl-[calc(35%+0.75rem)] min-w-0"
+  }, neg && /*#__PURE__*/React.createElement("span", {
+    className: "text-[8.5px] font-mono uppercase tracking-wider text-sage-600 bg-sage-500/15 rounded px-1 py-px shrink-0"
+  }, "хедж"), r.drivers && /*#__PURE__*/React.createElement("span", {
+    className: "text-[10px] font-mono text-ink-400 truncate"
+  }, r.drivers)));
+};
 const FactorVariance = ({
   fv
 }) => {
   if (!fv || !fv.rows || !fv.rows.length) return null;
   const maxAbs = Math.max(...fv.rows.map(r => Math.abs(r.pct)), 1);
   return /*#__PURE__*/React.createElement("div", {
-    className: "mt-5 rounded-2xl bg-cream-50 border border-ink-900/5 px-4 py-3.5"
+    className: "mt-5 rounded-3xl bg-cream-50 border border-ink-900/5 p-4 sm:p-5"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "flex items-start justify-between gap-4 flex-wrap mb-2"
+    className: "flex items-start justify-between gap-3 flex-wrap mb-3"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "text-[13px] font-semibold text-ink-900 leading-tight"
+  }, "Откуда берётся риск"), /*#__PURE__*/React.createElement("div", {
+    className: "text-[10.5px] text-ink-500 font-light mt-0.5"
+  }, "декомпозиция дисперсии по источникам · σ² = bᵀFb + wᵀDw")), /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center gap-1.5 shrink-0"
   }, /*#__PURE__*/React.createElement("span", {
-    className: "text-[12.5px] font-semibold text-ink-900"
-  }, "Откуда берётся риск — декомпозиция дисперсии"), /*#__PURE__*/React.createElement("span", {
-    className: "text-[10px] font-mono text-ink-500"
-  }, "систематика ", fv.systematic, "% · специфика бумаг ", fv.idio, "%")), /*#__PURE__*/React.createElement("div", {
-    className: "space-y-2"
-  }, fv.rows.map((r, i) => /*#__PURE__*/React.createElement("div", {
+    className: "text-[10px] font-mono rounded-full bg-gold-500/20 text-gold-700 px-2 py-0.5"
+  }, "систематика ", fv.systematic, "%"), /*#__PURE__*/React.createElement("span", {
+    className: "text-[10px] font-mono rounded-full bg-sage-500/15 text-sage-600 px-2 py-0.5"
+  }, "специфика ", fv.idio, "%"))), /*#__PURE__*/React.createElement("div", {
+    className: "divide-y divide-ink-900/5"
+  }, fv.rows.map((r, i) => /*#__PURE__*/React.createElement(VarianceRow, {
     key: i,
-    className: "grid grid-cols-12 gap-2.5 items-center"
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "col-span-12 sm:col-span-4 text-[11px] text-ink-800 font-medium"
-  }, r.source), /*#__PURE__*/React.createElement("span", {
-    className: "col-span-8 sm:col-span-5"
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "block h-1.5 rounded-full bg-ink-900/4 relative overflow-hidden"
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "absolute inset-y-0 left-0 rounded-full",
-    style: {
-      width: `${Math.min(Math.abs(r.pct) / maxAbs * 100, 100)}%`,
-      background: r.pct < 0 ? '#5d7c5c' : '#caa01a'
-    }
-  }))), /*#__PURE__*/React.createElement("span", {
-    className: "col-span-2 sm:col-span-1 text-right text-[11px] num font-semibold text-ink-900"
-  }, r.pct, "%", r.pct < 0 ? ' (хедж)' : ''), /*#__PURE__*/React.createElement("span", {
-    className: "col-span-2 sm:col-span-2 text-right text-[10px] font-mono text-ink-500 truncate"
-  }, r.drivers)))), fv.twins && fv.twins.length > 0 && /*#__PURE__*/React.createElement("p", {
-    className: "text-[11px] text-ink-500 leading-relaxed font-light mt-3"
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "text-ink-800 font-medium"
-  }, "Факторные двойники"), " (систематическая корреляция ≥ 0.90 — одна факторная ставка куплена дважды):", ' ', fv.twins.map((t, i) => /*#__PURE__*/React.createElement("span", {
+    r: r,
+    maxAbs: maxAbs
+  }))), fv.twins && fv.twins.length > 0 && /*#__PURE__*/React.createElement("div", {
+    className: "mt-3.5 pt-3 border-t border-ink-900/8"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "text-[11px] text-ink-800 font-medium mb-2"
+  }, "Факторные двойники ", /*#__PURE__*/React.createElement("span", {
+    className: "font-light text-ink-500"
+  }, "— одна ставка куплена дважды (systematic corr ≥ 0.90)")), /*#__PURE__*/React.createElement("div", {
+    className: "flex flex-wrap gap-1.5"
+  }, fv.twins.map((t, i) => /*#__PURE__*/React.createElement("span", {
     key: i,
-    className: "whitespace-nowrap"
-  }, t.pair, " · corr ", t.corr, " · вес ", t.w, "%", i < fv.twins.length - 1 ? '; ' : ''))));
+    className: "inline-flex items-center gap-1.5 text-[10px] font-mono rounded-full bg-white/70 border border-ink-900/8 px-2.5 py-1"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "text-ink-800 font-semibold whitespace-nowrap"
+  }, t.pair), /*#__PURE__*/React.createElement("span", {
+    className: "text-ink-400"
+  }, "corr ", t.corr), /*#__PURE__*/React.createElement("span", {
+    className: "text-ink-300"
+  }, "·"), /*#__PURE__*/React.createElement("span", {
+    className: "text-ink-400"
+  }, "вес ", t.w, "%"))))));
 };
 
 // 4-Pillar legend — spells out the F·V·T·C abbreviations AND the concrete
