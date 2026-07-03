@@ -1,4 +1,3 @@
-function _extends() { return _extends = Object.assign ? Object.assign.bind() : function (n) { for (var e = 1; e < arguments.length; e++) { var t = arguments[e]; for (var r in t) ({}).hasOwnProperty.call(t, r) && (n[r] = t[r]); } return n; }, _extends.apply(null, arguments); }
 /* Lucide-style thin-stroke icons as React components (1.5 stroke). */
 
 const Icon = ({
@@ -128,9 +127,10 @@ const Icons = {
   }), /*#__PURE__*/React.createElement("path", {
     d: "M3.5 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.65 4.36A9 9 0 0 0 20.5 15"
   })),
-  Dot: p => /*#__PURE__*/React.createElement(Icon, _extends({}, p, {
+  Dot: p => /*#__PURE__*/React.createElement(Icon, {
+    ...p,
     viewBox: "0 0 8 8"
-  }), /*#__PURE__*/React.createElement("circle", {
+  }, /*#__PURE__*/React.createElement("circle", {
     cx: "4",
     cy: "4",
     r: "3",
@@ -372,7 +372,7 @@ const RiskGauge = ({
     fontSize: size * 0.062,
     fill: "#6b6862",
     letterSpacing: "0.08em"
-  }, "/ 100 \xB7 ", zone.toUpperCase()));
+  }, "/ 100 · ", zone.toUpperCase()));
 };
 
 // ── Waterfall: standalone bars + diversification (negative) + total
@@ -942,7 +942,7 @@ const RegimeQuadrant = ({
     fontFamily: "JetBrains Mono",
     fontWeight: "600",
     fill: "#6b6862"
-  }, "\u2191 Growth"), /*#__PURE__*/React.createElement("text", {
+  }, "↑ Growth"), /*#__PURE__*/React.createElement("text", {
     x: pad + inner + 2,
     y: cy - 6,
     textAnchor: "end",
@@ -950,7 +950,7 @@ const RegimeQuadrant = ({
     fontFamily: "JetBrains Mono",
     fontWeight: "600",
     fill: "#6b6862"
-  }, "Cycle \u2192"), /*#__PURE__*/React.createElement("line", {
+  }, "Cycle →"), /*#__PURE__*/React.createElement("line", {
     x1: cx,
     y1: cy,
     x2: dx,
@@ -979,13 +979,13 @@ const RegimeQuadrant = ({
     fontFamily: "JetBrains Mono",
     fontWeight: "600",
     fill: "#caa01a"
-  }, "\u0441\u0435\u0439\u0447\u0430\u0441"), /*#__PURE__*/React.createElement("text", {
+  }, "сейчас"), /*#__PURE__*/React.createElement("text", {
     x: dx + 14,
     y: dy + 5,
     fontSize: "8",
     fontFamily: "JetBrains Mono",
     fill: "#6b6862"
-  }, "G +", dot.growth.toFixed(2), " \xB7 C +", dot.cycle.toFixed(2)));
+  }, "G +", dot.growth.toFixed(2), " · C +", dot.cycle.toFixed(2)));
 };
 
 // ── Mandate compliance bar: allowed band [lo,hi] + tick at value
@@ -1113,19 +1113,19 @@ const HeroGaugeCard = ({
   className: "flex items-center gap-2 flex-wrap"
 }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
   className: "text-ink-500 text-[10px] font-medium tracking-widest uppercase"
-}, "\u0418\u043D\u0434\u0435\u043A\u0441 \u0440\u0438\u0441\u043A\u0430"), /*#__PURE__*/React.createElement("h3", {
+}, "Индекс риска"), /*#__PURE__*/React.createElement("h3", {
   className: "text-base font-semibold tracking-tight text-ink-900 leading-tight"
-}, "\u0421\u0432\u043E\u0434\u043D\u044B\u0439 0\u2013100")), v.riskTier && v.riskTier !== '–' && /*#__PURE__*/React.createElement("span", {
+}, "Сводный 0–100")), v.riskTier && v.riskTier !== '–' && /*#__PURE__*/React.createElement("span", {
   className: "px-2 py-0.5 rounded-full bg-gold-400/25 text-gold-700 text-[9px] font-mono font-bold tracking-wider uppercase"
 }, v.riskTier)), v.expReturn && v.expReturn !== '–' && /*#__PURE__*/React.createElement("div", {
   className: "flex items-center gap-4"
 }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
   className: "text-[9px] text-ink-500 font-medium uppercase tracking-wider"
-}, "\u041E\u0436\u0438\u0434. \u0434\u043E\u0445. (\u0433\u043E\u0434.)"), /*#__PURE__*/React.createElement("div", {
+}, "Ожид. дох. (год.)"), /*#__PURE__*/React.createElement("div", {
   className: "num text-lg font-light text-sage-600 leading-none mt-0.5"
 }, v.expReturn)), v.expSharpe && v.expSharpe !== '–' && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
   className: "text-[9px] text-ink-500 font-medium uppercase tracking-wider"
-}, "\u0424\u0432\u0434-Sharpe"), /*#__PURE__*/React.createElement("div", {
+}, "Фвд-Sharpe"), /*#__PURE__*/React.createElement("div", {
   className: "num text-lg font-light text-ink-900 leading-none mt-0.5"
 }, v.expSharpe)))));
 
@@ -1144,7 +1144,7 @@ const VerdictCard = ({
 }, /*#__PURE__*/React.createElement(Icons.Sparkles, {
   size: 13,
   stroke: 1.8
-}), " AI \u0432\u0435\u0440\u0434\u0438\u043A\u0442 \xB7 ", window.DEEP.meta.aiModel), /*#__PURE__*/React.createElement("span", {
+}), " AI вердикт · ", window.DEEP.meta.aiModel), /*#__PURE__*/React.createElement("span", {
   className: "text-white/30 text-[10px] font-mono tracking-widest"
 }, "DEEP")), /*#__PURE__*/React.createElement("p", {
   className: "text-white text-[15px] leading-relaxed font-light mb-5"
@@ -1181,7 +1181,7 @@ const MandateCard = ({
   className: "flex items-start justify-between mb-1 gap-2"
 }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
   className: "text-ink-500 text-[12px] font-medium"
-}, "\u0421\u043E\u043E\u0442\u0432\u0435\u0442\u0441\u0442\u0432\u0438\u0435 \u043C\u0430\u043D\u0434\u0430\u0442\u0443"), /*#__PURE__*/React.createElement("h3", {
+}, "Соответствие мандату"), /*#__PURE__*/React.createElement("h3", {
   className: "text-xl font-semibold tracking-tight text-ink-900 leading-tight"
 }, m.profile)), m.violations > 0 ? /*#__PURE__*/React.createElement("span", {
   className: "px-2.5 py-1 rounded-full bg-rust-500/12 text-rust-600 text-[10px] font-semibold tracking-wider uppercase flex items-center gap-1 flex-shrink-0"
@@ -1190,9 +1190,9 @@ const MandateCard = ({
   stroke: 2
 }), " ", m.violations, " ", _plural(m.violations, 'нарушение', 'нарушения', 'нарушений')) : /*#__PURE__*/React.createElement("span", {
   className: "px-2.5 py-1 rounded-full bg-sage-500/15 text-sage-600 text-[10px] font-semibold tracking-wider uppercase flex-shrink-0"
-}, "\u0441\u043E\u043E\u0442\u0432\u0435\u0442\u0441\u0442\u0432\u0443\u0435\u0442")), /*#__PURE__*/React.createElement("div", {
+}, "соответствует")), /*#__PURE__*/React.createElement("div", {
   className: "text-[10.5px] text-ink-400 font-mono mb-2"
-}, "\u0446\u0435\u043B\u0435\u0432\u0430\u044F \u0432\u043E\u043B\u0430\u0442. \u2248", m.targetVol, "% \xB7 \u043E\u0442\u043A\u043B\u043E\u043D\u0435\u043D\u0438\u0435 \u043E\u0442 \u043E\u0440\u0438\u0435\u043D\u0442\u0438\u0440\u0430 \u2264", m.trackingCap, "%"), m.leveraged && /*#__PURE__*/React.createElement("div", {
+}, "целевая волат. ≈", m.targetVol, "% · отклонение от ориентира ≤", m.trackingCap, "%"), m.leveraged && /*#__PURE__*/React.createElement("div", {
   className: "flex items-center gap-2 rounded-2xl bg-rust-500/10 border border-rust-500/30 px-3 py-2 mb-3"
 }, /*#__PURE__*/React.createElement(Icons.Warning, {
   size: 13,
@@ -1200,7 +1200,7 @@ const MandateCard = ({
   stroke: 2
 }), /*#__PURE__*/React.createElement("span", {
   className: "text-[11px] text-rust-600 font-medium"
-}, "\u041C\u0430\u0440\u0436\u0438\u043D\u0430\u043B\u044C\u043D\u044B\u0439 \u0434\u043E\u043B\u0433 ", m.marginPct > 0 ? `≈${m.marginPct}% NAV` : 'обнаружен', " \u2014 \u043F\u043E\u0437\u0438\u0446\u0438\u0438 \u0447\u0430\u0441\u0442\u0438\u0447\u043D\u043E \u043A\u0443\u043F\u043B\u0435\u043D\u044B \u0432 \u0434\u043E\u043B\u0433")), /*#__PURE__*/React.createElement("div", {
+}, "Маржинальный долг ", m.marginPct > 0 ? `≈${m.marginPct}% NAV` : 'обнаружен', " — позиции частично куплены в долг")), /*#__PURE__*/React.createElement("div", {
   className: "space-y-3.5 mt-auto"
 }, m.rows.map((r, i) => {
   const tone = {
@@ -1223,7 +1223,7 @@ const MandateCard = ({
     state: r.state
   }), /*#__PURE__*/React.createElement("div", {
     className: "text-[9.5px] text-ink-400 font-mono mt-1"
-  }, "\u0434\u043E\u043F\u0443\u0441\u0442\u0438\u043C\u043E ", r.lo, "\u2013", r.hi, "%"));
+  }, "допустимо ", r.lo, "–", r.hi, "%"));
 })));
 
 // KPI card — value + a prominent 12-month trend chart (user request «добавь
@@ -1262,7 +1262,7 @@ const KpiCard = ({
     className: "rounded-2xl bg-cream-50/70 border border-ink-900/5 px-3 pt-2 pb-1.5 mb-3"
   }, /*#__PURE__*/React.createElement("div", {
     className: "flex items-center justify-between text-[8.5px] tracking-widest uppercase text-ink-400 font-mono mb-0.5"
-  }, /*#__PURE__*/React.createElement("span", null, "\u0414\u0438\u043D\u0430\u043C\u0438\u043A\u0430 \xB7 12 \u043C\u0435\u0441"), /*#__PURE__*/React.createElement("span", null, "\u0441\u0435\u0439\u0447\u0430\u0441")), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("span", null, "Динамика · 12 мес"), /*#__PURE__*/React.createElement("span", null, "сейчас")), /*#__PURE__*/React.createElement("div", {
     className: "h-12"
   }, hasPts ? /*#__PURE__*/React.createElement(Sparkline, {
     points: k.pts,
@@ -1277,7 +1277,7 @@ const KpiCard = ({
     }
   }) : /*#__PURE__*/React.createElement("div", {
     className: "w-full h-full flex items-center justify-center text-[9px] text-ink-300 font-mono"
-  }, "\u043D\u0435\u0442 \u0438\u0441\u0442\u043E\u0440\u0438\u0438"))), /*#__PURE__*/React.createElement("div", {
+  }, "нет истории"))), /*#__PURE__*/React.createElement("div", {
     className: "text-[10.5px] text-ink-400 font-mono leading-snug mb-4"
   }, k.sub), /*#__PURE__*/React.createElement("div", {
     className: "mt-auto flex items-start gap-2.5 rounded-2xl bg-cream-50 border border-ink-900/5 px-3.5 py-3"
@@ -1299,17 +1299,17 @@ const ConcentrationCard = ({
   className: "flex items-start justify-between mb-4"
 }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
   className: "text-ink-500 text-[12px] font-medium"
-}, "\u0413\u0434\u0435 \u0441\u043E\u0441\u0440\u0435\u0434\u043E\u0442\u043E\u0447\u0435\u043D \u0440\u0438\u0441\u043A"), /*#__PURE__*/React.createElement("h3", {
+}, "Где сосредоточен риск"), /*#__PURE__*/React.createElement("h3", {
   className: "text-xl font-semibold tracking-tight text-ink-900 leading-tight"
-}, "\u0422\u043E\u043F-\u0432\u043A\u043B\u0430\u0434\u0447\u0438\u043A\u0438")), /*#__PURE__*/React.createElement("span", {
+}, "Топ-вкладчики")), /*#__PURE__*/React.createElement("span", {
   className: "px-2.5 py-1 rounded-full bg-cream-50 border border-ink-900/5 text-[10px] font-mono tracking-wider text-ink-700"
-}, "TRC \xB7 Euler")), /*#__PURE__*/React.createElement("div", {
+}, "TRC · Euler")), /*#__PURE__*/React.createElement("div", {
   className: "grid grid-cols-[1.4fr_1fr_1fr_1.6fr_auto] gap-3 px-1 pb-2 text-[9px] tracking-widest uppercase text-ink-400 font-mono border-b border-ink-900/8"
-}, /*#__PURE__*/React.createElement("div", null, "\u0422\u0438\u043A\u0435\u0440"), /*#__PURE__*/React.createElement("div", {
+}, /*#__PURE__*/React.createElement("div", null, "Тикер"), /*#__PURE__*/React.createElement("div", {
   className: "text-right"
-}, "\u0412\u0435\u0441"), /*#__PURE__*/React.createElement("div", {
+}, "Вес"), /*#__PURE__*/React.createElement("div", {
   className: "text-right"
-}, "Beta"), /*#__PURE__*/React.createElement("div", null, "\u0412\u043A\u043B\u0430\u0434 \u0432 \u0440\u0438\u0441\u043A"), /*#__PURE__*/React.createElement("div", null)), /*#__PURE__*/React.createElement("div", {
+}, "Beta"), /*#__PURE__*/React.createElement("div", null, "Вклад в риск"), /*#__PURE__*/React.createElement("div", null)), /*#__PURE__*/React.createElement("div", {
   className: "divide-y divide-ink-900/5 mt-1"
 }, rows.map((r, i) => {
   const hot = r.status === 'HOTSPOT';
@@ -1369,11 +1369,11 @@ const WaterfallCard = ({
   className: "flex items-start justify-between mb-2"
 }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
   className: "text-ink-500 text-[12px] font-medium"
-}, "\u0414\u0435\u043A\u043E\u043C\u043F\u043E\u0437\u0438\u0446\u0438\u044F"), /*#__PURE__*/React.createElement("h3", {
+}, "Декомпозиция"), /*#__PURE__*/React.createElement("h3", {
   className: "text-xl font-semibold tracking-tight text-ink-900 leading-tight"
-}, "\u0420\u0438\u0441\u043A \u043F\u043E\u0440\u0442\u0444\u0435\u043B\u044F")), /*#__PURE__*/React.createElement("span", {
+}, "Риск портфеля")), /*#__PURE__*/React.createElement("span", {
   className: "px-2.5 py-1 rounded-full bg-cream-50 border border-ink-900/5 text-[10px] font-mono tracking-wider text-ink-700"
-}, data.total.toFixed(1), "% \u0433\u043E\u0434.")), /*#__PURE__*/React.createElement("div", {
+}, data.total.toFixed(1), "% год.")), /*#__PURE__*/React.createElement("div", {
   className: "flex-1 flex items-center -mx-1"
 }, /*#__PURE__*/React.createElement(Waterfall, {
   data: data,
@@ -1384,15 +1384,15 @@ const WaterfallCard = ({
   className: "flex items-center gap-1.5"
 }, /*#__PURE__*/React.createElement("span", {
   className: "w-2 h-2 rounded-full bg-ink-900"
-}), " \u043E\u0442\u0434\u0435\u043B\u044C\u043D\u043E"), /*#__PURE__*/React.createElement("span", {
+}), " отдельно"), /*#__PURE__*/React.createElement("span", {
   className: "flex items-center gap-1.5"
 }, /*#__PURE__*/React.createElement("span", {
   className: "w-2 h-2 rounded-full bg-rust-500"
-}), " \u0434\u0438\u0432\u0435\u0440\u0441\u0438\u0444\u0438\u043A\u0430\u0446\u0438\u044F"), /*#__PURE__*/React.createElement("span", {
+}), " диверсификация"), /*#__PURE__*/React.createElement("span", {
   className: "flex items-center gap-1.5"
 }, /*#__PURE__*/React.createElement("span", {
   className: "w-2 h-2 rounded-full bg-gold-400"
-}), " \u0438\u0442\u043E\u0433")));
+}), " итог")));
 const Overview = () => {
   const p = window.DEEP;
   const v = p.verdict;
@@ -1408,7 +1408,7 @@ const Overview = () => {
     className: "flex items-center gap-2 text-[11px] tracking-widest uppercase text-ink-500 font-mono mb-3"
   }, /*#__PURE__*/React.createElement("span", {
     className: "w-1.5 h-1.5 rounded-full bg-gold-400"
-  }), "Portfolio Risk Report \xB7 Tier ", p.meta.tier), /*#__PURE__*/React.createElement("h1", {
+  }), "Portfolio Risk Report · Tier ", p.meta.tier), /*#__PURE__*/React.createElement("h1", {
     className: "text-[clamp(32px,4.4vw,54px)] leading-[1.05] tracking-[-0.03em] font-light text-ink-900"
   }, v.headline, /*#__PURE__*/React.createElement("span", {
     className: "text-ink-400"
@@ -1471,7 +1471,7 @@ const Overview = () => {
     stroke: 1.7
   })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "text-[10px] tracking-widest uppercase font-mono text-ink-700 mb-1"
-  }, "AI \xB7 \u043A\u043E\u043C\u043C\u0435\u043D\u0442\u0430\u0440\u0438\u0439 \u043A \u0440\u0438\u0441\u043A\u0443"), /*#__PURE__*/React.createElement("p", {
+  }, "AI · комментарий к риску"), /*#__PURE__*/React.createElement("p", {
     className: "text-[14px] text-ink-900 leading-relaxed font-light"
   }, p.concAI))));
 };
@@ -1597,7 +1597,7 @@ const HoldingRow = ({
     className: "flex items-start justify-between gap-4 mb-4"
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "text-[10.5px] tracking-widest uppercase text-ink-500 font-mono"
-  }, "\u0424\u0443\u043D\u0434\u0430\u043C\u0435\u043D\u0442\u0430\u043B \xB7 SEC EDGAR"), /*#__PURE__*/React.createElement("div", {
+  }, "Фундаментал · SEC EDGAR"), /*#__PURE__*/React.createElement("div", {
     className: "text-[15px] text-ink-900 font-medium mt-0.5"
   }, h.name)), /*#__PURE__*/React.createElement("span", {
     className: "text-[10px] font-mono text-ink-400 tracking-wider px-2.5 py-1 rounded-full bg-cream-50 border border-ink-900/5"
@@ -1606,28 +1606,28 @@ const HoldingRow = ({
   }, /*#__PURE__*/React.createElement(FundCell, {
     label: "ROE",
     value: h.fund.roe,
-    hint: "\u0420\u0435\u043D\u0442\u0430\u0431\u0435\u043B\u044C\u043D\u043E\u0441\u0442\u044C \u0441\u043E\u0431\u0441\u0442\u0432\u0435\u043D\u043D\u043E\u0433\u043E \u043A\u0430\u043F\u0438\u0442\u0430\u043B\u0430 (\u0447\u0438\u0441\u0442\u0430\u044F \u043F\u0440\u0438\u0431\u044B\u043B\u044C \xF7 \u043A\u0430\u043F\u0438\u0442\u0430\u043B)"
+    hint: "Рентабельность собственного капитала (чистая прибыль ÷ капитал)"
   }), /*#__PURE__*/React.createElement(FundCell, {
-    label: "\u041E\u043F\u0435\u0440. \u043C\u0430\u0440\u0436\u0430",
+    label: "Опер. маржа",
     value: h.fund.margin,
-    hint: "\u041E\u043F\u0435\u0440\u0430\u0446\u0438\u043E\u043D\u043D\u0430\u044F \u043C\u0430\u0440\u0436\u0430 \u2014 \u043E\u043F\u0435\u0440\u0430\u0446\u0438\u043E\u043D\u043D\u0430\u044F \u043F\u0440\u0438\u0431\u044B\u043B\u044C \xF7 \u0432\u044B\u0440\u0443\u0447\u043A\u0430"
+    hint: "Операционная маржа — операционная прибыль ÷ выручка"
   }), /*#__PURE__*/React.createElement(FundCell, {
-    label: "\u0414\u043E\u043B\u0433 / \u0410\u043A\u0442\u0438\u0432\u044B",
+    label: "Долг / Активы",
     value: h.fund.debt,
-    hint: "\u0414\u043E\u043B\u0433\u043E\u0432\u0430\u044F \u043D\u0430\u0433\u0440\u0443\u0437\u043A\u0430: \u0441\u0443\u043C\u043C\u0430\u0440\u043D\u044B\u0439 \u0434\u043E\u043B\u0433 \xF7 \u0430\u043A\u0442\u0438\u0432\u044B. 0% = \u0434\u043E\u043B\u0433 \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D \u0432 \u043E\u0442\u0447\u0451\u0442\u043D\u043E\u0441\u0442\u0438 \u0438\u043B\u0438 \u0435\u0433\u043E \u043D\u0435\u0442"
+    hint: "Долговая нагрузка: суммарный долг ÷ активы. 0% = долг не найден в отчётности или его нет"
   }), /*#__PURE__*/React.createElement(FundCell, {
-    label: "\u0420\u043E\u0441\u0442 \u0432\u044B\u0440\u0443\u0447\u043A\u0438",
+    label: "Рост выручки",
     value: h.fund.growth,
-    hint: "\u0420\u043E\u0441\u0442 \u0432\u044B\u0440\u0443\u0447\u043A\u0438 \u0433\u043E\u0434 \u043A \u0433\u043E\u0434\u0443"
+    hint: "Рост выручки год к году"
   }), /*#__PURE__*/React.createElement(FundCell, {
-    label: "ATR \xB7 \u0434\u0435\u043D\u044C",
+    label: "ATR · день",
     value: h.fund.atr,
     warn: atrWarn,
-    hint: "Average True Range \u2014 \u0441\u0440\u0435\u0434\u043D\u0438\u0439 \u0434\u043D\u0435\u0432\u043D\u043E\u0439 \u0434\u0438\u0430\u043F\u0430\u0437\u043E\u043D \u0446\u0435\u043D\u044B, % (\u0432\u043E\u043B\u0430\u0442\u0438\u043B\u044C\u043D\u043E\u0441\u0442\u044C \u0431\u0443\u043C\u0430\u0433\u0438)"
+    hint: "Average True Range — средний дневной диапазон цены, % (волатильность бумаги)"
   }), /*#__PURE__*/React.createElement(FundCell, {
     label: "Altman-Z",
     value: h.fund.z,
-    hint: "Z-score \u0410\u043B\u044C\u0442\u043C\u0430\u043D\u0430 (\u0440\u0438\u0441\u043A \u0431\u0430\u043D\u043A\u0440\u043E\u0442\u0441\u0442\u0432\u0430): > 3 \u2014 \u0431\u0435\u0437\u043E\u043F\u0430\u0441\u043D\u043E, 1.8\u20133 \u2014 \u0441\u0435\u0440\u0430\u044F \u0437\u043E\u043D\u0430, < 1.8 \u2014 \u0440\u0438\u0441\u043A"
+    hint: "Z-score Альтмана (риск банкротства): > 3 — безопасно, 1.8–3 — серая зона, < 1.8 — риск"
   })), (h.fundNote || h.note) && /*#__PURE__*/React.createElement("div", {
     className: "mt-4 flex items-start gap-3 text-[13px] text-ink-700 leading-relaxed"
   }, /*#__PURE__*/React.createElement(Icons.Sparkles, {
@@ -1638,7 +1638,7 @@ const HoldingRow = ({
     className: "font-light"
   }, /*#__PURE__*/React.createElement("span", {
     className: "text-ink-500 font-medium"
-  }, "\u0412\u044B\u0432\u043E\u0434: "), h.fundNote || h.note, " ", /*#__PURE__*/React.createElement("span", {
+  }, "Вывод: "), h.fundNote || h.note, " ", /*#__PURE__*/React.createElement("span", {
     className: "text-ink-400 font-mono text-[11px]"
   }, "[SEC EDGAR] [Quant Engine]")))))));
 };
@@ -1656,14 +1656,14 @@ const SectorMix = ({
     className: "flex items-start justify-between mb-4 gap-2"
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "text-ink-500 text-[12px] font-medium"
-  }, "\u0421\u0442\u0440\u0443\u043A\u0442\u0443\u0440\u0430"), /*#__PURE__*/React.createElement("h3", {
+  }, "Структура"), /*#__PURE__*/React.createElement("h3", {
     className: "text-xl font-semibold tracking-tight text-ink-900 leading-tight"
-  }, "\u041F\u043E \u0441\u0435\u043A\u0442\u043E\u0440\u0430\u043C")), hasOverweight && /*#__PURE__*/React.createElement("span", {
+  }, "По секторам")), hasOverweight && /*#__PURE__*/React.createElement("span", {
     className: "px-2.5 py-1 rounded-full bg-rust-500/12 text-rust-600 text-[10px] font-semibold tracking-wider uppercase flex items-center gap-1 flex-shrink-0"
   }, /*#__PURE__*/React.createElement(Icons.Warning, {
     size: 11,
     stroke: 2
-  }), " \u041F\u0435\u0440\u0435\u0432\u0435\u0441")), /*#__PURE__*/React.createElement("svg", {
+  }), " Перевес")), /*#__PURE__*/React.createElement("svg", {
     viewBox: "0 0 320 18",
     className: "w-full h-3.5 mb-4",
     preserveAspectRatio: "none"
@@ -1739,13 +1739,13 @@ const Holdings = () => {
     className: "flex items-center gap-2 text-[11px] tracking-widest uppercase text-ink-500 font-mono mb-2"
   }, /*#__PURE__*/React.createElement("span", {
     className: "w-1.5 h-1.5 rounded-full bg-gold-400"
-  }), " Holdings \xB7 ", p.meta.positions, " \u043F\u043E\u0437\u0438\u0446\u0438\u0439"), /*#__PURE__*/React.createElement("h2", {
+  }), " Holdings · ", p.meta.positions, " позиций"), /*#__PURE__*/React.createElement("h2", {
     className: "text-[40px] leading-[1.05] tracking-[-0.02em] font-light text-ink-900"
-  }, "\u0427\u0442\u043E \u0432\u044B \u0434\u0435\u0440\u0436\u0438\u0442\u0435", /*#__PURE__*/React.createElement("span", {
+  }, "Что вы держите", /*#__PURE__*/React.createElement("span", {
     className: "text-ink-400"
   }, ".")), /*#__PURE__*/React.createElement("p", {
     className: "text-[15px] text-ink-500 mt-2 font-light"
-  }, "\u041D\u0430\u0436\u043C\u0438\u0442\u0435 \u043D\u0430 \u0441\u0442\u0440\u043E\u043A\u0443, \u0447\u0442\u043E\u0431\u044B \u0443\u0432\u0438\u0434\u0435\u0442\u044C \u0444\u0443\u043D\u0434\u0430\u043C\u0435\u043D\u0442\u0430\u043B \u0431\u0443\u043C\u0430\u0433\u0438.")), /*#__PURE__*/React.createElement("div", {
+  }, "Нажмите на строку, чтобы увидеть фундаментал бумаги.")), /*#__PURE__*/React.createElement("div", {
     className: "flex items-center gap-2 flex-wrap"
   }, filters.map(f => /*#__PURE__*/React.createElement("button", {
     key: f,
@@ -1763,13 +1763,13 @@ const Holdings = () => {
     className: "glass-strong rounded-4xl shadow-card overflow-hidden"
   }, /*#__PURE__*/React.createElement("div", {
     className: "swipe-hint items-center gap-1 text-[10px] font-mono text-gold-700 bg-gold-400/15 rounded-full px-2.5 py-1 mb-2.5 w-max"
-  }, "\u2194 \u043B\u0438\u0441\u0442\u0430\u0439\u0442\u0435 \u0442\u0430\u0431\u043B\u0438\u0446\u0443"), /*#__PURE__*/React.createElement("div", {
+  }, "↔ листайте таблицу"), /*#__PURE__*/React.createElement("div", {
     className: "mob-scroll-x"
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "grid grid-cols-[36px_minmax(0,1.9fr)_minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.1fr)_84px_36px] items-center gap-3 px-5 py-3 border-b border-ink-900/6 text-[9.5px] tracking-widest uppercase text-ink-500 font-mono"
-  }, /*#__PURE__*/React.createElement("div", null), /*#__PURE__*/React.createElement("div", null, "\u0422\u0438\u043A\u0435\u0440 \xB7 \u0418\u043C\u044F"), /*#__PURE__*/React.createElement("div", null, "\u041A\u043B\u0430\u0441\u0441"), /*#__PURE__*/React.createElement("div", null, "\u0412\u0435\u0441"), /*#__PURE__*/React.createElement("div", null, "\u0420\u0438\u0441\u043A"), /*#__PURE__*/React.createElement("div", null, "P/L"), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("div", null), /*#__PURE__*/React.createElement("div", null, "Тикер · Имя"), /*#__PURE__*/React.createElement("div", null, "Класс"), /*#__PURE__*/React.createElement("div", null, "Вес"), /*#__PURE__*/React.createElement("div", null, "Риск"), /*#__PURE__*/React.createElement("div", null, "P/L"), /*#__PURE__*/React.createElement("div", {
     className: "text-right"
-  }, "\u0421\u0438\u0433\u043D\u0430\u043B"), /*#__PURE__*/React.createElement("div", null)), /*#__PURE__*/React.createElement("div", {
+  }, "Сигнал"), /*#__PURE__*/React.createElement("div", null)), /*#__PURE__*/React.createElement("div", {
     className: "divide-y divide-ink-900/5"
   }, rows.map((h, i) => /*#__PURE__*/React.createElement(HoldingRow, {
     key: h.t,
@@ -1778,7 +1778,7 @@ const Holdings = () => {
     onToggle: () => setOpenIdx(openIdx === i ? -1 : i)
   })), rows.length === 0 && /*#__PURE__*/React.createElement("div", {
     className: "px-6 py-12 text-center text-ink-500 text-[14px]"
-  }, "\u041D\u0438\u0447\u0435\u0433\u043E \u043D\u0435 \u043F\u043E\u0434\u0445\u043E\u0434\u0438\u0442 \u043F\u043E\u0434 \u0444\u0438\u043B\u044C\u0442\u0440 \xAB", filter, "\xBB.")))))), /*#__PURE__*/React.createElement("div", {
+  }, "Ничего не подходит под фильтр «", filter, "».")))))), /*#__PURE__*/React.createElement("div", {
     className: "col-span-12 lg:col-span-4"
   }, /*#__PURE__*/React.createElement(SectorMix, {
     sectors: p.sectors,
@@ -1792,7 +1792,7 @@ const Holdings = () => {
     stroke: 1.7
   })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "text-[10px] tracking-widest uppercase font-mono text-ink-500 mb-1"
-  }, "AI \xB7 \u0441\u0432\u043E\u0434\u043A\u0430 \u043F\u043E \u0441\u043E\u0441\u0442\u0430\u0432\u0443"), /*#__PURE__*/React.createElement("p", {
+  }, "AI · сводка по составу"), /*#__PURE__*/React.createElement("p", {
     className: "text-[14px] text-ink-800 leading-relaxed font-light"
   }, p.holdingsAI))));
 };
@@ -1809,15 +1809,15 @@ const FactorTable = ({
   className: "text-[9.5px] tracking-widest uppercase text-ink-400 font-mono border-b border-ink-900/8"
 }, /*#__PURE__*/React.createElement("th", {
   className: "text-left font-medium py-2"
-}, "\u0424\u0430\u043A\u0442\u043E\u0440"), /*#__PURE__*/React.createElement("th", {
+}, "Фактор"), /*#__PURE__*/React.createElement("th", {
   className: "text-right font-medium py-2"
-}, "\u03B2 \u043F\u043E\u0440\u0442\u0444."), /*#__PURE__*/React.createElement("th", {
+}, "β портф."), /*#__PURE__*/React.createElement("th", {
   className: "text-right font-medium py-2",
-  title: "S&P 500 = \u044D\u0442\u0430\u043B\u043E\u043D \xAB\u0440\u044B\u043D\u043E\u043A\xBB: \u03B2_Market = 1, \u043F\u0440\u043E\u0447\u0438\u0435 \u2248 0 \u043F\u043E \u043F\u043E\u0441\u0442\u0440\u043E\u0435\u043D\u0438\u044E \u043C\u043E\u0434\u0435\u043B\u0438"
+  title: "S&P 500 = эталон «рынок»: β_Market = 1, прочие ≈ 0 по построению модели"
 }, "S&P 500"), /*#__PURE__*/React.createElement("th", {
   className: "text-right font-medium py-2",
-  title: "\u0410\u043A\u0442\u0438\u0432\u043D\u044B\u0439 \u043D\u0430\u043A\u043B\u043E\u043D \u043F\u043E\u0440\u0442\u0444\u0435\u043B\u044F \u043E\u0442\u043D\u043E\u0441\u0438\u0442\u0435\u043B\u044C\u043D\u043E \u0440\u044B\u043D\u043A\u0430"
-}, "\u041D\u0430\u043A\u043B\u043E\u043D \u0394"))), /*#__PURE__*/React.createElement("tbody", null, factors.map((f, i) => {
+  title: "Активный наклон портфеля относительно рынка"
+}, "Наклон Δ"))), /*#__PURE__*/React.createElement("tbody", null, factors.map((f, i) => {
   const d = f.port - f.mkt;
   const tone = d > 0 ? 'text-gold-700' : d < 0 ? 'text-sage-600' : 'text-ink-400';
   return /*#__PURE__*/React.createElement("tr", {
@@ -1833,6 +1833,55 @@ const FactorTable = ({
     className: `text-right py-2 text-[12px] num font-semibold ${tone}`
   }, d > 0 ? '+' : '', d.toFixed(2)));
 })));
+
+// Источники риска — факторная декомпозиция дисперсии (additive layer,
+// finance/factor_decomposition → payload.factor_variance → factorVariance).
+// Отвечает «откуда берётся риск ПО ИСТОЧНИКАМ» (Euler по факторам), дополняя
+// TRC-разложение по активам.  Отрицательная доля = фактор-хедж.  Блок целиком
+// скрыт, когда движок пропустил декомпозицию (factorVariance == null).
+const FactorVariance = ({
+  fv
+}) => {
+  if (!fv || !fv.rows || !fv.rows.length) return null;
+  const maxAbs = Math.max(...fv.rows.map(r => Math.abs(r.pct)), 1);
+  return /*#__PURE__*/React.createElement("div", {
+    className: "mt-5 rounded-2xl bg-cream-50 border border-ink-900/5 px-4 py-3.5"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-start justify-between gap-4 flex-wrap mb-2"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "text-[12.5px] font-semibold text-ink-900"
+  }, "Откуда берётся риск — декомпозиция дисперсии"), /*#__PURE__*/React.createElement("span", {
+    className: "text-[10px] font-mono text-ink-500"
+  }, "систематика ", fv.systematic, "% · специфика бумаг ", fv.idio, "%")), /*#__PURE__*/React.createElement("div", {
+    className: "space-y-2"
+  }, fv.rows.map((r, i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    className: "grid grid-cols-12 gap-2.5 items-center"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "col-span-12 sm:col-span-4 text-[11px] text-ink-800 font-medium"
+  }, r.source), /*#__PURE__*/React.createElement("span", {
+    className: "col-span-8 sm:col-span-5"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "block h-1.5 rounded-full bg-ink-900/4 relative overflow-hidden"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "absolute inset-y-0 left-0 rounded-full",
+    style: {
+      width: `${Math.min(Math.abs(r.pct) / maxAbs * 100, 100)}%`,
+      background: r.pct < 0 ? '#5d7c5c' : '#caa01a'
+    }
+  }))), /*#__PURE__*/React.createElement("span", {
+    className: "col-span-2 sm:col-span-1 text-right text-[11px] num font-semibold text-ink-900"
+  }, r.pct, "%", r.pct < 0 ? ' (хедж)' : ''), /*#__PURE__*/React.createElement("span", {
+    className: "col-span-2 sm:col-span-2 text-right text-[10px] font-mono text-ink-500 truncate"
+  }, r.drivers)))), fv.twins && fv.twins.length > 0 && /*#__PURE__*/React.createElement("p", {
+    className: "text-[11px] text-ink-500 leading-relaxed font-light mt-3"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "text-ink-800 font-medium"
+  }, "Факторные двойники"), " (систематическая корреляция ≥ 0.90 — одна факторная ставка куплена дважды):", ' ', fv.twins.map((t, i) => /*#__PURE__*/React.createElement("span", {
+    key: i,
+    className: "whitespace-nowrap"
+  }, t.pair, " · corr ", t.corr, " · вес ", t.w, "%", i < fv.twins.length - 1 ? '; ' : ''))));
+};
 
 // 4-Pillar legend — spells out the F·V·T·C abbreviations AND the concrete
 // metrics each pillar scores (user request «раскрыть какие показатели и
@@ -1916,7 +1965,7 @@ const ScoreCard = ({
     className: "text-[14px] font-bold num text-ink-900"
   }, s.t), /*#__PURE__*/React.createElement("span", {
     className: `text-[12px] font-semibold num ${totalTone}`
-  }, "\u0418\u0442\u043E\u0433 ", s.total > 0 ? '+' : '', s.total.toFixed(1))), /*#__PURE__*/React.createElement("div", {
+  }, "Итог ", s.total > 0 ? '+' : '', s.total.toFixed(1))), /*#__PURE__*/React.createElement("div", {
     className: "space-y-2"
   }, pillars.map(([name, val]) => /*#__PURE__*/React.createElement("div", {
     key: name,
@@ -1927,7 +1976,7 @@ const ScoreCard = ({
     className: "h-1.5 rounded-full bg-ink-900/4 flex items-center justify-center"
   }, /*#__PURE__*/React.createElement("span", {
     className: "text-[8px] text-ink-300 font-mono"
-  }, "\u043D/\u043F")) : /*#__PURE__*/React.createElement(ScorePillar, {
+  }, "н/п")) : /*#__PURE__*/React.createElement(ScorePillar, {
     value: val
   }), /*#__PURE__*/React.createElement("span", {
     className: `text-[10.5px] num font-semibold text-right ${pillarTone(val)}`
@@ -1951,31 +2000,31 @@ const Factors = () => {
     className: "flex items-center gap-2 text-[11px] tracking-widest uppercase text-ink-500 font-mono mb-2"
   }, /*#__PURE__*/React.createElement("span", {
     className: "w-1.5 h-1.5 rounded-full bg-gold-400"
-  }), " Factor decomposition \xB7 4-Pillar \xB7 DEEP"), /*#__PURE__*/React.createElement("h2", {
+  }), " Factor decomposition · 4-Pillar · DEEP"), /*#__PURE__*/React.createElement("h2", {
     className: "text-[40px] leading-[1.05] tracking-[-0.02em] font-light text-ink-900"
-  }, "\u0424\u0430\u043A\u0442\u043E\u0440\u044B \u0438 \u043A\u0430\u0447\u0435\u0441\u0442\u0432\u043E \u043F\u043E\u0437\u0438\u0446\u0438\u0439", /*#__PURE__*/React.createElement("span", {
+  }, "Факторы и качество позиций", /*#__PURE__*/React.createElement("span", {
     className: "text-ink-400"
   }, ".")), /*#__PURE__*/React.createElement("p", {
     className: "text-[15px] text-ink-500 mt-2 font-light max-w-[680px]"
-  }, "\u0421\u043A\u0440\u044B\u0442\u044B\u0435 \u043A\u043E\u043D\u0446\u0435\u043D\u0442\u0440\u0430\u0446\u0438\u0438 \u043F\u043E 10 \u0444\u0430\u043A\u0442\u043E\u0440\u0430\u043C \u0438 \u043E\u0446\u0435\u043D\u043A\u0430 \u043A\u0430\u0436\u0434\u043E\u0439 \u0431\u0443\u043C\u0430\u0433\u0438 \u043F\u043E \u0447\u0435\u0442\u044B\u0440\u0451\u043C \u0441\u0442\u043E\u043B\u043F\u0430\u043C.")), /*#__PURE__*/React.createElement("div", {
+  }, "Скрытые концентрации по 10 факторам и оценка каждой бумаги по четырём столпам.")), /*#__PURE__*/React.createElement("div", {
     className: "glass-strong rounded-4xl p-7 shadow-card mb-5"
   }, /*#__PURE__*/React.createElement("div", {
     className: "flex items-start justify-between gap-4 flex-wrap mb-4"
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h3", {
     className: "text-2xl font-semibold tracking-tight text-ink-900"
-  }, "\u0424\u0430\u043A\u0442\u043E\u0440\u043D\u043E\u0435 \u0440\u0430\u0437\u043B\u043E\u0436\u0435\u043D\u0438\u0435 (\u03B2)"), /*#__PURE__*/React.createElement("p", {
+  }, "Факторное разложение (β)"), /*#__PURE__*/React.createElement("p", {
     className: "text-[12px] text-ink-500 font-mono mt-1"
-  }, "Ridge \u03B2 (\u03B1=0.001) \xB7 EWMA hl=63 \u2295 Ledoit-Wolf 70/30 \xB7 \u043E\u043A\u043D\u043E 60 \u0434\u043D\u0435\u0439 \xB7 \u043F\u043E\u043A\u0440\u044B\u0442\u0438\u0435 ", p.factorCoverage, "%")), /*#__PURE__*/React.createElement("div", {
+  }, "Ridge β (α=0.001) · EWMA hl=63 ⊕ Ledoit-Wolf 70/30 · окно 60 дней · покрытие ", p.factorCoverage, "%")), /*#__PURE__*/React.createElement("div", {
     className: "flex items-center gap-4 text-[11px] text-ink-600"
   }, /*#__PURE__*/React.createElement("span", {
     className: "flex items-center gap-2"
   }, /*#__PURE__*/React.createElement("span", {
     className: "w-4 h-0 border-t-2 border-gold-600"
-  }), " \u041F\u043E\u0440\u0442\u0444\u0435\u043B\u044C"), /*#__PURE__*/React.createElement("span", {
+  }), " Портфель"), /*#__PURE__*/React.createElement("span", {
     className: "flex items-center gap-2"
   }, /*#__PURE__*/React.createElement("span", {
     className: "w-4 h-0 border-t-2 border-dashed border-ink-700"
-  }), " \u0420\u044B\u043D\u043E\u043A (S&P 500)"))), /*#__PURE__*/React.createElement("div", {
+  }), " Рынок (S&P 500)"))), /*#__PURE__*/React.createElement("div", {
     className: "grid grid-cols-12 gap-7 items-center"
   }, /*#__PURE__*/React.createElement("div", {
     className: "col-span-12 lg:col-span-5 flex justify-center"
@@ -1990,13 +2039,15 @@ const Factors = () => {
     className: "text-[11px] text-ink-500 leading-relaxed font-light mt-4"
   }, /*#__PURE__*/React.createElement("span", {
     className: "text-ink-800 font-medium"
-  }, "\u0427\u0442\u043E \u043F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u0435\u0442 \u0440\u0430\u0434\u0430\u0440:"), " \u043D\u0430\u0441\u043A\u043E\u043B\u044C\u043A\u043E \u043F\u043E\u0440\u0442\u0444\u0435\u043B\u044C \u0437\u0430\u0432\u044F\u0437\u0430\u043D \u043D\u0430 \u0433\u043B\u043E\u0431\u0430\u043B\u044C\u043D\u044B\u0435 \u0444\u0430\u043A\u0442\u043E\u0440\u044B. \u0411\u043E\u043B\u044C\u0448\u0430\u044F \u043F\u043B\u043E\u0449\u0430\u0434\u044C \u2014 \u0431\u043E\u043B\u044C\u0448\u0435 \u0437\u0430\u0432\u0438\u0441\u0438\u043C\u043E\u0441\u0442\u0438 \u043E\u0442 \u0440\u044B\u043D\u043A\u0430; \u0441\u043E\u0432\u043F\u0430\u0434\u0435\u043D\u0438\u0435 \u043D\u0430\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u0438\u0439 \u043F\u043E \u043D\u0435\u0441\u043A\u043E\u043B\u044C\u043A\u0438\u043C \u0444\u0430\u043A\u0442\u043E\u0440\u0430\u043C \u2014 \u0441\u043A\u0440\u044B\u0442\u0430\u044F \u043E\u0431\u0449\u0430\u044F \u0441\u0442\u0430\u0432\u043A\u0430."), /*#__PURE__*/React.createElement("p", {
+  }, "Что показывает радар:"), " насколько портфель завязан на глобальные факторы. Большая площадь — больше зависимости от рынка; совпадение направлений по нескольким факторам — скрытая общая ставка."), /*#__PURE__*/React.createElement("p", {
     className: "text-[11px] text-ink-500 leading-relaxed font-light mt-2 rounded-2xl bg-cream-50 border border-ink-900/5 px-3.5 py-2.5"
   }, /*#__PURE__*/React.createElement("span", {
     className: "text-ink-800 font-medium"
-  }, "\u041F\u043E\u0447\u0435\u043C\u0443 \u0443 S&P 500 \u043D\u0435\u043D\u0443\u043B\u0435\u0432\u0430\u044F \u0442\u043E\u043B\u044C\u043A\u043E Market?"), " \u0412 \u044D\u0442\u043E\u0439 \u043C\u043E\u0434\u0435\u043B\u0438 Market \u2014 \u044D\u0442\u043E \u0438 \u0435\u0441\u0442\u044C S&P 500, \u043F\u043E\u044D\u0442\u043E\u043C\u0443 \u044D\u0442\u0430\u043B\u043E\u043D \u043F\u043E \u043F\u043E\u0441\u0442\u0440\u043E\u0435\u043D\u0438\u044E \u0438\u043C\u0435\u0435\u0442 \u03B2_Market = 1, \u0430 \u0441\u0442\u0438\u043B\u0435\u0432\u044B\u0435 \u0444\u0430\u043A\u0442\u043E\u0440\u044B \u2248 0 (\u0438\u0445 \u044D\u043A\u0441\u043F\u043E\u0437\u0438\u0446\u0438\u044F \u0443\u0436\u0435 \xAB\u0437\u0430\u0448\u0438\u0442\u0430\xBB \u0432 \u0440\u044B\u043D\u043E\u043A). \u041A\u043E\u043B\u043E\u043D\u043A\u0430 ", /*#__PURE__*/React.createElement("span", {
+  }, "Почему у S&P 500 ненулевая только Market?"), " В этой модели Market — это и есть S&P 500, поэтому эталон по построению имеет β_Market = 1, а стилевые факторы ≈ 0 (их экспозиция уже «зашита» в рынок). Колонка ", /*#__PURE__*/React.createElement("span", {
     className: "font-medium"
-  }, "\u041D\u0430\u043A\u043B\u043E\u043D \u0394"), " = \u0430\u043A\u0442\u0438\u0432\u043D\u044B\u0439 \u043F\u0435\u0440\u0435\u043A\u043E\u0441 \u043F\u043E\u0440\u0442\u0444\u0435\u043B\u044F \u043E\u0442\u043D\u043E\u0441\u0438\u0442\u0435\u043B\u044C\u043D\u043E \u0440\u044B\u043D\u043A\u0430: \u0438\u043C\u0435\u043D\u043D\u043E \u043E\u043D \u0438 \u0435\u0441\u0442\u044C \u043F\u043E\u043B\u0435\u0437\u043D\u044B\u0439 \u0441\u0438\u0433\u043D\u0430\u043B."))), /*#__PURE__*/React.createElement("div", {
+  }, "Наклон Δ"), " = активный перекос портфеля относительно рынка: именно он и есть полезный сигнал."))), /*#__PURE__*/React.createElement(FactorVariance, {
+    fv: p.factorVariance
+  }), /*#__PURE__*/React.createElement("div", {
     className: "mt-5 rounded-2xl bg-cream-50 border border-ink-900/5 px-4 py-3.5 flex items-start gap-3"
   }, /*#__PURE__*/React.createElement(Icons.Sparkles, {
     size: 14,
@@ -2012,15 +2063,15 @@ const Factors = () => {
     className: "text-2xl font-semibold tracking-tight text-ink-900"
   }, "4-Pillar Scoring"), /*#__PURE__*/React.createElement("p", {
     className: "text-[12px] text-ink-500 mt-1 font-light"
-  }, "\u041A\u0430\u0436\u0434\u0430\u044F \u0431\u0443\u043C\u0430\u0433\u0430 \u043E\u0446\u0435\u043D\u0438\u0432\u0430\u0435\u0442\u0441\u044F \u043F\u043E \u0447\u0435\u0442\u044B\u0440\u0451\u043C \u0441\u0442\u043E\u043B\u043F\u0430\u043C \u2014 ", /*#__PURE__*/React.createElement("b", {
+  }, "Каждая бумага оценивается по четырём столпам — ", /*#__PURE__*/React.createElement("b", {
     className: "text-ink-800"
-  }, "F"), "undamentals \xB7 ", /*#__PURE__*/React.createElement("b", {
+  }, "F"), "undamentals · ", /*#__PURE__*/React.createElement("b", {
     className: "text-ink-800"
-  }, "V"), "aluation \xB7 ", /*#__PURE__*/React.createElement("b", {
+  }, "V"), "aluation · ", /*#__PURE__*/React.createElement("b", {
     className: "text-ink-800"
-  }, "T"), "echnical \xB7 ", /*#__PURE__*/React.createElement("b", {
+  }, "T"), "echnical · ", /*#__PURE__*/React.createElement("b", {
     className: "text-ink-800"
-  }, "C"), "redit \u2014 \u043A\u0430\u0436\u0434\u044B\u0439 \u22122\u2026+2, \u0438\u0442\u043E\u0433 \u2208 [\u22126, +6].")), /*#__PURE__*/React.createElement("span", {
+  }, "C"), "redit — каждый −2…+2, итог ∈ [−6, +6].")), /*#__PURE__*/React.createElement("span", {
     className: "text-[10px] font-mono text-ink-400 tracking-wider px-2.5 py-1 rounded-full bg-cream-50 border border-ink-900/5"
   }, "Quant Engine + SEC EDGAR")), /*#__PURE__*/React.createElement(PillarLegend, null), /*#__PURE__*/React.createElement("div", {
     className: "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"
@@ -2052,25 +2103,25 @@ const StressTable = ({
   className: "flex items-start justify-between gap-4 flex-wrap mb-5"
 }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h3", {
   className: "text-2xl font-semibold tracking-tight text-ink-900"
-}, "\u0421\u0442\u0440\u0435\u0441\u0441-\u0441\u0446\u0435\u043D\u0430\u0440\u0438\u0438"), /*#__PURE__*/React.createElement("p", {
+}, "Стресс-сценарии"), /*#__PURE__*/React.createElement("p", {
   className: "text-[12px] text-ink-500 font-mono mt-1"
-}, "\u041F\u0430\u0440\u0430\u043C\u0435\u0442\u0440\u0438\u0447\u0435\u0441\u043A\u0438\u0435 \u0448\u043E\u043A\u0438 \u0444\u0430\u043A\u0442\u043E\u0440\u043E\u0432 (\u0394PnL = w\u2032\xB7B\xB7shock) \xB7 \u0433\u043E\u0440\u0438\u0437\u043E\u043D\u0442 1 \u043A\u0432\u0430\u0440\u0442\u0430\u043B")), /*#__PURE__*/React.createElement("span", {
+}, "Параметрические шоки факторов (ΔPnL = w′·B·shock) · горизонт 1 квартал")), /*#__PURE__*/React.createElement("span", {
   className: "text-[10px] font-mono text-ink-400 tracking-wider px-2.5 py-1 rounded-full bg-cream-50 border border-ink-900/5"
-}, "7 \u0441\u0446\u0435\u043D\u0430\u0440\u0438\u0435\u0432 \xB7 \u043D\u0435 \u043F\u0440\u043E\u0433\u043D\u043E\u0437")), /*#__PURE__*/React.createElement("div", {
+}, "7 сценариев · не прогноз")), /*#__PURE__*/React.createElement("div", {
   className: "swipe-hint items-center gap-1 text-[10px] font-mono text-gold-700 bg-gold-400/15 rounded-full px-2.5 py-1 mb-2.5 w-max"
-}, "\u2194 \u043B\u0438\u0441\u0442\u0430\u0439\u0442\u0435 \u0442\u0430\u0431\u043B\u0438\u0446\u0443"), /*#__PURE__*/React.createElement("div", {
+}, "↔ листайте таблицу"), /*#__PURE__*/React.createElement("div", {
   className: "mob-scroll-x"
 }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
   className: "grid grid-cols-[minmax(0,2.1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.4fr)_minmax(0,0.9fr)_minmax(0,1fr)] gap-3 px-1 pb-2.5 text-[9.5px] tracking-widest uppercase text-ink-400 font-mono border-b border-ink-900/8"
-}, /*#__PURE__*/React.createElement("div", null, "\u0421\u0446\u0435\u043D\u0430\u0440\u0438\u0439"), /*#__PURE__*/React.createElement("div", {
+}, /*#__PURE__*/React.createElement("div", null, "Сценарий"), /*#__PURE__*/React.createElement("div", {
   className: "text-right"
-}, "\u0394 \u041F\u043E\u0440\u0442\u0444\u0435\u043B\u044C"), /*#__PURE__*/React.createElement("div", {
+}, "Δ Портфель"), /*#__PURE__*/React.createElement("div", {
   className: "text-right"
-}, "\u0394 \u0421\u0442\u043E\u0438\u043C\u043E\u0441\u0442\u044C"), /*#__PURE__*/React.createElement("div", null, "\u041C\u0430\u0433\u043D\u0438\u0442\u0443\u0434\u0430"), /*#__PURE__*/React.createElement("div", {
+}, "Δ Стоимость"), /*#__PURE__*/React.createElement("div", null, "Магнитуда"), /*#__PURE__*/React.createElement("div", {
   className: "text-right"
 }, "Drawdown"), /*#__PURE__*/React.createElement("div", {
   className: "text-right"
-}, "\u0412\u043E\u0441\u0441\u0442\u0430\u043D\u043E\u0432\u043B.")), /*#__PURE__*/React.createElement("div", {
+}, "Восстановл.")), /*#__PURE__*/React.createElement("div", {
   className: "divide-y divide-ink-900/5"
 }, rows.map((r, i) => {
   const pos = r.pct >= 0;
@@ -2111,9 +2162,9 @@ const RegimeBlock = ({
   className: "flex items-start justify-between mb-2"
 }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
   className: "text-ink-500 text-[12px] font-medium"
-}, "Growth \xD7 Cycle"), /*#__PURE__*/React.createElement("h3", {
+}, "Growth × Cycle"), /*#__PURE__*/React.createElement("h3", {
   className: "text-xl font-semibold tracking-tight text-ink-900"
-}, "\u041A\u043E\u043E\u0440\u0434\u0438\u043D\u0430\u0442\u044B \u0440\u0435\u0436\u0438\u043C\u0430")), /*#__PURE__*/React.createElement("span", {
+}, "Координаты режима")), /*#__PURE__*/React.createElement("span", {
   className: "text-[10px] font-mono text-ink-400 tracking-wider px-2.5 py-1 rounded-full bg-cream-50 border border-ink-900/5"
 }, "60-day")), /*#__PURE__*/React.createElement("div", {
   className: "flex-1 flex items-center justify-center py-2"
@@ -2128,42 +2179,42 @@ const RegimeBlock = ({
   className: "flex items-start justify-between mb-4"
 }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
   className: "text-[10px] tracking-widest uppercase text-ink-500 font-mono mb-1"
-}, "\u0422\u0435\u043A\u0443\u0449\u0438\u0439 \u0440\u0435\u0436\u0438\u043C"), /*#__PURE__*/React.createElement("div", {
+}, "Текущий режим"), /*#__PURE__*/React.createElement("div", {
   className: "flex items-baseline gap-3"
 }, /*#__PURE__*/React.createElement("span", {
   className: "text-[32px] font-light tracking-tight text-ink-900"
 }, r.name), /*#__PURE__*/React.createElement("span", {
   className: "text-[14px] text-ink-500 font-light"
-}, "\xB7 ", r.nameRu)), /*#__PURE__*/React.createElement("div", {
+}, "· ", r.nameRu)), /*#__PURE__*/React.createElement("div", {
   className: "text-[11.5px] text-ink-500 font-mono mt-1"
-}, "\u0423\u0432\u0435\u0440\u0435\u043D\u043D\u043E\u0441\u0442\u044C \u043C\u043E\u0434\u0435\u043B\u0438 ", /*#__PURE__*/React.createElement("b", {
+}, "Уверенность модели ", /*#__PURE__*/React.createElement("b", {
   className: "text-gold-700"
-}, r.confidence, "%"), " \xB7 ", r.confirms, " \u043F\u043E\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0430\u044E\u0449\u0438\u0445 \u0441\u0438\u0433\u043D\u0430\u043B\u0430")), /*#__PURE__*/React.createElement("div", {
+}, r.confidence, "%"), " · ", r.confirms, " подтверждающих сигнала")), /*#__PURE__*/React.createElement("div", {
   className: "flex items-center gap-2 px-3 py-1.5 rounded-full bg-sage-500/12 text-sage-600 text-[11px] font-semibold"
 }, /*#__PURE__*/React.createElement(Icons.Check, {
   size: 13,
   stroke: 2.2
-}), " \u0420\u043E\u0441\u0442")), /*#__PURE__*/React.createElement("div", {
+}), " Рост")), /*#__PURE__*/React.createElement("div", {
   className: "grid grid-cols-2 gap-3 mb-4"
 }, /*#__PURE__*/React.createElement("div", {
   className: "rounded-2xl bg-cream-50 border border-ink-900/5 px-4 py-3"
 }, /*#__PURE__*/React.createElement("div", {
   className: "text-[10px] uppercase tracking-wider text-ink-500 font-mono"
-}, "Growth-\u0444\u0430\u043A\u0442\u043E\u0440"), /*#__PURE__*/React.createElement("div", {
+}, "Growth-фактор"), /*#__PURE__*/React.createElement("div", {
   className: "text-[20px] num font-semibold text-sage-600 mt-0.5"
 }, "+", r.growth.toFixed(2)), /*#__PURE__*/React.createElement("div", {
   className: "text-[10px] text-ink-400"
-}, "\u0437\u0434\u043E\u0440\u043E\u0432\u044B\u0439 \u0440\u043E\u0441\u0442")), /*#__PURE__*/React.createElement("div", {
+}, "здоровый рост")), /*#__PURE__*/React.createElement("div", {
   className: "rounded-2xl bg-cream-50 border border-ink-900/5 px-4 py-3"
 }, /*#__PURE__*/React.createElement("div", {
   className: "text-[10px] uppercase tracking-wider text-ink-500 font-mono"
-}, "Cycle-\u0444\u0430\u043A\u0442\u043E\u0440"), /*#__PURE__*/React.createElement("div", {
+}, "Cycle-фактор"), /*#__PURE__*/React.createElement("div", {
   className: "text-[20px] num font-semibold text-sage-600 mt-0.5"
 }, "+", r.cycle.toFixed(2)), /*#__PURE__*/React.createElement("div", {
   className: "text-[10px] text-ink-400"
-}, "\u0446\u0438\u043A\u043B. \u044D\u043A\u0441\u043F\u0430\u043D\u0441\u0438\u044F"))), /*#__PURE__*/React.createElement("div", {
+}, "цикл. экспансия"))), /*#__PURE__*/React.createElement("div", {
   className: "text-[10px] tracking-widest uppercase text-ink-400 font-mono mb-2"
-}, "\u0421\u0438\u0433\u043D\u0430\u043B\u044B-\u0434\u0440\u0430\u0439\u0432\u0435\u0440\u044B \xB7 as_of 2026-06-22"), /*#__PURE__*/React.createElement("div", {
+}, "Сигналы-драйверы · as_of 2026-06-22"), /*#__PURE__*/React.createElement("div", {
   className: "space-y-1.5 flex-1"
 }, r.drivers.map((d, i) => /*#__PURE__*/React.createElement("div", {
   key: i,
@@ -2190,7 +2241,7 @@ const RegimeBlock = ({
 }, /*#__PURE__*/React.createElement(Icons.Check, {
   size: 14,
   stroke: 2.2
-}), " \u0418\u0418 \u043F\u043E\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0430\u0435\u0442 \u0440\u0435\u0436\u0438\u043C"), /*#__PURE__*/React.createElement("span", {
+}), " ИИ подтверждает режим"), /*#__PURE__*/React.createElement("span", {
   className: "text-[10px] font-mono text-ink-400"
 }, window.DEEP.meta.aiModel)), /*#__PURE__*/React.createElement("p", {
   className: "text-[13.5px] text-ink-800 leading-relaxed font-light mb-4"
@@ -2214,7 +2265,7 @@ const RegimeBlock = ({
 }, r.ragSignals.map((s, i) => /*#__PURE__*/React.createElement("span", {
   key: i,
   className: "text-[10.5px] text-ink-600 bg-white/60 border border-ink-900/6 rounded-full px-3 py-1 font-mono"
-}, "RAG \xB7 ", s))))));
+}, "RAG · ", s))))));
 const StressRegime = () => {
   const p = window.DEEP;
   return /*#__PURE__*/React.createElement("section", {
@@ -2227,13 +2278,13 @@ const StressRegime = () => {
     className: "flex items-center gap-2 text-[11px] tracking-widest uppercase text-ink-500 font-mono mb-2"
   }, /*#__PURE__*/React.createElement("span", {
     className: "w-1.5 h-1.5 rounded-full bg-gold-400"
-  }), " Stress test \xB7 Market regime \xB7 DEEP"), /*#__PURE__*/React.createElement("h2", {
+  }), " Stress test · Market regime · DEEP"), /*#__PURE__*/React.createElement("h2", {
     className: "text-[40px] leading-[1.05] tracking-[-0.02em] font-light text-ink-900"
-  }, "\u0423\u0441\u0442\u043E\u0439\u0447\u0438\u0432\u043E\u0441\u0442\u044C \u0438 \u043A\u043E\u043D\u0442\u0435\u043A\u0441\u0442", /*#__PURE__*/React.createElement("span", {
+  }, "Устойчивость и контекст", /*#__PURE__*/React.createElement("span", {
     className: "text-ink-400"
   }, ".")), /*#__PURE__*/React.createElement("p", {
     className: "text-[15px] text-ink-500 mt-2 font-light max-w-[680px]"
-  }, "\u041A\u0430\u043A \u043F\u043E\u0440\u0442\u0444\u0435\u043B\u044C \u0432\u0435\u0434\u0451\u0442 \u0441\u0435\u0431\u044F \u043F\u0440\u0438 \u0433\u0438\u043F\u043E\u0442\u0435\u0442\u0438\u0447\u0435\u0441\u043A\u0438\u0445 \u0448\u043E\u043A\u0430\u0445 \u0438 \u0432 \u043A\u0430\u043A\u043E\u0439 \u0444\u0430\u0437\u0435 \u0440\u044B\u043D\u043A\u0430 \u043C\u044B \u043D\u0430\u0445\u043E\u0434\u0438\u043C\u0441\u044F.")), /*#__PURE__*/React.createElement("div", {
+  }, "Как портфель ведёт себя при гипотетических шоках и в какой фазе рынка мы находимся.")), /*#__PURE__*/React.createElement("div", {
     className: "mb-5"
   }, /*#__PURE__*/React.createElement(StressTable, {
     rows: p.stress
@@ -2248,7 +2299,7 @@ const StressRegime = () => {
     stroke: 1.7
   })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "text-[10px] tracking-widest uppercase font-mono text-ink-500 mb-1"
-  }, "AI \xB7 \u043A\u043E\u043C\u043C\u0435\u043D\u0442\u0430\u0440\u0438\u0439 \u043A \u0440\u0435\u0436\u0438\u043C\u0443"), /*#__PURE__*/React.createElement("p", {
+  }, "AI · комментарий к режиму"), /*#__PURE__*/React.createElement("p", {
     className: "text-[14px] text-ink-800 leading-relaxed font-light"
   }, p.regime.regimeAI))));
 };
@@ -2271,25 +2322,25 @@ const ActionPlan = ({
   className: "flex items-start justify-between gap-4 flex-wrap mb-5"
 }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h3", {
   className: "text-2xl font-semibold tracking-tight text-ink-900"
-}, "Action Plan \u2014 \u0443\u0440\u043E\u0432\u043D\u0438 Buy / Sell / Stop"), /*#__PURE__*/React.createElement("p", {
+}, "Action Plan — уровни Buy / Sell / Stop"), /*#__PURE__*/React.createElement("p", {
   className: "text-[12px] text-ink-500 font-mono mt-1"
-}, "ATR (Wilder RMA) \xB7 SMA50/200 \xB7 RSI(14) \xB7 MACD(12,26,9) \xB7 \u0431\u0435\u0437 \u0432\u043D\u0435\u0448\u043D\u0438\u0445 \u0442\u0430\u0440\u0433\u0435\u0442-\u043F\u0440\u0430\u0439\u0441\u043E\u0432")), /*#__PURE__*/React.createElement("span", {
+}, "ATR (Wilder RMA) · SMA50/200 · RSI(14) · MACD(12,26,9) · без внешних таргет-прайсов")), /*#__PURE__*/React.createElement("span", {
   className: "text-[10px] font-mono text-ink-400 tracking-wider px-2.5 py-1 rounded-full bg-cream-50 border border-ink-900/5"
 }, "Quant Engine")), /*#__PURE__*/React.createElement("div", {
   className: "swipe-hint items-center gap-1 text-[10px] font-mono text-gold-700 bg-gold-400/15 rounded-full px-2.5 py-1 mb-2.5 w-max"
-}, "\u2194 \u043B\u0438\u0441\u0442\u0430\u0439\u0442\u0435 \u0442\u0430\u0431\u043B\u0438\u0446\u0443"), /*#__PURE__*/React.createElement("div", {
+}, "↔ листайте таблицу"), /*#__PURE__*/React.createElement("div", {
   className: "mob-scroll-x"
 }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
   className: "grid grid-cols-[minmax(0,1fr)_72px_minmax(0,1.25fr)_minmax(0,0.9fr)_minmax(0,1.3fr)_minmax(0,0.9fr)_minmax(0,1.45fr)] gap-3 px-1 pb-2.5 text-[9.5px] tracking-widest uppercase text-ink-400 font-mono border-b border-ink-900/8"
-}, /*#__PURE__*/React.createElement("div", null, "\u0422\u0438\u043A\u0435\u0440"), /*#__PURE__*/React.createElement("div", null, "\u0414\u0435\u0439\u0441\u0442\u0432\u0438\u0435"), /*#__PURE__*/React.createElement("div", {
+}, /*#__PURE__*/React.createElement("div", null, "Тикер"), /*#__PURE__*/React.createElement("div", null, "Действие"), /*#__PURE__*/React.createElement("div", {
   className: "text-right"
-}, "\u041A\u043E\u043B\u0438\u0447\u0435\u0441\u0442\u0432\u043E"), /*#__PURE__*/React.createElement("div", {
+}, "Количество"), /*#__PURE__*/React.createElement("div", {
   className: "text-right"
-}, "\u0426\u0435\u043D\u0430"), /*#__PURE__*/React.createElement("div", {
+}, "Цена"), /*#__PURE__*/React.createElement("div", {
   className: "text-right"
 }, "Sell target"), /*#__PURE__*/React.createElement("div", {
   className: "text-right"
-}, "Stop"), /*#__PURE__*/React.createElement("div", null, "\u041F\u0440\u0438\u0447\u0438\u043D\u0430")), /*#__PURE__*/React.createElement("div", {
+}, "Stop"), /*#__PURE__*/React.createElement("div", null, "Причина")), /*#__PURE__*/React.createElement("div", {
   className: "divide-y divide-ink-900/5"
 }, rows.map((r, i) => {
   const hasQty = r.qty != null && r.qty !== 0;
@@ -2310,7 +2361,7 @@ const ActionPlan = ({
   }, r.t, r.hot && /*#__PURE__*/React.createElement("span", {
     className: "text-[10px]",
     title: "Hotspot TRC > 20%"
-  }, "\uD83D\uDD25")), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+  }, "🔥")), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
     className: `px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wider ${actionChipCls[r.action]}`
   }, r.action)), /*#__PURE__*/React.createElement("div", {
     className: "text-right leading-tight"
@@ -2318,8 +2369,8 @@ const ActionPlan = ({
     className: `text-[12.5px] num font-semibold ${qtyTone}`
   }, hasQty ? `${r.qty > 0 ? '+' : '−'}${Math.abs(r.qty).toLocaleString('ru-RU')} шт` : '—'), r.dw != null && Math.abs(r.dw) >= 0.05 && /*#__PURE__*/React.createElement("div", {
     className: `text-[10px] num ${dwTone}`,
-    title: "\u0394 \u0432\u0435\u0441\u0430 \u043F\u043E Black-Litterman-\u043E\u043F\u0442\u0438\u043C\u0438\u0437\u0430\u0442\u043E\u0440\u0443 (\u043C\u043E\u0436\u0435\u0442 \u0440\u0430\u0441\u0445\u043E\u0434\u0438\u0442\u044C\u0441\u044F \u0441 \u0441\u0438\u0433\u043D\u0430\u043B\u043E\u043C 4-Pillar)"
-  }, "BL ", r.dw > 0 ? '+' : '−', Math.abs(r.dw).toFixed(1), " \u043F\u043F")), /*#__PURE__*/React.createElement("div", {
+    title: "Δ веса по Black-Litterman-оптимизатору (может расходиться с сигналом 4-Pillar)"
+  }, "BL ", r.dw > 0 ? '+' : '−', Math.abs(r.dw).toFixed(1), " пп")), /*#__PURE__*/React.createElement("div", {
     className: "text-right text-[12px] num text-ink-700"
   }, r.price.toFixed(2)), /*#__PURE__*/React.createElement("div", {
     className: "text-right text-[12px] num text-sage-600"
@@ -2346,11 +2397,11 @@ const EffectGrid = ({
   className: "flex items-start justify-between gap-4 flex-wrap mb-5"
 }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h3", {
   className: "text-2xl font-semibold tracking-tight text-ink-900"
-}, "\u041E\u0436\u0438\u0434\u0430\u0435\u043C\u044B\u0439 \u044D\u0444\u0444\u0435\u043A\u0442 \u043D\u0430 \u0440\u0438\u0441\u043A"), /*#__PURE__*/React.createElement("p", {
+}, "Ожидаемый эффект на риск"), /*#__PURE__*/React.createElement("p", {
   className: "text-[12px] text-ink-500 font-mono mt-1"
-}, "\u043E\u0446\u0435\u043D\u043A\u0430 \xAB\u0434\u043E / \u043F\u043E\u0441\u043B\u0435\xBB \u043F\u0440\u0438 \u0438\u0441\u043F\u043E\u043B\u043D\u0435\u043D\u0438\u0438 Action Plan \xB7 \u0433\u043E\u0440\u0438\u0437\u043E\u043D\u0442 1 \u043A\u0432\u0430\u0440\u0442\u0430\u043B")), /*#__PURE__*/React.createElement("span", {
+}, "оценка «до / после» при исполнении Action Plan · горизонт 1 квартал")), /*#__PURE__*/React.createElement("span", {
   className: "text-[10px] font-mono text-gold-700 tracking-wider px-2.5 py-1 rounded-full bg-gold-400/15"
-}, "\u0394 \u043F\u043E \u0438\u0434\u0435\u044F\u043C: MSFT \xB7 ORCL \xB7 SLV \xB7 SPCX \xB7 AAPL \xB7 GLD \xB7 NVDA")), /*#__PURE__*/React.createElement("div", {
+}, "Δ по идеям: MSFT · ORCL · SLV · SPCX · AAPL · GLD · NVDA")), /*#__PURE__*/React.createElement("div", {
   className: "grid grid-cols-2 md:grid-cols-4 gap-3"
 }, rows.map((r, i) => {
   const tone = {
@@ -2386,7 +2437,7 @@ const EffectGrid = ({
   className: "text-[12px] text-ink-800 leading-relaxed font-light"
 }, /*#__PURE__*/React.createElement("span", {
   className: "font-semibold text-gold-700"
-}, "\u0421\u0432\u043E\u0434\u043D\u044B\u0439 \u0432\u0435\u0440\u0434\u0438\u043A\u0442 \u043F\u043E \u043F\u043B\u0430\u043D\u0443:"), " ", verdict)), /*#__PURE__*/React.createElement("div", {
+}, "Сводный вердикт по плану:"), " ", verdict)), /*#__PURE__*/React.createElement("div", {
   className: "mt-3 rounded-2xl bg-cream-50 border border-ink-900/5 px-4 py-3.5 flex items-start gap-3"
 }, /*#__PURE__*/React.createElement(Icons.Sparkles, {
   size: 14,
@@ -2463,7 +2514,7 @@ const IdeaCard = ({
     stroke: 1.7
   })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: `text-[10px] tracking-widest uppercase font-mono mb-0.5 ${highlight ? 'text-white/50' : 'text-ink-400'}`
-  }, "\u0418\u0434\u0435\u044F ", idea.n, " \xB7 ", idea.cat), /*#__PURE__*/React.createElement("div", {
+  }, "Идея ", idea.n, " · ", idea.cat), /*#__PURE__*/React.createElement("div", {
     className: `flex items-center gap-1.5 ${highlight ? 'text-gold-400' : 'text-ink-600'}`
   }, /*#__PURE__*/React.createElement("span", {
     className: "w-1.5 h-1.5 rounded-full bg-current"
@@ -2482,7 +2533,7 @@ const IdeaCard = ({
     className: "mt-5"
   }, /*#__PURE__*/React.createElement("div", {
     className: `text-[10px] tracking-widest uppercase font-mono mb-2 ${highlight ? 'text-white/40' : 'text-ink-400'}`
-  }, idea.cands.length, " \u043A\u0430\u043D\u0434\u0438\u0434\u0430\u0442(\u0430) \u2014 \u043D\u0435\u0442 \u0432 \u043F\u043E\u0440\u0442\u0444\u0435\u043B\u0435"), /*#__PURE__*/React.createElement("div", {
+  }, idea.cands.length, " кандидат(а) — нет в портфеле"), /*#__PURE__*/React.createElement("div", {
     className: "flex flex-wrap gap-2"
   }, idea.cands.map(c => /*#__PURE__*/React.createElement("span", {
     key: c.t,
@@ -2499,7 +2550,7 @@ const IdeaCard = ({
     className: "pt-4"
   }, /*#__PURE__*/React.createElement("div", {
     className: `text-[10px] tracking-widest uppercase font-mono mb-2.5 ${highlight ? 'text-white/40' : 'text-ink-400'}`
-  }, "\u041A\u043E\u043D\u0432\u0435\u0439\u0435\u0440 \xB7 Factor \u2192 Regime \u2192 Stress \u2192 RAG"), /*#__PURE__*/React.createElement("div", {
+  }, "Конвейер · Factor → Regime → Stress → RAG"), /*#__PURE__*/React.createElement("div", {
     className: `flex flex-col sm:flex-row sm:items-stretch gap-1.5 sm:gap-0 ${highlight ? '[&_div.rounded-xl]:!bg-white/8 [&_div.rounded-xl]:!border-white/10 [&_.text-ink-800]:!text-white [&_.text-ink-400]:!text-white/40 [&_svg]:!text-white/40' : ''}`
   }, idea.pipeline.map((s, i) => /*#__PURE__*/React.createElement(PipeNode, {
     key: i,
@@ -2508,7 +2559,7 @@ const IdeaCard = ({
     last: i === idea.pipeline.length - 1
   })))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: `text-[10px] tracking-widest uppercase font-mono mb-2.5 ${highlight ? 'text-white/40' : 'text-ink-400'}`
-  }, "\u041F\u043E\u0447\u0435\u043C\u0443 \u0438\u043C\u0435\u043D\u043D\u043E \u044D\u0442\u0438 \u0431\u0443\u043C\u0430\u0433\u0438"), /*#__PURE__*/React.createElement("div", {
+  }, "Почему именно эти бумаги"), /*#__PURE__*/React.createElement("div", {
     className: "space-y-2.5"
   }, idea.cands.map(c => /*#__PURE__*/React.createElement("div", {
     key: c.t,
@@ -2544,13 +2595,13 @@ const Plan = () => {
     className: "flex items-center gap-2 text-[11px] tracking-widest uppercase text-ink-500 font-mono mb-2"
   }, /*#__PURE__*/React.createElement("span", {
     className: "w-1.5 h-1.5 rounded-full bg-gold-400"
-  }), " Action Plan \xB7 Effect \xB7 AI Ideas \xB7 DEEP"), /*#__PURE__*/React.createElement("h2", {
+  }), " Action Plan · Effect · AI Ideas · DEEP"), /*#__PURE__*/React.createElement("h2", {
     className: "text-[40px] leading-[1.05] tracking-[-0.02em] font-light text-ink-900"
-  }, "\u041E\u0442 \u0438\u0434\u0435\u0439 \u043A \u043A\u043E\u043D\u043A\u0440\u0435\u0442\u043D\u044B\u043C \u0443\u0440\u043E\u0432\u043D\u044F\u043C", /*#__PURE__*/React.createElement("span", {
+  }, "От идей к конкретным уровням", /*#__PURE__*/React.createElement("span", {
     className: "text-ink-400"
   }, ".")), /*#__PURE__*/React.createElement("p", {
     className: "text-[15px] text-ink-500 mt-2 font-light max-w-[680px]"
-  }, "\u041A\u043E\u043D\u043A\u0440\u0435\u0442\u043D\u044B\u0435 \u0443\u0440\u043E\u0432\u043D\u0438 Buy / Sell / Stop, \u043E\u0446\u0435\u043D\u043A\u0430 \u044D\u0444\u0444\u0435\u043A\u0442\u0430 \u0434\u043E/\u043F\u043E\u0441\u043B\u0435 \u0438 \u0441\u0442\u0440\u0430\u0442\u0435\u0433\u0438\u0447\u0435\u0441\u043A\u0438\u0435 \u0438\u0434\u0435\u0438 \u0441 \u043A\u0430\u043D\u0434\u0438\u0434\u0430\u0442\u0430\u043C\u0438.")), /*#__PURE__*/React.createElement("div", {
+  }, "Конкретные уровни Buy / Sell / Stop, оценка эффекта до/после и стратегические идеи с кандидатами.")), /*#__PURE__*/React.createElement("div", {
     className: "space-y-5"
   }, /*#__PURE__*/React.createElement(ActionPlan, {
     rows: p.actionPlan
@@ -2576,11 +2627,11 @@ const Plan = () => {
     stroke: 1.7
   })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "text-[10px] tracking-widest uppercase font-mono text-ink-700 mb-1"
-  }, "AI Ideas \xB7 4 \u0438\u0434\u0435\u0438 \xB7 \u043A\u0430\u0436\u0434\u0430\u044F \u043F\u0440\u043E\u0448\u043B\u0430 Factor \u2192 Regime \u2192 Stress \u2192 RAG"), /*#__PURE__*/React.createElement("p", {
+  }, "AI Ideas · 4 идеи · каждая прошла Factor → Regime → Stress → RAG"), /*#__PURE__*/React.createElement("p", {
     className: "text-[14.5px] text-ink-900 leading-relaxed font-light"
-  }, "\u0422\u0438\u043A\u0435\u0440\u044B-\u043A\u0430\u043D\u0434\u0438\u0434\u0430\u0442\u044B ", /*#__PURE__*/React.createElement("span", {
+  }, "Тикеры-кандидаты ", /*#__PURE__*/React.createElement("span", {
     className: "font-medium"
-  }, "\u043D\u0435 \u0438\u0437 \u0432\u0430\u0448\u0435\u0433\u043E \u043F\u043E\u0440\u0442\u0444\u0435\u043B\u044F"), " \u2014 \u0440\u0430\u0441\u0441\u043C\u043E\u0442\u0440\u0438\u0442\u0435 \u043A\u0430\u043A \u0437\u0430\u043C\u0435\u043D\u0443 \u0438\u043B\u0438 \u0434\u043E\u043F\u043E\u043B\u043D\u0435\u043D\u0438\u0435. \u0420\u0430\u0441\u043A\u0440\u043E\u0439\u0442\u0435 \u043A\u0430\u0440\u0442\u043E\u0447\u043A\u0443, \u0447\u0442\u043E\u0431\u044B \u0443\u0432\u0438\u0434\u0435\u0442\u044C \u043A\u043E\u043D\u0432\u0435\u0439\u0435\u0440 \u043E\u0442\u0431\u043E\u0440\u0430 \u0438 \u043E\u0431\u043E\u0441\u043D\u043E\u0432\u0430\u043D\u0438\u0435 \u043F\u043E \u043A\u0430\u0436\u0434\u043E\u043C\u0443 \u043A\u0430\u043D\u0434\u0438\u0434\u0430\u0442\u0443.")))), /*#__PURE__*/React.createElement("div", {
+  }, "не из вашего портфеля"), " — рассмотрите как замену или дополнение. Раскройте карточку, чтобы увидеть конвейер отбора и обоснование по каждому кандидату.")))), /*#__PURE__*/React.createElement("div", {
     className: "grid grid-cols-1 lg:grid-cols-2 gap-5"
   }, p.ideas.map((idea, i) => /*#__PURE__*/React.createElement(IdeaCard, {
     key: idea.n,
@@ -2649,27 +2700,27 @@ const Cove = () => {
     className: "flex items-center gap-2 text-[11px] tracking-widest uppercase text-ink-500 font-mono mb-2"
   }, /*#__PURE__*/React.createElement("span", {
     className: "w-1.5 h-1.5 rounded-full bg-gold-400"
-  }), " Chain-of-Verification \xB7 DEEP"), /*#__PURE__*/React.createElement("h2", {
+  }), " Chain-of-Verification · DEEP"), /*#__PURE__*/React.createElement("h2", {
     className: "text-[40px] leading-[1.05] tracking-[-0.02em] font-light text-ink-900"
-  }, "\u041E\u0442\u043A\u0443\u0434\u0430 \u0434\u0430\u043D\u043D\u044B\u0435", /*#__PURE__*/React.createElement("span", {
+  }, "Откуда данные", /*#__PURE__*/React.createElement("span", {
     className: "text-ink-400"
   }, ".")), /*#__PURE__*/React.createElement("p", {
     className: "text-[15px] text-ink-500 mt-2 font-light max-w-[640px]"
-  }, "\u041A\u0430\u0436\u0434\u044B\u0439 \u043F\u043E\u043A\u0430\u0437\u0430\u0442\u0435\u043B\u044C \u043F\u0440\u043E\u0441\u043B\u0435\u0436\u0438\u0432\u0430\u0435\u0442\u0441\u044F \u0434\u043E \u043F\u0435\u0440\u0432\u0438\u0447\u043D\u043E\u0433\u043E \u0438\u0441\u0442\u043E\u0447\u043D\u0438\u043A\u0430 \u0441 \u043C\u0435\u0442\u043E\u0434\u043E\u043C \u0440\u0430\u0441\u0447\u0451\u0442\u0430 \u0438 \u0441\u0442\u0430\u0442\u0443\u0441\u043E\u043C QualityGate.")), /*#__PURE__*/React.createElement("div", {
+  }, "Каждый показатель прослеживается до первичного источника с методом расчёта и статусом QualityGate.")), /*#__PURE__*/React.createElement("div", {
     className: "flex items-center gap-2"
   }, /*#__PURE__*/React.createElement("span", {
     className: "flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-sage-500/12 text-sage-600 text-[11px] font-semibold"
   }, /*#__PURE__*/React.createElement("span", {
     className: "font-bold"
-  }, "\u2713"), " ", counts.ok, " \u043F\u0440\u043E\u0448\u043B\u0438"), /*#__PURE__*/React.createElement("span", {
+  }, "✓"), " ", counts.ok, " прошли"), /*#__PURE__*/React.createElement("span", {
     className: "flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-gold-400/15 text-gold-700 text-[11px] font-semibold"
   }, /*#__PURE__*/React.createElement("span", {
     className: "font-bold"
-  }, "!"), " ", counts.warn, " \u0447\u0430\u0441\u0442\u0438\u0447\u043D\u043E"), /*#__PURE__*/React.createElement("span", {
+  }, "!"), " ", counts.warn, " частично"), /*#__PURE__*/React.createElement("span", {
     className: "flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-rust-500/12 text-rust-600 text-[11px] font-semibold"
   }, /*#__PURE__*/React.createElement("span", {
     className: "font-bold"
-  }, "\u2717"), " ", counts.fail, " \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u043D\u043E"))), /*#__PURE__*/React.createElement("div", {
+  }, "✗"), " ", counts.fail, " недоступно"))), /*#__PURE__*/React.createElement("div", {
     className: "glass-strong rounded-4xl p-7 shadow-card"
   }, /*#__PURE__*/React.createElement("div", {
     className: "grid grid-cols-1 lg:grid-cols-2 gap-x-10"
@@ -2682,11 +2733,11 @@ const Cove = () => {
     className: "mt-5 pt-4 border-t border-ink-900/8 text-[11px] text-ink-500 leading-relaxed font-light"
   }, /*#__PURE__*/React.createElement("b", {
     className: "text-sage-600"
-  }, "\u2713"), " \u2014 \u0434\u0430\u043D\u043D\u044B\u0435 \u043F\u0440\u043E\u0448\u043B\u0438 QualityGate \xB7 ", /*#__PURE__*/React.createElement("b", {
+  }, "✓"), " — данные прошли QualityGate · ", /*#__PURE__*/React.createElement("b", {
     className: "text-gold-700"
-  }, "!"), " \u2014 \u0447\u0430\u0441\u0442\u0438\u0447\u043D\u043E\u0435 \u043F\u043E\u043A\u0440\u044B\u0442\u0438\u0435 \u0438\u043B\u0438 fallback \u043D\u0430 \u0443\u0441\u0442\u0430\u0440\u0435\u0432\u0448\u0438\u0439 \u043A\u044D\u0448 \xB7 ", /*#__PURE__*/React.createElement("b", {
+  }, "!"), " — частичное покрытие или fallback на устаревший кэш · ", /*#__PURE__*/React.createElement("b", {
     className: "text-rust-600"
-  }, "\u2717"), " \u2014 \u0438\u0441\u0442\u043E\u0447\u043D\u0438\u043A \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u0435\u043D. \u0414\u043E\u043A\u0443\u043C\u0435\u043D\u0442 \u043D\u0435 \u044F\u0432\u043B\u044F\u0435\u0442\u0441\u044F \u0418\u0418\u0420 (\u0438\u043D\u0434\u0438\u0432\u0438\u0434\u0443\u0430\u043B\u044C\u043D\u043E\u0439 \u0438\u043D\u0432\u0435\u0441\u0442\u0438\u0446\u0438\u043E\u043D\u043D\u043E\u0439 \u0440\u0435\u043A\u043E\u043C\u0435\u043D\u0434\u0430\u0446\u0438\u0435\u0439) \u2014 \u0442\u043E\u043B\u044C\u043A\u043E \u0430\u043D\u0430\u043B\u0438\u0442\u0438\u0447\u0435\u0441\u043A\u0438\u0439 \u043C\u0430\u0442\u0435\u0440\u0438\u0430\u043B.")));
+  }, "✗"), " — источник недоступен. Документ не является ИИР (индивидуальной инвестиционной рекомендацией) — только аналитический материал.")));
 };
 Object.assign(window, {
   Cove
@@ -2771,7 +2822,7 @@ const TopBar = ({
     }
   }, /*#__PURE__*/React.createElement("div", {
     className: "w-full h-full flex items-center justify-center text-ink-900 text-[11px] font-bold"
-  }, "Y\u041A")))), /*#__PURE__*/React.createElement("div", {
+  }, "YК")))), /*#__PURE__*/React.createElement("div", {
     className: "max-w-[1480px] mx-auto mt-3 flex items-center justify-between text-[10px] font-mono tracking-wider text-ink-400 uppercase gap-3 flex-wrap"
   }, /*#__PURE__*/React.createElement("div", {
     className: "flex items-center gap-3 flex-wrap"
@@ -2779,15 +2830,15 @@ const TopBar = ({
     className: "flex items-center gap-1.5"
   }, /*#__PURE__*/React.createElement("span", {
     className: "w-1.5 h-1.5 rounded-full bg-sage-500 animate-pulse"
-  }), " Risk Engine \xB7 ", meta.engine), /*#__PURE__*/React.createElement("span", {
+  }), " Risk Engine · ", meta.engine), /*#__PURE__*/React.createElement("span", {
     className: "opacity-30"
-  }, "/"), /*#__PURE__*/React.createElement("span", null, "ID \xB7 ", meta.id), /*#__PURE__*/React.createElement("span", {
+  }, "/"), /*#__PURE__*/React.createElement("span", null, "ID · ", meta.id), /*#__PURE__*/React.createElement("span", {
     className: "opacity-30"
-  }, "/"), /*#__PURE__*/React.createElement("span", null, "AI \xB7 ", meta.aiModel), /*#__PURE__*/React.createElement("span", {
+  }, "/"), /*#__PURE__*/React.createElement("span", null, "AI · ", meta.aiModel), /*#__PURE__*/React.createElement("span", {
     className: "opacity-30 hidden sm:inline"
   }, "/"), /*#__PURE__*/React.createElement("span", {
     className: "hidden sm:inline"
-  }, "\u041F\u0440\u043E\u0444\u0438\u043B\u044C \xB7 ", meta.profile)), /*#__PURE__*/React.createElement("span", null, "Generated ", meta.generated)));
+  }, "Профиль · ", meta.profile)), /*#__PURE__*/React.createElement("span", null, "Generated ", meta.generated)));
 };
 const Footer = () => {
   const p = window.DEEP;
@@ -2806,31 +2857,31 @@ const Footer = () => {
     className: "max-w-[560px]"
   }, /*#__PURE__*/React.createElement("div", {
     className: "text-[10px] tracking-widest uppercase text-ink-400 font-mono mb-3"
-  }, "\u041A\u043E\u043D\u0442\u0440\u043E\u043B\u044C \u043A\u0430\u0447\u0435\u0441\u0442\u0432\u0430 \u0434\u0430\u043D\u043D\u044B\u0445"), /*#__PURE__*/React.createElement("div", {
+  }, "Контроль качества данных"), /*#__PURE__*/React.createElement("div", {
     className: "flex flex-wrap gap-2"
   }, p.quality.map((q, i) => /*#__PURE__*/React.createElement("span", {
     key: i,
     className: "flex items-center gap-1.5 text-[10px] font-mono text-ink-600 bg-cream-50 border border-ink-900/6 rounded-full px-2.5 py-1"
   }, /*#__PURE__*/React.createElement("span", {
     className: "text-sage-600 font-bold"
-  }, "\u2713"), " ", q)))), /*#__PURE__*/React.createElement("div", {
+  }, "✓"), " ", q)))), /*#__PURE__*/React.createElement("div", {
     className: "flex items-center gap-2 flex-wrap"
   }, /*#__PURE__*/React.createElement("button", {
     className: "flex items-center gap-1.5 px-4 py-2 rounded-full bg-white border border-ink-900/8 text-ink-700 text-[12px] font-medium hover:bg-cream-50 transition"
   }, /*#__PURE__*/React.createElement(Icons.Download, {
     size: 13,
     stroke: 1.8
-  }), " \u0421\u043A\u0430\u0447\u0430\u0442\u044C PDF"), /*#__PURE__*/React.createElement("button", {
+  }), " Скачать PDF"), /*#__PURE__*/React.createElement("button", {
     className: "flex items-center gap-1.5 px-4 py-2 rounded-full bg-white border border-ink-900/8 text-ink-700 text-[12px] font-medium hover:bg-cream-50 transition"
   }, /*#__PURE__*/React.createElement(Icons.Share, {
     size: 13,
     stroke: 1.8
-  }), " \u041F\u043E\u0434\u0435\u043B\u0438\u0442\u044C\u0441\u044F"), /*#__PURE__*/React.createElement("button", {
+  }), " Поделиться"), /*#__PURE__*/React.createElement("button", {
     className: "flex items-center gap-1.5 px-4 py-2 rounded-full bg-ink-900 text-white text-[12px] font-medium hover:bg-ink-800 transition"
   }, /*#__PURE__*/React.createElement(Icons.Sparkles, {
     size: 13,
     stroke: 1.8
-  }), " \u041D\u043E\u0432\u044B\u0439 \u0440\u0430\u0441\u0447\u0451\u0442"))), /*#__PURE__*/React.createElement("div", {
+  }), " Новый расчёт"))), /*#__PURE__*/React.createElement("div", {
     className: "mt-6 pt-5 border-t border-ink-900/8 flex items-start gap-3"
   }, /*#__PURE__*/React.createElement(Icons.Warning, {
     size: 15,
@@ -2840,14 +2891,14 @@ const Footer = () => {
     className: "text-[12px] text-ink-500 leading-relaxed font-light"
   }, /*#__PURE__*/React.createElement("span", {
     className: "text-ink-700 font-medium"
-  }, "\u042D\u0442\u043E \u0430\u043D\u0430\u043B\u0438\u0442\u0438\u0447\u0435\u0441\u043A\u0438\u0439 \u043C\u0430\u0442\u0435\u0440\u0438\u0430\u043B, \u0430 \u043D\u0435 \u0438\u043D\u0434\u0438\u0432\u0438\u0434\u0443\u0430\u043B\u044C\u043D\u0430\u044F \u0438\u043D\u0432\u0435\u0441\u0442\u0438\u0446\u0438\u043E\u043D\u043D\u0430\u044F \u0440\u0435\u043A\u043E\u043C\u0435\u043D\u0434\u0430\u0446\u0438\u044F."), " \u0420\u0430\u0441\u0447\u0451\u0442\u044B \u043E\u0441\u043D\u043E\u0432\u0430\u043D\u044B \u043D\u0430 \u0438\u0441\u0442\u043E\u0440\u0438\u0447\u0435\u0441\u043A\u0438\u0445 \u0434\u0430\u043D\u043D\u044B\u0445 \u0438 \u043F\u0443\u0431\u043B\u0438\u0447\u043D\u043E\u0439 \u043E\u0442\u0447\u0451\u0442\u043D\u043E\u0441\u0442\u0438; \u043E\u043D\u0438 \u043D\u0435 \u0443\u0447\u0438\u0442\u044B\u0432\u0430\u044E\u0442 \u0432\u0430\u0448\u0443 \u043D\u0430\u043B\u043E\u0433\u043E\u0432\u0443\u044E \u0441\u0438\u0442\u0443\u0430\u0446\u0438\u044E, \u0433\u043E\u0440\u0438\u0437\u043E\u043D\u0442 \u0438 \u0446\u0435\u043B\u0438. \u0418\u0441\u0442\u043E\u0447\u043D\u0438\u043A\u0438: ", sources, "."))), /*#__PURE__*/React.createElement("div", {
+  }, "Это аналитический материал, а не индивидуальная инвестиционная рекомендация."), " Расчёты основаны на исторических данных и публичной отчётности; они не учитывают вашу налоговую ситуацию, горизонт и цели. Источники: ", sources, "."))), /*#__PURE__*/React.createElement("div", {
     className: "text-center text-[10px] tracking-widest uppercase text-ink-400 font-mono mt-6"
-  }, "Portfolio Risk Report \xB7 DEEP Tier \xB7 ", p.meta.id, " \xB7 v2026.6"));
+  }, "Portfolio Risk Report · DEEP Tier · ", p.meta.id, " · v2026.6"));
 };
 const Fab = () => /*#__PURE__*/React.createElement("div", {
   className: "fixed bottom-6 right-6 z-50"
 }, /*#__PURE__*/React.createElement("button", {
-  title: "\u041F\u0435\u0440\u0435\u0441\u0447\u0438\u0442\u0430\u0442\u044C \u0440\u0438\u0441\u043A",
+  title: "Пересчитать риск",
   onClick: () => window.scrollTo({
     top: 0,
     behavior: 'smooth'

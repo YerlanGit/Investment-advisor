@@ -586,10 +586,14 @@ class Audit0623Test(unittest.TestCase):
 # Premium V2 data mapper (engine payload → strict design contract)
 # ─────────────────────────────────────────────────────────────────────────────
 class PremiumMapperTest(unittest.TestCase):
-    def test_deep_contract_is_exactly_29_keys(self):
+    def test_deep_contract_is_exactly_30_keys(self):
+        # 30 = 29 + `factorVariance` (факторная декомпозиция дисперсии —
+        # additive layer; None на пустом payload → блок скрыт).
         from premium_payload import build_design_data
         d = build_design_data({}, "deep")          # empty payload → no KeyError
-        self.assertEqual(len(d), 29)
+        self.assertEqual(len(d), 30)
+        self.assertIn("factorVariance", d)
+        self.assertIsNone(d["factorVariance"])
 
     def test_base_contract_is_exactly_12_keys(self):
         # §−13: +`leverage` {on, marginPct} — маржа-индикатор, рендерится ТОЛЬКО

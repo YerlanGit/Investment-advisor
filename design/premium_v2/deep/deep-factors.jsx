@@ -27,6 +27,50 @@ const FactorTable = ({ factors }) => (
   </table>
 );
 
+// Источники риска — факторная декомпозиция дисперсии (additive layer,
+// finance/factor_decomposition → payload.factor_variance → factorVariance).
+// Отвечает «откуда берётся риск ПО ИСТОЧНИКАМ» (Euler по факторам), дополняя
+// TRC-разложение по активам.  Отрицательная доля = фактор-хедж.  Блок целиком
+// скрыт, когда движок пропустил декомпозицию (factorVariance == null).
+const FactorVariance = ({ fv }) => {
+  if (!fv || !fv.rows || !fv.rows.length) return null;
+  const maxAbs = Math.max(...fv.rows.map(r => Math.abs(r.pct)), 1);
+  return (
+    <div className="mt-5 rounded-2xl bg-cream-50 border border-ink-900/5 px-4 py-3.5">
+      <div className="flex items-start justify-between gap-4 flex-wrap mb-2">
+        <span className="text-[12.5px] font-semibold text-ink-900">Откуда берётся риск — декомпозиция дисперсии</span>
+        <span className="text-[10px] font-mono text-ink-500">систематика {fv.systematic}% · специфика бумаг {fv.idio}%</span>
+      </div>
+      <div className="space-y-2">
+        {fv.rows.map((r, i) => (
+          <div key={i} className="grid grid-cols-12 gap-2.5 items-center">
+            <span className="col-span-12 sm:col-span-4 text-[11px] text-ink-800 font-medium">{r.source}</span>
+            <span className="col-span-8 sm:col-span-5">
+              <span className="block h-1.5 rounded-full bg-ink-900/4 relative overflow-hidden">
+                <span className="absolute inset-y-0 left-0 rounded-full"
+                      style={{ width: `${Math.min(Math.abs(r.pct) / maxAbs * 100, 100)}%`,
+                               background: r.pct < 0 ? '#5d7c5c' : '#caa01a' }}/>
+              </span>
+            </span>
+            <span className="col-span-2 sm:col-span-1 text-right text-[11px] num font-semibold text-ink-900">
+              {r.pct}%{r.pct < 0 ? ' (хедж)' : ''}
+            </span>
+            <span className="col-span-2 sm:col-span-2 text-right text-[10px] font-mono text-ink-500 truncate">{r.drivers}</span>
+          </div>
+        ))}
+      </div>
+      {fv.twins && fv.twins.length > 0 && (
+        <p className="text-[11px] text-ink-500 leading-relaxed font-light mt-3">
+          <span className="text-ink-800 font-medium">Факторные двойники</span> (систематическая корреляция ≥ 0.90 — одна факторная ставка куплена дважды):{' '}
+          {fv.twins.map((t, i) => (
+            <span key={i} className="whitespace-nowrap">{t.pair} · corr {t.corr} · вес {t.w}%{i < fv.twins.length - 1 ? '; ' : ''}</span>
+          ))}
+        </p>
+      )}
+    </div>
+  );
+};
+
 // 4-Pillar legend — spells out the F·V·T·C abbreviations AND the concrete
 // metrics each pillar scores (user request «раскрыть какие показатели и
 // аббревиатуры»).  Inputs mirror src/finance/scoring.py.
@@ -134,6 +178,7 @@ const Factors = () => {
             </p>
           </div>
         </div>
+        <FactorVariance fv={p.factorVariance}/>
         <div className="mt-5 rounded-2xl bg-cream-50 border border-ink-900/5 px-4 py-3.5 flex items-start gap-3">
           <Icons.Sparkles size={14} className="text-gold-600 mt-0.5 flex-shrink-0" stroke={1.8}/>
           <p className="text-[12.5px] text-ink-700 leading-relaxed font-light">{p.factorAI}</p>

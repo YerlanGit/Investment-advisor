@@ -146,6 +146,21 @@ def _map_deep(p: dict, meta: dict) -> dict:
     factors = [{"name": _txt(f, "axis"), "port": _num(f, "beta"), "mkt": _num(f, "bench", default=1.0)}
                for f in _list(p, "factor_betas")]
 
+    # factor-variance decomposition (источники риска + факторные двойники) —
+    # additive layer; None hides the sub-block in the Factors section.
+    fv = _g(p, "factor_variance", default=None)
+    factor_variance = None
+    if isinstance(fv, dict) and _list(fv, "rows"):
+        factor_variance = {
+            "rows": [{"source": _txt(r, "source"), "pct": _num(r, "share_pct"),
+                      "drivers": _txt(r, "drivers") if _g(r, "drivers") else ""}
+                     for r in _list(fv, "rows")],
+            "systematic": _num(fv, "systematic_pct"),
+            "idio":       _num(fv, "idio_pct"),
+            "twins": [{"pair": _txt(t, "pair_label"), "corr": _num(t, "systematic_corr"),
+                       "w": _num(t, "combined_weight_pct")} for t in _list(fv, "twins")],
+        }
+
     # 4-pillar scores
     scores = [{"t": _txt(s, "ticker"), "total": _num(s, "total"), "action": _txt(s, "action").upper(),
                "F": _num(s, "fundamentals"), "V": _num(s, "valuations"),
@@ -291,6 +306,7 @@ def _map_deep(p: dict, meta: dict) -> dict:
         "sectorWarn": [_warn_text(x) for x in _list(p, "sector_warnings")][:3] or [DASH],
         "holdingsAI": _txt(p, "ai_holdings_comment"),
         "factors": factors, "factorCoverage": _coverage(p), "factorAI": _txt(p, "ai_factor_comment"),
+        "factorVariance": factor_variance,
         # scoresNote dropped — it duplicated scoresAI verbatim (same
         # ai_4pillar_comment rendered twice).  The AI box keeps the comment once.
         "scores": scores, "scoresNote": "", "scoresAI": _txt(p, "ai_4pillar_comment"),
