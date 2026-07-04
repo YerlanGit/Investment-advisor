@@ -1,10 +1,34 @@
 # AUDIT.md — RAMP Bot · Институциональный аудит и стратегия
 
-> **Версия:** 2026-07-02 (§−14 исполнение Roadmap 360-аудита · §−13 leverage-правило/пиллы · §−12 рекомендации a/b/c) · **Базовый коммит:** `ed85a8d` (merge PR #47 → `main`)
-> **Текущая ветка:** `claude/base-report-improvements-z9ndut` — Premium V2 в проде (PR #66/#67 → `main`); коммиты на GitHub **Verified ✅** (linked `claude` account)
+> **Версия:** 2026-07-04 (§−15 RAG-наблюдаемость/инфляция-overlay/un-cut/миграция бакетов · §−14 Roadmap A/B/C · §−13 leverage-правило) · **Базовый коммит:** `ed85a8d` (merge PR #47 → `main`)
+> **Текущая ветка:** `claude/bank-rag-deep-analysis-cf106s` — Premium V2 в проде; коммиты на GitHub **Verified ✅** (`Claude <noreply@anthropic.com>`)
 > **Аудитор:** CTO / Lead Quant Architect / Lead UI / DevSecOps
-> **Верификация:** живые прод-отчёты 2026-06-09 → **2026-06-28** (`base/deep.html`, U148046720); раунды 8–9 рендер-верификация Playwright/Chromium; **раунд 10 — pytest 493 passed, 10 skipped** (полный прогон после каждого изменения ядра)
+> **Верификация:** живые прод-отчёты 2026-06-09 → **2026-07-04** (`base/deep.html`, U148046720); рендер-верификация Playwright/Chromium; **раунд 15 — pytest 544 passed, 10 skipped** (полный прогон после каждого изменения ядра)
 > **Карты:** `REPORT_SECTIONS.md` (секция→builder→шаблон) · `REPORT_SECTIONS_AUDIT.md` (посекционный аудит живых отчётов)
+
+---
+
+## −15. RAG-наблюдаемость · инфляция в regime · un-cut ИИ · миграция бакетов (2026-07-04, раунд 15) — Lead Quant / DevSecOps
+
+> **Контекст:** серия live-верификаций DEEP U148046720 (2026-07-03/04). **pytest 544 passed, 10 skipped**
+> (+17 к базе −14). Ветка `claude/bank-rag-deep-analysis-cf106s` (PR #82…#85 в `main`).
+
+### Было / Стало
+
+| # | Узел | Было | Стало |
+|---|---|---|---|
+| RAG-1 | **Миграция бакетов GCS** | `ramp-bot-ingest` / `ramp-bot-chroma-db` (+рассинхрон код↔доки: docs звали inbox `ramp-bot-chroma-db-inbox`) | Единые глобально-уникальные namespace: INBOX `ramp-bot-chroma-db-inbox-investadv`, STORE `ramp-bot-chroma-db-investadv`. Правки: `entrypoint`, `cloud_function/main`, `cloudbuild`, `Dockerfile`, `ingest_bank_report`, `RAG_INGESTION`. Только строки-дефолты — математика/логика не тронуты. |
+| RAG-2 | **«RAG не читает отчёты?»** — нет наблюдаемости | строка CoVe = бинарный `used_rag`; счётчик отрывков жил только в `detail` (премиум-маппер его отбрасывал) | `_fetch_rag_context` отдаёт инвентарь базы (`docs/chunks`); строка Bank RAG = 3-state + «прочитано N отрывков · база M отчётов/K чанков»; **новая CoVe-строка `ИИ-цитирование банк-аналитики`** (`_rag_citation_status`) + integrity-пилл `ИИ↔банк-аналитика`. |
+| RAG-3 | **ИИ цитирует `[GS][Barclays][JPM]` при пустом RAG** | воспринималось как баг | **By design:** системный промпт (стр. 1086–1088) и спека `ai_regime_comment` (1018–1020) ЯВНО велят давать банк-консенсус из знаний модели «даже без RAG». Голые банк-теги ≠ `[RAG:файл]` (последние гейтит `_strip_unverified_rag_citations`). Теперь ЧЕСТНО флагается: `⚠ из общих знаний модели, не подтверждено отчётами`. |
+| REG-1 | **Инфляция в regime-overlay** (BLOCK 3.4) | overlay = GDP (→growth) + безработица (→cycle) | + третья надбавка **10Y breakeven (T10YIE) → growth-ось** (канал политики/ставки): уровень vs таргет 2% ⊕ **темп ре-анкоринга** за ~1 мес, ограничена ±0.05, ключ `macro_inflation_nudge`. Growth-список стал 5-компонентным (доля макро ≤2/5 — tilt, не override). Отсутствующая серия → нет надбавки. `_macro_nudges`→4-кортеж. |
+| UI-1 | **ИИ обрывает мысль** («…это компромисс, а…») | потолки `_soft_trim` впритык к промпту → обрезка на каждом прогоне (factor 640, regime 250, effect 250) | потолки подняты (factor 900, regime 400, effect 400 для DEEP) + `_soft_trim` grace: предложение, пересекающее лимит, завершается целиком в пределах +25% (40–120 симв.); вердикт/саммари сохраняют жёсткий кап (`allow_grace=False`). |
+| UI-2 | **Двойной символ в футере** | «Контроль качества» хардкодил зелёную `✓` → рендерилось `✓ ✗ RAG` (зелёная на ошибке) | футер красит СОБСТВЕННЫЙ символ строки (✓ sage / ✗ rust / ⚠ gold / — neutral) — правки в `deep-app.jsx` + скомпилированном `deep-components.js`. |
+
+### Диагностика (без правок кода)
+- **`docs/RAG_TROUBLESHOOTING.md`** (новый) — 8-шаговый runbook «почему Bank RAG пуст, хотя PDF в GCS»:
+  сверка имён бакетов (INBOX vs STORE), деплой/триггер функции (fail-soft в cloudbuild проглатывает 403),
+  логи функции (`[Ingest] Added N chunks`), бут-синк бота (только на буте!), env-дрейф, быстрый CLI-обход.
+- **`docs/BANK_RAG_COVE_DIAGNOSIS.md`** — рекомендации P1/D-4/D-5 из раунда закрыты (см. статус в самом файле).
 
 ---
 

@@ -44,18 +44,25 @@ import pandas as pd
 
 # ── BLOCK 3.4 — hard-macro overlay tunables (gated, additive) ────────────────
 # The ETF-momentum axes above are the deterministic DEFAULT.  When the env
-# flag is set AND a FRED macro pack is supplied to classify(), two hard signals
-# join the axis component lists at the SAME scale as the ETF spreads.  Crucially
-# each signal blends a LEVEL with a RATE-OF-CHANGE (темпы роста/падения) — the
-# regime cares far more about the DIRECTION a macro series is moving than its
-# absolute reading: unemployment at 4.1% that is RISING is a slowdown signal,
-# the same 4.1% FALLING is an expansion signal.  So:
+# flag is set AND a FRED macro pack is supplied to classify(), three hard
+# signals join the axis component lists at the SAME scale as the ETF spreads.
+# Crucially each signal blends a LEVEL with a RATE-OF-CHANGE (темпы роста /
+# падения) — the regime cares far more about the DIRECTION a macro series is
+# moving than its absolute reading: unemployment at 4.1% that is RISING is a
+# slowdown signal, the same 4.1% FALLING is an expansion signal.  So:
 #   • Real GDP growth : level (vs ~2% trend) ⊕ acceleration (Δ vs prior quarter) → growth axis
 #   • Unemployment    : level (vs ~4.5% neutral, inverted) ⊕ −trend (RISING = bad) → cycle axis
+#   • Inflation (2026-07-04, owner request): 10Y breakeven expectations —
+#     level (vs the 2% policy anchor, inverted) ⊕ −trend (re-anchoring UP =
+#     tightening ahead) → growth axis.  Rationale: inflation expectations act
+#     through the POLICY/DISCOUNT-RATE channel (equities vs treasuries — the
+#     growth axis), not the cyclicals-vs-defensives rotation; and the growth
+#     list already has 4 components, so a third macro signal there keeps the
+#     macro share of the axis ≤ 2/5 (tilt, never override).
 # When history is available the two halves blend 50/50; with only a spot value
 # the level carries full weight.  Each signal is bounded to ±_MACRO_MAX_NUDGE so
-# macro can TILT, never OVERRIDE, the price-based regime.  Off by default → the
-# classifier stays byte-identical.
+# macro can TILT, never OVERRIDE, the price-based regime.  REGIME_MACRO_OVERLAY=0
+# restores the byte-identical pure price classifier.
 MACRO_OVERLAY_ENV     = "REGIME_MACRO_OVERLAY"
 _MACRO_MAX_NUDGE      = 0.05     # ≈ a quarter of the 0.20 magnitude reference
 _TREND_GDP_GROWTH     = 2.0      # % SAAR — long-run US real-GDP trend
@@ -66,6 +73,10 @@ _NEUTRAL_UNEMPLOYMENT = 4.5      # % — rough full-employment anchor
 _UNEMP_SCALE          = 0.030    # 1.5pp below neutral ⇒ +0.045 cycle (level half)
 _UNEMP_TREND_LAG      = 3        # obs back (≈ 3 months ≥3 changes) for the U-rate trend
 _UNEMP_TREND_SCALE    = 0.040    # +0.5pp rise over the window ⇒ −0.02 cycle (trend half)
+_TARGET_BREAKEVEN     = 2.0      # % — Fed inflation target (10Y breakeven anchor)
+_INFL_SCALE           = 0.020    # 1pp above target ⇒ −0.02 growth (level half)
+_INFL_TREND_LAG       = 21       # obs back (≈1 month of daily prints) for the BE trend
+_INFL_TREND_SCALE     = 0.100    # +0.3pp re-anchoring over ~1м ⇒ −0.03 growth (trend half)
 # Минимум наблюдений для расчёта темпа: 4 точки = 3 последовательных изменения
 # (требование «анализировать темпы минимум 3 изменений, а не 1»).
 _TREND_MIN_POINTS     = 4
@@ -146,15 +157,18 @@ def _blend(level: float, momentum: Optional[float]) -> float:
     return level if momentum is None else 0.5 * level + 0.5 * momentum
 
 
-def _macro_nudges(macro: dict) -> tuple[Optional[float], Optional[float], dict]:
+def _macro_nudges(macro: dict) -> tuple[Optional[float], Optional[float],
+                                        Optional[float], dict]:
     """
-    Map a FRED macro pack to (growth_nudge, cycle_nudge, diagnostics).
+    Map a FRED macro pack to (growth_nudge, cycle_nudge, inflation_nudge,
+    diagnostics).
 
     Each nudge fuses a LEVEL and a RATE-OF-CHANGE so the overlay reads macro
     momentum, not just the spot print.  `diagnostics` exposes the raw trend
-    components for the QC/CoVe panel.
+    components for the QC/CoVe panel.  Any signal whose series is missing /
+    unusable returns None and simply doesn't join the axis (never poisons).
     """
-    g_nudge = c_nudge = None
+    g_nudge = c_nudge = i_nudge = None
     diag: dict = {}
 
     # GDP growth: above-trend level ⊕ quarter-on-quarter acceleration.
@@ -175,7 +189,22 @@ def _macro_nudges(macro: dict) -> tuple[Optional[float], Optional[float], dict]:
         if une_tr is not None:
             diag["macro_unemployment_trend"] = round(une_tr, 3)
 
-    return g_nudge, c_nudge, diag
+    # Inflation expectations (2026-07-04): 10Y breakeven vs the 2% anchor,
+    # inverted (above-target = tightening drag on the growth axis), ⊕ −trend —
+    # the ТЕМП matters most: breakevens re-anchoring UP mean the market prices
+    # hotter inflation → hawkish policy path → risk-off; drifting DOWN toward
+    # (or below) target frees the easing room.  Same 50/50 level⊕trend blend
+    # and ±_MACRO_MAX_NUDGE bound as the other two signals.
+    be, be_tr = _value_and_trend((macro or {}).get("breakeven_inflation"),
+                                 _INFL_TREND_LAG)
+    if be is not None:
+        lvl = (_TARGET_BREAKEVEN - be) * _INFL_SCALE
+        mom = None if be_tr is None else (-be_tr) * _INFL_TREND_SCALE
+        i_nudge = float(np.clip(_blend(lvl, mom), -_MACRO_MAX_NUDGE, _MACRO_MAX_NUDGE))
+        if be_tr is not None:
+            diag["macro_breakeven_trend"] = round(be_tr, 3)
+
+    return g_nudge, c_nudge, i_nudge, diag
 
 
 # Map of regime → action-relevant guidance.  Used by the Scoring engine
@@ -298,19 +327,25 @@ class RegimeClassifier:
         cycle_score = float(np.mean(cycle_components)) if cycle_components else 0.0
 
         # ── BLOCK 3.4: optional hard-macro overlay (gated, additive) ──────
-        # Fold GDP-growth / unemployment in as extra components at the SAME
-        # scale as the ETF spreads, then recompute the axis means.  Because
-        # they enter the component LISTS, the magnitude + directional-agreement
-        # confidence math below picks them up with no special-casing.  Bounded
-        # and off-by-default, so this can tilt but never hijack price action.
+        # Fold GDP-growth / unemployment / inflation-expectations in as extra
+        # components at the SAME scale as the ETF spreads, then recompute the
+        # axis means.  Because they enter the component LISTS, the magnitude +
+        # directional-agreement confidence math below picks them up with no
+        # special-casing.  Bounded and env-gated, so this can tilt but never
+        # hijack price action.
         if macro and _macro_overlay_enabled():
-            g_nudge, c_nudge, macro_diag = _macro_nudges(macro)
+            g_nudge, c_nudge, i_nudge, macro_diag = _macro_nudges(macro)
             if g_nudge is not None:
                 growth_components.append(g_nudge)
                 signals["macro_gdp_growth_nudge"] = round(g_nudge, 4)
             if c_nudge is not None:
                 cycle_components.append(c_nudge)
                 signals["macro_unemployment_nudge"] = round(c_nudge, 4)
+            # Inflation joins the GROWTH axis (policy/discount-rate channel —
+            # see the tunables block above for the axis rationale).
+            if i_nudge is not None:
+                growth_components.append(i_nudge)
+                signals["macro_inflation_nudge"] = round(i_nudge, 4)
             signals.update(macro_diag)   # raw Δ components for QC transparency
             growth_score = float(np.mean(growth_components)) if growth_components else 0.0
             cycle_score  = float(np.mean(cycle_components))  if cycle_components else 0.0

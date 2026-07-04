@@ -9,7 +9,7 @@
 > → HTML по подписанной ссылке.
 >
 > ИИ-поля приходят отдельной веткой: `generate_narrative()` (`src/ai_narrative.py`) → `ai_summary` → те же payload-ключи.
-> Обновлено: 2026-06-16 (Sprint 6 · BLOCK 1–4: routing Sonnet/Opus, macro overlay, high-priority effect, CoVe).
+> Обновлено: 2026-07-04 (RAG-наблюдаемость: инвентарь базы + чекер ИИ-цитирования; инфляция в regime-overlay; grace-завершение комментариев ИИ; миграция бакетов `-investadv`). Ранее: 2026-06-16 (Sprint 6 · BLOCK 1–4).
 
 ## Легенда
 - **Ключ** — ключ в `payload` (в шаблоне читается как `data.<ключ>`).
@@ -44,7 +44,7 @@
 | **Smart Money · инсайдеры (SEC Form 4)** | `smart_money.{status,enabled,rows[],headline,hint}` | `_build_smart_money` (+ блок B2.4 в deep-шаблоне) | `finance/smart_money.py` (gated `SMART_MONEY_INSIDERS`); видна всегда: active-таблица или плашка «источник не активирован». Архитектура → `SMART_MONEY.md` |
 | Детерминированная сверка FRED↔моментум | `regime_consistency.status/note/signals` | `_build_regime_consistency` | Sprint 5/R3: пороги — инверсия<0, HY>5.5%, VIX>25 |
 | AI-подтверждение режима | `regime_confirmation.stance/summary/signals` | прокидка из `ai_summary` | DEEP-only; ✓/⚠/✗ |
-| RAG-подтверждение | `regime_rag_confirm[]` | `tg_bot._fetch_rag_context` | выдержки банковских PDF |
+| RAG-подтверждение | `regime_rag_confirm[]` | `tg_bot._fetch_rag_context` (returns ctx, confirm[], rag_status, kb_stats) | выдержки банковских PDF (при пустой базе — пусто) |
 
 **Как менять:** сигналы классификатора → `regime.py` (`SHORT/MEDIUM_WIN`, компоненты осей); пороги сверки → `_build_regime_consistency`; геометрия SVG → `_regime_dot_coords` + анкор `qExpansion` в deep-шаблоне.
 
@@ -147,8 +147,8 @@
 
 | Элемент | Ключи | Builder |
 |---|---|---|
-| Integrity-панель ✓/⚠ | `integrity_checks[]` | `_build_integrity_checks` (RAG 3-state: used/no_match/unavailable) |
-| CoVe data-lineage (Sprint 6: +5 строк) | `cove_lineage[]` | `finance/data_lineage.build_lineage` — источники: Quant Engine, TRC-Euler, **факторная независимость κ+max\|corr\|** (4.6), Tradernet-цены, **валютный слой FX+ставка** (`_fx_status`), SEC (Z-scores + Altman/Piotroski), CDS, FRED-макро (6 серий), Action levels, Black-Litterman, режим, стресс, **Smart-Money/инсайдеры** (gated, 3.5), Bank RAG, AI, **LLM-чекеры галлюцинаций + проверки вычислений** (4.8) |
+| Integrity-панель ✓/⚠ | `integrity_checks[]` | `_build_integrity_checks` — RAG 3-state (used/no_match/unavailable) **+ инвентарь базы** (`M отчётов · K чанков`, 2026-07-04) **+ пилл «ИИ↔банк-аналитика»** (⚠ когда ИИ ссылается на банки при пустой базе). Футер красит собственный символ строки (fix двойного `✓`) |
+| CoVe data-lineage (24 строки при 6 FRED) | `cove_lineage[]` | `finance/data_lineage.build_lineage` — источники: Quant Engine, TRC-Euler, **факторная независимость κ+max\|corr\|** (4.6), Tradernet-цены, **валютный слой FX+ставка** (`_fx_status`), SEC (Z-scores + Altman/Piotroski), CDS, FRED-макро (6 серий), Action levels, Black-Litterman, режим, стресс, **Smart-Money/инсайдеры** (gated, 3.5), **Bank RAG** (+ инвентарь база: отчёты/чанки/отрывки), **ИИ-цитирование банк-аналитики** (`_rag_citation_status`, 2026-07-04: проверенные [RAG]-цитаты vs. банк-консенсус из памяти модели), AI, **LLM-чекеры галлюцинаций + проверки вычислений** (4.8) |
 | Data quality | `data_quality` | `build_payload` (факторы N/10, SEC-пропуски) |
 | AI-вердикт/буллеты | `ai_verdict`, `ai_plain_summary`, `ai_bullets` | прокидка из `ai_summary` |
 
