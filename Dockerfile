@@ -54,7 +54,7 @@ COPY tests/ ./tests/
 # cloudbuild.yaml).  The /app/data fallback below is only used in local dev.
 # Reports are rendered to /tmp/user_reports (writable, ephemeral) and then
 # uploaded to GCS via services/report_storage.py — see REPORT_BUCKET_NAME.
-# /app/data/chroma_db is pre-warmed on boot from gs://ramp-bot-chroma-db/
+# /app/data/chroma_db is pre-warmed on boot from gs://ramp-bot-chroma-db-investadv/
 # (see entrypoint.py:_download_chroma_db) so RAG sees the freshest snapshot.
 RUN mkdir -p /app/data/chroma_db
 

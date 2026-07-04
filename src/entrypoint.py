@@ -6,7 +6,7 @@ Cloud Run requires a container to bind on $PORT (default 8080). The bot uses
 long-polling, not webhooks, so this thin stdlib-only server handles the probe.
 
 On startup, the entrypoint also pre-warms the on-disk ChromaDB by syncing
-the latest snapshot from gs://ramp-bot-chroma-db/chroma_db/. The bucket is
+the latest snapshot from gs://ramp-bot-chroma-db-investadv/chroma_db/. The bucket is
 populated by the Cloud Function `cloud_function/main.py` whenever a new
 bank-analytic PDF is uploaded — so each container restart picks up the
 freshest knowledge base without a redeploy.
@@ -24,7 +24,7 @@ logger = logging.getLogger("ramp.entrypoint")
 
 # ── ChromaDB sync from GCS ──────────────────────────────────────────────────
 CHROMA_LOCAL_PATH  = os.environ.get("CHROMA_LOCAL_PATH",  "/app/data/chroma_db")
-CHROMA_GCS_BUCKET  = os.environ.get("CHROMA_BUCKET",      "ramp-bot-chroma-db")
+CHROMA_GCS_BUCKET  = os.environ.get("CHROMA_BUCKET",      "ramp-bot-chroma-db-investadv")
 CHROMA_GCS_PREFIX  = os.environ.get("CHROMA_GCS_PREFIX",  "chroma_db/")
 
 

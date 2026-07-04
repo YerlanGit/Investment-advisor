@@ -13,7 +13,7 @@ PDF аналитики банка
       │
       ├── (A) заливка в GCS-бакет ──► Cloud Function (авто-триггер) ─┐
       │                                                             ├─► ChromaDB в GCS
-      └── (B) scripts/ingest_bank_report.py --upload ───────────────┘   gs://ramp-bot-chroma-db/chroma_db/
+      └── (B) scripts/ingest_bank_report.py --upload ───────────────┘   gs://ramp-bot-chroma-db-investadv/chroma_db/
                                                                              │
                                              при старте контейнера бот тянет ▼
                                              entrypoint._download_chroma_db → /app/data/chroma_db
@@ -60,14 +60,14 @@ barclays_tech_sector_2026.pdf
 ```bash
 # один файл
 gsutil cp goldman_sachs_equity_outlook_Q3_2026.pdf \
-    gs://ramp-bot-chroma-db-inbox/          # бакет-триггер Cloud Function
+    gs://ramp-bot-chroma-db-inbox-investadv/          # бакет-триггер Cloud Function
 
 # пачкой
-gsutil -m cp reports/*.pdf gs://ramp-bot-chroma-db-inbox/
+gsutil -m cp reports/*.pdf gs://ramp-bot-chroma-db-inbox-investadv/
 ```
 
 - Cloud Function (`cloud_function/main.py`) срабатывает на загрузку, ингестит PDF, пишет ChromaDB в
-  `gs://ramp-bot-chroma-db/chroma_db/`.
+  `gs://ramp-bot-chroma-db-investadv/chroma_db/`.
 - Бот подхватит на следующем рестарте (или запланируйте рестарт/`--no-traffic` ревизию).
 - **Онлайн быстро и надёжно:** можно повесить `gsutil cp` на Cloud Scheduler + маленький скрапер витрин
   GS/MS/JPM, либо давать аналитикам прямой upload в inbox-бакет (IAM `roles/storage.objectCreator`).
@@ -96,7 +96,7 @@ python scripts/ingest_bank_report.py --list
 Переменные окружения:
 ```
 CHROMA_LOCAL_PATH   локальная папка ChromaDB     (default ./data/chroma_db)
-CHROMA_BUCKET       GCS-бакет для --upload        (default ramp-bot-chroma-db)
+CHROMA_BUCKET       GCS-бакет для --upload        (default ramp-bot-chroma-db-investadv)
 CHROMA_GCS_PREFIX   префикс объекта               (default chroma_db/)
 GOOGLE_APPLICATION_CREDENTIALS  сервис-аккаунт с доступом к бакету (для --upload)
 ```

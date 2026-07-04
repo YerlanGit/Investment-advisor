@@ -51,7 +51,7 @@
 
 ```
 entrypoint._download_chroma_db()                 (буте контейнера)
-  gs://ramp-bot-chroma-db/chroma_db/* → /app/data/chroma_db     [entrypoint.py:31-80]
+  gs://ramp-bot-chroma-db-investadv/chroma_db/* → /app/data/chroma_db     [entrypoint.py:31-80]
         │
 tg_bot._fetch_rag_context(results)                              [tg_bot.py:565-629]
   FinancialRAG(db_path=$CHROMA_LOCAL_PATH || /app/data/chroma_db)
@@ -183,7 +183,7 @@ Smart-Money и RAG нет.
    pip install pymupdf4llm chromadb google-cloud-storage
    python scripts/ingest_bank_report.py reports/goldman_sachs_equity_outlook_Q3_2026.pdf --upload
    python scripts/ingest_bank_report.py --list   # проверить: банк, дата, chunks
-   # способ A (авто): gsutil cp reports/*.pdf gs://ramp-bot-ingest/
+   # способ A (авто): gsutil cp reports/*.pdf gs://ramp-bot-chroma-db-inbox-investadv/
    ```
    Имена файлов — по конвенции `<bank>_<theme>_<Q#|month>_<YYYY>.pdf` (иначе свежесть возьмётся
    из mtime и recency-ранжирование поедет).

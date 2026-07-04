@@ -117,7 +117,7 @@ steps:
       # here makes the premium routing persistent across every redeploy.  The
       # render path still falls back to v3 on any premium error (see
       # html_renderer.render_report_html), so this is safe to ship.
-      - --set-env-vars=REPORT_BUCKET_NAME=ramp-bot-reports,CHROMA_BUCKET=ramp-bot-chroma-db,TOKENOMICS_DB_PATH=/mnt/state/tokenomics.db,VAULT_DB_PATH=/mnt/state/users_vault.db,REPORTING_CURRENCY=USD,ADMIN_USER_IDS=148046720,PREMIUM_REPORT_ENABLED=true
+      - --set-env-vars=REPORT_BUCKET_NAME=ramp-bot-reports,CHROMA_BUCKET=ramp-bot-chroma-db-investadv,TOKENOMICS_DB_PATH=/mnt/state/tokenomics.db,VAULT_DB_PATH=/mnt/state/users_vault.db,REPORTING_CURRENCY=USD,ADMIN_USER_IDS=148046720,PREMIUM_REPORT_ENABLED=true
 
   # ── Step 5: Deploy the RAG-ingest Cloud Function (M3) ──────────────────────
   # Listens to the DEDICATED, write-controlled ingest bucket (NOT the reports
@@ -151,8 +151,8 @@ steps:
           --source ./cloud_function \
           --entry-point on_pdf_uploaded \
           --trigger-event-filters="type=google.cloud.storage.object.v1.finalized" \
-          --trigger-event-filters="bucket=ramp-bot-ingest" \
-          --set-env-vars CHROMA_BUCKET=ramp-bot-chroma-db \
+          --trigger-event-filters="bucket=ramp-bot-chroma-db-inbox-investadv" \
+          --set-env-vars CHROMA_BUCKET=ramp-bot-chroma-db-investadv \
           --memory 1Gi \
           --timeout 300s \
           --max-instances 1 \
