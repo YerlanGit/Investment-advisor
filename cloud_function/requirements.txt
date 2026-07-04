@@ -1,5 +1,8 @@
 functions-framework==3.*
 google-cloud-storage>=2.16.0
 pymupdf4llm>=0.0.10
-chromadb>=0.5.0
+# Pin ChromaDB to the SAME minor the bot reads with (bot lock: chromadb==0.6.3).
+# An unpinned range let the function write a store schema a newer/older reader
+# (the bot) could parse as empty — the KB looked populated in GCS yet RAG read 0.
+chromadb==0.6.3
 pandas>=2.1.0

@@ -30,6 +30,21 @@
   логи функции (`[Ingest] Added N chunks`), бут-синк бота (только на буте!), env-дрейф, быстрый CLI-обход.
 - **`docs/BANK_RAG_COVE_DIAGNOSIS.md`** — рекомендации P1/D-4/D-5 из раунда закрыты (см. статус в самом файле).
 
+### RAG-4: STORE пуст, хотя PDF в INBOX и триггер настроен вручную — **надёжный fix**
+> Прод: бакеты в `europe-west3`, STORE `ramp-bot-chroma-db-investadv` ПУСТ несмотря на ручной триггер.
+> Диагноз: Cloud Function → Eventarc — хрупкая цепочка (регион триггера ≠ регион бакета; embedding-модель
+> не «запечена» в функции и качается в рантайме; `cloud_function/rag_engine.py` был устаревшей копией
+> src на 112 строк).
+
+| Узел | Было | Стало |
+|---|---|---|
+| **Boot-ingest бота (путь B)** | RAG зависел ТОЛЬКО от Cloud Function/Eventarc | `entrypoint._boot_ingest_from_inbox` (daemon-поток, не блокирует health-probe): если STORE пуст, а в INBOX есть PDF — бот ингестит **в контейнере** (там deps + pre-baked ONNX-модель + запиненный chromadb) и публикует базу в STORE. Обходит функцию/регион/скачивание модели. Гейт `RAG_BOOT_INGEST=0`, бакет `RAG_INBOX_BUCKET`. |
+| **Дрейф движка функции** | `cloud_function/rag_engine.py` (29-06, 290 стр.) без секционного чанкинга/метаданных | синхронизирован с `src/agent/rag_engine.py` (402 стр., IDENTICAL). |
+| **Дрейф версии chromadb** | функция `chromadb>=0.5.0` (плавающий) vs бот `==0.6.3` | функция запинена `chromadb==0.6.3` (одинаковая схема записи/чтения). |
+| **Регион (docs)** | не отмечено | `RAG_TROUBLESHOOTING §3`: Eventarc-триггер обязан быть в регионе бакета (europe-west3), иначе события не доходят; путь B региону безразличен. |
+
+Тесты: +7 (`test_phase22_rag_boot`: env-гейт, skip при непустой базе, ингест при пустой, no-raise).
+
 ---
 
 ## −14. Исполнение Roadmap 360-аудита: спринты A/B/C (2026-07-02, раунд 14) — CTO / Lead Quant
