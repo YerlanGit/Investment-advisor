@@ -55,13 +55,18 @@ class FPillarMomentumTest(unittest.TestCase):
 class RegimeMacroOverlayTest(unittest.TestCase):
     """(б) — the FRED overlay nudges the axes with level ⊕ rate-of-change."""
 
-    def _pack(self, gdp_hist, unemp_hist):
-        return {
+    def _pack(self, gdp_hist, unemp_hist, breakeven_hist=None):
+        pack = {
             "gdp_growth":  {"value": gdp_hist[-1], "status": "ok",
                             "history_30d": [{"value": v} for v in gdp_hist]},
             "unemployment": {"value": unemp_hist[-1], "status": "ok",
                              "history_30d": [{"value": v} for v in unemp_hist]},
         }
+        if breakeven_hist is not None:
+            pack["breakeven_inflation"] = {
+                "value": breakeven_hist[-1], "status": "ok",
+                "history_30d": [{"value": v} for v in breakeven_hist]}
+        return pack
 
     def test_series_trend_needs_three_changes(self):
         from finance.regime import series_trend
@@ -75,9 +80,10 @@ class RegimeMacroOverlayTest(unittest.TestCase):
     def test_bullish_macro_tilts_growth_and_cycle_up(self):
         from finance.regime import _macro_nudges, _MACRO_MAX_NUDGE
         # Above-trend accelerating GDP + below-neutral falling unemployment.
-        g, c, diag = _macro_nudges(self._pack(
+        g, c, i, diag = _macro_nudges(self._pack(
             gdp_hist=[2.0, 2.5, 3.0, 3.5], unemp_hist=[4.2, 4.0, 3.9, 3.8]))
         self.assertIsNotNone(g); self.assertIsNotNone(c)
+        self.assertIsNone(i)                # no breakeven series → no nudge
         self.assertGreater(g, 0.0)          # strong growth → +growth axis
         self.assertGreater(c, 0.0)          # tight labour → +cycle axis
         self.assertLessEqual(abs(g), _MACRO_MAX_NUDGE + 1e-9)   # bounded
@@ -88,9 +94,62 @@ class RegimeMacroOverlayTest(unittest.TestCase):
         from finance.regime import _macro_nudges
         # Same level, but a RISING unemployment trend must lower the cycle nudge
         # vs a falling one (rate-of-change matters, not just the spot value).
-        _, c_falling, _ = _macro_nudges(self._pack([2.0]*4, [4.3, 4.1, 4.0, 3.9]))
-        _, c_rising,  _ = _macro_nudges(self._pack([2.0]*4, [3.5, 3.7, 3.8, 3.9]))
+        _, c_falling, _, _ = _macro_nudges(self._pack([2.0]*4, [4.3, 4.1, 4.0, 3.9]))
+        _, c_rising,  _, _ = _macro_nudges(self._pack([2.0]*4, [3.5, 3.7, 3.8, 3.9]))
         self.assertGreater(c_falling, c_rising)
+
+    # ── (2026-07-04) Inflation-expectations nudge: level ⊕ темп → growth axis ─
+
+    def test_rising_breakeven_pulls_growth_down(self):
+        """Re-anchoring UP (темп +) must produce a LOWER inflation nudge than
+        drifting down — the rate-of-change matters, not just the spot value."""
+        from finance.regime import _macro_nudges, _MACRO_MAX_NUDGE
+        flat = [2.0] * 4
+        _, _, i_up, diag_up = _macro_nudges(
+            self._pack(flat, [4.0]*4, breakeven_hist=[2.0, 2.1, 2.25, 2.4]))
+        _, _, i_dn, _ = _macro_nudges(
+            self._pack(flat, [4.0]*4, breakeven_hist=[2.4, 2.25, 2.1, 2.0]))
+        self.assertIsNotNone(i_up)
+        self.assertIsNotNone(i_dn)
+        self.assertLess(i_up, i_dn)                 # heating > cooling penalty
+        self.assertLess(i_up, 0.0)                  # above-target AND rising → drag
+        self.assertLessEqual(abs(i_up), _MACRO_MAX_NUDGE + 1e-9)   # bounded
+        self.assertLessEqual(abs(i_dn), _MACRO_MAX_NUDGE + 1e-9)
+        self.assertIn("macro_breakeven_trend", diag_up)
+
+    def test_anchored_breakeven_is_near_neutral(self):
+        """Expectations parked at the 2% target with no drift ≈ no tilt."""
+        from finance.regime import _macro_nudges
+        _, _, i, _ = _macro_nudges(
+            self._pack([2.0]*4, [4.0]*4, breakeven_hist=[2.0]*6))
+        self.assertIsNotNone(i)
+        self.assertAlmostEqual(i, 0.0, places=6)
+
+    def test_inflation_nudge_joins_growth_axis_in_classify(self):
+        """End-to-end: classify() must fold the inflation nudge into the GROWTH
+        component list (signal key macro_inflation_nudge) when the pack has a
+        usable breakeven series, and stay silent without one."""
+        import numpy as np
+        import pandas as pd
+        from finance.regime import RegimeClassifier
+        idx = pd.bdate_range("2025-06-01", periods=200)
+        rng = np.random.default_rng(7)
+        base = pd.DataFrame({
+            "SPY.US": 100 * np.cumprod(1 + rng.normal(0.0006, 0.01, 200)),
+            "IEF.US": 100 * np.cumprod(1 + rng.normal(0.0001, 0.004, 200)),
+            "IWM.US": 100 * np.cumprod(1 + rng.normal(0.0005, 0.012, 200)),
+        }, index=idx)
+        pack = self._pack([2.5, 2.6, 2.7, 2.8], [4.2, 4.1, 4.0, 3.9],
+                          breakeven_hist=[2.1, 2.2, 2.3, 2.4, 2.5])
+        r = RegimeClassifier().classify(base, macro=pack)
+        self.assertIsNotNone(r)
+        self.assertIn("macro_inflation_nudge", r.signals)
+        # Hot, re-anchoring-up expectations → the nudge drags growth down.
+        self.assertLess(r.signals["macro_inflation_nudge"], 0.0)
+        # Without the breakeven series the signal must be absent.
+        r_no = RegimeClassifier().classify(
+            base, macro=self._pack([2.5, 2.6, 2.7, 2.8], [4.2, 4.1, 4.0, 3.9]))
+        self.assertNotIn("macro_inflation_nudge", r_no.signals)
 
     def test_overlay_env_gate(self):
         from finance.regime import _macro_overlay_enabled

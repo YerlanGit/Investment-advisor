@@ -71,12 +71,22 @@ def _wrap_untrusted(label: str, payload: str) -> str:
 _SENTENCE_END_RE = re.compile(r"[\.\!\?…](?:\s|\)|\]|$)")
 
 
-def _soft_trim(text: str, max_chars: int) -> str:
+def _soft_trim(text: str, max_chars: int, *, allow_grace: bool = True) -> str:
     """
     Trim ``text`` to ``max_chars`` characters, ending at the LAST complete
-    sentence boundary inside the budget.  If the candidate would lose more
-    than 50% of the budget, fall back to a hard cut + ellipsis so the
-    truncation is at least visually marked, not silent.
+    sentence boundary inside the budget.
+
+    Audit 2026-07-04 (completion grace): the owner's reports kept showing a
+    dangling «…это компромисс, а…» whenever the model overshot the budget by a
+    few words — the sentence straddling the cap was amputated.  Now, when no
+    acceptable boundary fits the budget, the sentence CROSSING the cap is kept
+    WHOLE if it finishes within a bounded grace window (≤ +25% of the budget,
+    40–120 chars) — a complete thought slightly over budget beats a marked
+    truncation.  Runaway sentences longer than the grace still fall back to a
+    word-boundary cut + ellipsis so truncation stays visually marked.
+
+    ``allow_grace=False`` keeps the STRICT budget (no overrun) for the cover
+    verdict / plain-summary, whose boxes have a hard layout ceiling.
     """
     if not text:
         return ""
@@ -90,6 +100,19 @@ def _soft_trim(text: str, max_chars: int) -> str:
         # Strip trailing whitespace after the boundary char.
         candidate = head[:end].rstrip()
         if len(candidate) >= max_chars // 2:
+            return candidate
+    # Completion grace: finish the straddling sentence if it ends soon enough.
+    if allow_grace:
+        grace = min(120, max(40, max_chars // 4))
+        m2 = _SENTENCE_END_RE.search(s, max(0, max_chars - 1))
+        if m2 and m2.end() <= max_chars + grace:
+            return s[:m2.end()].rstrip()
+    # The straddling sentence runs away past the grace — prefer the COMPLETE
+    # in-budget sentence(s) even if short-ish (≥25% of budget) over a dangling
+    # clause; only then hard-fall to the marked word-cut.
+    if matches:
+        candidate = head[:matches[-1].end()].rstrip()
+        if len(candidate) >= max_chars // 4:
             return candidate
     # Audit 2026-06-14: no sentence boundary in budget → cut at the last WORD
     # boundary, never mid-word.  The prod reports showed «увеличивать Fi…»,
@@ -1559,6 +1582,10 @@ def generate_narrative(results: dict, tier: str = "base",
         # the SAME strings the report renders (post strip + soft-trim).
         _regime_cmt = _comment("ai_regime_comment", 400 if tier == "deep" else 250)
         _factor_cmt = _comment("ai_factor_comment", 900 if tier == "deep" else 250)
+        # Audit 2026-07-04: the effect comment summarises the 8-card «Ожидаемый
+        # эффект» grid AND its trade-off caveat — 250 chars amputated the caveat
+        # («…это компромисс, а…») on every DEEP run.  Same headroom as regime.
+        _effect_cmt = _comment("ai_effect_comment", 400 if tier == "deep" else 250)
         _rc = _regime_confirmation()
 
         # RAG audit trail — count report-backed [RAG:file] citations vs. bank
@@ -1566,16 +1593,19 @@ def generate_narrative(results: dict, tier: str = "base",
         # actually reads.  Feeds the CoVe "ИИ-цитирование банков" checker.
         _cite = _count_rag_citations(
             [verdict, plain_summary, plan_txt, impact_txt, *bullets,
-             _regime_cmt, _factor_cmt, _rc.get("summary", "")]
+             _regime_cmt, _factor_cmt, _effect_cmt, _rc.get("summary", "")]
             + [_comment(k) for k in (
                 "ai_risk_comment", "ai_holdings_comment", "ai_4pillar_comment",
-                "ai_stress_comment", "ai_action_comment", "ai_effect_comment")])
+                "ai_stress_comment", "ai_action_comment")])
 
         return {
             # Sprint-5.3 (замечание 1): hard length cut so the cover verdict
-            # stays short even if the model overruns — was 300/400.
-            "verdict":                  _soft_trim(verdict, 150),
-            "plain_summary":            _soft_trim(plain_summary, 230),
+            # stays short even if the model overruns — was 300/400.  These two
+            # cover fields keep the STRICT budget (allow_grace=False): the
+            # headline boxes have a fixed layout ceiling, unlike the body
+            # section comments where a slightly-over complete thought is better.
+            "verdict":                  _soft_trim(verdict, 150, allow_grace=False),
+            "plain_summary":            _soft_trim(plain_summary, 230, allow_grace=False),
             "bullets":                  bullets[:7 if tier == "deep" else 4],
             "action_plan_text":         _soft_trim(plan_txt, 1000) if tier == "deep" else "",
             "ai_action_impact":         _soft_trim(impact_txt, 400) if tier == "deep" else "",
@@ -1604,7 +1634,7 @@ def generate_narrative(results: dict, tier: str = "base",
             "ai_4pillar_comment":       _comment("ai_4pillar_comment"),
             "ai_stress_comment":        validate_stress_comment(_comment("ai_stress_comment")),
             "ai_action_comment":        _comment("ai_action_comment"),
-            "ai_effect_comment":        _comment("ai_effect_comment"),
+            "ai_effect_comment":        _effect_cmt,
             # Sprint-5 margin/leverage trigger output — only the AI fills this
             # (empty when the book is unlevered; the template hides it then).
             "ai_leverage_warning":      _comment("ai_leverage_warning", 260),

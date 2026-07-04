@@ -240,6 +240,30 @@ class SoftTrimTest(unittest.TestCase):
         self.assertLessEqual(len(out), 31)            # +1 for ellipsis char
         self.assertTrue(out.endswith("…"))
 
+    def test_completion_grace_keeps_straddling_sentence(self) -> None:
+        """2026-07-04: a sentence CROSSING the budget that finishes within the
+        grace window (≤ +25%, 40–120 chars) is kept WHOLE — no more dangling
+        «…это компромисс, а…» on modest model overruns."""
+        from ai_narrative import _soft_trim
+        first = "Портфель перегружен техом."                       # 26 < 100//2
+        tail  = (" Урезание NVDA поднимет концентрацию остальных — "
+                 "это компромисс, а не гарантированный выигрыш.")
+        s = first + tail                                            # ≈122 chars
+        out = _soft_trim(s, 100)   # overrun ≈22 ≤ grace(40) → whole thought
+        self.assertEqual(out, s)
+        self.assertFalse(out.endswith("…"))
+
+    def test_runaway_sentence_prefers_complete_inbudget_sentence(self) -> None:
+        """A straddling sentence longer than the grace must not bloat the
+        output — fall back to the COMPLETE in-budget sentence, not a dangling
+        clause with an ellipsis."""
+        from ai_narrative import _soft_trim
+        first = "Портфель перегружен техом."                       # 26 ≥ 100//4
+        s = first + " " + "бесконечная мысль без знаков препинания " * 20
+        out = _soft_trim(s, 100)
+        self.assertEqual(out, first)
+        self.assertFalse(out.endswith("…"))
+
 
 # ── #7: Beta NaN robustness in pdf_payload ─────────────────────────────────
 
