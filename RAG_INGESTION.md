@@ -129,9 +129,17 @@ python scripts/ingest_bank_report.py --list
 
 ## 5. Частые проблемы
 
+> **PDF залиты, но отчёт всё равно пуст?** → полный 8-шаговый runbook: **`docs/RAG_TROUBLESHOOTING.md`**
+> (сверка имён бакетов INBOX↔STORE, деплой/триггер функции, логи ингеста, бут-синк бота, env-дрейф).
+
+**Два разных бакета — не путать:** PDF льют в **INBOX** `ramp-bot-chroma-db-inbox-investadv`
+(его слушает Cloud Function); собранная база ChromaDB лежит в **STORE** `ramp-bot-chroma-db-investadv`
+(её бот тянет на буте). PDF, положенный в STORE, никто не ингестит.
+
 | Симптом | Причина | Решение |
 |---|---|---|
-| `RAG not available` в отчёте | база пуста / не синкнулась | залить PDF (2A/2B), проверить `--list`, рестартнуть бот |
+| `RAG not available` в отчёте | база пуста / не синкнулась / **бот не рестартовали** (синк только на буте) | залить PDF в INBOX (2A/2B), проверить, что функция отработала, **рестартнуть бот**; см. `RAG_TROUBLESHOOTING.md` |
+| PDF в GCS, триггера нет | залито НЕ в INBOX-бакет / имена рассинхронены | `gcloud storage ls gs://ramp-bot-chroma-db-inbox-investadv/`; перезалить в INBOX |
 | Неверная дата записки | в имени нет года | переименовать по конвенции §1 |
 | `bank = Unknown` | банк не распознан | добавить в имя файла или `--bank "…"` |
 | `No module named 'pymupdf4llm'` | нет ingest-зависимости | `pip install pymupdf4llm` (нужен только для ингеста) |
@@ -140,4 +148,5 @@ python scripts/ingest_bank_report.py --list
 ---
 
 **Файлы:** `src/agent/rag_engine.py` (движок RAG), `scripts/ingest_bank_report.py` (админ-CLI),
-`cloud_function/` (авто-ингест по GCS-триггеру), `src/entrypoint.py` (синк ChromaDB из GCS на буте).
+`cloud_function/` (авто-ингест по GCS-триггеру), `src/entrypoint.py` (синк ChromaDB из GCS на буте),
+`docs/RAG_TROUBLESHOOTING.md` (диагностика пустой базы).
