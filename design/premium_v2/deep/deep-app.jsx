@@ -82,11 +82,25 @@ const Footer = () => {
           <div className="max-w-[560px]">
             <div className="text-[10px] tracking-widest uppercase text-ink-400 font-mono mb-3">Контроль качества данных</div>
             <div className="flex flex-wrap gap-2">
-              {p.quality.map((q,i) => (
-                <span key={i} className="flex items-center gap-1.5 text-[10px] font-mono text-ink-600 bg-cream-50 border border-ink-900/6 rounded-full px-2.5 py-1">
-                  <span className="text-sage-600 font-bold">✓</span> {q}
-                </span>
-              ))}
+              {p.quality.map((q,i) => {
+                // Audit 2026-07-04: each quality string already carries its OWN
+                // status symbol («✓ …» / «✗ …» / «⚠ …» / «— …»).  The footer used
+                // to HARDCODE a green ✓ in front, so an «✗ RAG» pill rendered as
+                // «✓ ✗ RAG» (double symbol, green on a failure).  Colour the
+                // string's own leading symbol instead — honest for every state.
+                const s = String(q).trim();
+                const sym = s.charAt(0);
+                const rest = s.slice(1).trim();
+                const cls = sym === '✗' ? 'text-rust-600'
+                          : sym === '⚠' ? 'text-gold-700'
+                          : sym === '—' ? 'text-ink-400'
+                          : 'text-sage-600';
+                return (
+                  <span key={i} className="flex items-center gap-1.5 text-[10px] font-mono text-ink-600 bg-cream-50 border border-ink-900/6 rounded-full px-2.5 py-1">
+                    <span className={`${cls} font-bold`}>{sym}</span> {rest}
+                  </span>
+                );
+              })}
             </div>
           </div>
           <div className="flex items-center gap-2 flex-wrap">

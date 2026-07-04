@@ -2902,12 +2902,20 @@ const Footer = () => {
     className: "text-[10px] tracking-widest uppercase text-ink-400 font-mono mb-3"
   }, "Контроль качества данных"), /*#__PURE__*/React.createElement("div", {
     className: "flex flex-wrap gap-2"
-  }, p.quality.map((q, i) => /*#__PURE__*/React.createElement("span", {
-    key: i,
-    className: "flex items-center gap-1.5 text-[10px] font-mono text-ink-600 bg-cream-50 border border-ink-900/6 rounded-full px-2.5 py-1"
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "text-sage-600 font-bold"
-  }, "✓"), " ", q)))), /*#__PURE__*/React.createElement("div", {
+  }, p.quality.map((q, i) => {
+    // Audit 2026-07-04: colour each pill's OWN leading status symbol instead of
+    // hardcoding a green ✓ (which rendered «✓ ✗ RAG» / «✓ ⚠ …» — double symbol).
+    const s = String(q).trim();
+    const sym = s.charAt(0);
+    const rest = s.slice(1).trim();
+    const cls = sym === '✗' ? 'text-rust-600' : sym === '⚠' ? 'text-gold-700' : sym === '—' ? 'text-ink-400' : 'text-sage-600';
+    return /*#__PURE__*/React.createElement("span", {
+      key: i,
+      className: "flex items-center gap-1.5 text-[10px] font-mono text-ink-600 bg-cream-50 border border-ink-900/6 rounded-full px-2.5 py-1"
+    }, /*#__PURE__*/React.createElement("span", {
+      className: cls + " font-bold"
+    }, sym), " ", rest);
+  }))), /*#__PURE__*/React.createElement("div", {
     className: "flex items-center gap-2 flex-wrap"
   }, /*#__PURE__*/React.createElement("button", {
     className: "flex items-center gap-1.5 px-4 py-2 rounded-full bg-white border border-ink-900/8 text-ink-700 text-[12px] font-medium hover:bg-cream-50 transition"

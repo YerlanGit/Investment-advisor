@@ -66,6 +66,31 @@ class NarrativeRAGTest(unittest.TestCase):
         empty = "Foo [RAG: anywhere.pdf] bar"
         self.assertNotIn("RAG:", _strip_unverified_rag_citations(empty, ""))
 
+    def test_count_rag_citations_distinguishes_file_vs_bank(self) -> None:
+        """The narrative audit must tell report-backed [RAG:file] citations
+        apart from bank consensus the model surfaced from memory."""
+        from ai_narrative import _count_rag_citations
+        texts = [
+            "Value undervalued [RAG: goldman_q1.pdf] and [RAG: jpm_2026.pdf].",
+            "Goldman и JPMorgan осторожны; Barclays советует value.",
+            "Морган Стэнли не считается; MSFT — не банк.",  # bare MS/ticker ignored
+        ]
+        out = _count_rag_citations(texts)
+        self.assertEqual(out["file_cites"], 2)             # two [RAG:file] tags
+        # Distinct issuers by prose name: Goldman, JPMorgan, Barclays.
+        self.assertEqual(out["bank_cites"], 3)
+        self.assertIn("Goldman Sachs", out["banks"])
+        self.assertIn("JPMorgan", out["banks"])
+        self.assertIn("Barclays", out["banks"])
+        # A bare "MSFT" ticker must NOT be read as Morgan Stanley.
+        self.assertNotIn("Morgan Stanley", out["banks"])
+
+    def test_count_rag_citations_bracket_tags(self) -> None:
+        from ai_narrative import _count_rag_citations
+        out = _count_rag_citations(["Консенсус [GS]/[JPM]/[Barclays] по циклу."])
+        self.assertEqual(out["file_cites"], 0)
+        self.assertEqual(out["bank_cites"], 3)
+
     def test_fallback_returns_used_rag_false(self) -> None:
         prev = os.environ.pop("ANTHROPIC_API_KEY", None)
         try:
@@ -263,8 +288,14 @@ class RAGContextSilenceTest(unittest.TestCase):
             self.skipTest(f"tg_bot import unavailable in this env: {exc!r}")
             return
         # Empty results dict — performance_table is None → no tickers.
+        # Contract (2026-07-04): returns a 4-tuple
+        # (market_context, regime_confirm, rag_status, kb_stats).
         out = _fetch_rag_context({"performance_table": None})
-        self.assertEqual(out, "")
+        self.assertIsInstance(out, tuple)
+        self.assertEqual(out[0], "")                       # empty market_context
+        self.assertIn(out[2], ("unavailable", "no_match"))  # 3-state flag
+        self.assertIn("docs", out[3])                      # KB inventory present
+        self.assertIn("chunks", out[3])
 
 
 if __name__ == "__main__":

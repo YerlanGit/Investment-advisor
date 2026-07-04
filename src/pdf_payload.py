@@ -1871,24 +1871,56 @@ def _build_integrity_checks(results: dict,
     # 6. RAG (bank research retrieval) — 3-state status from the backend so the
     # panel never shows the misleading binary "не использован" for a portfolio
     # that simply had no matching bank report (or an empty knowledge base).
-    rag_status  = (ai_summary or {}).get("rag_status")
-    rag_context = (ai_summary or {}).get("rag_context") or ""
+    _ai = ai_summary or {}
+    rag_status  = _ai.get("rag_status")
+    rag_context = _ai.get("rag_context") or ""
     # _fetch_rag_context joins sections with "\n\n"; count non-blank
     # paragraphs as approximate snippet count (header lines included).
     snippets    = (sum(1 for p in rag_context.split("\n\n") if p.strip())
                    if rag_context else 0)
+    # KB inventory (2026-07-04): show how many bank PDFs / chunks the store holds
+    # so «RAG видит отчёты» is provable, not a bare flag.
+    _kb_docs   = int(_ai.get("rag_kb_docs", 0) or 0)
+    _kb_chunks = int(_ai.get("rag_kb_chunks", 0) or 0)
+    _kb = f"{_kb_docs} отчётов · {_kb_chunks} чанков"
     if rag_status is None:   # back-compat with summaries that predate rag_status
-        rag_status = "used" if (ai_summary or {}).get("used_rag") else "no_match"
+        rag_status = "used" if _ai.get("used_rag") else "no_match"
     if rag_status == "used":
-        _rag_icon, _rag_detail = "✓", f"ChromaDB · cosine ≥0.72 · ~{snippets} отрывков"
+        _rag_icon = "✓"
+        _rag_detail = f"ChromaDB · cosine ≥0.72 · прочитано ~{snippets} отрывков из {_kb}"
     elif rag_status == "no_match":
-        _rag_icon, _rag_detail = "—", "запрошен — релевантных отчётов не найдено"
+        _rag_icon, _rag_detail = "—", f"база {_kb} · релевантных отчётов не найдено"
     else:  # "unavailable"
-        _rag_icon, _rag_detail = "✗", "база недоступна / пуста"
+        _rag_icon, _rag_detail = "✗", f"база недоступна / пуста ({_kb})"
     checks.append({
         "status": _rag_icon,
         "label":  "RAG: банк. отчёты",
         "detail": _rag_detail,
+    })
+
+    # 6b. AI-citation audit — did the narrative actually reference bank research,
+    # and was it report-backed ([RAG:file], verified) or bank consensus from the
+    # model's memory (allowed with an empty KB, but NOT proof a report was read)?
+    _have_ai   = bool(_ai.get("verdict") or _ai.get("bullets"))
+    _file_cite = int(_ai.get("rag_file_citations", 0) or 0)
+    _bank_cite = int(_ai.get("rag_bank_citations", 0) or 0)
+    _banks     = ", ".join(str(b) for b in (_ai.get("rag_cited_banks") or [])[:3])
+    _used_rag  = rag_status == "used"
+    if not _have_ai:
+        _ci_icon, _ci_detail = "—", "AI не вызывался"
+    elif _file_cite > 0:
+        _ci_icon, _ci_detail = "✓", f"{_file_cite} проверенных [RAG]-цитат из отчётов"
+    elif _bank_cite > 0 and _used_rag:
+        _ci_icon, _ci_detail = "✓", f"{_bank_cite} ссылок на банки ({_banks}) · RAG активна"
+    elif _bank_cite > 0 and not _used_rag:
+        _ci_icon = "⚠"
+        _ci_detail = f"{_bank_cite} ссылок на банки ({_banks}) из знаний модели — не подтв. отчётами"
+    else:
+        _ci_icon, _ci_detail = "✓", "без ссылок на банки (Quant Engine/SEC/FRED)"
+    checks.append({
+        "status": _ci_icon,
+        "label":  "ИИ↔банк-аналитика",
+        "detail": _ci_detail,
     })
 
     # 7. AI model attribution
