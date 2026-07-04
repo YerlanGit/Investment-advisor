@@ -562,26 +562,38 @@ def _safe_float(val, default: float = 0.0) -> float:
         return default
 
 
-def _fetch_rag_context(results: dict) -> tuple[str, list[str]]:
+def _fetch_rag_context(results: dict) -> tuple[str, list[str], str, dict]:
     """
     Pull macro + micro RAG excerpts for the AI narrative (deep tier only).
     Also queries for regime confirmation from bank reports.
 
-    Returns (market_context_str, regime_rag_confirm_list, rag_status).
+    Returns (market_context_str, regime_rag_confirm_list, rag_status, kb_stats).
 
     rag_status is a 3-state flag so the UI can tell the user the truth instead
     of a misleading binary "не использован":
       • "unavailable" — ChromaDB empty or unreachable (RAG never queried)
       • "no_match"    — queried, but no bank report cleared the similarity gate
       • "used"        — relevant bank context was retrieved and fed to the model
+
+    kb_stats = {"docs": <distinct source PDFs in ChromaDB>, "chunks": <embeddings>}
+    surfaces how much bank research the knowledge base actually holds, so the
+    CoVe panel can prove "RAG sees N reports / M chunks" instead of a bare flag.
     """
+    _empty_stats = {"docs": 0, "chunks": 0}
     try:
         from agent.rag_engine import FinancialRAG
         rag = FinancialRAG(db_path=os.environ.get("CHROMA_LOCAL_PATH",
                                                    "/app/data/chroma_db"))
-        if rag.collection.count() == 0:
+        n_chunks = int(rag.collection.count())
+        if n_chunks == 0:
             logger.info("RAG database empty — narrative will run without bank context.")
-            return "", [], "unavailable"
+            return "", [], "unavailable", _empty_stats
+        # Distinct ingested bank PDFs (source filenames) — the "reports read" count.
+        try:
+            n_docs = len(rag.list_documents())
+        except Exception:
+            n_docs = 0
+        kb_stats = {"docs": n_docs, "chunks": n_chunks}
 
         perf = results.get("performance_table")
         tickers: list[str] = []
@@ -623,10 +635,10 @@ def _fetch_rag_context(results: dict) -> tuple[str, list[str]]:
             sections.append("=== MICRO INSIGHTS ===\n" + micro_ctx)
         ctx = "\n\n".join(sections)
         # Queried successfully — "used" iff something cleared the gate.
-        return ctx, regime_rag_confirm, ("used" if ctx else "no_match")
+        return ctx, regime_rag_confirm, ("used" if ctx else "no_match"), kb_stats
     except Exception as exc:
         logger.info("RAG context fetch skipped: %s", exc)
-        return "", [], "unavailable"
+        return "", [], "unavailable", _empty_stats
 
 
 def _build_pdf_payload(results: dict, tier: str,
@@ -648,7 +660,7 @@ def _build_pdf_payload(results: dict, tier: str,
         # Both tiers pull RAG context (macro + micro + regime confirmation).
         # Deep tier gets full 6000-char context; base tier gets 2000-char
         # version (truncated in ai_narrative) to keep latency reasonable.
-        market_context, regime_rag_confirm, rag_status = _fetch_rag_context(results)
+        market_context, regime_rag_confirm, rag_status, rag_kb = _fetch_rag_context(results)
 
         ai_summary = generate_narrative(
             results,
@@ -660,6 +672,10 @@ def _build_pdf_payload(results: dict, tier: str,
         # panel shows the truth (used / queried-no-match / unavailable) for
         # BOTH tiers — not just deep, and not the misleading binary.
         ai_summary["rag_status"] = rag_status
+        # KB inventory (distinct PDFs + chunk embeddings) so the CoVe/quality
+        # panels can prove HOW MUCH bank research RAG actually holds and read.
+        ai_summary["rag_kb_docs"]   = int((rag_kb or {}).get("docs", 0) or 0)
+        ai_summary["rag_kb_chunks"] = int((rag_kb or {}).get("chunks", 0) or 0)
         payload = _build_v2_payload(
             results, tier,
             ai_summary=ai_summary,

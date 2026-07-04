@@ -328,14 +328,70 @@ def _stress_status(results: dict) -> dict:
 
 
 def _rag_status(ai_summary: Optional[dict]) -> dict:
-    used = bool((ai_summary or {}).get("used_rag"))
+    """Retrieval row — proves HOW MUCH bank research the KB holds and whether it
+    was actually read on this run (docs/chunks inventory + retrieved snippets),
+    using the 3-state rag_status instead of the old misleading binary."""
+    a = ai_summary or {}
+    rag_status = a.get("rag_status")
+    if rag_status is None:   # back-compat with summaries predating rag_status
+        rag_status = "used" if a.get("used_rag") else "missing"
+    docs   = int(a.get("rag_kb_docs", 0) or 0)
+    chunks = int(a.get("rag_kb_chunks", 0) or 0)
+    ctx    = a.get("rag_context") or ""
+    snippets = sum(1 for p in ctx.split("\n\n") if p.strip()) if ctx else 0
+    kb = f"база: {docs} отчётов · {chunks} чанков"
+    if rag_status == "used":
+        status, note = "ok", f"прочитано {snippets} отрывков · {kb}"
+    elif rag_status == "no_match":
+        status, note = "warn", f"{kb} · релевантных под портфель не найдено"
+    else:  # unavailable / missing — база пуста или недоступна
+        status = "missing"
+        note   = (f"{kb} — база пуста/недоступна, отчёты не читались"
+                  if chunks == 0 else f"{kb} · RAG не запрашивался")
     return _row(
         name   = "Bank RAG (выдержки)",
         source = "ChromaDB · GS / MS / JPM PDF reports",
-        method = "cosine similarity retrieval",
-        status = "ok" if used else "missing",
-        note   = "" if used else "RAG not requested / not available",
+        method = "cosine similarity retrieval (semantic 0.6 ⊕ recency 0.4)",
+        status = status,
+        note   = note,
     )
+
+
+def _rag_citation_status(ai_summary: Optional[dict]) -> dict:
+    """Audit whether the NARRATIVE actually referenced bank research, and of
+    what kind — a verified [RAG:file] citation (report was truly read) vs. bank
+    consensus the model surfaced from its own training memory (allowed by the
+    prompt even with an empty KB, but NOT proof a report was read).  This is the
+    checker the owner asked for: «если ИИ ссылается на отчёты — это чекается»."""
+    a = ai_summary or {}
+    have_ai = bool(a.get("verdict") or a.get("bullets"))
+    name   = "ИИ-цитирование банк-аналитики"
+    source = "CoVe · аудит ссылок нарратива"
+    method = "[RAG:файл] (проверено RAG) vs. банк-консенсус из знаний модели"
+    if not have_ai:
+        return _row(name=name, source=source, method=method,
+                    status="missing", note="AI не вызывался")
+    rag_status = a.get("rag_status") or ("used" if a.get("used_rag") else "missing")
+    used       = rag_status == "used"
+    file_cites = int(a.get("rag_file_citations", 0) or 0)
+    bank_cites = int(a.get("rag_bank_citations", 0) or 0)
+    banks      = [str(b) for b in (a.get("rag_cited_banks") or [])]
+    banks_str  = ", ".join(banks[:4])
+    if file_cites > 0:
+        note = f"{file_cites} проверенных [RAG]-цитат из ингестированных отчётов"
+        note += f" · {banks_str}" if banks_str else ""
+        status = "ok"
+    elif bank_cites > 0 and used:
+        status = "ok"
+        note   = f"ИИ сослался на {bank_cites} банк(ов) ({banks_str}) · база RAG активна"
+    elif bank_cites > 0 and not used:
+        status = "warn"
+        note   = (f"ИИ сослался на {bank_cites} банк(ов) ({banks_str}) из общих знаний "
+                  "модели — база RAG пуста, цитаты НЕ подтверждены отчётами")
+    else:
+        status = "ok"
+        note   = "модель не ссылалась на банк-аналитику (источники — Quant Engine/SEC/FRED)"
+    return _row(name=name, source=source, method=method, status=status, note=note)
 
 
 def _ai_status(ai_summary: Optional[dict]) -> dict:
@@ -567,8 +623,9 @@ def build_lineage(results: dict,
     # "missing" until SMART_MONEY_INSIDERS=1 wires a provider.
     rows.append(_smart_money_status(results))
 
-    # Bank RAG + AI narrative.
+    # Bank RAG (retrieval inventory) + AI-citation audit + AI narrative.
     rows.append(_rag_status(ai_summary))
+    rows.append(_rag_citation_status(ai_summary))
     rows.append(_ai_status(ai_summary))
 
     # BLOCK 4.8: explicit LLM verification rows — the narrative's

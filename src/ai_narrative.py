@@ -576,6 +576,59 @@ def _strip_unverified_rag_citations(text: str, market_context: str) -> str:
     return re.sub(r"\[RAG:\s*([^\]]+)\]", _keep, text)
 
 
+# ── Bank-citation observability (RAG audit trail) ────────────────────────────
+# The narrative references investment-bank views in two DISTINCT ways and the
+# CoVe panel must tell them apart so the reader knows whether "Goldman says…"
+# came from an actually-ingested report or from the model's own memory:
+#   • [RAG: <file>]  — a claim backed by a RETRIEVED bank PDF (already verified
+#                      against market_context by _strip_unverified_rag_citations,
+#                      so any surviving tag is a TRUE report citation).
+#   • bank name in   — bank CONSENSUS the system prompt explicitly allows the
+#     prose / [GS]     model to surface from training knowledge even when
+#     bracket tags     ChromaDB is empty ("даже без RAG-данных").  NOT proof a
+#                      report was read.
+_RAG_FILE_CITE_RE = re.compile(r"\[RAG:\s*[^\]]+\]")
+# Full, unambiguous issuer names only (bare GS/MS/JPM in prose are dropped —
+# §−14 C-8: «MS» is usually Microsoft/milliseconds, «GS» too generic).
+_BANK_NAME_RE = re.compile(
+    r"\b(Goldman(?:\s+Sachs)?|JP\s?Morgan|JPMorgan|Morgan\s+Stanley|Barclays|"
+    r"Bank\s+of\s+America|BofA|Merrill|UBS|Citigroup|Citibank|Wells\s+Fargo|"
+    r"Deutsche\s+Bank|HSBC)\b", re.IGNORECASE)
+# Bare abbreviations count ONLY inside square-bracket citation tags.
+_BANK_TAG_RE = re.compile(r"\[(GS|MS|JPM|BofA|Barclays|UBS|Citi|HSBC)\b[^\]]*\]")
+
+_BANK_CANON = {
+    "goldman": "Goldman Sachs", "goldman sachs": "Goldman Sachs", "gs": "Goldman Sachs",
+    "jpmorgan": "JPMorgan", "jp morgan": "JPMorgan", "jpmorgan chase": "JPMorgan", "jpm": "JPMorgan",
+    "morgan stanley": "Morgan Stanley", "ms": "Morgan Stanley",
+    "barclays": "Barclays",
+    "bank of america": "Bank of America", "bofa": "Bank of America", "merrill": "Bank of America",
+    "ubs": "UBS", "citigroup": "Citi", "citibank": "Citi", "citi": "Citi",
+    "wells fargo": "Wells Fargo", "deutsche bank": "Deutsche Bank", "hsbc": "HSBC",
+}
+
+
+def _canon_bank(raw: str) -> str:
+    return _BANK_CANON.get(re.sub(r"\s+", " ", str(raw).strip().lower()), str(raw).strip())
+
+
+def _count_rag_citations(texts: list[str]) -> dict:
+    """Count verified [RAG:file] citations and distinct bank-consensus mentions
+    across the FINAL narrative, so the CoVe panel can show the AI's real
+    sourcing (report-backed vs. model-knowledge)."""
+    blob = "  ".join(t for t in texts if t)
+    banks: set[str] = set()
+    for m in _BANK_NAME_RE.finditer(blob):
+        banks.add(_canon_bank(m.group(1)))
+    for m in _BANK_TAG_RE.finditer(blob):
+        banks.add(_canon_bank(m.group(1)))
+    return {
+        "file_cites": len(_RAG_FILE_CITE_RE.findall(blob)),
+        "bank_cites": len(banks),
+        "banks":      sorted(banks),
+    }
+
+
 # ── JSON repair for truncated responses ──────────────────────────────────────
 
 def _repair_truncated_json(raw: str) -> str:
@@ -1502,6 +1555,22 @@ def generate_narrative(results: dict, tier: str = "base",
             ][:6]
             return {"stance": stance, "summary": summary, "signals": signals}
 
+        # Build the per-section comments ONCE so the citation audit below counts
+        # the SAME strings the report renders (post strip + soft-trim).
+        _regime_cmt = _comment("ai_regime_comment", 400 if tier == "deep" else 250)
+        _factor_cmt = _comment("ai_factor_comment", 900 if tier == "deep" else 250)
+        _rc = _regime_confirmation()
+
+        # RAG audit trail — count report-backed [RAG:file] citations vs. bank
+        # consensus the model surfaced from memory, across everything the user
+        # actually reads.  Feeds the CoVe "ИИ-цитирование банков" checker.
+        _cite = _count_rag_citations(
+            [verdict, plain_summary, plan_txt, impact_txt, *bullets,
+             _regime_cmt, _factor_cmt, _rc.get("summary", "")]
+            + [_comment(k) for k in (
+                "ai_risk_comment", "ai_holdings_comment", "ai_4pillar_comment",
+                "ai_stress_comment", "ai_action_comment", "ai_effect_comment")])
+
         return {
             # Sprint-5.3 (замечание 1): hard length cut so the cover verdict
             # stays short even if the model overruns — was 300/400.
@@ -1519,15 +1588,19 @@ def generate_narrative(results: dict, tier: str = "base",
             "ai_risk_comment":          _comment("ai_risk_comment"),
             "ai_benchmark_comment":     _comment("ai_benchmark_comment"),
             "ai_performance_comment":   _comment("ai_performance_comment"),
-            "ai_regime_comment":        _comment("ai_regime_comment"),
+            # Audit 2026-07-04: the DEEP regime/factor comments were truncated
+            # with a trailing «…» on EVERY run because the model overshot the
+            # prompt's ≤220/≤560 guidance and the soft-trim ceiling (250/640)
+            # sat just above it.  Ceilings raised (400/900) so the closing
+            # sentence completes; the boxes are auto-height so no layout risk.
+            "ai_regime_comment":        _regime_cmt,
             "ai_holdings_comment":      _comment("ai_holdings_comment"),
             "ai_sector_comment":        _comment("ai_sector_comment", 200),
             # DEEP factor comment ties BOTH illustrations together (β-radar +
             # variance decomposition) via the 4-step institutional recipe —
             # needs headroom so the closing thought isn't clipped mid-sentence
             # (soft-trim still guards the hard ceiling at a WORD boundary).
-            "ai_factor_comment":        _comment("ai_factor_comment",
-                                                 640 if tier == "deep" else 250),
+            "ai_factor_comment":        _factor_cmt,
             "ai_4pillar_comment":       _comment("ai_4pillar_comment"),
             "ai_stress_comment":        validate_stress_comment(_comment("ai_stress_comment")),
             "ai_action_comment":        _comment("ai_action_comment"),
@@ -1535,7 +1608,13 @@ def generate_narrative(results: dict, tier: str = "base",
             # Sprint-5 margin/leverage trigger output — only the AI fills this
             # (empty when the book is unlevered; the template hides it then).
             "ai_leverage_warning":      _comment("ai_leverage_warning", 260),
-            "regime_confirmation":      _regime_confirmation(),
+            "regime_confirmation":      _rc,
+            # RAG audit trail (2026-07-04): how the narrative sourced bank views
+            # — report-backed [RAG:file] citations vs. bank consensus from model
+            # memory — so the CoVe panel proves whether reports were truly read.
+            "rag_file_citations":       _cite["file_cites"],
+            "rag_bank_citations":       _cite["bank_cites"],
+            "rag_cited_banks":          _cite["banks"],
             # Surface the raw RAG context so integrity_checks can show the
             # actual snippet count.  Without this the integrity pill was
             # hard-wired to "~0 отрывков" even when ChromaDB returned real

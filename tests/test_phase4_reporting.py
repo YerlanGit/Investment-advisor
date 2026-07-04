@@ -1746,6 +1746,52 @@ class DataLineageTest(unittest.TestCase):
         rag_no = next(x for x in rows_no if x["name"] == "Bank RAG (выдержки)")
         self.assertEqual(rag_no["status"], "missing")
 
+    def test_rag_status_surfaces_kb_inventory(self) -> None:
+        """The retrieval row proves HOW MUCH the KB holds and whether it was
+        read (docs/chunks + snippet count), not a bare flag."""
+        from finance.data_lineage import build_lineage
+        # Populated KB, actually used on this run.
+        used = build_lineage(self._full_results(), {
+            "rag_status": "used", "rag_kb_docs": 3, "rag_kb_chunks": 62,
+            "rag_context": "=== MACRO ===\nGS: rotation\n\n=== MICRO ===\nJPM: trim",
+        }, today=date(2026, 5, 17))
+        rag = next(x for x in used if x["name"] == "Bank RAG (выдержки)")
+        self.assertEqual(rag["status"], "ok")
+        self.assertIn("3 отчётов", rag["note"])
+        self.assertIn("62 чанков", rag["note"])
+        self.assertIn("прочитано", rag["note"])
+        # Empty KB → honest "база пуста", отчёты не читались.
+        empty = build_lineage(self._full_results(),
+                              {"rag_status": "unavailable", "rag_kb_docs": 0,
+                               "rag_kb_chunks": 0}, today=date(2026, 5, 17))
+        rag_e = next(x for x in empty if x["name"] == "Bank RAG (выдержки)")
+        self.assertEqual(rag_e["status"], "missing")
+        self.assertIn("0 отчётов", rag_e["note"])
+
+    def test_rag_citation_row_flags_unverified_bank_mentions(self) -> None:
+        """New checker: if the AI cites banks but the KB is empty, the citation
+        is from model memory — flagged warn, NOT presented as report-backed."""
+        from finance.data_lineage import build_lineage
+        # Bank consensus surfaced from memory while RAG is empty → warn.
+        rows = build_lineage(self._full_results(), {
+            "verdict": "v", "bullets": ["b"], "rag_status": "unavailable",
+            "rag_file_citations": 0, "rag_bank_citations": 2,
+            "rag_cited_banks": ["Goldman Sachs", "JPMorgan"],
+        }, today=date(2026, 5, 17))
+        cite = next(x for x in rows if x["name"] == "ИИ-цитирование банк-аналитики")
+        self.assertEqual(cite["status"], "warn")
+        self.assertIn("подтверждены отчётами", cite["note"])
+        self.assertIn("Goldman Sachs", cite["note"])
+        # Verified [RAG:file] citations while KB is used → ok.
+        rows_ok = build_lineage(self._full_results(), {
+            "verdict": "v", "bullets": ["b"], "rag_status": "used",
+            "rag_file_citations": 2, "rag_bank_citations": 1,
+            "rag_cited_banks": ["Goldman Sachs"],
+        }, today=date(2026, 5, 17))
+        cite_ok = next(x for x in rows_ok if x["name"] == "ИИ-цитирование банк-аналитики")
+        self.assertEqual(cite_ok["status"], "ok")
+        self.assertIn("проверенных [RAG]", cite_ok["note"])
+
     def test_lineage_always_returns_stable_schema(self) -> None:
         """Every row has the SAME keys — renderer can iterate without checks."""
         from finance.data_lineage import build_lineage
@@ -2324,6 +2370,35 @@ class IntegrityChecksTest(unittest.TestCase):
         )
         self.assertIsNotNone(rag_check)
         self.assertEqual(rag_check["status"], "—")
+
+    def test_ai_citation_pill_warns_on_unverified_banks(self) -> None:
+        """Integrity panel gains an «ИИ↔банк-аналитика» pill: bank mentions with
+        an empty KB are flagged (⚠), report-backed [RAG] citations pass (✓)."""
+        from pdf_payload import build_payload
+        results = self._base_results()
+        p = build_payload(results, "base", ai_summary={
+            "verdict": "v", "bullets": ["b"], "used_rag": False,
+            "rag_status": "unavailable", "rag_bank_citations": 2,
+            "rag_file_citations": 0, "rag_cited_banks": ["Goldman Sachs", "Barclays"],
+        })
+        pill = next((c for c in p["integrity_checks"]
+                     if c["label"] == "ИИ↔банк-аналитика"), None)
+        self.assertIsNotNone(pill)
+        self.assertEqual(pill["status"], "⚠")
+        self.assertIn("не подтв. отчётами", pill["detail"])
+
+    def test_rag_pill_shows_kb_inventory(self) -> None:
+        from pdf_payload import build_payload
+        results = self._base_results()
+        p = build_payload(results, "base", ai_summary={
+            "verdict": "v", "bullets": ["b"], "rag_status": "used",
+            "rag_context": "=== MACRO ===\nGS rotation", "rag_kb_docs": 4,
+            "rag_kb_chunks": 69, "model_used": "claude-sonnet-4-6",
+        })
+        rag = next(c for c in p["integrity_checks"] if c["label"] == "RAG: банк. отчёты")
+        self.assertEqual(rag["status"], "✓")
+        self.assertIn("4 отчётов", rag["detail"])
+        self.assertIn("69 чанков", rag["detail"])
 
     def test_return_series_coverage_in_payload(self) -> None:
         from pdf_payload import build_payload
