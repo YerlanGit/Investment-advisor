@@ -129,8 +129,10 @@ python scripts/ingest_bank_report.py --list
 
 ## 5. Частые проблемы
 
-> **PDF залиты, но отчёт всё равно пуст?** → полный 8-шаговый runbook: **`docs/RAG_TROUBLESHOOTING.md`**
-> (сверка имён бакетов INBOX↔STORE, деплой/триггер функции, логи ингеста, бут-синк бота, env-дрейф).
+> **PDF залиты, но отчёт всё равно пуст?** → полный runbook: **`docs/RAG_TROUBLESHOOTING.md`**.
+> **Самый надёжный путь (07-04):** просто положите PDF в INBOX и **перезапустите бот** — он сам
+> заингестит их в контейнере (`entrypoint._boot_ingest_from_inbox`, путь B), минуя Cloud
+> Function/Eventarc/регион. Выключатель `RAG_BOOT_INGEST=0`.
 
 **Два разных бакета — не путать:** PDF льют в **INBOX** `ramp-bot-chroma-db-inbox-investadv`
 (его слушает Cloud Function); собранная база ChromaDB лежит в **STORE** `ramp-bot-chroma-db-investadv`

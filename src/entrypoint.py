@@ -16,6 +16,7 @@ import asyncio
 import logging
 import os
 import sys
+import threading
 
 # yfinance был удалён 2026-04. Цены теперь берутся через Tradernet
 # (freedom_portfolio.history); кеш истории живёт в /tmp/freedom_history_cache.
@@ -26,6 +27,23 @@ logger = logging.getLogger("ramp.entrypoint")
 CHROMA_LOCAL_PATH  = os.environ.get("CHROMA_LOCAL_PATH",  "/app/data/chroma_db")
 CHROMA_GCS_BUCKET  = os.environ.get("CHROMA_BUCKET",      "ramp-bot-chroma-db-investadv")
 CHROMA_GCS_PREFIX  = os.environ.get("CHROMA_GCS_PREFIX",  "chroma_db/")
+
+# ── RAG boot-ingest fallback (2026-07-04) ────────────────────────────────────
+# The Cloud-Function → Eventarc → ChromaDB path is fragile in practice: the
+# trigger's region must match the bucket's region (europe-west3), the function
+# has to download the embedding model at runtime (the BOT image PRE-BAKES it),
+# and a fail-soft cloudbuild step can silently skip the deploy.  When any of
+# that breaks, the STORE bucket stays empty and RAG never lights up even though
+# PDFs are sitting in the INBOX.  This fallback makes the bot self-sufficient:
+# if the synced ChromaDB is empty but the INBOX holds PDFs, ingest them
+# IN-CONTAINER (deps + pre-baked model + pinned chromadb already present) and
+# publish the built store back to STORE.  Off switch: RAG_BOOT_INGEST=0.
+RAG_INBOX_BUCKET = os.environ.get("RAG_INBOX_BUCKET", "ramp-bot-chroma-db-inbox-investadv")
+
+
+def _rag_boot_ingest_enabled() -> bool:
+    return str(os.getenv("RAG_BOOT_INGEST", "on")).strip().lower() not in (
+        "0", "false", "no", "off", "")
 
 
 def _download_chroma_db() -> None:
@@ -80,6 +98,85 @@ def _download_chroma_db() -> None:
         logger.warning("ChromaDB sync failed (continuing anyway): %s", exc)
 
 
+def _upload_chroma_db_to_store() -> int:
+    """Mirror the local ChromaDB dir → gs://CHROMA_BUCKET/CHROMA_GCS_PREFIX so a
+    store built in-container by the boot-ingest fallback persists (future boots
+    just sync it, and any sibling revision sees it).  Best-effort; returns the
+    number of blobs uploaded (0 on any failure)."""
+    try:
+        from google.cloud import storage  # noqa: PLC0415
+        client = storage.Client()
+        bucket = client.bucket(CHROMA_GCS_BUCKET)
+        uploaded = 0
+        for root, _, files in os.walk(CHROMA_LOCAL_PATH):
+            for fname in files:
+                local_file = os.path.join(root, fname)
+                rel = os.path.relpath(local_file, CHROMA_LOCAL_PATH).replace("\\", "/")
+                bucket.blob(f"{CHROMA_GCS_PREFIX}{rel}").upload_from_filename(local_file)
+                uploaded += 1
+        logger.info("RAG boot-ingest: published %d ChromaDB blob(s) → gs://%s/%s.",
+                    uploaded, CHROMA_GCS_BUCKET, CHROMA_GCS_PREFIX)
+        return uploaded
+    except Exception as exc:
+        logger.warning("RAG boot-ingest: publish to STORE skipped (%s).", exc)
+        return 0
+
+
+def _boot_ingest_from_inbox() -> None:
+    """Fallback: when the synced ChromaDB is EMPTY but the INBOX bucket holds
+    PDFs, ingest them in-container and publish the store back to STORE — so RAG
+    works even if the Cloud Function / Eventarc path is misconfigured (wrong
+    region, missing trigger, embedding-model download failure).  Runs on a
+    daemon thread so it never blocks the health probe or the bot event loop;
+    every failure is swallowed (RAG simply stays empty, as before)."""
+    if not _rag_boot_ingest_enabled():
+        return
+    try:
+        from agent.rag_engine import FinancialRAG  # noqa: PLC0415
+        rag = FinancialRAG(db_path=CHROMA_LOCAL_PATH)
+        # Already populated (synced from STORE)?  Nothing to do — zero cost once
+        # the store exists, so this fallback is a no-op on the happy path.
+        already = int(rag.collection.count())
+        if already > 0:
+            logger.info("RAG boot-ingest: store already has %d chunks — skip.", already)
+            return
+
+        from google.cloud import storage  # noqa: PLC0415
+        client = storage.Client()
+        pdfs = [b for b in client.bucket(RAG_INBOX_BUCKET).list_blobs()
+                if b.name.lower().endswith(".pdf")]
+        if not pdfs:
+            logger.info("RAG boot-ingest: INBOX gs://%s has no PDFs — RAG stays empty.",
+                        RAG_INBOX_BUCKET)
+            return
+        logger.info("RAG boot-ingest: STORE empty, INBOX gs://%s has %d PDF(s) — "
+                    "ingesting in-container.", RAG_INBOX_BUCKET, len(pdfs))
+
+        import tempfile  # noqa: PLC0415
+        total = 0
+        for blob in pdfs:
+            fname = os.path.basename(blob.name)
+            tmp_path = None
+            try:
+                with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+                    tmp_path = tmp.name
+                    blob.download_to_filename(tmp_path)
+                n = rag.ingest_pdf(tmp_path, doc_metadata={"filename": fname})
+                total += n
+                logger.info("RAG boot-ingest: %s → %d chunks.", fname, n)
+            except Exception as exc:
+                logger.warning("RAG boot-ingest: %s failed (%s) — skipped.", fname, exc)
+            finally:
+                if tmp_path and os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+
+        logger.info("RAG boot-ingest: ingested %d chunks from %d PDF(s).", total, len(pdfs))
+        if total > 0:
+            _upload_chroma_db_to_store()
+    except Exception as exc:
+        logger.warning("RAG boot-ingest skipped (%s).", exc)
+
+
 async def _health_server() -> None:
     """Minimal HTTP/1.0 server: any GET → 200 OK."""
     port = int(os.environ.get("PORT", 8080))
@@ -126,6 +223,13 @@ if __name__ == "__main__":
     # already sees the fresh knowledge base.  Synchronous I/O here is fine —
     # this runs once at boot.
     _download_chroma_db()
+
+    # Reliable RAG fallback: if the synced store is empty but PDFs sit in the
+    # INBOX, ingest them in-container on a DAEMON thread (never blocks the
+    # startup probe or the bot).  Makes RAG work without a healthy Cloud
+    # Function / Eventarc trigger.  Off switch: RAG_BOOT_INGEST=0.
+    threading.Thread(target=_boot_ingest_from_inbox,
+                     name="rag-boot-ingest", daemon=True).start()
 
     # Playwright spawns child processes via asyncio subprocess.
     # On Linux/Cloud Run (Python 3.10+), the default child watcher raises
