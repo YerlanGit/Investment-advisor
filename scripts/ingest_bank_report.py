@@ -32,7 +32,7 @@ Examples
 Env
 ───
   CHROMA_LOCAL_PATH  local ChromaDB dir           (default ./data/chroma_db)
-  CHROMA_BUCKET      GCS bucket for --upload/--list-remote (default ramp-bot-chroma-db)
+  CHROMA_BUCKET      GCS bucket for --upload/--list-remote (default ramp-bot-chroma-db-investadv)
   CHROMA_GCS_PREFIX  object prefix                (default chroma_db/)
 """
 from __future__ import annotations
@@ -49,7 +49,7 @@ if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
 CHROMA_LOCAL_PATH = os.environ.get("CHROMA_LOCAL_PATH", "data/chroma_db")
-CHROMA_BUCKET     = os.environ.get("CHROMA_BUCKET", "ramp-bot-chroma-db")
+CHROMA_BUCKET     = os.environ.get("CHROMA_BUCKET", "ramp-bot-chroma-db-investadv")
 CHROMA_GCS_PREFIX = os.environ.get("CHROMA_GCS_PREFIX", "chroma_db/")
 
 

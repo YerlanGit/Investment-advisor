@@ -2,7 +2,7 @@
 Cloud Function: автоматическая индексация PDF при загрузке в GCS bucket.
 
 SECURITY (M2): the trigger listens to a DEDICATED, write-controlled
-``ramp-bot-ingest`` bucket — NEVER ``ramp-bot-reports``.  Listening to the
+``ramp-bot-chroma-db-inbox-investadv`` bucket — NEVER ``ramp-bot-reports``.  Listening to the
 reports bucket created a feedback loop (user-rendered reports got re-ingested
 as "bank analytics", poisoning the RAG KB) and let anyone who could write a
 report write to the knowledge base.  The ingest bucket has restricted IAM:
@@ -20,7 +20,7 @@ secret must not widen this function's attack surface.
       --source=./cloud_function \
       --entry-point=on_pdf_uploaded \
       --trigger-event-filters="type=google.cloud.storage.object.v1.finalized" \
-      --trigger-event-filters="bucket=ramp-bot-ingest" \
+      --trigger-event-filters="bucket=ramp-bot-chroma-db-inbox-investadv" \
       --memory=1Gi \
       --timeout=300s \
       --max-instances=1 \
@@ -35,10 +35,10 @@ with an HNSW segment from run B — a structurally corrupt KB that the bot
 then syncs at boot.  Serializing instances closes the race.
 
 Как это работает:
-  1. Куратор загружает банковский PDF в защищённый bucket 'ramp-bot-ingest'
+  1. Куратор загружает банковский PDF в защищённый bucket 'ramp-bot-chroma-db-inbox-investadv'
   2. Eventarc автоматически вызывает эту функцию
   3. Функция скачивает PDF, парсит, добавляет в ChromaDB на GCS
-  4. ChromaDB синхронизируется обратно в bucket 'ramp-bot-chroma-db'
+  4. ChromaDB синхронизируется обратно в bucket 'ramp-bot-chroma-db-investadv'
   5. При следующем деплое бота — свежая база уже встроена в образ
 """
 import functions_framework
@@ -75,7 +75,7 @@ def on_pdf_uploaded(cloud_event):
         print(f"[Download] Saved to {tmp_path}")
 
     # Download existing ChromaDB from GCS (if exists) to /tmp/chroma_db
-    chroma_bucket_name = os.getenv("CHROMA_BUCKET", "ramp-bot-chroma-db")
+    chroma_bucket_name = os.getenv("CHROMA_BUCKET", "ramp-bot-chroma-db-investadv")
     chroma_local = "/tmp/chroma_db"
     os.makedirs(chroma_local, exist_ok=True)
     _download_chroma_db(gcs, chroma_bucket_name, chroma_local)
