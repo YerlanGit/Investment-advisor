@@ -804,6 +804,74 @@ class PremiumMapperAuditTest(unittest.TestCase):
         self.assertEqual(cb[0], {"ok": True,  "t": "Безработица снижается (темп −0,09)"})
         self.assertEqual(cb[1], {"ok": False, "t": "ВВП замедляется (темп −2,7) — против фазы роста"})
 
+    def test_regime_confirm_carries_summary_not_stance_token(self):
+        # Audit 2026-07-05 (R-3/R-5): the banner paragraph rendered the raw
+        # stance token («diverges»); the human summary was dropped, and
+        # «N подтверждающих» counted contradicting bullets too.
+        from premium_payload import build_design_data
+        p = {"regime_confirmation": {
+                "stance": "diverges",
+                "summary": "Сигналы расходятся: ВВП замедляется при risk-on ярлыке.",
+                "signals": ["✓ Кривая положительная", "⚠ ВВП замедляется",
+                            "✓ VIX низкий"]}}
+        r = build_design_data(p, "deep")["regime"]
+        self.assertEqual(r["confirm"],
+                         "Сигналы расходятся: ВВП замедляется при risk-on ярлыке.")
+        self.assertEqual(r["confirmStance"], "diverges")
+        self.assertEqual(r["confirms"], 2)          # only the ✓ bullets
+
+    def test_regime_maps_consistency_asof_and_rag_confirm(self):
+        # Audit 2026-07-05 (R-2/R-6/R-8): macro as_of, the deterministic FRED
+        # cross-check and the REAL bank-RAG confirmations were lost in premium.
+        from premium_payload import build_design_data
+        p = {"regime": {"label": "Expansion", "label_ru": "Экспансия",
+                        "confidence": 34, "growth": 0.06, "cycle": 0.02,
+                        "explainers": ["SPY обгоняет IEF"]},
+             "macro_drivers": {"series": [
+                 {"name": "CBOE VIX", "value": "16.6", "status": "ok"}],
+                 "as_of": "2026-07-04"},
+             "regime_consistency": {"status": "aligned",
+                                    "note": "Макро-сигналы FRED согласуются."},
+             "regime_rag_confirm": ["[2026-07-01] goldman.pdf: цикл продолжится"]}
+        r = build_design_data(p, "deep")["regime"]
+        self.assertEqual(r["nameRu"], "Экспансия")
+        self.assertEqual(r["driversAsOf"], "2026-07-04")
+        self.assertEqual(r["consistency"]["status"], "aligned")
+        self.assertTrue(r["ragBacked"])              # real excerpts win…
+        self.assertIn("goldman.pdf", r["ragSignals"][0])
+        # …and the driver state pill speaks Russian, not the raw token.
+        self.assertEqual(r["drivers"][0]["state"], "актуально")
+        # Without RAG excerpts the chips fall back to momentum, honestly labeled.
+        p.pop("regime_rag_confirm")
+        r2 = build_design_data(p, "deep")["regime"]
+        self.assertFalse(r2["ragBacked"])
+        self.assertIn("SPY обгоняет IEF", r2["ragSignals"][0])
+
+    def test_quadrant_labels_match_engine_semantics(self):
+        # Audit 2026-07-05 (R-1): both charts had RECOVERY/SLOWDOWN swapped vs
+        # finance/regime.py.  Pin the corrected geometry: top-left = SLOWDOWN,
+        # bottom-right = RECOVERY (X=cycle, Y=growth).
+        import re as _re
+        from pathlib import Path as _P
+        root = _P(__file__).resolve().parent.parent
+        jsx = (root / "design/premium_v2/deep/deep-charts.jsx").read_text(encoding="utf-8")
+        m = _re.search(r"const quads = \[(.*?)\];", jsx, _re.S)
+        self.assertIsNotNone(m)
+        rows = [ln for ln in m.group(1).splitlines() if "label:" in ln]
+        self.assertIn("SLOWDOWN", rows[0])   # top-left  (growth+, cycle−)
+        self.assertIn("EXPANSION", rows[1])  # top-right
+        self.assertIn("RECESSION", rows[2])  # bottom-left
+        self.assertIn("RECOVERY", rows[3])   # bottom-right (growth−, cycle+)
+        # Compiled bundle must carry the same order (rebuilt via build.sh).
+        bundle = (root / "src/premium_assets/deep-components.js").read_text(encoding="utf-8")
+        self.assertLess(bundle.find("SLOWDOWN"), bundle.find("RECOVERY"))
+        # v3 fallback SVG labels, in document order.
+        v3 = (root / "src/templates/report_deep_v3.html").read_text(encoding="utf-8")
+        seg = v3[v3.find('letter-spacing="0.05em"'):]
+        labels = _re.findall(r"<text[^>]*>(SLOWDOWN|EXPANSION|RECESSION|RECOVERY)</text>",
+                             seg[:800])
+        self.assertEqual(labels, ["SLOWDOWN", "EXPANSION", "RECESSION", "RECOVERY"])
+
     def test_sector_warnings_extract_text_not_dict_repr(self):
         # sector_warnings are dicts; the mapper str()'d the whole dict, leaking
         # «{'sector': 'Technology', ...}» into the UI.  Extract the text field.

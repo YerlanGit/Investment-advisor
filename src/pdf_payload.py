@@ -1013,8 +1013,14 @@ def build_payload(results: dict, tier: str,
         g_val = float(regime["growth_score"])
         c_val = float(regime["cycle_score"])
         dot_cx, dot_cy = _regime_dot_coords(g_val, c_val)
+        # Audit 2026-07-05 (R-7): the premium header showed «Expansion · Expansion»
+        # because no Russian label was ever emitted — the mapper fell back to the
+        # EN label twice.  Emit the RU pair the design always expected.
+        _regime_ru = {"Expansion": "Экспансия", "Recovery": "Восстановление",
+                      "Slowdown": "Замедление", "Recession": "Рецессия"}
         regime_block = {
             "label":      regime["regime"],
+            "label_ru":   _regime_ru.get(str(regime["regime"]), str(regime["regime"])),
             "confidence": int(round(regime["confidence"] * 100)),
             "growth":     g_val,
             "cycle":      c_val,
