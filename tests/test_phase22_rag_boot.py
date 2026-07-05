@@ -109,5 +109,43 @@ class RagBootIngestBehaviourTest(unittest.TestCase):
             entrypoint._boot_ingest_from_inbox()   # must not raise
 
 
+class IngestLogicalFilenameTest(unittest.TestCase):
+    """2026-07-05: PDFs are downloaded to NamedTemporaryFile paths, so the tmp
+    basename («tmpl3mmhrmf.pdf») used to become the source metadata (leaked
+    into the report's RAG chips) and defeated filename-based DATE detection —
+    recency then fell back to tmp-file mtime (≈today for ANY old report)."""
+
+    def test_doc_date_prefers_logical_filename(self) -> None:
+        from agent.rag_engine import FinancialRAG
+        rag = FinancialRAG.__new__(FinancialRAG)   # no chromadb needed
+        dt, method = rag._get_doc_date(
+            "/tmp/tmpl3mmhrmf.pdf", "no dates in text",
+            filename="goldman_sachs_outlook_Q3_2026.pdf")
+        self.assertEqual(method, "filename")
+        self.assertEqual((dt.year, dt.month), (2026, 7))   # Q3 → июль
+
+    def test_regime_rag_chips_are_demarkdowned(self) -> None:
+        """The regime chips must carry CONTENT, not retrieval headers/markdown."""
+        import re as _re
+        raw_lines = [
+            "--- [2026-06-01] tmpl3mmhrmf.pdf — **Global Direction** (актуальность: 91%) ---",
+            "**against spread duration risk** and further tightening ahead",
+            "Despite tight spreads, the recent move higher in yields is supportive",
+        ]
+        # Mirror the tg_bot._fetch_rag_context filter (kept in sync by hand).
+        out = []
+        for line in raw_lines:
+            line = line.strip()
+            if not line or line.startswith("---"):
+                continue
+            line = _re.sub(r"\*\*(.*?)\*\*", r"\1", line)
+            line = line.lstrip("#*•- ").strip()
+            if len(line) > 30:
+                out.append(line[:200])
+        self.assertEqual(len(out), 2)                      # header dropped
+        self.assertNotIn("**", " ".join(out))              # markdown stripped
+        self.assertNotIn("tmpl3mmhrmf", " ".join(out))
+
+
 if __name__ == "__main__":
     unittest.main()
