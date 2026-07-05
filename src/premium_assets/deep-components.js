@@ -872,11 +872,16 @@ const RegimeQuadrant = ({
   const Y = v => cy - v / SCALE * (inner / 2);
   const dx = X(dot.cycle),
     dy = Y(dot.growth);
+  // Audit 2026-07-05 (R-1): labels pinned to finance/regime.py quadrants —
+  // X=cycle, Y=growth ⇒ top-left (growth+, cycle−) is SLOWDOWN and bottom-right
+  // (growth−, cycle+) is RECOVERY.  The old layout had them SWAPPED (pre-fix
+  // engine semantics), so a Slowdown reading would land the dot in a quadrant
+  // labelled «RECOVERY» — visually contradicting the regime label.
   const quads = [{
     x: pad,
     y: pad,
-    label: 'RECOVERY',
-    fill: '#5d7c5c'
+    label: 'SLOWDOWN',
+    fill: '#a8a293'
   }, {
     x: cx,
     y: pad,
@@ -890,8 +895,8 @@ const RegimeQuadrant = ({
   }, {
     x: cx,
     y: cy,
-    label: 'SLOWDOWN',
-    fill: '#a8a293'
+    label: 'RECOVERY',
+    fill: '#5d7c5c'
   }];
   return /*#__PURE__*/React.createElement("svg", {
     viewBox: `0 0 ${size} ${size}`,
@@ -985,7 +990,7 @@ const RegimeQuadrant = ({
     fontSize: "8",
     fontFamily: "JetBrains Mono",
     fill: "#6b6862"
-  }, "G +", dot.growth.toFixed(2), " · C +", dot.cycle.toFixed(2)));
+  }, "G ", (dot.growth >= 0 ? '+' : '') + dot.growth.toFixed(2), " · C ", (dot.cycle >= 0 ? '+' : '') + dot.cycle.toFixed(2)));
 };
 
 // ── Mandate compliance bar: allowed band [lo,hi] + tick at value
@@ -2193,122 +2198,172 @@ const StressTable = ({
 }), /*#__PURE__*/React.createElement("p", {
   className: "text-[12.5px] text-ink-700 leading-relaxed font-light"
 }, window.DEEP.stressAI)));
+
+/* Audit 2026-07-05 (R-2/R-3/R-4/R-6/R-8): the regime block used to hardcode a
+   design-mock as_of date, a green «Рост» chip, «+»-prefixed sage values with
+   «здоровый рост» captions regardless of the data, a green «ИИ подтверждает»
+   header even on stance=diverges, and «RAG ·» chips that showed ETF momentum.
+   Everything below is data-driven now. */
+const _phaseChip = name => ({
+  Expansion: {
+    t: 'Рост',
+    cls: 'bg-sage-500/12 text-sage-600'
+  },
+  Recovery: {
+    t: 'Восстановление',
+    cls: 'bg-sage-500/12 text-sage-600'
+  },
+  Slowdown: {
+    t: 'Замедление',
+    cls: 'bg-gold-400/18 text-gold-700'
+  },
+  Recession: {
+    t: 'Спад',
+    cls: 'bg-rust-500/12 text-rust-600'
+  }
+})[name] || {
+  t: name,
+  cls: 'bg-cream-50 text-ink-600'
+};
+const _axisCard = (label, v, posCaption, negCaption) => /*#__PURE__*/React.createElement("div", {
+  className: "rounded-2xl bg-cream-50 border border-ink-900/5 px-4 py-3"
+}, /*#__PURE__*/React.createElement("div", {
+  className: "text-[10px] uppercase tracking-wider text-ink-500 font-mono"
+}, label), /*#__PURE__*/React.createElement("div", {
+  className: `text-[20px] num font-semibold mt-0.5 ${v >= 0 ? 'text-sage-600' : 'text-rust-600'}`
+}, (v >= 0 ? '+' : '') + v.toFixed(2)), /*#__PURE__*/React.createElement("div", {
+  className: "text-[10px] text-ink-400"
+}, v >= 0 ? posCaption : negCaption));
+const _stanceHeader = stance => ({
+  confirms: {
+    t: 'ИИ подтверждает режим',
+    cls: 'text-sage-600',
+    warn: false
+  },
+  partial: {
+    t: 'Частичное подтверждение ИИ',
+    cls: 'text-gold-700',
+    warn: true
+  },
+  diverges: {
+    t: 'ИИ расходится с моделью',
+    cls: 'text-rust-600',
+    warn: true
+  }
+})[stance] || {
+  t: 'ИИ-сверка режима',
+  cls: 'text-ink-600',
+  warn: false
+};
 const RegimeBlock = ({
   r
-}) => /*#__PURE__*/React.createElement("div", {
-  className: "grid grid-cols-12 gap-5"
-}, /*#__PURE__*/React.createElement("div", {
-  className: "col-span-12 lg:col-span-5"
-}, /*#__PURE__*/React.createElement("div", {
-  className: "glass-strong rounded-4xl p-6 shadow-card lift h-full flex flex-col"
-}, /*#__PURE__*/React.createElement("div", {
-  className: "flex items-start justify-between mb-2"
-}, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-  className: "text-ink-500 text-[12px] font-medium"
-}, "Growth × Cycle"), /*#__PURE__*/React.createElement("h3", {
-  className: "text-xl font-semibold tracking-tight text-ink-900"
-}, "Координаты режима")), /*#__PURE__*/React.createElement("span", {
-  className: "text-[10px] font-mono text-ink-400 tracking-wider px-2.5 py-1 rounded-full bg-cream-50 border border-ink-900/5"
-}, "60-day")), /*#__PURE__*/React.createElement("div", {
-  className: "flex-1 flex items-center justify-center py-2"
-}, /*#__PURE__*/React.createElement(RegimeQuadrant, {
-  dot: r.dot,
-  size: 300
-})))), /*#__PURE__*/React.createElement("div", {
-  className: "col-span-12 lg:col-span-7"
-}, /*#__PURE__*/React.createElement("div", {
-  className: "glass-strong rounded-4xl p-6 shadow-card lift h-full flex flex-col"
-}, /*#__PURE__*/React.createElement("div", {
-  className: "flex items-start justify-between mb-4"
-}, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-  className: "text-[10px] tracking-widest uppercase text-ink-500 font-mono mb-1"
-}, "Текущий режим"), /*#__PURE__*/React.createElement("div", {
-  className: "flex items-baseline gap-3"
-}, /*#__PURE__*/React.createElement("span", {
-  className: "text-[32px] font-light tracking-tight text-ink-900"
-}, r.name), /*#__PURE__*/React.createElement("span", {
-  className: "text-[14px] text-ink-500 font-light"
-}, "· ", r.nameRu)), /*#__PURE__*/React.createElement("div", {
-  className: "text-[11.5px] text-ink-500 font-mono mt-1"
-}, "Уверенность модели ", /*#__PURE__*/React.createElement("b", {
-  className: "text-gold-700"
-}, r.confidence, "%"), " · ", r.confirms, " подтверждающих сигнала")), /*#__PURE__*/React.createElement("div", {
-  className: "flex items-center gap-2 px-3 py-1.5 rounded-full bg-sage-500/12 text-sage-600 text-[11px] font-semibold"
-}, /*#__PURE__*/React.createElement(Icons.Check, {
-  size: 13,
-  stroke: 2.2
-}), " Рост")), /*#__PURE__*/React.createElement("div", {
-  className: "grid grid-cols-2 gap-3 mb-4"
-}, /*#__PURE__*/React.createElement("div", {
-  className: "rounded-2xl bg-cream-50 border border-ink-900/5 px-4 py-3"
-}, /*#__PURE__*/React.createElement("div", {
-  className: "text-[10px] uppercase tracking-wider text-ink-500 font-mono"
-}, "Growth-фактор"), /*#__PURE__*/React.createElement("div", {
-  className: "text-[20px] num font-semibold text-sage-600 mt-0.5"
-}, "+", r.growth.toFixed(2)), /*#__PURE__*/React.createElement("div", {
-  className: "text-[10px] text-ink-400"
-}, "здоровый рост")), /*#__PURE__*/React.createElement("div", {
-  className: "rounded-2xl bg-cream-50 border border-ink-900/5 px-4 py-3"
-}, /*#__PURE__*/React.createElement("div", {
-  className: "text-[10px] uppercase tracking-wider text-ink-500 font-mono"
-}, "Cycle-фактор"), /*#__PURE__*/React.createElement("div", {
-  className: "text-[20px] num font-semibold text-sage-600 mt-0.5"
-}, "+", r.cycle.toFixed(2)), /*#__PURE__*/React.createElement("div", {
-  className: "text-[10px] text-ink-400"
-}, "цикл. экспансия"))), /*#__PURE__*/React.createElement("div", {
-  className: "text-[10px] tracking-widest uppercase text-ink-400 font-mono mb-2"
-}, "Сигналы-драйверы · as_of 2026-06-22"), /*#__PURE__*/React.createElement("div", {
-  className: "space-y-1.5 flex-1"
-}, r.drivers.map((d, i) => /*#__PURE__*/React.createElement("div", {
-  key: i,
-  className: "grid grid-cols-[1fr_auto_auto_auto] items-center gap-3 py-1.5 border-b border-ink-900/5 last:border-0"
-}, /*#__PURE__*/React.createElement("span", {
-  className: "text-[11.5px] text-ink-700 truncate"
-}, d.name), /*#__PURE__*/React.createElement("span", {
-  className: `text-[11.5px] num font-semibold ${d.tone === 'warn' ? 'text-gold-700' : 'text-sage-600'}`
-}, d.val), /*#__PURE__*/React.createElement("span", {
-  className: "text-[9.5px] font-mono text-ink-400 whitespace-nowrap"
-}, d.trend), /*#__PURE__*/React.createElement("span", {
-  className: `text-[8.5px] font-mono font-bold tracking-wider px-1.5 py-0.5 rounded-full ${d.tone === 'warn' ? 'bg-gold-400/18 text-gold-700' : 'bg-sage-500/12 text-sage-600'}`
-}, d.state)))))), /*#__PURE__*/React.createElement("div", {
-  className: "col-span-12"
-}, /*#__PURE__*/React.createElement("div", {
-  className: "rounded-4xl p-6 shadow-card",
-  style: {
-    background: 'linear-gradient(120deg, #f3f6f1 0%, #eef3ea 100%)'
-  }
-}, /*#__PURE__*/React.createElement("div", {
-  className: "flex items-center justify-between mb-3"
-}, /*#__PURE__*/React.createElement("div", {
-  className: "flex items-center gap-2 text-sage-600 text-[11px] font-semibold"
-}, /*#__PURE__*/React.createElement(Icons.Check, {
-  size: 14,
-  stroke: 2.2
-}), " ИИ подтверждает режим"), /*#__PURE__*/React.createElement("span", {
-  className: "text-[10px] font-mono text-ink-400"
-}, window.DEEP.meta.aiModel)), /*#__PURE__*/React.createElement("p", {
-  className: "text-[13.5px] text-ink-800 leading-relaxed font-light mb-4"
-}, r.confirm), /*#__PURE__*/React.createElement("div", {
-  className: "grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-2"
-}, r.confirmBullets.map((b, i) => /*#__PURE__*/React.createElement("div", {
-  key: i,
-  className: "flex items-start gap-2.5"
-}, b.ok ? /*#__PURE__*/React.createElement(Icons.Check, {
-  size: 13,
-  className: "text-sage-600 mt-0.5 flex-shrink-0",
-  stroke: 2.4
-}) : /*#__PURE__*/React.createElement(Icons.Warning, {
-  size: 13,
-  className: "text-gold-700 mt-0.5 flex-shrink-0",
-  stroke: 2
-}), /*#__PURE__*/React.createElement("span", {
-  className: "text-[11.5px] text-ink-700 leading-snug"
-}, b.t)))), /*#__PURE__*/React.createElement("div", {
-  className: "mt-4 pt-3 border-t border-ink-900/8 flex flex-wrap gap-2"
-}, r.ragSignals.map((s, i) => /*#__PURE__*/React.createElement("span", {
-  key: i,
-  className: "text-[10.5px] text-ink-600 bg-white/60 border border-ink-900/6 rounded-full px-3 py-1 font-mono"
-}, "RAG · ", s))))));
+}) => {
+  const phase = _phaseChip(r.name);
+  const head = _stanceHeader(r.confirmStance);
+  return /*#__PURE__*/React.createElement("div", {
+    className: "grid grid-cols-12 gap-5"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "col-span-12 lg:col-span-5"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "glass-strong rounded-4xl p-6 shadow-card lift h-full flex flex-col"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-start justify-between mb-2"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "text-ink-500 text-[12px] font-medium"
+  }, "Growth × Cycle"), /*#__PURE__*/React.createElement("h3", {
+    className: "text-xl font-semibold tracking-tight text-ink-900"
+  }, "Координаты режима")), /*#__PURE__*/React.createElement("span", {
+    className: "text-[10px] font-mono text-ink-400 tracking-wider px-2.5 py-1 rounded-full bg-cream-50 border border-ink-900/5"
+  }, "60-day")), /*#__PURE__*/React.createElement("div", {
+    className: "flex-1 flex items-center justify-center py-2"
+  }, /*#__PURE__*/React.createElement(RegimeQuadrant, {
+    dot: r.dot,
+    size: 300
+  })))), /*#__PURE__*/React.createElement("div", {
+    className: "col-span-12 lg:col-span-7"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "glass-strong rounded-4xl p-6 shadow-card lift h-full flex flex-col"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-start justify-between mb-4"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "text-[10px] tracking-widest uppercase text-ink-500 font-mono mb-1"
+  }, "Текущий режим"), /*#__PURE__*/React.createElement("div", {
+    className: "flex items-baseline gap-3"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "text-[32px] font-light tracking-tight text-ink-900"
+  }, r.name), r.nameRu && r.nameRu !== r.name && /*#__PURE__*/React.createElement("span", {
+    className: "text-[14px] text-ink-500 font-light"
+  }, "· ", r.nameRu)), /*#__PURE__*/React.createElement("div", {
+    className: "text-[11.5px] text-ink-500 font-mono mt-1"
+  }, "Уверенность модели ", /*#__PURE__*/React.createElement("b", {
+    className: "text-gold-700"
+  }, r.confidence, "%"), " · ", r.confirms, " подтверждающих сигнала")), /*#__PURE__*/React.createElement("div", {
+    className: `flex items-center gap-2 px-3 py-1.5 rounded-full text-[11px] font-semibold ${phase.cls}`
+  }, /*#__PURE__*/React.createElement(Icons.Check, {
+    size: 13,
+    stroke: 2.2
+  }), " ", phase.t)), /*#__PURE__*/React.createElement("div", {
+    className: "grid grid-cols-2 gap-3 mb-4"
+  }, _axisCard('Growth-фактор', r.growth, 'здоровый рост', 'рост под давлением'), _axisCard('Cycle-фактор', r.cycle, 'цикл. экспансия', 'цикл. сжатие')), /*#__PURE__*/React.createElement("div", {
+    className: "text-[10px] tracking-widest uppercase text-ink-400 font-mono mb-2"
+  }, "Сигналы-драйверы", r.driversAsOf ? ` · as_of ${r.driversAsOf}` : ''), /*#__PURE__*/React.createElement("div", {
+    className: "space-y-1.5 flex-1"
+  }, r.drivers.map((d, i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    className: "grid grid-cols-[1fr_auto_auto_auto] items-center gap-3 py-1.5 border-b border-ink-900/5 last:border-0"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "text-[11.5px] text-ink-700 truncate"
+  }, d.name), /*#__PURE__*/React.createElement("span", {
+    className: `text-[11.5px] num font-semibold ${d.tone === 'warn' ? 'text-gold-700' : 'text-sage-600'}`
+  }, d.val), /*#__PURE__*/React.createElement("span", {
+    className: "text-[9.5px] font-mono text-ink-400 whitespace-nowrap"
+  }, d.trend), /*#__PURE__*/React.createElement("span", {
+    className: `text-[8.5px] font-mono font-bold tracking-wider px-1.5 py-0.5 rounded-full ${d.tone === 'warn' ? 'bg-gold-400/18 text-gold-700' : 'bg-sage-500/12 text-sage-600'}`
+  }, d.state)))))), /*#__PURE__*/React.createElement("div", {
+    className: "col-span-12"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "rounded-4xl p-6 shadow-card",
+    style: {
+      background: 'linear-gradient(120deg, #f3f6f1 0%, #eef3ea 100%)'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between mb-3"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: `flex items-center gap-2 text-[11px] font-semibold ${head.cls}`
+  }, head.warn ? /*#__PURE__*/React.createElement(Icons.Warning, {
+    size: 14,
+    stroke: 2.2
+  }) : /*#__PURE__*/React.createElement(Icons.Check, {
+    size: 14,
+    stroke: 2.2
+  }), " ", head.t), /*#__PURE__*/React.createElement("span", {
+    className: "text-[10px] font-mono text-ink-400"
+  }, window.DEEP.meta.aiModel)), /*#__PURE__*/React.createElement("p", {
+    className: "text-[13.5px] text-ink-800 leading-relaxed font-light mb-4"
+  }, r.confirm), /*#__PURE__*/React.createElement("div", {
+    className: "grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-2"
+  }, r.confirmBullets.map((b, i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    className: "flex items-start gap-2.5"
+  }, b.ok ? /*#__PURE__*/React.createElement(Icons.Check, {
+    size: 13,
+    className: "text-sage-600 mt-0.5 flex-shrink-0",
+    stroke: 2.4
+  }) : /*#__PURE__*/React.createElement(Icons.Warning, {
+    size: 13,
+    className: "text-gold-700 mt-0.5 flex-shrink-0",
+    stroke: 2
+  }), /*#__PURE__*/React.createElement("span", {
+    className: "text-[11.5px] text-ink-700 leading-snug"
+  }, b.t)))), r.consistency && r.consistency.note ? /*#__PURE__*/React.createElement("div", {
+    className: `mt-3 text-[11px] leading-snug ${r.consistency.status === 'aligned' ? 'text-sage-600' : 'text-gold-700'}`
+  }, r.consistency.status === 'aligned' ? '✓ ' : '⚠ ', r.consistency.note) : null, /*#__PURE__*/React.createElement("div", {
+    className: "mt-4 pt-3 border-t border-ink-900/8 flex flex-wrap gap-2"
+  }, r.ragSignals.map((s, i) => /*#__PURE__*/React.createElement("span", {
+    key: i,
+    className: "text-[10.5px] text-ink-600 bg-white/60 border border-ink-900/6 rounded-full px-3 py-1 font-mono"
+  }, r.ragBacked ? 'RAG' : 'Моментум', " · ", s))))));
+};
 const StressRegime = () => {
   const p = window.DEEP;
   return /*#__PURE__*/React.createElement("section", {
@@ -2903,8 +2958,11 @@ const Footer = () => {
   }, "Контроль качества данных"), /*#__PURE__*/React.createElement("div", {
     className: "flex flex-wrap gap-2"
   }, p.quality.map((q, i) => {
-    // Audit 2026-07-04: colour each pill's OWN leading status symbol instead of
-    // hardcoding a green ✓ (which rendered «✓ ✗ RAG» / «✓ ⚠ …» — double symbol).
+    // Audit 2026-07-04: each quality string already carries its OWN
+    // status symbol («✓ …» / «✗ …» / «⚠ …» / «— …»).  The footer used
+    // to HARDCODE a green ✓ in front, so an «✗ RAG» pill rendered as
+    // «✓ ✗ RAG» (double symbol, green on a failure).  Colour the
+    // string's own leading symbol instead — honest for every state.
     const s = String(q).trim();
     const sym = s.charAt(0);
     const rest = s.slice(1).trim();
@@ -2913,7 +2971,7 @@ const Footer = () => {
       key: i,
       className: "flex items-center gap-1.5 text-[10px] font-mono text-ink-600 bg-cream-50 border border-ink-900/6 rounded-full px-2.5 py-1"
     }, /*#__PURE__*/React.createElement("span", {
-      className: cls + " font-bold"
+      className: `${cls} font-bold`
     }, sym), " ", rest);
   }))), /*#__PURE__*/React.createElement("div", {
     className: "flex items-center gap-2 flex-wrap"

@@ -37,7 +37,38 @@ const StressTable = ({ rows }) => (
   </div>
 );
 
-const RegimeBlock = ({ r }) => (
+/* Audit 2026-07-05 (R-2/R-3/R-4/R-6/R-8): the regime block used to hardcode a
+   design-mock as_of date, a green «Рост» chip, «+»-prefixed sage values with
+   «здоровый рост» captions regardless of the data, a green «ИИ подтверждает»
+   header even on stance=diverges, and «RAG ·» chips that showed ETF momentum.
+   Everything below is data-driven now. */
+const _phaseChip = (name) => ({
+  Expansion: { t:'Рост',            cls:'bg-sage-500/12 text-sage-600' },
+  Recovery:  { t:'Восстановление',  cls:'bg-sage-500/12 text-sage-600' },
+  Slowdown:  { t:'Замедление',      cls:'bg-gold-400/18 text-gold-700' },
+  Recession: { t:'Спад',            cls:'bg-rust-500/12 text-rust-600' },
+}[name] || { t: name, cls:'bg-cream-50 text-ink-600' });
+
+const _axisCard = (label, v, posCaption, negCaption) => (
+  <div className="rounded-2xl bg-cream-50 border border-ink-900/5 px-4 py-3">
+    <div className="text-[10px] uppercase tracking-wider text-ink-500 font-mono">{label}</div>
+    <div className={`text-[20px] num font-semibold mt-0.5 ${v>=0?'text-sage-600':'text-rust-600'}`}>
+      {(v>=0?'+':'')+v.toFixed(2)}
+    </div>
+    <div className="text-[10px] text-ink-400">{v>=0?posCaption:negCaption}</div>
+  </div>
+);
+
+const _stanceHeader = (stance) => ({
+  confirms: { t:'ИИ подтверждает режим',      cls:'text-sage-600', warn:false },
+  partial:  { t:'Частичное подтверждение ИИ', cls:'text-gold-700', warn:true  },
+  diverges: { t:'ИИ расходится с моделью',    cls:'text-rust-600', warn:true  },
+}[stance] || { t:'ИИ-сверка режима', cls:'text-ink-600', warn:false });
+
+const RegimeBlock = ({ r }) => {
+  const phase = _phaseChip(r.name);
+  const head  = _stanceHeader(r.confirmStance);
+  return (
   <div className="grid grid-cols-12 gap-5">
     {/* quadrant */}
     <div className="col-span-12 lg:col-span-5">
@@ -62,30 +93,25 @@ const RegimeBlock = ({ r }) => (
             <div className="text-[10px] tracking-widest uppercase text-ink-500 font-mono mb-1">Текущий режим</div>
             <div className="flex items-baseline gap-3">
               <span className="text-[32px] font-light tracking-tight text-ink-900">{r.name}</span>
-              <span className="text-[14px] text-ink-500 font-light">· {r.nameRu}</span>
+              {r.nameRu && r.nameRu !== r.name &&
+                <span className="text-[14px] text-ink-500 font-light">· {r.nameRu}</span>}
             </div>
             <div className="text-[11.5px] text-ink-500 font-mono mt-1">Уверенность модели <b className="text-gold-700">{r.confidence}%</b> · {r.confirms} подтверждающих сигнала</div>
           </div>
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-sage-500/12 text-sage-600 text-[11px] font-semibold">
-            <Icons.Check size={13} stroke={2.2}/> Рост
+          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-[11px] font-semibold ${phase.cls}`}>
+            <Icons.Check size={13} stroke={2.2}/> {phase.t}
           </div>
         </div>
 
         <div className="grid grid-cols-2 gap-3 mb-4">
-          <div className="rounded-2xl bg-cream-50 border border-ink-900/5 px-4 py-3">
-            <div className="text-[10px] uppercase tracking-wider text-ink-500 font-mono">Growth-фактор</div>
-            <div className="text-[20px] num font-semibold text-sage-600 mt-0.5">+{r.growth.toFixed(2)}</div>
-            <div className="text-[10px] text-ink-400">здоровый рост</div>
-          </div>
-          <div className="rounded-2xl bg-cream-50 border border-ink-900/5 px-4 py-3">
-            <div className="text-[10px] uppercase tracking-wider text-ink-500 font-mono">Cycle-фактор</div>
-            <div className="text-[20px] num font-semibold text-sage-600 mt-0.5">+{r.cycle.toFixed(2)}</div>
-            <div className="text-[10px] text-ink-400">цикл. экспансия</div>
-          </div>
+          {_axisCard('Growth-фактор', r.growth, 'здоровый рост', 'рост под давлением')}
+          {_axisCard('Cycle-фактор',  r.cycle,  'цикл. экспансия', 'цикл. сжатие')}
         </div>
 
         {/* macro drivers */}
-        <div className="text-[10px] tracking-widest uppercase text-ink-400 font-mono mb-2">Сигналы-драйверы · as_of 2026-06-22</div>
+        <div className="text-[10px] tracking-widest uppercase text-ink-400 font-mono mb-2">
+          Сигналы-драйверы{r.driversAsOf ? ` · as_of ${r.driversAsOf}` : ''}
+        </div>
         <div className="space-y-1.5 flex-1">
           {r.drivers.map((d,i) => (
             <div key={i} className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-3 py-1.5 border-b border-ink-900/5 last:border-0">
@@ -99,13 +125,15 @@ const RegimeBlock = ({ r }) => (
       </div>
     </div>
 
-    {/* RAG signals + confirm */}
+    {/* AI confirmation + (RAG | momentum) signals */}
     <div className="col-span-12">
       <div className="rounded-4xl p-6 shadow-card"
            style={{ background:'linear-gradient(120deg, #f3f6f1 0%, #eef3ea 100%)' }}>
         <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2 text-sage-600 text-[11px] font-semibold">
-            <Icons.Check size={14} stroke={2.2}/> ИИ подтверждает режим
+          <div className={`flex items-center gap-2 text-[11px] font-semibold ${head.cls}`}>
+            {head.warn
+              ? <Icons.Warning size={14} stroke={2.2}/>
+              : <Icons.Check size={14} stroke={2.2}/>} {head.t}
           </div>
           <span className="text-[10px] font-mono text-ink-400">{window.DEEP.meta.aiModel}</span>
         </div>
@@ -120,15 +148,21 @@ const RegimeBlock = ({ r }) => (
             </div>
           ))}
         </div>
+        {r.consistency && r.consistency.note ? (
+          <div className={`mt-3 text-[11px] leading-snug ${r.consistency.status==='aligned'?'text-sage-600':'text-gold-700'}`}>
+            {r.consistency.status==='aligned' ? '✓ ' : '⚠ '}{r.consistency.note}
+          </div>
+        ) : null}
         <div className="mt-4 pt-3 border-t border-ink-900/8 flex flex-wrap gap-2">
           {r.ragSignals.map((s,i) => (
-            <span key={i} className="text-[10.5px] text-ink-600 bg-white/60 border border-ink-900/6 rounded-full px-3 py-1 font-mono">RAG · {s}</span>
+            <span key={i} className="text-[10.5px] text-ink-600 bg-white/60 border border-ink-900/6 rounded-full px-3 py-1 font-mono">{r.ragBacked?'RAG':'Моментум'} · {s}</span>
           ))}
         </div>
       </div>
     </div>
   </div>
-);
+  );
+};
 
 const StressRegime = () => {
   const p = window.DEEP;

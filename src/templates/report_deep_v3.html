@@ -2955,10 +2955,11 @@
         <svg class="reg-quadrant-svg" viewBox="0 0 320 280" xmlns="http://www.w3.org/2000/svg"
              role="img" aria-label="Квадрант рыночного режима: Growth × Cycle">
           <defs>
-            <!-- Цветовая семантика:                                       -->
-            <!--   Expansion = синий  (здоровый рост — наша целевая фаза)  -->
-            <!--   Recovery  = зелёный (выход из дна, growth↑ cycle↓)      -->
-            <!--   Slowdown  = амбер  (охлаждение, growth↓ cycle↑)         -->
+            <!-- Цветовая семантика (оси по finance/regime.py):            -->
+            <!--   Expansion = синий  (здоровый рост: growth↑ cycle↑)      -->
+            <!--   Recovery  = зелёный (выход из дна: growth↓ cycle↑ —      -->
+            <!--                цикличные уже лидируют, рынок ещё нет)      -->
+            <!--   Slowdown  = амбер  (охлаждение: growth↑ cycle↓)          -->
             <!--   Recession = красный (двойное падение growth↓ cycle↓)    -->
             <linearGradient id="qSlowdown" x1="0" y1="1" x2="1" y2="0">
               <stop offset="0%"   stop-color="#D9A03B" stop-opacity="0.18"/>
@@ -2987,20 +2988,22 @@
           </defs>
 
           <!-- 4 квадранта -->
-          <rect x="30"  y="30"  width="125" height="125" fill="url(#qRecovery)"/>
+          <rect x="30"  y="30"  width="125" height="125" fill="url(#qSlowdown)"/>
           <rect x="155" y="30"  width="125" height="125" fill="url(#qExpansion)"/>
           <rect x="30"  y="155" width="125" height="125" fill="url(#qRecession)"/>
-          <rect x="155" y="155" width="125" height="125" fill="url(#qSlowdown)"/>
-          <!-- внутренние подписи квадрантов (синхронизировано с finance/regime.py) -->
-          <!--   top-left  (Growth↑, Cycle↓): RECOVERY                              -->
-          <!--   top-right (Growth↑, Cycle↑): EXPANSION                             -->
-          <!--   bot-left  (Growth↓, Cycle↓): RECESSION                             -->
-          <!--   bot-right (Growth↓, Cycle↑): SLOWDOWN                              -->
+          <rect x="155" y="155" width="125" height="125" fill="url(#qRecovery)"/>
+          <!-- внутренние подписи квадрантов (Audit 2026-07-05 R-1: синхронизировано
+               с finance/regime.py — ранее RECOVERY/SLOWDOWN были ПЕРЕПУТАНЫ,
+               подписи следовали до-фиксовой семантике движка):
+                 top-left  (Growth↑, Cycle↓): SLOWDOWN  (рынок растёт, цикличные сдают)
+                 top-right (Growth↑, Cycle↑): EXPANSION
+                 bot-left  (Growth↓, Cycle↓): RECESSION
+                 bot-right (Growth↓, Cycle↑): RECOVERY  (цикличные лидируют, рынок ещё нет) -->
           <g font-family="JetBrains Mono" font-size="9" fill="rgba(28,27,26,0.55)" font-weight="600" letter-spacing="0.05em">
-            <text x="92.5"  y="50">RECOVERY</text>
+            <text x="92.5"  y="50">SLOWDOWN</text>
             <text x="217.5" y="50">EXPANSION</text>
             <text x="92.5"  y="275">RECESSION</text>
-            <text x="217.5" y="275">SLOWDOWN</text>
+            <text x="217.5" y="275">RECOVERY</text>
           </g>
 
           <!-- оси (центральный крест) -->

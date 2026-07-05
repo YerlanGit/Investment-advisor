@@ -308,11 +308,16 @@ const RegimeQuadrant = ({ dot, size=300 }) => {
   const X = (v) => cx + (v/SCALE) * (inner/2);
   const Y = (v) => cy - (v/SCALE) * (inner/2);
   const dx = X(dot.cycle), dy = Y(dot.growth);
+  // Audit 2026-07-05 (R-1): labels pinned to finance/regime.py quadrants —
+  // X=cycle, Y=growth ⇒ top-left (growth+, cycle−) is SLOWDOWN and bottom-right
+  // (growth−, cycle+) is RECOVERY.  The old layout had them SWAPPED (pre-fix
+  // engine semantics), so a Slowdown reading would land the dot in a quadrant
+  // labelled «RECOVERY» — visually contradicting the regime label.
   const quads = [
-    { x:pad,        y:pad,        label:'RECOVERY',  fill:'#5d7c5c' },
+    { x:pad,        y:pad,        label:'SLOWDOWN',  fill:'#a8a293' },
     { x:cx,         y:pad,        label:'EXPANSION', fill:'#caa01a' },
     { x:pad,        y:cy,         label:'RECESSION', fill:'#c47358' },
-    { x:cx,         y:cy,         label:'SLOWDOWN',  fill:'#a8a293' },
+    { x:cx,         y:cy,         label:'RECOVERY',  fill:'#5d7c5c' },
   ];
   return (
     <svg viewBox={`0 0 ${size} ${size}`} className="w-full h-auto" style={{ maxWidth: size }}>
@@ -337,7 +342,8 @@ const RegimeQuadrant = ({ dot, size=300 }) => {
       <circle cx={dx} cy={dy} r="7" fill="#f5d04e" stroke="#caa01a" strokeWidth="1.5"/>
       <text x={dx+14} y={dy-6} fontSize="9.5" fontFamily="JetBrains Mono" fontWeight="600" fill="#caa01a">сейчас</text>
       <text x={dx+14} y={dy+5} fontSize="8" fontFamily="JetBrains Mono" fill="#6b6862">
-        G +{dot.growth.toFixed(2)} · C +{dot.cycle.toFixed(2)}
+        {/* R-4: signed formatting — «+-0.05» is impossible now */}
+        G {(dot.growth>=0?'+':'')+dot.growth.toFixed(2)} · C {(dot.cycle>=0?'+':'')+dot.cycle.toFixed(2)}
       </text>
     </svg>
   );

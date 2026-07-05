@@ -224,6 +224,10 @@ def _map_deep(p: dict, meta: dict) -> dict:
     # yielded an empty list and the «координаты режима» chips never rendered even
     # though FRED was fresh.  Read the `series` list and drop only genuinely
     # missing prints (value formatted as "—").
+    # Audit 2026-07-05 (R-9): the state pill used to leak the raw EN token
+    # («ok»/«stale») — map to the design's RU labels.
+    _drv_state_ru = {"ok": "актуально", "stale": "устарело",
+                     "warn": "частично", "missing": "нет данных", "error": "ошибка"}
     drivers = []
     for m in _list(_g(p, "macro_drivers", default={}), "series"):
         if not isinstance(m, dict):
@@ -234,19 +238,41 @@ def _map_deep(p: dict, meta: dict) -> dict:
         st = str(_g(m, "status") or "").strip().lower()
         drivers.append({"name": _txt(m, "name"), "val": val,
                         "trend": _txt(m, "trend_label") if _g(m, "trend_label") else "",
-                        "state": _txt(m, "status"),
+                        "state": _drv_state_ru.get(st, st or "—"),
                         "tone": "pos" if st == "ok" else "warn"})
+    _bullets_rc = [_signal_obj(x) for x in _list(rc, "signals")][:6]
+    # Audit 2026-07-05 (R-6): the «RAG ·» chips used to show ETF momentum
+    # (explainers) while the REAL bank excerpts (regime_rag_confirm) were a dead
+    # payload key.  Prefer the true RAG confirmations when the KB returned any;
+    # fall back to momentum explainers with an honest label (ragBacked=False).
+    _rag_confirm = [str(x) for x in _list(p, "regime_rag_confirm") if str(x).strip()]
+    _cons = _g(p, "regime_consistency", default={}) or {}
     regime = {
         "name": _txt(reg, "label").split()[0] if _g(reg, "label") else DASH,
         "nameRu": _txt(reg, "label_ru") if _g(reg, "label_ru") else _txt(reg, "label"),
         "confidence": round(_num(reg, "confidence") * (100 if _num(reg, "confidence") <= 1 else 1)),
-        "confirms": len([s for s in _list(rc, "signals")]) or 0,
+        # R-5: «N подтверждающих сигнала» must count CONFIRMING (✓) bullets only,
+        # not the contradicting ⚠/✗ ones the same list carries.
+        "confirms": len([b for b in _bullets_rc if b.get("ok")]),
         "growth": _num(reg, "growth"), "cycle": _num(reg, "cycle"),
         "dot": {"growth": _num(reg, "growth"), "cycle": _num(reg, "cycle")},
-        "ragSignals": [str(x) for x in _list(reg, "explainers")][:4],
+        "ragSignals": (_rag_confirm[:4] if _rag_confirm
+                       else [str(x) for x in _list(reg, "explainers")][:4]),
+        "ragBacked": bool(_rag_confirm),
         "drivers": drivers,
-        "confirm": _txt(rc, "stance") if _g(rc, "stance") else DASH,
-        "confirmBullets": [_signal_obj(x) for x in _list(rc, "signals")][:6],
+        # R-2: the drivers header used to hardcode a design-mock date — carry the
+        # real macro-pack as_of so the component renders live freshness.
+        "driversAsOf": _txt(_g(p, "macro_drivers", default={}) or {}, "as_of"),
+        # R-3: the banner paragraph used to render the raw stance token
+        # («diverges») — carry the human summary; stance drives the header tone.
+        "confirm": _txt(rc, "summary") if _g(rc, "summary") else (
+            _txt(rc, "stance") if _g(rc, "stance") else DASH),
+        "confirmStance": _txt(rc, "stance") if _g(rc, "stance") else "",
+        "confirmBullets": _bullets_rc,
+        # R-8: the deterministic FRED↔momentum cross-check (4.D) was v3-only —
+        # surface it in premium too.
+        "consistency": ({"status": _txt(_cons, "status"), "note": _txt(_cons, "note")}
+                        if _cons else None),
         "regimeAI": _txt(p, "ai_regime_comment"),
     }
 
