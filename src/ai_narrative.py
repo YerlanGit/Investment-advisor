@@ -1022,12 +1022,15 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
         '    "stance": "confirms | partial | diverges",\n'
         '    "summary": "≤220 знаков — простыми словами: подтверждается ли вывод движка о режиме, '
         'на основании каких независимых сигналов",\n'
-        '    "signals": ["4–6 строк ≤90 знаков — каждая начинается с ✓/⚠/✗ + сигнал. '
-        'ПОКРЫТЬ обязательно: (1) МАКРО-ДИНАМИКА — направление темпов из summary.macro[*].trend: '
+        '    "signals": ["5–7 строк ≤90 знаков — каждая начинается с ✓/⚠/✗ + сигнал. '
+        'ПОКРЫТЬ обязательно ВСЕ СЕМЬ: (1) МАКРО-ДИНАМИКА — направление темпов из summary.macro[*].trend: '
         'безработица РАСТЁТ/ПАДАЕТ, ВВП УСКОРЯЕТСЯ/ЗАМЕДЛЯЕТСЯ (приоритет ТЕМПА над уровнем); '
         '(2) кривая доходности 10Y−2Y, (3) HY OAS (кредитный спред), (4) VIX (страх рынка), '
-        '(5) факторные беты портфеля vs ожидаемые для режима ([Barclays]), '
-        '(6) банковский консенсус [GS]/[Barclays]/[JPM]"]\n'
+        '(5) ИНФЛЯЦИОННЫЕ ОЖИДАНИЯ — breakeven 10Y: уровень vs таргет 2% И темп '
+        '(ре-анкоринг ВВЕРХ = ужесточение ФРС против роста ⚠; заякорены/снижаются = поддержка ✓ '
+        '— этот сигнал входит в growth-ось движка), '
+        '(6) факторные беты портфеля vs ожидаемые для режима ([Barclays]), '
+        '(7) банковский консенсус [GS]/[Barclays]/[JPM]"]\n'
         '  },\n'
         '  "ai_holdings_comment": "≤200 знаков — какие позиции занимают наибольшую долю в риске '
         '(TRC — доля в общем риске). Назови конкретные тикеры-hotspots и объясни почему они опасны. '
@@ -1571,11 +1574,14 @@ def generate_narrative(results: dict, tier: str = "base",
             summary = _soft_trim(_strip_unverified_rag_citations(
                 str(raw.get("summary", "")).strip(), market_context), 260)
             signals_in = raw.get("signals") or []
+            # 2026-07-05: cap 6→7 — the checklist gained a mandatory INFLATION
+            # (breakeven level⊕темп) checkpoint, mirroring the overlay's third
+            # nudge; at 6 the model had to drop a signal to fit.
             signals = [
                 _soft_trim(_strip_unverified_rag_citations(
                     str(s).strip(), market_context), 120)
                 for s in signals_in if str(s).strip()
-            ][:6]
+            ][:7]
             return {"stance": stance, "summary": summary, "signals": signals}
 
         # Build the per-section comments ONCE so the citation audit below counts

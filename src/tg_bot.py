@@ -18,6 +18,7 @@ import asyncio
 import logging
 import math
 import os
+import re
 import signal
 import uuid
 from datetime import datetime
@@ -621,9 +622,17 @@ def _fetch_rag_context(results: dict) -> tuple[str, list[str], str, dict]:
             )
             regime_raw = rag.get_market_sentiment(query=regime_query, n_results=2)
             if regime_raw and "NO PDF DATA" not in regime_raw:
+                # 2026-07-05: the raw context is Markdown with retrieval-header
+                # lines («--- [дата] файл … (актуальность: …) ---»); those
+                # headers and **bold** markers leaked verbatim into the report's
+                # regime chips.  Keep CONTENT lines only, de-markdowned.
                 for line in regime_raw.split("\n"):
                     line = line.strip()
-                    if line and len(line) > 30:
+                    if not line or line.startswith("---"):
+                        continue                     # retrieval header, not text
+                    line = re.sub(r"\*\*(.*?)\*\*", r"\1", line)   # **bold** → bold
+                    line = line.lstrip("#*•- ").strip()
+                    if len(line) > 30:
                         regime_rag_confirm.append(line[:200])
                         if len(regime_rag_confirm) >= 3:
                             break

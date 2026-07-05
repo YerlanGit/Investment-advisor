@@ -201,12 +201,18 @@ def _build_regime_consistency(regime: Optional[dict],
     yc  = _val("yield_curve_10y2y")   # pp; < 0 = inverted (recessionary)
     hy  = _val("hy_credit_spread")    # %  (5.5 == 550 bp); > 5.5 = stress
     vix = _val("vix")                 # index; > 25 = fear
+    # 2026-07-05 (владелец: «в чекере должны быть ВСЕ сигналы»): инфляционные
+    # ожидания входят и в детерминированную сверку — де-анкоринг 10Y breakeven
+    # выше 3% (рынок закладывает ужесточение ФРС) — стресс-сигнал против
+    # risk-on ярлыка; порог зеркалит overlay-якорь 2% + 1пп буфер.
+    be  = _val("breakeven_inflation") # %; > 3.0 = де-анкоринг ожиданий
 
     stress: list[str] = []
     if yc is not None and yc < 0:    stress.append("инверсия кривой 10Y−2Y")
     if hy is not None and hy > 5.5:  stress.append("широкий HY-спред (>550 б.п.)")
     if vix is not None and vix > 25: stress.append("повышенный VIX (>25)")
-    have_any = any(x is not None for x in (yc, hy, vix))
+    if be is not None and be > 3.0:  stress.append("де-анкоринг инфляционных ожиданий (breakeven >3%)")
+    have_any = any(x is not None for x in (yc, hy, vix, be))
 
     if risk_on and len(stress) >= 2:
         return {"status": "diverges", "signals": stress,

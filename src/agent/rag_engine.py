@@ -125,12 +125,18 @@ class FinancialRAG:
 
         return None
 
-    def _get_doc_date(self, file_path: str, md_text: str) -> tuple[datetime, str]:
+    def _get_doc_date(self, file_path: str, md_text: str,
+                      filename: str | None = None) -> tuple[datetime, str]:
         """
         Returns (datetime, method_used).
         Priority: filename → PDF text → file modification time.
+
+        ``filename`` (2026-07-05): the LOGICAL document name when file_path is
+        a NamedTemporaryFile download — otherwise the year/quarter in the real
+        name is invisible and recency falls back to tmp-file mtime (≈ «сегодня»
+        для любого старого отчёта).
         """
-        filename = os.path.basename(file_path)
+        filename = filename or os.path.basename(file_path)
 
         dt = self._extract_date_from_filename(filename)
         if dt:
@@ -244,7 +250,14 @@ class FinancialRAG:
         if doc_metadata is None:
             doc_metadata = {}
 
-        filename = os.path.basename(file_path)
+        # 2026-07-05: the Cloud Function / boot-ingest download PDFs into
+        # NamedTemporaryFile paths, so basename(file_path) was «tmpl3mmhrmf.pdf»
+        # — that garbage became the `source` metadata (leaked into the report's
+        # RAG chips) AND broke filename-based date/bank detection, silently
+        # degrading recency ranking.  The callers already pass the REAL object
+        # name in doc_metadata["filename"] — prefer it.
+        filename = os.path.basename(
+            str(doc_metadata.get("filename") or os.path.basename(file_path)))
         logger.info("[RAG] Парсинг: %s", filename)
         print(f"[RAG] Парсинг: {filename}")
 
@@ -260,7 +273,7 @@ class FinancialRAG:
             return 0
 
         # ── Определяем дату документа ──────────────────────────────────────
-        doc_dt, method = self._get_doc_date(file_path, md_text)
+        doc_dt, method = self._get_doc_date(file_path, md_text, filename=filename)
         doc_ts = int(doc_dt.timestamp())
         print(f"[RAG] Дата документа: {doc_dt.strftime('%Y-%m-%d')} (источник: {method})")
 

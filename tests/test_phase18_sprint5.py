@@ -780,6 +780,20 @@ class RegimeConsistencyR3Test(unittest.TestCase):
         self.assertIsNone(_build_regime_consistency({"regime": "Expansion"}, None))
         self.assertIsNone(_build_regime_consistency(None, self._macro(0, 3, 15)))
 
+    def test_breakeven_deanchoring_counts_as_stress(self):
+        # 2026-07-05: inflation joined the checker — de-anchored 10Y breakeven
+        # (>3%) is a stress signal; anchored expectations are not.
+        from pdf_payload import _build_regime_consistency
+        macro = self._macro(-0.2, 3.0, 18)              # 1 стресс (инверсия)
+        macro["breakeven_inflation"] = {"value": 3.4}   # + де-анкоринг = 2 → diverges
+        out = _build_regime_consistency({"regime": "Expansion"}, macro)
+        self.assertEqual(out["status"], "diverges")
+        self.assertTrue(any("инфляционных ожиданий" in s for s in out["signals"]))
+        # Заякоренные ожидания (2.2%) стресс не добавляют.
+        macro["breakeven_inflation"] = {"value": 2.2}
+        out2 = _build_regime_consistency({"regime": "Expansion"}, macro)
+        self.assertFalse(any("инфляционных" in s for s in out2["signals"]))
+
 
 if __name__ == "__main__":
     unittest.main()

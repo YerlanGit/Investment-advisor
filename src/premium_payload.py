@@ -240,7 +240,7 @@ def _map_deep(p: dict, meta: dict) -> dict:
                         "trend": _txt(m, "trend_label") if _g(m, "trend_label") else "",
                         "state": _drv_state_ru.get(st, st or "—"),
                         "tone": "pos" if st == "ok" else "warn"})
-    _bullets_rc = [_signal_obj(x) for x in _list(rc, "signals")][:6]
+    _bullets_rc = [_signal_obj(x) for x in _list(rc, "signals")][:7]
     # Audit 2026-07-05 (R-6): the «RAG ·» chips used to show ETF momentum
     # (explainers) while the REAL bank excerpts (regime_rag_confirm) were a dead
     # payload key.  Prefer the true RAG confirmations when the KB returned any;
