@@ -851,17 +851,25 @@ class PremiumMapperAuditTest(unittest.TestCase):
         # Audit 2026-07-05 (R-1): both charts had RECOVERY/SLOWDOWN swapped vs
         # finance/regime.py.  Pin the corrected geometry: top-left = SLOWDOWN,
         # bottom-right = RECOVERY (X=cycle, Y=growth).
+        #
+        # NB (build-gate fix): the deploy gate runs this suite INSIDE the Docker
+        # image, which ships src/ + tests/ but NOT the dev-only design/ tree
+        # (Dockerfile COPY list).  The JSX source pin therefore runs only when
+        # design/ is present (repo checkout / GitHub CI); the SHIPPED artifacts
+        # — compiled bundle + v3 template — are pinned unconditionally.
         import re as _re
         from pathlib import Path as _P
         root = _P(__file__).resolve().parent.parent
-        jsx = (root / "design/premium_v2/deep/deep-charts.jsx").read_text(encoding="utf-8")
-        m = _re.search(r"const quads = \[(.*?)\];", jsx, _re.S)
-        self.assertIsNotNone(m)
-        rows = [ln for ln in m.group(1).splitlines() if "label:" in ln]
-        self.assertIn("SLOWDOWN", rows[0])   # top-left  (growth+, cycle−)
-        self.assertIn("EXPANSION", rows[1])  # top-right
-        self.assertIn("RECESSION", rows[2])  # bottom-left
-        self.assertIn("RECOVERY", rows[3])   # bottom-right (growth−, cycle+)
+        jsx_path = root / "design/premium_v2/deep/deep-charts.jsx"
+        if jsx_path.exists():
+            jsx = jsx_path.read_text(encoding="utf-8")
+            m = _re.search(r"const quads = \[(.*?)\];", jsx, _re.S)
+            self.assertIsNotNone(m)
+            rows = [ln for ln in m.group(1).splitlines() if "label:" in ln]
+            self.assertIn("SLOWDOWN", rows[0])   # top-left  (growth+, cycle−)
+            self.assertIn("EXPANSION", rows[1])  # top-right
+            self.assertIn("RECESSION", rows[2])  # bottom-left
+            self.assertIn("RECOVERY", rows[3])   # bottom-right (growth−, cycle+)
         # Compiled bundle must carry the same order (rebuilt via build.sh).
         bundle = (root / "src/premium_assets/deep-components.js").read_text(encoding="utf-8")
         self.assertLess(bundle.find("SLOWDOWN"), bundle.find("RECOVERY"))
