@@ -91,6 +91,20 @@ class NarrativeRAGTest(unittest.TestCase):
         self.assertEqual(out["file_cites"], 0)
         self.assertEqual(out["bank_cites"], 3)
 
+    def test_regime_rag_confirm_reaches_the_prompt(self) -> None:
+        """Фаза 4 (блок 1): режим-специфичные выдержки должны попадать в промпт
+        отдельным fenced-блоком с binding-правилом — раньше их видели только
+        чипы отчёта, а модель писала regime-комментарий из памяти."""
+        from ai_narrative import _user_prompt
+        p = _user_prompt({}, tier="deep", market_context="--- goldman.pdf ---\nтекст",
+                         regime_rag_confirm=["Goldman: цикл продолжится, качество в фаворе"])
+        self.assertIn("RAG-ПОДТВЕРЖДЕНИЕ РЕЖИМА", p)
+        self.assertIn("Goldman: цикл продолжится", p)
+        self.assertIn("ОПИРАЙСЯ В ПЕРВУЮ ОЧЕРЕДЬ", p)
+        # Без выдержек блок не появляется (промпт не раздувается).
+        p2 = _user_prompt({}, tier="deep", market_context="--- goldman.pdf ---\nтекст")
+        self.assertNotIn("RAG-ПОДТВЕРЖДЕНИЕ РЕЖИМА", p2)
+
     def test_fallback_returns_used_rag_false(self) -> None:
         prev = os.environ.pop("ANTHROPIC_API_KEY", None)
         try:

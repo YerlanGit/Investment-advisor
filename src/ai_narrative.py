@@ -706,7 +706,8 @@ def _repair_truncated_json(raw: str) -> str:
 # ── Narrative prompt (RUSSIAN) ───────────────────────────────────────────────
 
 def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
-                 user_profile: str = "Moderate") -> str:
+                 user_profile: str = "Moderate",
+                 regime_rag_confirm: list[str] | None = None) -> str:
     regime = (summary.get("regime") or {})
     regime_label = regime.get("regime", "unknown")
     regime_ru    = _regime_ru(regime_label)   # Sprint-5.3: plain-Russian phrase
@@ -747,6 +748,26 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
         rag_rule = (
             "Если используешь факт из АНАЛИТИКИ БАНКОВ — цитируй "
             "[RAG: <имя_файла>]. Не выдумывай файлы.\n"
+        )
+
+    # 2026-07-05 (Фаза 4, блок 1): the regime-specific bank excerpts used to
+    # flow ONLY to the report chips — the model never saw them, so
+    # ai_regime_comment / regime_confirmation leaned on memory-consensus even
+    # when the KB held on-point excerpts.  Feed them as a dedicated fenced
+    # block + a binding rule so the regime narrative is grounded in the
+    # retrieved chunks first.
+    if regime_rag_confirm:
+        _lines = "\n".join(f"- {str(s)[:200]}" for s in regime_rag_confirm[:3])
+        rag_block += (
+            "\n\n=== RAG-ПОДТВЕРЖДЕНИЕ РЕЖИМА (выдержки из банковских PDF) ===\n"
+            + _wrap_untrusted("rag_regime_confirm", _lines)
+            + "\n=== КОНЕЦ RAG-ПОДТВЕРЖДЕНИЯ ==="
+        )
+        rag_rule += (
+            "В ai_regime_comment и regime_confirmation ОПИРАЙСЯ В ПЕРВУЮ ОЧЕРЕДЬ "
+            "на «RAG-ПОДТВЕРЖДЕНИЕ РЕЖИМА» и «АНАЛИТИКУ БАНКОВ» (с [RAG: файл]); "
+            "консенсус из собственной памяти [GS]/[Barclays]/[JPM] — только как "
+            "ДОПОЛНЕНИЕ, когда выдержки не покрывают вопрос.\n"
         )
 
     # Build list of tickers that are on Sell/Trim in action_plan
@@ -1015,9 +1036,12 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
         'и секторными перекосами из ai_sector_comment [Quant Engine]",\n'
         '  "ai_performance_comment": "≤180 знаков — доходность 1М/3М/12М/YTD: тренды и причины. '
         'Укажи как макро-режим [см. ai_regime_comment] повлиял на динамику [Quant Engine]",\n'
-        '  "ai_regime_comment": "≤220 знаков — текущий режим рынка: что это значит простыми словами '
-        '(рынок восстанавливается / перегрет / в стагфляции). Что рекомендуют Goldman Sachs, '
-        'Barclays, JPMorgan для этого режима. Как это влияет на факторы [Quant Engine][GS][Barclays][JPM]",\n'
+        '  "ai_regime_comment": "≤300 знаков — текущий режим рынка простыми словами '
+        '(рынок восстанавливается / перегрет / в стагфляции), с опорой на ВСЕ драйверы '
+        'summary.macro (включая инфляционные ожидания breakeven и их темп). '
+        'Если даны RAG-выдержки — рекомендации банков бери ИЗ НИХ с [RAG: файл]; '
+        'консенсус по памяти [GS]/[Barclays]/[JPM] — только как дополнение. '
+        'Как это влияет на факторы [Quant Engine]",\n'
         '  "regime_confirmation": {\n'
         '    "stance": "confirms | partial | diverges",\n'
         '    "summary": "≤220 знаков — простыми словами: подтверждается ли вывод движка о режиме, '
@@ -1433,7 +1457,8 @@ def _fallback_stock_picks(regime_label: str, tier: str) -> dict:
 
 def generate_narrative(results: dict, tier: str = "base",
                        market_context: str = "",
-                       user_risk_profile: str = "Moderate") -> dict:
+                       user_risk_profile: str = "Moderate",
+                       regime_rag_confirm: list[str] | None = None) -> dict:
     """
     Returns {verdict, plain_summary, bullets, stock_picks,
              action_plan_text, ai_action_impact, used_rag}.
@@ -1491,7 +1516,8 @@ def generate_narrative(results: dict, tier: str = "base",
                 "role": "user",
                 "content": _user_prompt(summary, tier=tier,
                                         market_context=market_context,
-                                        user_profile=user_risk_profile),
+                                        user_profile=user_risk_profile,
+                                        regime_rag_confirm=regime_rag_confirm),
             }],
             # Structured Outputs — force the report through a typed tool call so
             # the SDK returns a GUARANTEED dict.  No brace-finding, no
