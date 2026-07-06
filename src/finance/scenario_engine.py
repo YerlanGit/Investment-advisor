@@ -17,6 +17,25 @@ default 1825 ≈ 5 лет) — окно ОСНОВНОГО отчёта (HISTORY
 не трогаем.  Молодые активы не роняют матрицу: ковариация считается pairwise
 с min_periods (NaN-маскирование), веса недостающих метрик исключаются с
 перенормировкой.
+
+Сверка с формульным референсом (Bloomberg-style, разделы 1–9) — что совпадает
+и где осознанно отклоняемся:
+  • 1.3/1.4  геометрическая годовая доходность (1+R_cum)^(1/N)−1 и Σw·R — ✓;
+  • 2.1–2.2  выборочная σ с поправкой Бесселя (ddof=1) ×√252 — ✓;
+  • 2.5/2.6  gross Σwσ (reference) vs истинная √(wᵀΣw) — обе, основная = истинная;
+  • 5.1–5.3  Euler-разложение: MCTR(i)=ρ(i,P)·σ(i), CTRisk=w·MCTR,
+             Σ CTRisk = σ_p ТОЧНО, Σ pct_CTR = 100% — `mctr_table()`;
+  • 8.2/8.3  β(P)=Σw·β, DY(P)=Σw·DY — плоская сумма по ВСЕМ позициям,
+             отсутствующее значение = вклад 0 (β золота/бондов 0.00), без
+             перенормировки на покрытие — иначе β(P)/DY(P) завышаются;
+  • 4.1      Sharpe = (E[r]−RFR)/σ_p; референс берёт Rf≈5.3% (3M T-bill) либо 0%
+             для gross-сравнения — у нас Rf из env RISK_FREE_RATE (default
+             0.045), единая конвенция с основным отчётом (Base Currency + RFR);
+  • ОТКЛОНЕНИЕ (оценка Σ): референс — EWMA λ=0.96 (half-life ≈17 дн.);
+    сценарный тир СОЗНАТЕЛЬНО берёт равновзвешенную выборочную ковариацию на
+    5-летнем окне: дельты «до/после» должны отражать сделку, а не дрожание
+    оценщика последнего месяца.  Основной движок (MAC3) использует
+    EWMA(hl=63)⊕Ledoit-Wolf — реактивность там, стабильность здесь.
 """
 from __future__ import annotations
 
@@ -84,14 +103,17 @@ def _daily_returns(prices: pd.DataFrame) -> pd.DataFrame:
     return prices.sort_index().pct_change(fill_method=None)
 
 
-def portfolio_vol_cov(prices: pd.DataFrame, weights: dict[str, float],
-                      *, min_periods: int = _MIN_PERIODS_COV) -> Optional[float]:
-    """Истинная годовая σ_p = √(wᵀΣw)·√252 по pairwise-ковариации.
+def _cov_core(prices: pd.DataFrame, weights: dict[str, float],
+              min_periods: int) -> Optional[tuple[list[str], np.ndarray, np.ndarray]]:
+    """Общее ядро σ_p и Euler-разложения: pairwise-ковариация дневных
+    доходностей с NaN-маскированием молодых активов.
 
-    NaN-маскирование молодых активов: pandas `.cov(min_periods=…)` считает
-    каждую пару на пересечении дат; пары без min_periods дают NaN → такие
-    активы исключаются из расчёта с перенормировкой весов (портфель не падает,
-    в payload уходит список исключённых — честность CoVe)."""
+    pandas `.cov(min_periods=…)` считает каждую пару на пересечении дат;
+    пары без min_periods дают NaN → такие активы исключаются из расчёта с
+    перенормировкой весов (портфель не падает, в payload уходит список
+    исключённых — честность CoVe).  Возвращает (тикеры, w-нормированные,
+    Σ дневная) — один код-путь гарантирует, что Σ CTRisk из `mctr_table`
+    сходится с `portfolio_vol_cov` бит-в-бит (тождество Эйлера)."""
     cols = [t for t in weights if t in prices.columns and weights[t] > 0]
     if not cols:
         return None
@@ -102,9 +124,52 @@ def portfolio_vol_cov(prices: pd.DataFrame, weights: dict[str, float],
         return None
     w = np.array([weights[c] for c in ok], dtype=float)
     w = w / w.sum()
-    sigma = cov.loc[ok, ok].fillna(0.0).values
+    return ok, w, cov.loc[ok, ok].fillna(0.0).values
+
+
+def portfolio_vol_cov(prices: pd.DataFrame, weights: dict[str, float],
+                      *, min_periods: int = _MIN_PERIODS_COV) -> Optional[float]:
+    """Истинная годовая σ_p = √(wᵀΣw)·√252 (формула 2.6 референса)."""
+    core = _cov_core(prices, weights, min_periods)
+    if core is None:
+        return None
+    _, w, sigma = core
     var_d = float(w @ sigma @ w)
     return float(np.sqrt(max(var_d, 0.0)) * np.sqrt(TRADING_DAYS))
+
+
+def mctr_table(prices: pd.DataFrame, weights: dict[str, float],
+               *, min_periods: int = _MIN_PERIODS_COV) -> Optional[dict]:
+    """Euler-разложение риска по позициям (формулы 5.1–5.3 референса).
+
+    MCTR(i)   = (Σw)ᵢ/σ_p = ρ(i,P)·σ(i)   — маржинальный вклад в риск;
+    CTRisk(i) = w(i)·MCTR(i),  Σ CTRisk(i) = σ_p ТОЧНО (тождество Эйлера);
+    pct_CTR(i) = CTRisk(i)/σ_p·100,  Σ = 100%.
+
+    Годовая шкала (×√252).  Хедж с ρ(i,P)<0 даёт ОТРИЦАТЕЛЬНЫЕ MCTR/CTRisk —
+    позиция снижает риск портфеля (пример референса: XOM с ρ=−0.15).
+    Молодые активы маскируются тем же ядром, что и `portfolio_vol_cov`."""
+    core = _cov_core(prices, weights, min_periods)
+    if core is None:
+        return None
+    ok, w, sigma = core
+    var_d = float(w @ sigma @ w)
+    if var_d <= 0:
+        return None
+    ann = float(np.sqrt(TRADING_DAYS))
+    sd_d = float(np.sqrt(var_d))
+    vol_p = sd_d * ann
+    mctr = (sigma @ w) / sd_d * ann              # = ρ(i,P)·σᵢ, годовая
+    ctrisk = w * mctr                            # Σ = vol_p (Эйлер)
+    sig_i = np.sqrt(np.clip(np.diag(sigma), 0.0, None)) * ann
+    rows = []
+    for j, t in enumerate(ok):
+        rho = float(mctr[j] / sig_i[j]) if sig_i[j] > 0 else None
+        rows.append({"ticker": t, "weight": float(w[j]),
+                     "sigma_i": float(sig_i[j]), "rho_ip": rho,
+                     "mctr": float(mctr[j]), "ctrisk": float(ctrisk[j]),
+                     "pct_ctr": float(ctrisk[j] / vol_p * 100.0)})
+    return {"rows": rows, "vol_cov": vol_p}
 
 
 def ann_return(prices: pd.DataFrame, ticker: str) -> Optional[float]:
@@ -229,8 +294,16 @@ def five_metrics(prices: pd.DataFrame, weights: dict[str, float], *,
                  div_yield: Optional[dict[str, float]] = None,
                  pe: Optional[dict[str, float]] = None) -> dict:
     """Ann.Return (взвеш.), σ_p (КОВАРИАЦИОННАЯ), Sharpe (RFR-adj), Beta Σwβ,
-    DY Σw·dy (+ wtd P/E). Отсутствующие per-asset данные исключаются с
-    перенормировкой; None — честный ответ, не ноль."""
+    DY Σw·dy (+ wtd P/E).
+
+    Две агрегации — по референсу:
+      • ann_return / gross vol / P/E: перенормировка на покрытие (молодой актив
+        без истории ≠ актив с нулевой доходностью — честная оценка по
+        покрытым);
+      • beta / div_yield (формулы 8.2/8.3): плоская Σ w·x по ВСЕМ позициям —
+        отсутствующее значение даёт вклад 0 (β кэша/золота/бондов = 0.00,
+        DY неплательщика = 0), веса НЕ перенормируются, иначе β(P) и DY(P)
+        завышаются."""
     def _wavg(vals: Optional[dict[str, float]]) -> Optional[float]:
         if not vals:
             return None
@@ -241,6 +314,16 @@ def five_metrics(prices: pd.DataFrame, weights: dict[str, float], *,
         tw = sum(p[0] for p in pairs)
         return float(sum(w * v for w, v in pairs) / tw) if tw else None
 
+    def _wsum(vals: Optional[dict[str, float]]) -> Optional[float]:
+        if not vals:
+            return None
+        tw = sum(w for w in weights.values() if w > 0)
+        pairs = [(weights[t], vals[t]) for t in weights
+                 if t in vals and vals[t] is not None and weights[t] > 0]
+        if not pairs or not tw:
+            return None
+        return float(sum(w * v for w, v in pairs) / tw)
+
     rets = {t: ann_return(prices, t) for t in weights}
     ann_r = _wavg({t: r for t, r in rets.items() if r is not None})
     vol_p = portfolio_vol_cov(prices, weights)
@@ -249,8 +332,8 @@ def five_metrics(prices: pd.DataFrame, weights: dict[str, float], *,
     if ann_r is not None and vol_p and vol_p > 0:
         shrp = float((ann_r - _rfr()) / vol_p)
     return {"ann_return": ann_r, "vol_cov": vol_p, "vol_gross_ref": gross,
-            "sharpe_rfr": shrp, "beta": _wavg(betas),
-            "div_yield": _wavg(div_yield), "pe": _wavg(pe), "rfr": _rfr()}
+            "sharpe_rfr": shrp, "beta": _wsum(betas),
+            "div_yield": _wsum(div_yield), "pe": _wavg(pe), "rfr": _rfr()}
 
 
 def delta_metrics(before: dict, after: dict) -> dict:
@@ -341,7 +424,8 @@ def walk_forward(prices: pd.DataFrame, ticker: str,
 
 __all__ = [
     "ARCHETYPES", "DISCLAIMERS", "MACRO_REGIME_GROUPS", "SCENARIO_LOOKBACK_DAYS",
-    "portfolio_vol_cov", "ann_return", "ann_vol", "sharpe", "corr_to_basket",
+    "portfolio_vol_cov", "mctr_table", "ann_return", "ann_vol", "sharpe",
+    "corr_to_basket",
     "funding_candidates", "size_position", "five_metrics", "delta_metrics",
     "regime_survival", "walk_forward", "BacktestResult",
 ]
