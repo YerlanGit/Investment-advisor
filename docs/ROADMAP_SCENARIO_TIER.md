@@ -1,9 +1,25 @@
 # ROADMAP_SCENARIO_TIER.md — тир «Scenario Analysis»: Full Framework
 
-> Фаза 4 · Блок 2 · v2 (2026-07-06): интегрирован полный пользовательский фреймворк
+> Фаза 4 · Блок 2 · v2.1 (2026-07-06): интегрирован полный пользовательский фреймворк
 > «Portfolio Scenario Analysis» (7 шагов + worked example BUY NVDA/TSM/XOM/GLD //
-> SELL MSFT/AAPL). Статус: **дизайн-спека утверждена, код не начат.**
-> Принципы прежние: ZERO/минимум LLM-API, переиспользование движка, Do-No-Harm.
+> SELL MSFT/AAPL). Принципы: ZERO/минимум LLM-API, переиспользование движка, Do-No-Harm.
+>
+> **Статус v2.1 — ЯДРО РЕАЛИЗОВАНО** (`src/finance/scenario_engine.py`, 12 тестов
+> `test_phase23_scenario.py`): ковариационная σ_p с NaN-маскированием молодых активов
+> (pairwise min_periods=252), RFR-Sharpe, funding decision-tree (Sharpe<0.5 / ret<0 /
+> corr-двойники≥0.90 / TRC-несоразмерность), MCTR-sizing капы (vol>35%→≤15%,
+> ERC-доля≤35%), архетип high_dividend, delta-метрики «до/после», группировка 7 шоков
+> в 3 макро-режима, walk-forward Панель B c look-ahead guard (тест: сигнал никогда не
+> видит будущее) и жёстко зашитыми дисклеймерами Фазы 3 (`DISCLAIMERS`).
+> Сценарный lookback — своя env-ручка `SCENARIO_LOOKBACK_DAYS=1825`; окно основного
+> отчёта (730) не тронуто; изоляция Do-No-Harm закреплена тестом (ядро не импортирует
+> scenario_engine).
+>
+> **ОСТАТОК (шаги 3, 6 таблицы ниже):** DY per-ticker источник; ATR-уровни для
+> кандидатов (перенос из Action Plan); UI — кнопки «Simulate Action plan» /
+> «Scenario analysis report» (премиум-React: правка `deep-plan.jsx` + rebuild
+> `build.sh` из корня; callback в `tg_bot` с кэшем последнего `results` per-user +
+> токен-тариф), payload+шаблон Панелей A/B, CoVe-строка тира.
 
 ---
 
