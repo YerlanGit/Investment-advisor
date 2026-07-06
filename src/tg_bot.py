@@ -676,6 +676,10 @@ def _build_pdf_payload(results: dict, tier: str,
             tier=tier,
             market_context=market_context,
             user_risk_profile=user_risk_profile,
+            # Фаза 4 (блок 1): режим-специфичные банковские выдержки теперь
+            # видны МОДЕЛИ (не только чипам отчёта) — ai_regime_comment и
+            # regime_confirmation обязаны опираться на них в первую очередь.
+            regime_rag_confirm=regime_rag_confirm,
         )
         # Propagate the 3-state RAG status into the summary so the integrity
         # panel shows the truth (used / queried-no-match / unavailable) for

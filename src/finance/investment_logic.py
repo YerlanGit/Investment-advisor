@@ -557,9 +557,15 @@ class MAC3RiskEngine:
             logger.info("AIX instruments proxied to %s for factor model: %s", proxy, ", ".join(aix_found))
         return resolved
 
-    def get_market_data(self, tickers, period_days: int = 730):
+    def get_market_data(self, tickers, period_days: int | None = None):
         """
         Загрузка дневных закрытий через Tradernet API (replaces yfinance).
+
+        period_days (Фаза 4 · Data Resilience §4-а): default читается из env
+        ``HISTORY_LOOKBACK_DAYS`` (=730 → поведение байт-идентично прежнему
+        hardcode).  Расширение окна (напр. 1825 ≈ 5 лет) включается конфигом
+        ТОЛЬКО после чек-листа ROADMAP_DATA_RESILIENCE §4-б: оно меняет все
+        метрики и требует NaN-маскирования молодых активов.
 
         Returns (data, history_result) tuple where history_result contains
         loaded/failed/retried ticker details for user-facing messages.
@@ -569,6 +575,13 @@ class MAC3RiskEngine:
         `self.reporting_currency` by multiplying with the matching FX
         series.  USD-only portfolios short-circuit (no FX calls, no copy).
         """
+        if period_days is None:
+            try:
+                period_days = int(os.getenv("HISTORY_LOOKBACK_DAYS", "730"))
+            except (TypeError, ValueError):
+                period_days = 730
+            period_days = max(90, min(3650, period_days))   # sanity clamp
+
         valid_tickers = self.resolve_tickers(tickers)
         all_req = list(dict.fromkeys(
             valid_tickers + list(self.factor_tickers.values()) + self.BENCHMARK_EXTRA
