@@ -676,6 +676,7 @@ def _flag(value, *, kind: str) -> bool:
 
 TIER_BASE = "base"
 TIER_DEEP = "deep"
+TIER_SCENARIO = "scenario"
 
 # Factor ETFs the engine attempts to load (keep in sync with MAC3RiskEngine).
 # SPLV adds the Volatility (low-vol) factor — Step 5 expansion.
@@ -1986,4 +1987,4 @@ def _build_integrity_checks(results: dict,
     return checks
 
 
-__all__ = ["build_payload", "TIER_BASE", "TIER_DEEP"]
+__all__ = ["build_payload", "TIER_BASE", "TIER_DEEP", "TIER_SCENARIO"]

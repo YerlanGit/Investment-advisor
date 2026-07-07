@@ -91,6 +91,53 @@ def _mock_payload(tier: str = "base") -> dict:
     The shapes match what the live engine emits — same field names and
     types — so the template binds the same way in production.
     """
+    # Scenario tier — не проходит через build_payload (у него своя схема
+    # `data.scenario`).  Smoke-фикстура строит синтетический сценарный payload
+    # напрямую (форма 1:1 с finance/scenario_report.build_scenario_payload).
+    if (tier or "").lower() == "scenario":
+        return {
+            "tier": "scenario",
+            "scenario": {
+                "available": True,
+                "window_days": 1825, "n_obs": 1240,
+                "metrics": {"ann_return": 0.183, "vol_cov": 0.116, "vol_gross_ref": 0.214,
+                            "sharpe_rfr": 1.19, "beta": 0.65, "div_yield": 0.012,
+                            "pe": 24.5, "rfr": 0.045},
+                "mctr_rows": [
+                    {"display": "NVDA", "weight": 0.148, "sigma_i": 0.46, "rho_ip": 0.82,
+                     "mctr": 0.38, "ctrisk": 0.056, "pct_ctr": 27.8},
+                    {"display": "MSFT", "weight": 0.175, "sigma_i": 0.28, "rho_ip": 0.71,
+                     "mctr": 0.20, "ctrisk": 0.035, "pct_ctr": 17.4},
+                    {"display": "GLD", "weight": 0.056, "sigma_i": 0.14, "rho_ip": -0.11,
+                     "mctr": -0.015, "ctrisk": -0.001, "pct_ctr": -0.6},
+                ],
+                "vol_cov": 0.116,
+                "regime_survival": [
+                    {"regime": "risk_on", "label": "Risk-On / бычий рынок", "avg_pct": 6.2,
+                     "n_shocks": 2, "survives": True},
+                    {"regime": "rate_shock", "label": "Шок процентных ставок", "avg_pct": -8.1,
+                     "n_shocks": 4, "survives": True},
+                    {"regime": "risk_off", "label": "Risk-Off / рецессия", "avg_pct": -14.6,
+                     "n_shocks": 3, "survives": False},
+                ],
+                "funding": [
+                    {"display": "ORCL", "weight": 0.109, "sharpe": 0.42,
+                     "flags": ["Sharpe 0.42 < 0.5", "дублирующийся риск: corr≥0.9 c NVDA"]},
+                ],
+                "excluded_young": ["FFSPC6.1028.AIX"],
+                "backtest": {"ticker": "MSFT", "rule": "Цена выше 200-дневной средней (трендовый фильтр)",
+                             "summary": {"n_signals": 41, "hit_rate_63d": 0.68,
+                                         "horizons": {"21d": {"mean": 0.021, "median": 0.018, "worst": -0.11, "n": 41},
+                                                      "63d": {"mean": 0.058, "median": 0.049, "worst": -0.19, "n": 41},
+                                                      "126d": {"mean": 0.112, "median": 0.093, "worst": -0.22, "n": 38}}}},
+                "disclaimers": [
+                    "Историческая доходность не гарантирует будущих результатов.",
+                    "Расчёты подвержены искажению выжившего (survivorship bias).",
+                    "Отчёт — результат мат. моделирования и не является ИИР.",
+                ],
+            },
+        }
+
     from pdf_payload import build_payload
     # Tier-specific model — mirrors src/ai_narrative.py:
     #   MODEL_BASE = claude-haiku-4-5-20251001
@@ -308,6 +355,8 @@ def _select_template(tier: str) -> str:
         deep → report_deep_v3.html
         base → report_basic_v3.html
     """
+    if (tier or "base").lower() == "scenario":
+        return "report_scenario_v3.html"
     if (tier or "base").lower() == "deep":
         return "report_deep_v3.html"
     return "report_basic_v3.html"
@@ -352,7 +401,9 @@ def render_report_html(data_dict: dict | None,
     # ── Routing: Premium V2 (flag) vs classic v3 Jinja ─────────────────────────
     # Feature-flagged so the v3 pipeline below is byte-identical when OFF.  Any
     # failure in the premium path falls back to v3 — a report is always produced.
-    if PREMIUM_REPORT_ENABLED:
+    # Scenario tier has NO Premium React bundle (focused single-page report) —
+    # it always renders via its dedicated Jinja template below.
+    if PREMIUM_REPORT_ENABLED and (tier or "base").lower() != "scenario":
         try:
             from premium_payload import build_design_data
             from premium_renderer import render_premium

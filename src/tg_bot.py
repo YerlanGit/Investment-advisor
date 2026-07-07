@@ -79,7 +79,7 @@ from finance.security import SecureVault, MasterKeyRotatedError
 from agent.gatekeeper import run_gatekeeper
 from html_renderer import MOCK_DATA, render_report_html, write_report_html
 from services.report_storage import upload_report
-from pdf_payload import build_payload as _build_v2_payload, TIER_BASE, TIER_DEEP
+from pdf_payload import build_payload as _build_v2_payload, TIER_BASE, TIER_DEEP, TIER_SCENARIO
 from pdf_charts import equity_curve_svg, factor_radar_svg
 from ai_narrative import generate_narrative
 from profile_manager import (
@@ -200,8 +200,12 @@ QUESTIONS: list[dict] = [
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-TIER_COST  = {"base": 1, "deep": 2}
-TIER_LABEL = {"base": "Базовый отчёт", "deep": "Глубокий сценарный анализ"}
+# Токен-тариф (2026-07-07): base 1 · scenario 1 · deep 2.
+TIER_COST  = {"base": 1, "scenario": 1, "deep": 2}
+TIER_LABEL = {"base": "Базовый отчёт",
+              "scenario": "Сценарный анализ",
+              "deep": "Глубокий анализ"}
+TIER_SCENARIO_LABEL = TIER_LABEL[TIER_SCENARIO]
 
 SOURCE_GREETING: dict[str, str] = {
     "news_apple": "новостей Apple",
@@ -665,6 +669,13 @@ def _build_pdf_payload(results: dict, tier: str,
     v1 (legacy, REPORT_VERSION=v1 env): retains the old shape so the legacy
     report.html keeps rendering without code changes elsewhere.
     """
+    # Scenario tier — детерминированный, БЕЗ ИИ-вызовов и RAG (0 LLM-API →
+    # 1 токен).  Собственная схема `data.scenario`; рендерится своим Jinja-
+    # шаблоном (html_renderer маршрутизирует scenario минуя Premium).
+    if (tier or "").lower() == TIER_SCENARIO:
+        from finance.scenario_report import build_scenario_payload
+        return build_scenario_payload(results)
+
     if os.getenv("REPORT_VERSION", "v2").lower() != "v1":
         # Both tiers pull RAG context (macro + micro + regime confirmation).
         # Deep tier gets full 6000-char context; base tier gets 2000-char
@@ -943,10 +954,16 @@ def kb_connect_choice() -> InlineKeyboardMarkup:
 
 
 def kb_analysis_choice() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="📊 Базовый (1 токен)",   callback_data="analysis:base"),
-        InlineKeyboardButton(text="🔬 Глубокий (2 токена)", callback_data="analysis:deep"),
-    ]])
+    # 3 тира: базовый/сценарный по 1 токену, глубокий 2.  Сценарный — своей
+    # строкой, чтобы кнопка не сжималась и подпись «1 токен» читалась.
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="📊 Базовый (1 токен)",  callback_data="analysis:base"),
+            InlineKeyboardButton(text="🔬 Глубокий (2 токена)", callback_data="analysis:deep"),
+        ],
+        [InlineKeyboardButton(text="🎯 Сценарный анализ (1 токен)",
+                              callback_data="analysis:scenario")],
+    ])
 
 
 def kb_confirm(tier: str, context_slug: str) -> InlineKeyboardMarkup:
@@ -1022,13 +1039,19 @@ async def _show_analysis_menu(message: Message, slug: str) -> None:
             f"👋 Кстати, вы пришли из нашего канала _{_source_label(slug)}_.\n\n"
             "Хотите узнать, как эта новость влияет на ваш портфель?\n\n"
             "💰 *Базовый отчёт:* 1 токен\n"
+            "🎯 *Сценарный анализ:* 1 токен\n"
             "🔬 *Глубокий анализ:* 2 токена",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=kb_analysis_choice(),
         )
     else:
         await message.answer(
-            "🚀 *Выберите тип анализа вашего портфеля:*",
+            "🚀 *Выберите тип анализа вашего портфеля:*\n\n"
+            "📊 *Базовый* (1 токен) — риск-профиль, CVaR/Sharpe, состав, идеи.\n"
+            "🎯 *Сценарный* (1 токен) — вклад позиций в риск (Euler-MCTR), "
+            "выживаемость в 3 макро-режимах, слабые звенья, бэктест правила.\n"
+            "🔬 *Глубокий* (2 токена) — всё из базового + факторное разложение, "
+            "4-Pillar, стресс-сценарии, режим, банковская аналитика.",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=kb_analysis_choice(),
         )
@@ -1072,8 +1095,9 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
             await message.answer(
                 f"👋 Привет! Я вижу, вы пришли из нашего канала _{_source_label(slug)}_.\n\n"
                 "Я могу проанализировать, как эта новость повлияет на ваш портфель.\n\n"
-                "💰 *Стоимость базового отчета:* 1 токен\n"
-                "🔬 *Глубокий сценарный анализ:* 2 токена\n\n"
+                "💰 *Базовый отчёт:* 1 токен\n"
+                "🎯 *Сценарный анализ:* 1 токен\n"
+                "🔬 *Глубокий анализ:* 2 токена\n\n"
                 "Начать анализ?",
                 parse_mode=ParseMode.MARKDOWN,
                 reply_markup=kb_analysis_choice(),
@@ -1936,6 +1960,26 @@ async def _run_analysis_background(
             parse_mode=ParseMode.MARKDOWN,
         )
 
+        # Follow-up CTA: предложить сценарную диагностику ОДНИМ тапом.  Сценарный
+        # отчёт считается ИЗ ЭТОГО ЖЕ `results` (без повторной загрузки/ИИ), так
+        # что кэшируем его и вешаем inline-кнопку.  Только для BASE/DEEP — под
+        # самим сценарным отчётом кнопка не нужна.
+        if tier in (TIER_BASE, TIER_DEEP):
+            try:
+                _cache_results_for_scenario(user_id, results)
+                await bot.send_message(
+                    chat_id,
+                    "🎯 *Хотите сценарную диагностику этого же портфеля?*\n\n"
+                    "Вклад каждой позиции в риск (Euler-MCTR), выживаемость в "
+                    "3 макро-режимах, слабые звенья для ребаланса и бэктест "
+                    "трендового правила — *1 токен*, считается мгновенно из "
+                    "уже загруженных данных.",
+                    parse_mode=ParseMode.MARKDOWN,
+                    reply_markup=_kb_scenario_cta(),
+                )
+            except Exception as cta_exc:
+                logger.warning("Scenario CTA/cache failed for %s: %s", user_id, cta_exc)
+
     except RealPortfolioRequired as exc:
         await bot.send_message(
             chat_id,
@@ -2240,6 +2284,117 @@ def _release_user_slot(user_id: int) -> None:
     _IN_FLIGHT_USERS.discard(user_id)
 
 
+# ── Per-user results cache for the one-tap Scenario button ───────────────────
+# After a BASE/DEEP report is delivered, we offer «🎯 Сценарный анализ» as an
+# inline button.  Каждый сценарный отчёт детерминирован и считается ИЗ УЖЕ
+# посчитанного `results` (0 LLM-API, без повторной загрузки цен) — поэтому мы
+# кэшируем последний `results` пользователя и billing-ем 1 токен только за
+# отрисованный отчёт.  Bounded + TTL: max-instances=1, beta-масштаб → память
+# под контролем; протухший кэш честно просит перезапустить из меню.
+import time as _time
+from collections import OrderedDict
+
+_SCENARIO_CACHE: "OrderedDict[int, tuple[dict, float]]" = OrderedDict()
+_SCENARIO_CACHE_TTL_SEC = 3600.0     # 1 час — ссылка на отчёт живёт 48ч, но
+                                     # держать тяжёлый results дольше часа незачем
+_SCENARIO_CACHE_MAX = 64
+
+
+def _cache_results_for_scenario(user_id: int, results: dict) -> None:
+    _SCENARIO_CACHE[user_id] = (results, _time.monotonic())
+    _SCENARIO_CACHE.move_to_end(user_id)
+    while len(_SCENARIO_CACHE) > _SCENARIO_CACHE_MAX:
+        _SCENARIO_CACHE.popitem(last=False)
+
+
+def _get_cached_results(user_id: int) -> dict | None:
+    item = _SCENARIO_CACHE.get(user_id)
+    if item is None:
+        return None
+    results, ts = item
+    if _time.monotonic() - ts > _SCENARIO_CACHE_TTL_SEC:
+        _SCENARIO_CACHE.pop(user_id, None)
+        return None
+    return results
+
+
+def _kb_scenario_cta() -> InlineKeyboardMarkup:
+    """Inline-кнопка «Сценарный анализ» под готовым BASE/DEEP отчётом."""
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="🎯 Сценарный анализ этого портфеля (1 токен)",
+                             callback_data="scenario:cached"),
+    ]])
+
+
+async def cb_scenario_cached(callback: CallbackQuery, state: FSMContext) -> None:
+    """One-tap сценарный отчёт из закэшированного `results` последнего BASE/DEEP
+    прогона.  Billing 1 токен ТОЛЬКО после успешной доставки (как в основном
+    флоу).  Кэш протух → просим перезапустить из меню."""
+    await callback.answer()
+    user_id = callback.from_user.id
+    results = _get_cached_results(user_id)
+    if results is None:
+        await callback.message.answer(
+            "⌛ Данные прошлого отчёта уже устарели.\n\n"
+            "Запустите *🎯 Сценарный анализ* из меню /start — он посчитается "
+            "с нуля (тоже 1 токен).",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        return
+    if not _try_acquire_user_slot(user_id):
+        await callback.message.answer(
+            "⏳ *У вас уже выполняется анализ.* Дождитесь его завершения.",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        return
+    cost = TIER_COST[TIER_SCENARIO]
+    try:
+        balance = await get_balance(user_id)
+        if balance < cost:
+            await callback.message.answer(
+                f"❌ *Недостаточно токенов.* Нужен *{cost}*, доступно *{balance}*.\n\n"
+                "Пополните баланс: /topup.",
+                parse_mode=ParseMode.MARKDOWN,
+            )
+            return
+        await callback.message.answer(
+            "🎯 Собираю *сценарную диагностику* этого портфеля "
+            "(Euler-MCTR · 3 макро-режима · бэктест)…",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        loop = asyncio.get_running_loop()
+        # Детерминированная сборка (numpy/бэктест) — в executor, чтобы не
+        # блокировать long-poll event-loop.
+        payload = await loop.run_in_executor(
+            None, _build_pdf_payload, results, TIER_SCENARIO)
+        await _send_report(callback.message.bot, callback.message.chat.id,
+                           user_id, TIER_SCENARIO, payload)
+        await deduct_tokens(user_id, cost, reason="scenario_analysis")
+        bal = await get_balance(user_id)
+        await callback.message.answer(
+            f"✅ Сценарный анализ готов. 💳 Списан *{cost}* токен · остаток *{bal}*.",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+    except RuntimeError as exc:
+        # _send_report сигналит сбой рендера/загрузки — токен НЕ списан.
+        logger.warning("Scenario-from-cache delivery failed for %s: %s", user_id, exc)
+        await callback.message.answer(
+            "😔 Не удалось сформировать сценарный отчёт. Токен *не списан* — "
+            "попробуйте позже или запустите из меню /start.",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+    except Exception as exc:
+        error_id = uuid.uuid4().hex[:12]
+        logger.exception("Scenario-from-cache error [%s] user=%s: %s",
+                         error_id, user_id, exc)
+        await callback.message.answer(
+            f"😔 Ошибка сценарного анализа. Код: `{error_id}`. Токен *не списан*.",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+    finally:
+        _release_user_slot(user_id)
+
+
 # ── Dispatcher assembly ───────────────────────────────────────────────────────
 
 def build_dispatcher() -> Dispatcher:
@@ -2267,6 +2422,7 @@ def build_dispatcher() -> Dispatcher:
     # Analysis flow callbacks
     dp.callback_query.register(cb_analysis_choice, F.data.startswith("analysis:"))
     dp.callback_query.register(cb_confirm,          F.data.startswith("confirm:"))
+    dp.callback_query.register(cb_scenario_cached,  F.data == "scenario:cached")
     dp.callback_query.register(cb_cancel,           F.data == "cancel")
 
     # Sprint-5 (Task 1 — hard text-input filter) MUST be LAST.  Bot navigation
