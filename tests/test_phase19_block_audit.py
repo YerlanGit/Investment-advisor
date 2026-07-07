@@ -595,14 +595,16 @@ class PremiumMapperTest(unittest.TestCase):
         self.assertIn("factorVariance", d)
         self.assertIsNone(d["factorVariance"])
 
-    def test_base_contract_is_exactly_12_keys(self):
+    def test_base_contract_is_exactly_13_keys(self):
         # §−13: +`leverage` {on, marginPct} — маржа-индикатор, рендерится ТОЛЬКО
         # на левереджёванном счёте (отрицательный кэш).
+        # 2026-07-07: +`quality` (RAG-наблюдаемость, паритет с DEEP) → 13.
         from premium_payload import build_design_data
         b = build_design_data({}, "base")
-        self.assertEqual(len(b), 12)
+        self.assertEqual(len(b), 13)
         self.assertIn("leverage", b)
         self.assertFalse(b["leverage"]["on"])   # пустой payload → плечо скрыто
+        self.assertIn("quality", b)             # integrity/RAG strip surfaced in BASE
 
     def test_none_payload_defensive_dash(self):
         from premium_payload import build_design_data

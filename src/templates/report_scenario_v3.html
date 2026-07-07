@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<!--
+  SCENARIO-ОТЧЁТ (tier=scenario) — одностраничная сценарная диагностика.
+  Панель A: 5 core-метрик (ковариационная σ_p, RFR-Sharpe, Σwβ), Euler-MCTR
+  вклад в риск, выживаемость в 3 макро-режимах, funding-кандидаты.
+  Панель B: walk-forward бэктест трендового правила (look-ahead guard).
+  Данные: pdf-independent — finance/scenario_report.build_scenario_payload.
+  Дизайн-язык V2 (cream/gold/ink), самодостаточный CSS, мобильная адаптация.
+-->
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Scenario Analysis — сценарная диагностика</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg:#FAF9F5; --panel:#FBF8F1; --ink:#1C1B1A;
+    --ink-60:rgba(28,27,26,0.60); --ink-40:rgba(28,27,26,0.40);
+    --hairline:rgba(28,27,26,0.16); --hairline-2:rgba(28,27,26,0.09);
+    --gold:#F5D04E; --tech-blue:#9A7A10; --tech-blue-08:rgba(245,208,78,0.18);
+    --green:#3F8F5F; --neg:#C0492F; --amber:#B8801F;
+    --font-ui:'Manrope',-apple-system,BlinkMacSystemFont,sans-serif;
+    --font-mono:'JetBrains Mono',monospace;
+  }
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+  html,body{background:var(--bg);color:var(--ink);font-family:var(--font-ui);font-size:13px;line-height:1.5;}
+  .sheet{max-width:820px;margin:0 auto;padding:26px 30px 40px;}
+  .tech-header{display:flex;justify-content:space-between;font-family:var(--font-mono);
+    font-size:10px;color:var(--ink-60);border-bottom:1px solid var(--hairline);padding-bottom:8px;margin-bottom:18px;}
+  .tech-header b{color:var(--ink);font-weight:600;} .tech-header .ts{color:var(--ink-40);}
+  .sec-head{margin-bottom:16px;}
+  .sec-title{font-size:22px;font-weight:800;letter-spacing:-0.01em;color:var(--ink);}
+  .sec-title .hl{color:var(--tech-blue);}
+  .sec-sub{font-size:11.5px;color:var(--ink-60);margin-top:3px;}
+  .block{background:var(--panel);border:1px solid var(--hairline-2);border-radius:14px;padding:16px 18px;margin-bottom:16px;}
+  .block-title{font-size:13px;font-weight:700;color:var(--ink);margin-bottom:2px;}
+  .block-sub{font-size:10px;font-family:var(--font-mono);color:var(--ink-60);margin-bottom:12px;}
+  .src{color:var(--tech-blue);}
+  .metric-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}
+  .metric{background:var(--bg);border:1px solid var(--hairline-2);border-radius:11px;padding:11px 12px;}
+  .metric .m-name{font-size:9.5px;font-family:var(--font-mono);text-transform:uppercase;letter-spacing:0.04em;color:var(--ink-60);}
+  .metric .m-val{font-size:20px;font-weight:800;letter-spacing:-0.02em;margin-top:3px;}
+  .metric .m-sub{font-size:9.5px;color:var(--ink-40);margin-top:1px;}
+  .pos{color:var(--green);} .negv{color:var(--neg);} .flat{color:var(--ink-40);}
+  table{width:100%;border-collapse:collapse;margin-top:4px;}
+  thead th{font-size:9px;font-family:var(--font-mono);text-transform:uppercase;letter-spacing:0.04em;
+    color:var(--ink-60);text-align:right;padding:5px 6px;border-bottom:1px solid var(--hairline);}
+  thead th:first-child{text-align:left;}
+  tbody td{font-size:11px;padding:5px 6px;text-align:right;border-bottom:1px solid var(--hairline-2);font-variant-numeric:tabular-nums;}
+  tbody td:first-child{text-align:left;font-weight:600;}
+  tbody tr:last-child td{border-bottom:none;}
+  .bar-track{display:inline-block;width:56px;height:6px;border-radius:4px;background:var(--hairline-2);position:relative;vertical-align:middle;overflow:hidden;}
+  .bar-fill{position:absolute;left:0;top:0;bottom:0;border-radius:4px;background:var(--gold);}
+  .chip{display:inline-block;font-size:9px;font-family:var(--font-mono);border-radius:20px;padding:2px 8px;}
+  .chip-ok{background:rgba(63,143,95,0.14);color:var(--green);}
+  .chip-warn{background:rgba(184,128,31,0.16);color:var(--amber);}
+  .chip-bad{background:rgba(192,73,47,0.14);color:var(--neg);}
+  .regime-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid var(--hairline-2);}
+  .regime-row:last-child{border-bottom:none;}
+  .regime-name{font-size:11.5px;font-weight:600;}
+  .fund-item{font-size:10.5px;color:var(--ink-60);padding:6px 0;border-bottom:1px solid var(--hairline-2);}
+  .fund-item:last-child{border-bottom:none;}
+  .fund-item b{color:var(--ink);}
+  .flags{color:var(--amber);font-family:var(--font-mono);font-size:9.5px;}
+  .note{font-size:10.5px;color:var(--ink-60);line-height:1.6;}
+  .disc{font-size:9.5px;color:var(--ink-40);line-height:1.6;margin-top:6px;padding-left:14px;text-indent:-14px;}
+  .placeholder{background:var(--panel);border:1px dashed var(--hairline);border-radius:14px;padding:28px;text-align:center;color:var(--ink-60);font-size:12px;}
+  @media (max-width:600px){
+    .sheet{padding:14px 14px 24px;}
+    .metric-grid{grid-template-columns:1fr 1fr;}
+    .block{overflow-x:auto;}
+    .sec-title{font-size:19px;}
+    table{font-size:10px;} thead th,tbody td{padding:4px 5px;}
+    .bar-track{width:38px;}
+  }
+</style>
+</head>
+<body>
+{% set s = data.scenario or {} %}
+<div class="sheet">
+  <div class="tech-header">
+    <span><b>SCENARIO ANALYSIS</b> // TIER: SCENARIO // ID: U{{ user_id }} // ENGINE: MAC3+SE</span>
+    <span class="ts">{{ generated_at }}</span>
+  </div>
+
+  <div class="sec-head">
+    <div class="sec-title">Сценарный анализ <span class="hl">(β)</span></div>
+    <div class="sec-sub">детерминированная диагностика портфеля на 5-летнем окне · без ИИ-вызовов ·
+      окно {{ s.window_days or 1825 }} кал.дн{% if s.n_obs %} · {{ s.n_obs }} наблюдений{% endif %}</div>
+  </div>
+
+  {% if not s.available %}
+  <div class="placeholder">
+    {{ s.note or "Сценарная диагностика недоступна для этого портфеля." }}
+  </div>
+  {% else %}
+
+  <!-- ════ ПАНЕЛЬ A · 5 CORE-МЕТРИК ════ -->
+  <div class="block">
+    <div class="block-title">Панель A · Сценарные метрики портфеля</div>
+    <div class="block-sub">σ_p — истинная ковариационная (√wᵀΣw), НЕ gross · Sharpe = (E[r]−RFR)/σ_p
+      <span class="src">[Scenario Engine]</span></div>
+    {% set m = s.metrics or {} %}
+    <div class="metric-grid">
+      <div class="metric">
+        <div class="m-name">Ann. Return (5y)</div>
+        <div class="m-val {% if m.ann_return and m.ann_return>0 %}pos{% elif m.ann_return and m.ann_return<0 %}negv{% endif %}">
+          {{ "%.1f%%"|format(m.ann_return*100) if m.ann_return is not none else "н/д" }}</div>
+        <div class="m-sub">геометрическая, взвеш.</div>
+      </div>
+      <div class="metric">
+        <div class="m-name">Volatility σ_p</div>
+        <div class="m-val">{{ "%.1f%%"|format(m.vol_cov*100) if m.vol_cov is not none else "н/д" }}</div>
+        <div class="m-sub">{% if m.vol_gross_ref %}gross ref {{ "%.1f%%"|format(m.vol_gross_ref*100) }}{% else %}ковариационная{% endif %}</div>
+      </div>
+      <div class="metric">
+        <div class="m-name">Sharpe (RFR-adj)</div>
+        <div class="m-val {% if m.sharpe_rfr and m.sharpe_rfr>=1 %}pos{% elif m.sharpe_rfr and m.sharpe_rfr<0 %}negv{% endif %}">
+          {{ "%.2f"|format(m.sharpe_rfr) if m.sharpe_rfr is not none else "н/д" }}</div>
+        <div class="m-sub">RFR {{ "%.1f%%"|format(m.rfr*100) if m.rfr is not none else "—" }}</div>
+      </div>
+      <div class="metric">
+        <div class="m-name">Beta (Σwβ)</div>
+        <div class="m-val">{{ "%.2f"|format(m.beta) if m.beta is not none else "н/д" }}</div>
+        <div class="m-sub">к рынку (S&amp;P 500)</div>
+      </div>
+      <div class="metric">
+        <div class="m-name">Div Yield</div>
+        <div class="m-val">{{ "%.2f%%"|format(m.div_yield*100) if m.div_yield is not none else "н/д" }}</div>
+        <div class="m-sub">Σw·dy</div>
+      </div>
+      <div class="metric">
+        <div class="m-name">P/E (взвеш.)</div>
+        <div class="m-val">{{ "%.1f"|format(m.pe) if m.pe is not none else "н/д" }}</div>
+        <div class="m-sub">по покрытым</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════ EULER-MCTR ════ -->
+  {% if s.mctr_rows %}
+  <div class="block">
+    <div class="block-title">Вклад позиций в риск — Euler-MCTR</div>
+    <div class="block-sub">MCTR(i)=ρ(i,P)·σ(i) · CTRisk=w·MCTR · Σ CTRisk = σ_p (тождество Эйлера) · Σ% = 100%
+      <span class="src">[Scenario Engine 5.1–5.3]</span></div>
+    <table>
+      <thead><tr><th>Позиция</th><th>Вес</th><th>σ_i</th><th>ρ к порт.</th><th>MCTR</th><th>Вклад в риск</th></tr></thead>
+      <tbody>
+        {% for r in s.mctr_rows %}
+        <tr>
+          <td>{{ r.display }}</td>
+          <td>{{ "%.1f%%"|format(r.weight*100) }}</td>
+          <td>{{ "%.0f%%"|format(r.sigma_i*100) }}</td>
+          <td class="{% if r.rho_ip is not none and r.rho_ip<0 %}pos{% endif %}">{{ "%.2f"|format(r.rho_ip) if r.rho_ip is not none else "—" }}</td>
+          <td class="{% if r.mctr<0 %}pos{% endif %}">{{ "%.0f%%"|format(r.mctr*100) }}</td>
+          <td>
+            <span class="bar-track"><span class="bar-fill" style="width:{{ [r.pct_ctr, 0]|max if r.pct_ctr else 0 }}%;{% if r.pct_ctr and r.pct_ctr<0 %}background:var(--green);{% endif %}"></span></span>
+            {{ "%.0f%%"|format(r.pct_ctr) }}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <div class="note" style="margin-top:8px;">Отрицательные ρ/MCTR — позиция-хедж: снижает общий риск портфеля.</div>
+  </div>
+  {% endif %}
+
+  <!-- ════ ВЫЖИВАЕМОСТЬ В 3 МАКРО-РЕЖИМАХ ════ -->
+  {% if s.regime_survival %}
+  <div class="block">
+    <div class="block-title">Выживаемость в 3 макро-режимах</div>
+    <div class="block-sub">группировка 7 параметрических шоков движка · средний Δ портфеля по шокам режима
+      <span class="src">[Scenario Engine · Stress]</span></div>
+    {% for rg in s.regime_survival %}
+    <div class="regime-row">
+      <span class="regime-name">{{ rg.label }}</span>
+      <span>
+        {% if rg.avg_pct is not none %}
+          <b class="{% if rg.avg_pct>=0 %}pos{% elif rg.avg_pct>-10 %}flat{% else %}negv{% endif %}">{{ "%+.1f%%"|format(rg.avg_pct) }}</b>
+          <span class="chip {% if rg.survives %}chip-ok{% else %}chip-bad{% endif %}">{{ "выживает" if rg.survives else "уязвим" }}</span>
+        {% else %}
+          <span class="chip chip-warn">нет данных</span>
+        {% endif %}
+      </span>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <!-- ════ FUNDING-КАНДИДАТЫ ════ -->
+  <div class="block">
+    <div class="block-title">Источники финансирования сделки — слабые звенья</div>
+    <div class="block-sub">decision-tree: Sharpe&lt;0.5 · доходность&lt;0 · факторный дубль (corr≥0.90) · TRC несоразмерен весу
+      <span class="src">[Scenario Engine · Step 2]</span></div>
+    {% if s.funding %}
+      {% for f in s.funding %}
+      <div class="fund-item">
+        <b>{{ f.display }}</b> · вес {{ "%.1f%%"|format(f.weight*100) }}{% if f.sharpe is not none %} · Sharpe {{ "%.2f"|format(f.sharpe) }}{% endif %}<br>
+        <span class="flags">⚠ {{ f.flags|join(" · ") }}</span>
+      </div>
+      {% endfor %}
+    {% else %}
+      <div class="note">Слабых звеньев по decision-tree не выявлено — портфель сбалансирован по Sharpe/корреляциям.</div>
+    {% endif %}
+    {% if s.excluded_young %}
+    <div class="note" style="margin-top:8px;">Исключены из ковариации (история &lt; 1 года): {{ s.excluded_young|join(", ") }}.</div>
+    {% endif %}
+  </div>
+
+  <!-- ════ ПАНЕЛЬ B · WALK-FORWARD ════ -->
+  {% if s.backtest %}
+  {% set bt = s.backtest.summary or {} %}
+  <div class="block">
+    <div class="block-title">Панель B · Проверка историей (walk-forward)</div>
+    <div class="block-sub">{{ s.backtest.ticker }} · правило: {{ s.backtest.rule }} · сигнал видит ТОЛЬКО прошлое (look-ahead guard)
+      <span class="src">[Scenario Engine · Backtest]</span></div>
+    <div class="metric-grid" style="grid-template-columns:repeat(3,1fr);">
+      <div class="metric">
+        <div class="m-name">Сигналов</div>
+        <div class="m-val">{{ bt.n_signals or 0 }}</div>
+        <div class="m-sub">за окно</div>
+      </div>
+      <div class="metric">
+        <div class="m-name">Hit-rate (63д)</div>
+        <div class="m-val {% if bt.hit_rate_63d and bt.hit_rate_63d>=0.5 %}pos{% elif bt.hit_rate_63d is not none %}negv{% endif %}">
+          {{ "%.0f%%"|format(bt.hit_rate_63d*100) if bt.hit_rate_63d is not none else "н/д" }}</div>
+        <div class="m-sub">доля прибыльных</div>
+      </div>
+      {% set h63 = (bt.horizons or {}).get('63d') %}
+      <div class="metric">
+        <div class="m-name">Медиана 63д</div>
+        <div class="m-val {% if h63 and h63.median>0 %}pos{% elif h63 and h63.median<0 %}negv{% endif %}">
+          {{ "%+.1f%%"|format(h63.median*100) if h63 else "н/д" }}</div>
+        <div class="m-sub">{% if h63 %}худший {{ "%.1f%%"|format(h63.worst*100) }}{% else %}—{% endif %}</div>
+      </div>
+    </div>
+    {% if bt.horizons %}
+    <table style="margin-top:10px;">
+      <thead><tr><th>Горизонт</th><th>Среднее</th><th>Медиана</th><th>Худший</th><th>N</th></tr></thead>
+      <tbody>
+        {% for hz in ['21d','63d','126d'] %}{% set hd = (bt.horizons or {}).get(hz) %}{% if hd %}
+        <tr>
+          <td>{{ hz }}</td>
+          <td class="{% if hd.mean>0 %}pos{% elif hd.mean<0 %}negv{% endif %}">{{ "%+.1f%%"|format(hd.mean*100) }}</td>
+          <td class="{% if hd.median>0 %}pos{% elif hd.median<0 %}negv{% endif %}">{{ "%+.1f%%"|format(hd.median*100) }}</td>
+          <td class="negv">{{ "%.1f%%"|format(hd.worst*100) }}</td>
+          <td>{{ hd.n }}</td>
+        </tr>
+        {% endif %}{% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </div>
+  {% endif %}
+  {% endif %}
+
+  <!-- ════ ДИСКЛЕЙМЕРЫ ════ -->
+  <div class="block" style="background:transparent;border-style:dashed;">
+    <div class="block-title" style="font-size:11px;">Ограничения (обязательно к прочтению)</div>
+    {% for d in (s.disclaimers or []) %}
+    <div class="disc">— {{ d }}</div>
+    {% endfor %}
+    <div class="disc">— Панель A — ожидания на параметрах движка, не прогноз; сценарии не являются ИИР.</div>
+  </div>
+</div>
+</body>
+</html>

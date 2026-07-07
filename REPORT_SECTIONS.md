@@ -154,6 +154,28 @@
 
 ---
 
+## 11. Scenario Analysis (отдельный тир · 1 токен · 2026-07-07)
+
+> Тир `scenario` — **самостоятельный отчёт**, НЕ страница BASE/DEEP. Детерминирован
+> (0 LLM-вызовов). Поток: `analyze_all()` → `finance/scenario_report.build_scenario_payload`
+> (переиспользует `finance/scenario_engine`) → `templates/report_scenario_v3.html`
+> (свой Jinja, `html_renderer` маршрутизирует scenario минуя Premium).
+
+| Панель | Ключи (`data.scenario.*`) | Движок |
+|---|---|---|
+| A · 5 core-метрик | `metrics{ann_return,vol_cov,vol_gross_ref,sharpe_rfr,beta,div_yield,pe,rfr}` | `scenario_engine.five_metrics` (σ_p ковариационная, RFR-Sharpe, Σwβ) |
+| A · Euler-MCTR вклад в риск | `mctr_rows[]{display,weight,sigma_i,rho_ip,mctr,ctrisk,pct_ctr}`, `vol_cov` | `scenario_engine.mctr_table` (MCTR=ρ·σ, Σ CTRisk=σ_p, Σ%=100) |
+| A · Выживаемость 3 макро-режима | `regime_survival[]{regime,label,avg_pct,survives}` | `scenario_engine.regime_survival` (группировка 7 шоков; **билдер нормализует `stress.port_pct` долю→%**) |
+| A · Funding-звенья | `funding[]{display,weight,sharpe,flags[]}` | `scenario_engine.funding_candidates` (Sharpe<0.5 · доходность<0 · corr-дубль≥0.90 · TRC-несоразмерность) |
+| B · Walk-forward бэктест | `backtest{ticker,rule,summary{n_signals,hit_rate_63d,horizons}}` | `scenario_engine.walk_forward` (правило «цена>200-DMA», look-ahead guard, `DISCLAIMERS`) |
+
+**Токен-тариф:** `tg_bot.TIER_COST` = base 1 · scenario 1 · deep 2. Кнопка тира в
+`kb_analysis_choice` + inline-CTA `scenario:cached` под BASE/DEEP (кэш `results` per-user).
+**Как менять:** математика → `finance/scenario_engine.py`; сборка → `scenario_report.py`;
+вид → `report_scenario_v3.html`. Тесты: `tests/test_phase24_scenario_report.py`.
+
+---
+
 ## Чек-лист изменения секции
 1. Найти секцию здесь → открыть builder (`pdf_payload.py`) и/или движок (`finance/*`).
 2. Числа меняются ТОЛЬКО в движке; формат — в builder; вид — в шаблоне.

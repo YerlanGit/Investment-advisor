@@ -32,10 +32,20 @@ Design constraints
 from __future__ import annotations
 
 import math
+import os
 from datetime import date, datetime, timezone
 from typing import Optional
 
 import pandas as pd
+
+
+def _lookback_days() -> int:
+    """Актуальное окно истории (кал. дней) из env — чтобы CoVe-лейбл
+    «Nd window» не расходился с реальным `HISTORY_LOOKBACK_DAYS`."""
+    try:
+        return max(90, min(3650, int(os.getenv("HISTORY_LOOKBACK_DAYS", "1825"))))
+    except (TypeError, ValueError):
+        return 1825
 
 
 # Per-source freshness thresholds (calendar days).
@@ -92,7 +102,7 @@ def _tradernet_status(results: dict, today: date) -> dict:
         return _row(
             name   = "Цены и история активов",
             source = "Tradernet (Freedom Broker)",
-            method = "Daily CLOSE · 730d window",
+            method = f"Daily CLOSE · {_lookback_days()}d window",
             status = "error",
             note   = "no price data loaded",
         )
@@ -105,7 +115,7 @@ def _tradernet_status(results: dict, today: date) -> dict:
     return _row(
         name   = "Цены и история активов",
         source = "Tradernet (Freedom Broker)",
-        method = "Daily CLOSE · 730d window · ATR via OHLC (fallback |ΔClose|)",
+        method = f"Daily CLOSE · {_lookback_days()}d window · ATR via OHLC (fallback |ΔClose|)",
         status = status,
         as_of  = last_dt.isoformat(),
         freshness_days = age,

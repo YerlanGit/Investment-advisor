@@ -1948,50 +1948,70 @@ const TopBar = ({
     className: "opacity-30"
   }, "/"), /*#__PURE__*/React.createElement("span", null, "Session · ", meta.session)), /*#__PURE__*/React.createElement("span", null, "Generated ", meta.generated)));
 };
-const Footer = () => /*#__PURE__*/React.createElement("footer", {
-  className: "mt-16 mb-8"
-}, /*#__PURE__*/React.createElement("div", {
-  className: "rounded-4xl p-7 glass-strong shadow-card flex items-start justify-between gap-6 flex-wrap"
-}, /*#__PURE__*/React.createElement("div", {
-  className: "max-w-[520px]"
-}, /*#__PURE__*/React.createElement("div", {
-  className: "text-[10px] tracking-widest uppercase text-ink-400 font-mono mb-2"
-}, "Источники данных"), /*#__PURE__*/React.createElement("p", {
-  className: "text-[13px] text-ink-700 leading-relaxed font-light"
-}, /*#__PURE__*/React.createElement("span", {
-  className: "font-medium"
-}, "SEC EDGAR"), " · публичная отчётность · ", /*#__PURE__*/React.createElement("span", {
-  className: "font-medium"
-}, "Quant Engine MAC3"), " · расчёт риска и сигналов ·", /*#__PURE__*/React.createElement("span", {
-  className: "font-medium"
-}, " Factor Engine"), " · ", /*#__PURE__*/React.createElement("span", {
-  className: "font-medium"
-}, "Regime Model"), " · ", /*#__PURE__*/React.createElement("span", {
-  className: "font-medium"
-}, "Goldman Sachs"), " Q2 2026 · ", /*#__PURE__*/React.createElement("span", {
-  className: "font-medium"
-}, "Morgan Stanley"), " Tech Outlook 2026 · ", /*#__PURE__*/React.createElement("span", {
-  className: "font-medium"
-}, "JPMorgan"), " Strategy Q2 2026.")), /*#__PURE__*/React.createElement("div", {
-  className: "flex items-center gap-2 flex-wrap"
-}, /*#__PURE__*/React.createElement("button", {
-  className: "flex items-center gap-1.5 px-4 py-2 rounded-full bg-white border border-ink-900/8 text-ink-700 text-[12px] font-medium hover:bg-cream-50 transition"
-}, /*#__PURE__*/React.createElement(Icons.Download, {
-  size: 13,
-  stroke: 1.8
-}), " Скачать PDF"), /*#__PURE__*/React.createElement("button", {
-  className: "flex items-center gap-1.5 px-4 py-2 rounded-full bg-white border border-ink-900/8 text-ink-700 text-[12px] font-medium hover:bg-cream-50 transition"
-}, /*#__PURE__*/React.createElement(Icons.Share, {
-  size: 13,
-  stroke: 1.8
-}), " Поделиться"), /*#__PURE__*/React.createElement("button", {
-  className: "flex items-center gap-1.5 px-4 py-2 rounded-full bg-ink-900 text-white text-[12px] font-medium hover:bg-ink-800 transition"
-}, /*#__PURE__*/React.createElement(Icons.Sparkles, {
-  size: 13,
-  stroke: 1.8
-}), " Новый расчёт"))), /*#__PURE__*/React.createElement("div", {
-  className: "text-center text-[10px] tracking-widest uppercase text-ink-400 font-mono mt-6"
-}, "Portfolio Risk Report · BASE Tier · ", window.PORTFOLIO.meta.id, " · v2026.5"));
+const Footer = () => {
+  const p = window.PORTFOLIO;
+  // Паритет с DEEP (RAG-наблюдаемость): банк-источники заявляем ТОЛЬКО когда
+  // RAG реально консультировался (quality несёт «✓ … RAG …»).  Прежде футер
+  // BASE статично печатал GS/MS/JPM — вводило в заблуждение при пустом RAG.
+  const quality = p.quality || [];
+  const ragOn = quality.some(q => typeof q === 'string' && q.includes('✓') && /rag/i.test(q));
+  const sources = ['SEC EDGAR', 'Tradernet', 'FRED', 'Quant Engine MAC3'].concat(ragOn ? ['ChromaDB (GS / MS / JPM)'] : []).concat([p.meta && p.meta.aiModel].filter(Boolean)).join(' · ');
+  return /*#__PURE__*/React.createElement("footer", {
+    className: "mt-16 mb-8"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "rounded-4xl p-7 glass-strong shadow-card"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-start justify-between gap-6 flex-wrap"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "max-w-[560px]"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "text-[10px] tracking-widest uppercase text-ink-400 font-mono mb-3"
+  }, "Контроль качества данных"), /*#__PURE__*/React.createElement("div", {
+    className: "flex flex-wrap gap-2"
+  }, quality.map((q, i) => {
+    // Каждая строка уже несёт СВОЙ статус-символ («✓ …»/«✗ …»/«⚠ …»/«— …»);
+    // красим именно его — честно для любого состояния (в т.ч. RAG 3-state).
+    const s = String(q).trim();
+    const sym = s.charAt(0);
+    const rest = s.slice(1).trim();
+    const cls = sym === '✗' ? 'text-rust-600' : sym === '⚠' ? 'text-gold-700' : sym === '—' ? 'text-ink-400' : 'text-sage-600';
+    return /*#__PURE__*/React.createElement("span", {
+      key: i,
+      className: "flex items-center gap-1.5 text-[10px] font-mono text-ink-600 bg-cream-50 border border-ink-900/6 rounded-full px-2.5 py-1"
+    }, /*#__PURE__*/React.createElement("span", {
+      className: `${cls} font-bold`
+    }, sym), " ", rest);
+  }))), /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center gap-2 flex-wrap"
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "flex items-center gap-1.5 px-4 py-2 rounded-full bg-white border border-ink-900/8 text-ink-700 text-[12px] font-medium hover:bg-cream-50 transition"
+  }, /*#__PURE__*/React.createElement(Icons.Download, {
+    size: 13,
+    stroke: 1.8
+  }), " Скачать PDF"), /*#__PURE__*/React.createElement("button", {
+    className: "flex items-center gap-1.5 px-4 py-2 rounded-full bg-white border border-ink-900/8 text-ink-700 text-[12px] font-medium hover:bg-cream-50 transition"
+  }, /*#__PURE__*/React.createElement(Icons.Share, {
+    size: 13,
+    stroke: 1.8
+  }), " Поделиться"), /*#__PURE__*/React.createElement("button", {
+    className: "flex items-center gap-1.5 px-4 py-2 rounded-full bg-ink-900 text-white text-[12px] font-medium hover:bg-ink-800 transition"
+  }, /*#__PURE__*/React.createElement(Icons.Sparkles, {
+    size: 13,
+    stroke: 1.8
+  }), " Новый расчёт"))), /*#__PURE__*/React.createElement("div", {
+    className: "mt-6 pt-5 border-t border-ink-900/8 flex items-start gap-3"
+  }, /*#__PURE__*/React.createElement(Icons.Warning, {
+    size: 15,
+    className: "text-rust-500 mt-0.5 flex-shrink-0",
+    stroke: 1.8
+  }), /*#__PURE__*/React.createElement("p", {
+    className: "text-[12px] text-ink-500 leading-relaxed font-light"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "text-ink-700 font-medium"
+  }, "Это аналитический материал, а не индивидуальная инвестиционная рекомендация."), " Расчёты основаны на исторических данных и публичной отчётности. Источники: ", sources, "."))), /*#__PURE__*/React.createElement("div", {
+    className: "text-center text-[10px] tracking-widest uppercase text-ink-400 font-mono mt-6"
+  }, "Portfolio Risk Report · BASE Tier · ", p.meta.id, " · v2026.7"));
+};
 
 // Floating action button (echoes reference pattern — bottom right luxury chip)
 const Fab = () => /*#__PURE__*/React.createElement("div", {

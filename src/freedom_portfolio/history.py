@@ -79,7 +79,7 @@ def get_candles(
     client,                       # TradernetClient — typed loosely to avoid circular import
     ticker: str,
     *,
-    days: int = 730,              # ~2 years
+    days: int = 1825,             # КАЛЕНДАРНЫХ дней ≈ 5 лет (≈1260 торговых)
     timeframe: str = "D",         # daily bars
     use_cache: bool = True,
 ) -> pd.Series:
@@ -132,7 +132,7 @@ def get_history_frame(
     client,
     tickers: list[str],
     *,
-    days: int = 730,
+    days: int = 1825,             # КАЛЕНДАРНЫХ дней ≈ 5 лет (≈1260 торговых)
     max_workers: int = 6,
 ) -> HistoryResult:
     """

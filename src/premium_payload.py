@@ -424,6 +424,12 @@ def _map_base(p: dict, meta: dict) -> dict:
         "leverage": _leverage_info(p, assets),
         "performance": _map_performance(p),
         "ideas": _map_ideas(p, base=True),
+        # RAG-наблюдаемость (паритет с DEEP, 2026-07-07): integrity_checks уже
+        # строятся для ОБОИХ тиров (RAG 3-state · факторное покрытие · провенанс).
+        # BASE их прежде не показывал → футер статично заявлял банк-источники
+        # даже без RAG.  Теперь та же честная quality-полоса, что в DEEP.
+        "quality": [f"{_txt(q, 'status')} {_txt(q, 'label')}"
+                    for q in _list(p, "integrity_checks")] or [DASH],
     }
 
 
