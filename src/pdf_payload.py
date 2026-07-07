@@ -8,10 +8,19 @@ be unit-tested in isolation.
 from __future__ import annotations
 
 import math
+import os
 from typing import Optional
 
 import numpy as np
 import pandas as pd
+
+
+def _hist_lookback_days() -> int:
+    """Актуальное окно истории (кал. дней) из env, для честного лейбла источника."""
+    try:
+        return max(90, min(3650, int(os.getenv("HISTORY_LOOKBACK_DAYS", "1825"))))
+    except (TypeError, ValueError):
+        return 1825
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -1057,7 +1066,7 @@ def build_payload(results: dict, tier: str,
         "factors_complete":   factors_loaded == factors_total,
         "benchmarks_loaded":  bm_loaded,
         "sec_skipped":        sec_skipped,
-        "data_source_label":  "Daily CLOSE из Tradernet (730d). ATR — OHLC, fallback |ΔClose|.",
+        "data_source_label":  f"Daily CLOSE из Tradernet ({_hist_lookback_days()}d). ATR — OHLC, fallback |ΔClose|.",
     }
 
     # KPI extreme flags — drive red borders + tooltips in template.

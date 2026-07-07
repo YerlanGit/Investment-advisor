@@ -61,7 +61,10 @@ FRED_API_ROOT       = "https://api.stlouisfed.org/fred/series/observations"
 HTTP_TIMEOUT_SEC    = 8.0
 HTTP_MAX_RETRIES    = 3
 HTTP_BACKOFF_BASE   = 0.5
-DEFAULT_DAYS        = 750     # ~3 years; matches engine `period_days` cap
+DEFAULT_DAYS        = 1900    # ≥ engine lookback (1825 кал.) + буфер: FX-серия
+                              # ДОЛЖНА покрывать всё ценовое окно, иначе ранние
+                              # даты мультивалютного портфеля не конвертируются →
+                              # NaN → row-dropna усекает общее окно обратно.
 DEFAULT_CACHE_DIR   = Path("/tmp/fx_cache")
 _RETRY_STATUS       = frozenset({429, 500, 502, 503, 504})
 

@@ -124,14 +124,15 @@ class IngestLogicalFilenameTest(unittest.TestCase):
         self.assertEqual(method, "filename")
         self.assertEqual((dt.year, dt.month), (2026, 7))   # Q3 → июль
 
-    def test_lookback_env_bridge_defaults_to_730(self) -> None:
-        """Фаза 4 §4-а: HISTORY_LOOKBACK_DAYS параметризует окно истории;
-        default 730 — поведение байт-идентично прежнему hardcode; clamp 90–3650."""
+    def test_lookback_env_bridge_defaults_to_1825(self) -> None:
+        """Фаза 4 §4-б: HISTORY_LOOKBACK_DAYS параметризует окно истории;
+        с 2026-07-07 default = 1825 кал.дн ≈ 1260 торговых ≈ 5 лет (целевое
+        окно §4-б); env-override сохранён; clamp 90–3650."""
         import inspect
         from finance.investment_logic import MAC3RiskEngine
         src = inspect.getsource(MAC3RiskEngine.get_market_data)
         self.assertIn("HISTORY_LOOKBACK_DAYS", src)
-        self.assertIn('"730"', src)                    # default preserved
+        self.assertIn('"1825"', src)                   # 5-year default
         self.assertIn("period_days: int | None = None", src)
 
     def test_regime_rag_chips_are_demarkdowned(self) -> None:

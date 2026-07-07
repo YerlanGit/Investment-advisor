@@ -561,11 +561,17 @@ class MAC3RiskEngine:
         """
         Загрузка дневных закрытий через Tradernet API (replaces yfinance).
 
-        period_days (Фаза 4 · Data Resilience §4-а): default читается из env
-        ``HISTORY_LOOKBACK_DAYS`` (=730 → поведение байт-идентично прежнему
-        hardcode).  Расширение окна (напр. 1825 ≈ 5 лет) включается конфигом
-        ТОЛЬКО после чек-листа ROADMAP_DATA_RESILIENCE §4-б: оно меняет все
-        метрики и требует NaN-маскирования молодых активов.
+        period_days (Фаза 4 · Data Resilience §4-б): default читается из env
+        ``HISTORY_LOOKBACK_DAYS``.  С 2026-07-07 дефолт = **1825 КАЛЕНДАРНЫХ
+        дней ≈ 1260 ТОРГОВЫХ ≈ 5 лет** (ровно целевое окно §4-б: «1260 торговых
+        ≈ 1825 кал.»).  Параметр `days` в `history.py` — КАЛЕНДАРНЫЙ
+        (`today − timedelta(days=days)`), поэтому 5 торговых лет = 1825 кал., а
+        НЕ 1260 кал. (то было бы ~3.45 года).  Расширение окна меняет все
+        метрики; молодые активы не роняют матрицу — sparse-history дроп +
+        row-level `dropna` дают общее пересечение дат (эффективное окно =
+        min-история среди активов и фактор-ETF), а `min_obs` гейт защищает
+        от вырожденной регрессии.  Откат на прежнее 2-летнее окно —
+        `HISTORY_LOOKBACK_DAYS=730`.
 
         Returns (data, history_result) tuple where history_result contains
         loaded/failed/retried ticker details for user-facing messages.
@@ -577,9 +583,10 @@ class MAC3RiskEngine:
         """
         if period_days is None:
             try:
-                period_days = int(os.getenv("HISTORY_LOOKBACK_DAYS", "730"))
+                # Дефолт 1825 кал.дн ≈ 1260 торговых ≈ 5 лет (§4-б Data Resilience).
+                period_days = int(os.getenv("HISTORY_LOOKBACK_DAYS", "1825"))
             except (TypeError, ValueError):
-                period_days = 730
+                period_days = 1825
             period_days = max(90, min(3650, period_days))   # sanity clamp
 
         valid_tickers = self.resolve_tickers(tickers)
