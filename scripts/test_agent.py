@@ -1,6 +1,11 @@
-# test_agent.py — Тест движка MAC3 (обновлен под новый API)
+# test_agent.py — ручной smoke-скрипт движка MAC3 (НЕ pytest; запуск вручную).
+# Лежит в scripts/ → добавляем repo_root/src на путь и импортируем как `finance.*`.
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 import pandas as pd
-from src.finance.investment_logic import MAC3RiskEngine
+from finance.investment_logic import MAC3RiskEngine
 
 def main():
     print("Инициализация MAC3 Квант-Движка (Structural Risk)...")

@@ -1,5 +1,10 @@
+# Ручной smoke-скрипт (НЕ pytest). Лежит в scripts/ → repo_root/src на путь.
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 import pandas as pd
-from src.finance.investment_logic import UniversalPortfolioManager
+from finance.investment_logic import UniversalPortfolioManager
 
 def main():
     print("--- Запуск Универсального Аналитика с поддержкой Кэша (MAC3/RAMP) ---")

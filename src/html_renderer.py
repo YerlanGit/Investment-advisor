@@ -330,7 +330,7 @@ MOCK_DATA: dict = {}   # lazily filled by the CLI / smoke entry-point below.
 # were read into DEEP_VERSION/BASIC_VERSION and never consulted anywhere (v3 is
 # the single Jinja design; selection is tier-based in _select_template).
 
-# Premium V2 routing (see PREMIUM_DESIGN.md).  Sprint-1 #1: Premium V2 is now the
+# Premium V2 routing (see docs/PREMIUM_DESIGN.md).  Sprint-1 #1: Premium V2 is now the
 # PRODUCTION DEFAULT — the code default flips OFF→ON to match the live deploy,
 # which already sets PREMIUM_REPORT_ENABLED=true.  The classic v3 Jinja pipeline
 # is RETAINED as the automatic fallback (render_report_html wraps the premium
