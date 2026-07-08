@@ -476,7 +476,7 @@ def _build_smart_money(raw: Optional[dict]) -> dict:
             "rows":     [],
             "headline": "Слой инсайдеров (SEC Form 4) подключён, источник данных не активирован.",
             "hint":     "Включается флагом SMART_MONEY_INSIDERS=1 + провайдер Form-4 (EDGAR). "
-                        "Архитектура и модели — см. SMART_MONEY.md.",
+                        "Архитектура и модели — см. docs/SMART_MONEY.md.",
         }
     rows: list[dict] = []
     for t, v in sig.items():

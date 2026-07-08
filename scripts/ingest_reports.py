@@ -15,8 +15,8 @@
 import os
 import sys
 
-# Support running from the repo root
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
+# Скрипт лежит в scripts/ → src на уровень выше (repo_root/src).
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from agent.rag_engine import FinancialRAG
 
 
