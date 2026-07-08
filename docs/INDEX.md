@@ -86,6 +86,7 @@ Investment-advisor/
 |---|---|---|
 | [`SMART_MONEY.md`](SMART_MONEY.md) | 📌 | Архитектура Smart-Money / инсайдеры (SEC Form 4). |
 | [`PRODUCTION_READINESS.md`](PRODUCTION_READINESS.md) | 🟢 | Пер-подсистемные оценки готовности + GA-блокеры. |
+| [`INFRA_NETWORKING.md`](INFRA_NETWORKING.md) | 🟢 | Прод-инциденты Cloud Run: WAF-блок цен (статический egress) + segfault RAG-ингеста (память/ONNX). Команды фикса. |
 
 ## 8. Живой аудит
 

@@ -21,10 +21,23 @@ secret must not widen this function's attack surface.
       --entry-point=on_pdf_uploaded \
       --trigger-event-filters="type=google.cloud.storage.object.v1.finalized" \
       --trigger-event-filters="bucket=ramp-bot-chroma-db-inbox-investadv" \
-      --memory=1Gi \
-      --timeout=300s \
+      --set-env-vars=OMP_NUM_THREADS=1,OPENBLAS_NUM_THREADS=1,TOKENIZERS_PARALLELISM=false \
+      --memory=4Gi \
+      --cpu=2 \
+      --timeout=540s \
       --max-instances=1 \
       --concurrency=1
+
+ПАМЯТЬ/CPU (фикс 2026-07-08): 1Gi/1CPU давали Segmentation Fault (signal 11)
+ровно на загрузке ONNX-модели эмбеддингов all-MiniLM-L6-v2 (79 МБ) внутри
+chromadb.DefaultEmbeddingFunction — OOM на слабом контейнере.  4Gi + 2 CPU +
+thread-cap (OMP/OpenBLAS/tokenizers) устраняют падение.  ТА ЖЕ правка — у
+CI-функции ``ramp-bot-rag-ingest`` (cloudbuild.yaml, шаг 5).  Уже работающий
+сервис чинится БЕЗ передеплоя кода (gen2-функция = Cloud Run сервис под капотом):
+    gcloud run services update ingest-pdf-trigger --region=us-central1 \
+      --memory=4Gi --cpu=2 --timeout=540 \
+      --set-env-vars=OMP_NUM_THREADS=1,OPENBLAS_NUM_THREADS=1,TOKENIZERS_PARALLELISM=false
+Подробности — docs/INFRA_NETWORKING.md.
 
 F-4 (concurrency): --max-instances=1 --concurrency=1 are MANDATORY.  This
 function does a download → mutate → blob-by-blob overwrite of the whole

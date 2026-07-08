@@ -137,7 +137,7 @@ CI гоняет `python -m pytest tests/ -q` (baseline **601 passed, 10 skipped*
 | Путь | Функция |
 |---|---|
 | `docs/` | **Вся документация** — начинать с `docs/INDEX.md` (карта по темам/значимости). |
-| `scripts/` | Ручные CLI/smoke: `ingest_bank_report.py`, `ingest_reports.py` (RAG-ингест), `test_agent.py`, `test_performance.py` (движок-смоук). НЕ pytest. |
+| `scripts/` | Ручные CLI/smoke: `ingest_bank_report.py`, `ingest_reports.py` (RAG-ингест), `test_agent.py`, `test_performance.py` (движок-смоук), `setup_static_egress.sh` (статический egress-IP для WAF-фикса). НЕ pytest. |
 | `design/premium_v2/` | Исходники Premium V2 React (`portfolio-*.jsx` = BASE, `deep/*.jsx` = DEEP) + `build.sh` (Tailwind + Babel → бандлы в `src/premium_assets/`). |
 | `cloud_function/` | GCS-триггерный RAG-ингест: `main.py`, `rag_engine.py` (идентичен `src/agent/rag_engine.py`), `requirements.txt`. |
 | `.github/workflows/` | CI: `python-ci.yml` (pytest-гейт), `Check logs.yml`. |

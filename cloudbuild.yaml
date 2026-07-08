@@ -23,6 +23,14 @@ substitutions:
   #   gcloud storage buckets create gs://ramp-bot-state \
   #     --location=us-central1 --uniform-bucket-level-access
   _STATE_BUCKET: ramp-bot-state
+  # Serverless VPC Access connector for STATIC egress IP (2026-07-08 fix for the
+  # Cloudflare-WAF 403 that blocks Cloud Run's shared IP pool from the broker).
+  # Empty by default → deploy behaves EXACTLY as before (no VPC routing).  Set
+  # it (in the Build Trigger substitutions, or `scripts/setup_static_egress.sh`
+  # sets it for you) to route all egress through Cloud NAT + a reserved static
+  # IP the broker's Cloudflare no longer challenges.  Format: connector NAME
+  # (same region) or full projects/…/connectors/… path.
+  _VPC_CONNECTOR: ''
 
 steps:
   # ── Step 1: Build Docker image ──────────────────────────────────────────────
@@ -119,6 +127,35 @@ steps:
       # html_renderer.render_report_html), so this is safe to ship.
       - --set-env-vars=REPORT_BUCKET_NAME=ramp-bot-reports,CHROMA_BUCKET=ramp-bot-chroma-db-investadv,TOKENOMICS_DB_PATH=/mnt/state/tokenomics.db,VAULT_DB_PATH=/mnt/state/users_vault.db,REPORTING_CURRENCY=USD,ADMIN_USER_IDS=148046720,PREMIUM_REPORT_ENABLED=true
 
+  # ── Step 4b: STATIC EGRESS (2026-07-08 fix for Cloudflare-WAF 403) ──────────
+  # The broker's Cloudflare WAF blocks Cloud Run's SHARED egress IP pool (the
+  # client already sends a browser User-Agent + retries — the block is IP-based,
+  # not header-based).  Routing egress through a Serverless VPC connector →
+  # Cloud Router + Cloud NAT with a RESERVED static IP gives a stable, non-pool
+  # address the WAF no longer challenges.  This step is a NO-OP when
+  # _VPC_CONNECTOR is empty (default), so it never changes the current deploy;
+  # once you run scripts/setup_static_egress.sh (creates the connector + NAT +
+  # static IP and sets the substitution), every deploy pins egress here.
+  - id: configure-egress
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    waitFor: [deploy]
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        if [ -n "${_VPC_CONNECTOR}" ]; then
+          echo "Routing ramp-bot egress through VPC connector: ${_VPC_CONNECTOR}"
+          gcloud run services update ${_SERVICE} \
+            --region=${_REGION} \
+            --vpc-connector=${_VPC_CONNECTOR} \
+            --vpc-egress=all-traffic \
+            --quiet \
+            || echo "WARN: could not attach VPC connector — check it exists in ${_REGION} and the SA has run.admin. Bot still runs on the shared egress IP."
+        else
+          echo "No _VPC_CONNECTOR set — bot uses the default shared egress IP (Cloudflare-WAF risk). Run scripts/setup_static_egress.sh to enable a static egress IP."
+        fi
+        exit 0
+
   # ── Step 5: Deploy the RAG-ingest Cloud Function (M3) ──────────────────────
   # Listens to the DEDICATED, write-controlled ingest bucket (NOT the reports
   # bucket — M2 fix) and re-indexes uploaded bank PDFs into ChromaDB.
@@ -144,6 +181,15 @@ steps:
     args:
       - -c
       - |
+        # MEMORY/CPU (2026-07-08 fix): the default 1Gi/1CPU caused a
+        # Segmentation Fault (signal 11) exactly when chromadb's
+        # DefaultEmbeddingFunction downloads + loads the all-MiniLM-L6-v2 ONNX
+        # model (79 MB) and runs onnxruntime over the PDF — classic OOM on a
+        # constrained container.  4Gi + 2 CPU gives the embedder headroom; the
+        # thread-cap env (OMP/OpenBLAS/tokenizers) prevents onnxruntime from
+        # over-subscribing CPU and segfaulting under memory pressure.  Timeout
+        # bumped 300→540s because the first cold invocation also downloads the
+        # model before it can embed.
         gcloud functions deploy ramp-bot-rag-ingest \
           --gen2 \
           --runtime python312 \
@@ -152,9 +198,10 @@ steps:
           --entry-point on_pdf_uploaded \
           --trigger-event-filters="type=google.cloud.storage.object.v1.finalized" \
           --trigger-event-filters="bucket=ramp-bot-chroma-db-inbox-investadv" \
-          --set-env-vars CHROMA_BUCKET=ramp-bot-chroma-db-investadv \
-          --memory 1Gi \
-          --timeout 300s \
+          --set-env-vars CHROMA_BUCKET=ramp-bot-chroma-db-investadv,OMP_NUM_THREADS=1,OPENBLAS_NUM_THREADS=1,TOKENIZERS_PARALLELISM=false \
+          --memory 4Gi \
+          --cpu 2 \
+          --timeout 540s \
           --max-instances 1 \
           --concurrency 1 \
           --quiet \
