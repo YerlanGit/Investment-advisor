@@ -3,7 +3,7 @@ Premium V2 data mapper (Adapter / anti-corruption layer).
 
 Translates the engine's "heavy" v3 report payload (≈86 keys produced by
 pdf_payload.build_payload) into the STRICT design-data contracts the Premium V2
-React components consume — 29 keys for DEEP, 11 for BASE (see docs/PREMIUM_DESIGN.md
+React components consume — 32 keys for DEEP, 13 for BASE (see docs/PREMIUM_DESIGN.md
 §3-4 and design/premium_v2/*-data.sample.json).
 
 Strict isolation (Separation of Concerns):
@@ -193,6 +193,13 @@ def _map_deep(p: dict, meta: dict) -> dict:
                        "delta":  _eff_delta(key, _g(cell, "delta_pp")),
                        "tone": "pos" if fav is True else ("neg" if fav is False else "flat")})
 
+    # R2#5: the «до/после» simulation is scoped to the HIGH-PRIORITY Action-Plan
+    # rows (the positions actually traded).  Surface that ticker set so the panel
+    # can say plainly WHICH positions the effect belongs to instead of a mystery
+    # «Δ по идеям» chip.  Empty list → the panel hides the chip.
+    effect_scope = [str(t) for t in _list(ee, "high_priority_tickers") if str(t).strip()]
+    effect_scoped = bool(_g(ee, "scoped_to_high_priority"))
+
     # action plan — score + hotspot are NOT on the action_plan rows; they live in
     # score_breakdown (4-Pillar total) and assets (euler hotspot).  The mapper
     # previously read non-existent score_total/hotspot keys → every row showed
@@ -349,6 +356,7 @@ def _map_deep(p: dict, meta: dict) -> dict:
         "scores": scores, "scoresNote": "", "scoresAI": _txt(p, "ai_4pillar_comment"),
         "stress": stress, "stressAI": _txt(p, "ai_stress_comment"),
         "effect": effect, "effectVerdict": _txt(ee, "verdict", "headline"), "effectAI": _txt(p, "ai_effect_comment"),
+        "effectScope": effect_scope, "effectScoped": effect_scoped,
         "actionPlan": plan, "actionAI": _txt(p, "ai_action_comment"),
         "ideas": ideas, "regime": regime, "cove": cove, "quality": quality or [DASH],
     }
@@ -835,7 +843,7 @@ def build_design_data(payload: dict | None, tier: str = "base",
         "positions": _g(p, "holdings_count", default=DASH),
         # Bot @username for the «Применить идею» → Scenario deep-link (the report
         # is static HTML; charging the token happens bot-side after the handoff).
-        "botUsername": _txt(p, "bot_username") if _g(p, "bot_username") else "RampBot",
+        "botUsername": _txt(p, "bot_username") if _g(p, "bot_username") else "KEN_investment_bot",
     }
     return _map_deep(p, meta) if is_deep else _map_base(p, meta)
 

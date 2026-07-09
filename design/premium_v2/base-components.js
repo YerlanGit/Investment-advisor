@@ -1089,14 +1089,6 @@ Object.assign(window, {
 });
 /* Holdings section — interactive expandable rows + filter chips */
 
-// «Открыть бумагу» destination.  The report is a STATIC page (no backend), so
-// the button opens the security's public TradingView page in a new tab.  The
-// engine tags tickers in Tradernet format (AAPL.US · KSPI.KZ · BRK.B.US); we
-// strip a trailing exchange suffix (.US/.KZ/…) but keep in-symbol dots (BRK.B).
-const securityUrl = t => {
-  const sym = String(t || '').trim().replace(/\.[A-Za-z]{2,4}$/, '');
-  return sym ? `https://www.tradingview.com/symbols/${encodeURIComponent(sym)}/` : '#';
-};
 const StatusBadge = ({
   status
 }) => status === 'HOTSPOT' ? /*#__PURE__*/React.createElement("span", {
@@ -1215,21 +1207,12 @@ const HoldingRow = ({
   }, /*#__PURE__*/React.createElement("div", {
     className: "rounded-3xl p-5 bg-white/70 border border-ink-900/5"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "flex items-start justify-between gap-4 mb-4"
-  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "mb-4"
+  }, /*#__PURE__*/React.createElement("div", {
     className: "text-[11px] tracking-widest uppercase text-ink-500 font-mono"
   }, "Фундаментал · SEC EDGAR"), /*#__PURE__*/React.createElement("div", {
     className: "text-[15px] text-ink-900 font-medium mt-0.5"
-  }, h.name)), /*#__PURE__*/React.createElement("a", {
-    href: securityUrl(h.t),
-    target: "_blank",
-    rel: "noopener noreferrer",
-    title: `Открыть ${h.t} на TradingView (котировки, график, новости)`,
-    className: "flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-ink-900 text-white text-[11px] font-medium hover:bg-ink-800 transition"
-  }, "Открыть бумагу ", /*#__PURE__*/React.createElement(Icons.ArrowR, {
-    size: 12,
-    stroke: 2.2
-  }))), /*#__PURE__*/React.createElement("div", {
+  }, h.name)), /*#__PURE__*/React.createElement("div", {
     className: "grid grid-cols-2 md:grid-cols-6 gap-3"
   }, /*#__PURE__*/React.createElement(FundCell, {
     label: "ROE",
@@ -1778,7 +1761,7 @@ const IdeaCard = ({
 // token itself.  So the button opens a two-step modal (pick 1 of 4 ideas →
 // confirm «Да/Нет»); «Да» deep-links to the Telegram bot, which runs the
 // Scenario-tier analysis and charges the 1 token there (t.me/<bot>?start=scn_N).
-const scenarioDeepLink = (bot, n) => `https://t.me/${encodeURIComponent(String(bot || 'RampBot').replace(/^@/, ''))}` + `?start=scn_${String(n).replace(/[^0-9A-Za-z_]/g, '')}`;
+const scenarioDeepLink = (bot, n) => `https://t.me/${encodeURIComponent(String(bot || 'KEN_investment_bot').replace(/^@/, ''))}` + `?start=scn_${String(n).replace(/[^0-9A-Za-z_]/g, '')}`;
 const ApplyIdeaModal = ({
   ideas,
   botUsername,

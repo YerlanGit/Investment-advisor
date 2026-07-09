@@ -10,7 +10,7 @@ const DEEP = {
     generated: '23.06.2026 07:05 UTC+5',
     nav: 13692,
     positions: 11,
-    botUsername: 'RampBot',
+    botUsername: 'KEN_investment_bot',
   },
 
   verdict: {
@@ -193,6 +193,8 @@ const DEEP = {
     { name:'Max TRC (1 позиция)', before:'35,1%', after:'52,8%', delta:'+17,7 пп',     tone:'neg' },
     { name:'Ожид. доходность',    before:'2,2%',  after:'2,6%',  delta:'+0,4 пп',      tone:'pos' },
   ],
+  effectScope: ['ORCL', 'SPCX', 'AAPL', 'MSFT', 'NVDA'],
+  effectScoped: true,
   effectVerdict: 'Компромисс: волатильность и просадка снижаются, но при урезании NVDA её доля в остаточном риске временно растёт (max TRC ухудшается).',
   effectAI: 'После ребалансировки потери в худший день из 20 снизятся с ≈2,7% к ≈2,2%, волатильность с 18% к ≈16%, отдача на риск вырастет. Главная причина — урезание NVDA и продажа дорогого ORCL уменьшат концентрацию и чувствительность к рынку.',
 
