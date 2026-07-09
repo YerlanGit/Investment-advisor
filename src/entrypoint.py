@@ -141,6 +141,13 @@ def _boot_ingest_from_inbox() -> None:
     try:
         from agent.rag_engine import FinancialRAG  # noqa: PLC0415
         rag = FinancialRAG(db_path=CHROMA_LOCAL_PATH)
+
+        # R2#6: purge pre-fix tmp-named artifact chunks first — they are stale
+        # duplicates of reports since re-ingested under proper names, and they
+        # over-count «база: N отчётов» (48 vs. 29) + pollute retrieval.  Republish
+        # to STORE if anything was removed so the fix persists across revisions.
+        purged = rag.purge_temp_sources()
+
         already = int(rag.collection.count())
 
         from google.cloud import storage  # noqa: PLC0415
@@ -150,6 +157,8 @@ def _boot_ingest_from_inbox() -> None:
         if not pdfs:
             logger.info("RAG boot-ingest: INBOX gs://%s has no PDFs — RAG stays %s.",
                         RAG_INBOX_BUCKET, "empty" if already == 0 else "as-is")
+            if purged > 0:
+                _upload_chroma_db_to_store()
             return
 
         # Which INBOX PDFs are missing from the store?  Compare by normalised
@@ -166,6 +175,8 @@ def _boot_ingest_from_inbox() -> None:
         if not missing:
             logger.info("RAG boot-ingest: store has %d chunks · all %d INBOX PDF(s) "
                         "already ingested — skip.", already, len(pdfs))
+            if purged > 0:
+                _upload_chroma_db_to_store()
             return
         logger.info("RAG boot-ingest: store has %d chunks · %d of %d INBOX PDF(s) "
                     "missing — ingesting in-container.", already, len(missing), len(pdfs))
@@ -190,7 +201,7 @@ def _boot_ingest_from_inbox() -> None:
 
         logger.info("RAG boot-ingest: ingested %d chunks from %d new PDF(s).",
                     total, len(missing))
-        if total > 0:
+        if total > 0 or purged > 0:   # republish so ingest AND purge persist
             _upload_chroma_db_to_store()
     except Exception as exc:
         logger.warning("RAG boot-ingest skipped (%s).", exc)

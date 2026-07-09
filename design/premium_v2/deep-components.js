@@ -2434,7 +2434,7 @@ const actionChipCls = {
 // «Применить идею» → Scenario deep-link (same behaviour as the BASE report).
 // Static page cannot charge a token; «Да» hands off to the Telegram bot, which
 // runs the Scenario-tier analysis and charges 1 token there.
-const scenarioDeepLink = (bot, n) => `https://t.me/${encodeURIComponent(String(bot || 'RampBot').replace(/^@/, ''))}` + `?start=scn_${String(n).replace(/[^0-9A-Za-z_]/g, '')}`;
+const scenarioDeepLink = (bot, n) => `https://t.me/${encodeURIComponent(String(bot || 'KEN_investment_bot').replace(/^@/, ''))}` + `?start=scn_${String(n).replace(/[^0-9A-Za-z_]/g, '')}`;
 const ApplyIdeaModal = ({
   ideas,
   botUsername,
@@ -2586,7 +2586,9 @@ const ActionPlan = ({
 }, window.DEEP.actionAI)));
 const EffectGrid = ({
   rows,
-  verdict
+  verdict,
+  scope,
+  scoped
 }) => /*#__PURE__*/React.createElement("div", {
   className: "glass-strong rounded-4xl p-7 shadow-card"
 }, /*#__PURE__*/React.createElement("div", {
@@ -2595,9 +2597,10 @@ const EffectGrid = ({
   className: "text-2xl font-semibold tracking-tight text-ink-900"
 }, "Ожидаемый эффект на риск"), /*#__PURE__*/React.createElement("p", {
   className: "text-[12px] text-ink-500 font-mono mt-1"
-}, "оценка «до / после» при исполнении Action Plan · горизонт 1 квартал")), /*#__PURE__*/React.createElement("span", {
-  className: "text-[10px] font-mono text-gold-700 tracking-wider px-2.5 py-1 rounded-full bg-gold-400/15"
-}, "Δ по идеям: MSFT · ORCL · SLV · SPCX · AAPL · GLD · NVDA")), /*#__PURE__*/React.createElement("div", {
+}, "оценка «до / после» при исполнении Action Plan · горизонт 1 квартал")), scoped && scope && scope.length > 0 && /*#__PURE__*/React.createElement("span", {
+  className: "text-[10px] font-mono text-gold-700 tracking-wider px-2.5 py-1 rounded-full bg-gold-400/15",
+  title: "Эти позиции меняет Action Plan — по ним и посчитан эффект «до/после»"
+}, "Меняем позиции: ", scope.join(' · '))), /*#__PURE__*/React.createElement("div", {
   className: "grid grid-cols-2 md:grid-cols-4 gap-3"
 }, rows.map((r, i) => {
   const tone = {
@@ -2787,8 +2790,8 @@ const Plan = () => {
     className: "rise",
     "data-screen-label": "05 Action Plan"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "flex items-end justify-between gap-4 flex-wrap mb-6"
-  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "mb-6"
+  }, /*#__PURE__*/React.createElement("div", {
     className: "flex items-center gap-2 text-[11px] tracking-widest uppercase text-ink-500 font-mono mb-2"
   }, /*#__PURE__*/React.createElement("span", {
     className: "w-1.5 h-1.5 rounded-full bg-gold-400"
@@ -2798,13 +2801,7 @@ const Plan = () => {
     className: "text-ink-400"
   }, ".")), /*#__PURE__*/React.createElement("p", {
     className: "text-[15px] text-ink-500 mt-2 font-light max-w-[680px]"
-  }, "Конкретные уровни Buy / Sell / Stop, оценка эффекта до/после и стратегические идеи с кандидатами.")), /*#__PURE__*/React.createElement("button", {
-    onClick: () => setApplyOpen(true),
-    className: "flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-ink-900 text-white text-[12px] font-medium hover:bg-ink-800 transition"
-  }, /*#__PURE__*/React.createElement(Icons.Sparkles, {
-    size: 13,
-    stroke: 1.8
-  }), " Применить идею")), applyOpen && /*#__PURE__*/React.createElement(ApplyIdeaModal, {
+  }, "Конкретные уровни Buy / Sell / Stop, оценка эффекта до/после и стратегические идеи с кандидатами.")), applyOpen && /*#__PURE__*/React.createElement(ApplyIdeaModal, {
     ideas: p.ideas,
     botUsername: (p.meta || {}).botUsername,
     onClose: () => setApplyOpen(false)
@@ -2814,7 +2811,9 @@ const Plan = () => {
     rows: p.actionPlan
   }), /*#__PURE__*/React.createElement(EffectGrid, {
     rows: p.effect,
-    verdict: p.effectVerdict
+    verdict: p.effectVerdict,
+    scope: p.effectScope,
+    scoped: p.effectScoped
   }), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "rounded-4xl p-6 mb-5 relative overflow-hidden",
     style: {
@@ -2826,7 +2825,9 @@ const Plan = () => {
       background: 'radial-gradient(circle, #caa01a, transparent 65%)'
     }
   }), /*#__PURE__*/React.createElement("div", {
-    className: "relative flex items-start gap-4"
+    className: "relative flex items-start justify-between gap-4 flex-wrap"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-start gap-4"
   }, /*#__PURE__*/React.createElement("div", {
     className: "w-11 h-11 rounded-2xl bg-ink-900 text-gold-400 flex items-center justify-center flex-shrink-0"
   }, /*#__PURE__*/React.createElement(Icons.Sparkles, {
@@ -2838,7 +2839,13 @@ const Plan = () => {
     className: "text-[14.5px] text-ink-900 leading-relaxed font-light"
   }, "Тикеры-кандидаты ", /*#__PURE__*/React.createElement("span", {
     className: "font-medium"
-  }, "не из вашего портфеля"), " — рассмотрите как замену или дополнение. Раскройте карточку, чтобы увидеть конвейер отбора и обоснование по каждому кандидату.")))), /*#__PURE__*/React.createElement("div", {
+  }, "не из вашего портфеля"), " — рассмотрите как замену или дополнение. Раскройте карточку, чтобы увидеть конвейер отбора и обоснование по каждому кандидату."))), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setApplyOpen(true),
+    className: "flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-ink-900 text-white text-[12px] font-medium hover:bg-ink-800 transition flex-shrink-0"
+  }, /*#__PURE__*/React.createElement(Icons.Sparkles, {
+    size: 13,
+    stroke: 1.8
+  }), " Применить идею"))), /*#__PURE__*/React.createElement("div", {
     className: "grid grid-cols-1 lg:grid-cols-2 gap-5"
   }, p.ideas.map((idea, i) => /*#__PURE__*/React.createElement(IdeaCard, {
     key: idea.n,

@@ -9,7 +9,7 @@ const actionChipCls = {
 // Static page cannot charge a token; «Да» hands off to the Telegram bot, which
 // runs the Scenario-tier analysis and charges 1 token there.
 const scenarioDeepLink = (bot, n) =>
-  `https://t.me/${encodeURIComponent(String(bot || 'RampBot').replace(/^@/, ''))}`
+  `https://t.me/${encodeURIComponent(String(bot || 'KEN_investment_bot').replace(/^@/, ''))}`
   + `?start=scn_${String(n).replace(/[^0-9A-Za-z_]/g, '')}`;
 
 const ApplyIdeaModal = ({ ideas, botUsername, onClose }) => {
@@ -139,14 +139,21 @@ const ActionPlan = ({ rows }) => (
   </div>
 );
 
-const EffectGrid = ({ rows, verdict }) => (
+const EffectGrid = ({ rows, verdict, scope, scoped }) => (
   <div className="glass-strong rounded-4xl p-7 shadow-card">
     <div className="flex items-start justify-between gap-4 flex-wrap mb-5">
       <div>
         <h3 className="text-2xl font-semibold tracking-tight text-ink-900">Ожидаемый эффект на риск</h3>
         <p className="text-[12px] text-ink-500 font-mono mt-1">оценка «до / после» при исполнении Action Plan · горизонт 1 квартал</p>
       </div>
-      <span className="text-[10px] font-mono text-gold-700 tracking-wider px-2.5 py-1 rounded-full bg-gold-400/15">Δ по идеям: MSFT · ORCL · SLV · SPCX · AAPL · GLD · NVDA</span>
+      {/* R2#5: data-driven — какие ИМЕННО позиции меняет план (высокоприоритетные
+          строки Action Plan: Sell/Trim/Buy), т.е. по ним и считается «до/после». */}
+      {scoped && scope && scope.length > 0 && (
+        <span className="text-[10px] font-mono text-gold-700 tracking-wider px-2.5 py-1 rounded-full bg-gold-400/15"
+              title="Эти позиции меняет Action Plan — по ним и посчитан эффект «до/после»">
+          Меняем позиции: {scope.join(' · ')}
+        </span>
+      )}
     </div>
     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
       {rows.map((r,i) => {
@@ -270,22 +277,16 @@ const Plan = () => {
   const [applyOpen, setApplyOpen] = React.useState(false);
   return (
     <section id="plan" className="rise" data-screen-label="05 Action Plan">
-      <div className="flex items-end justify-between gap-4 flex-wrap mb-6">
-        <div>
-          <div className="flex items-center gap-2 text-[11px] tracking-widest uppercase text-ink-500 font-mono mb-2">
-            <span className="w-1.5 h-1.5 rounded-full bg-gold-400"/> Action Plan · Effect · AI Ideas · DEEP
-          </div>
-          <h2 className="text-[40px] leading-[1.05] tracking-[-0.02em] font-light text-ink-900">
-            От идей к конкретным уровням<span className="text-ink-400">.</span>
-          </h2>
-          <p className="text-[15px] text-ink-500 mt-2 font-light max-w-[680px]">
-            Конкретные уровни Buy / Sell / Stop, оценка эффекта до/после и стратегические идеи с кандидатами.
-          </p>
+      <div className="mb-6">
+        <div className="flex items-center gap-2 text-[11px] tracking-widest uppercase text-ink-500 font-mono mb-2">
+          <span className="w-1.5 h-1.5 rounded-full bg-gold-400"/> Action Plan · Effect · AI Ideas · DEEP
         </div>
-        <button onClick={()=>setApplyOpen(true)}
-                className="flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-ink-900 text-white text-[12px] font-medium hover:bg-ink-800 transition">
-          <Icons.Sparkles size={13} stroke={1.8}/> Применить идею
-        </button>
+        <h2 className="text-[40px] leading-[1.05] tracking-[-0.02em] font-light text-ink-900">
+          От идей к конкретным уровням<span className="text-ink-400">.</span>
+        </h2>
+        <p className="text-[15px] text-ink-500 mt-2 font-light max-w-[680px]">
+          Конкретные уровни Buy / Sell / Stop, оценка эффекта до/после и стратегические идеи с кандидатами.
+        </p>
       </div>
 
       {applyOpen && (
@@ -296,19 +297,26 @@ const Plan = () => {
 
       <div className="space-y-5">
         <ActionPlan rows={p.actionPlan}/>
-        <EffectGrid rows={p.effect} verdict={p.effectVerdict}/>
+        <EffectGrid rows={p.effect} verdict={p.effectVerdict} scope={p.effectScope} scoped={p.effectScoped}/>
 
         <div>
           <div className="rounded-4xl p-6 mb-5 relative overflow-hidden" style={{ background:'linear-gradient(120deg, #fbf3d9 0%, #f6ebc0 100%)' }}>
             <div className="absolute -right-6 top-1/2 -translate-y-1/2 w-40 h-40 rounded-full opacity-30" style={{ background:'radial-gradient(circle, #caa01a, transparent 65%)' }}/>
-            <div className="relative flex items-start gap-4">
-              <div className="w-11 h-11 rounded-2xl bg-ink-900 text-gold-400 flex items-center justify-center flex-shrink-0"><Icons.Sparkles size={18} stroke={1.7}/></div>
-              <div>
-                <div className="text-[10px] tracking-widest uppercase font-mono text-ink-700 mb-1">AI Ideas · 4 идеи · каждая прошла Factor → Regime → Stress → RAG</div>
-                <p className="text-[14.5px] text-ink-900 leading-relaxed font-light">
-                  Тикеры-кандидаты <span className="font-medium">не из вашего портфеля</span> — рассмотрите как замену или дополнение. Раскройте карточку, чтобы увидеть конвейер отбора и обоснование по каждому кандидату.
-                </p>
+            <div className="relative flex items-start justify-between gap-4 flex-wrap">
+              <div className="flex items-start gap-4">
+                <div className="w-11 h-11 rounded-2xl bg-ink-900 text-gold-400 flex items-center justify-center flex-shrink-0"><Icons.Sparkles size={18} stroke={1.7}/></div>
+                <div>
+                  <div className="text-[10px] tracking-widest uppercase font-mono text-ink-700 mb-1">AI Ideas · 4 идеи · каждая прошла Factor → Regime → Stress → RAG</div>
+                  <p className="text-[14.5px] text-ink-900 leading-relaxed font-light">
+                    Тикеры-кандидаты <span className="font-medium">не из вашего портфеля</span> — рассмотрите как замену или дополнение. Раскройте карточку, чтобы увидеть конвейер отбора и обоснование по каждому кандидату.
+                  </p>
+                </div>
               </div>
+              {/* «Применить идею» живёт рядом с самими идеями (замечание R2#4) */}
+              <button onClick={()=>setApplyOpen(true)}
+                      className="flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-ink-900 text-white text-[12px] font-medium hover:bg-ink-800 transition flex-shrink-0">
+                <Icons.Sparkles size={13} stroke={1.8}/> Применить идею
+              </button>
             </div>
           </div>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">

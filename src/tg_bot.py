@@ -1,7 +1,8 @@
 """
 RAMP Telegram Bot — aiogram 3.x async entry point.
 
-Deep-link format: t.me/RampBot?start=<source_slug>
+Deep-link format: t.me/KEN_investment_bot?start=<source_slug>  (bot @username;
+  override via BOT_USERNAME env). `start=scn_<n>` → «Применить идею» → Scenario tier.
 Analysis tiers:
   - base  : 1 token  → MAC3 CVaR + allocation table
   - deep  : 2 tokens → base + scenario analysis + fundamental signals
@@ -567,6 +568,33 @@ def _safe_float(val, default: float = 0.0) -> float:
         return default
 
 
+def _clean_rag_excerpt(text: str, max_len: int = 190) -> str:
+    """Turn a raw RAG chunk into a clean, readable excerpt (замечание R2#3 —
+    выдержки обрывались на середине слова: «ury/…», «…mod-»).
+
+    - collapse whitespace + strip markdown;
+    - drop a leading mid-word fragment (a chunk boundary can cut a word, so the
+      body may open with «ury/German…» — skip to the first sentence/word start);
+    - truncate on a WORD boundary with an ellipsis, never mid-word.
+    """
+    t = re.sub(r"\*\*(.*?)\*\*", r"\1", str(text or ""))          # de-bold
+    t = re.sub(r"\s+", " ", t).strip().lstrip("#*•-—·> ").strip()
+    if not t:
+        return ""
+    if t[:1].islower():                       # opened mid-word → find a clean start
+        m = re.search(r"[.!?]\s+(\S)", t)     # right after a sentence end
+        if m:
+            t = t[m.start(1):]
+        else:
+            m2 = re.search(r"[A-ZА-Я0-9]", t)  # else first capital / digit (if near)
+            if m2 and m2.start() < 45:
+                t = t[m2.start():]
+    t = t.strip()
+    if len(t) > max_len:                      # truncate on a word boundary + «…»
+        t = t[:max_len].rsplit(" ", 1)[0].rstrip(",;:—- ") + "…"
+    return t.strip()
+
+
 def _fetch_rag_context(results: dict) -> tuple[str, list[str], str, dict]:
     """
     Pull macro + micro RAG excerpts for the AI narrative (deep tier only).
@@ -589,15 +617,18 @@ def _fetch_rag_context(results: dict) -> tuple[str, list[str], str, dict]:
         from agent.rag_engine import FinancialRAG
         rag = FinancialRAG(db_path=os.environ.get("CHROMA_LOCAL_PATH",
                                                    "/app/data/chroma_db"))
-        n_chunks = int(rag.collection.count())
-        if n_chunks == 0:
+        if int(rag.collection.count()) == 0:
             logger.info("RAG database empty — narrative will run without bank context.")
             return "", [], "unavailable", _empty_stats
-        # Distinct ingested bank PDFs (source filenames) — the "reports read" count.
+        # «Отчётов / чанков» must count REAL reports only — list_documents()
+        # excludes tmp-named ingestion artifacts (замечание R2#6: показывало 48
+        # вместо 29).  Derive BOTH counts from it so they stay consistent.
         try:
-            n_docs = len(rag.list_documents())
+            docs = rag.list_documents()   # real sources only
+            n_docs   = len(docs)
+            n_chunks = sum(int(d.get("chunks", 0) or 0) for d in docs)
         except Exception:
-            n_docs = 0
+            n_docs, n_chunks = 0, int(rag.collection.count())
         kb_stats = {"docs": n_docs, "chunks": n_chunks}
 
         perf = results.get("performance_table")
@@ -627,30 +658,60 @@ def _fetch_rag_context(results: dict) -> tuple[str, list[str], str, dict]:
                 f"Market regime {regime_label} GDP growth recession expansion "
                 "economic cycle leading indicators PMI yield curve"
             )
-            regime_raw = rag.get_market_sentiment(query=regime_query, n_results=2)
+            # Pull MORE than we show so we can pick DISTINCT banks (замечание
+            # R2#3: раньше все 3 выдержки были из одного JPMorgan).
+            regime_raw = rag.get_market_sentiment(query=regime_query, n_results=6)
             if regime_raw and "NO PDF DATA" not in regime_raw:
-                # 2026-07-05: the raw context is Markdown with retrieval-header
-                # lines («--- [дата] файл — БАНК · секция (актуальность: …) ---»);
-                # those headers and **bold** markers must NOT leak into chips, but
-                # the BANK inside the header is exactly the attribution we want —
-                # track it as we walk the block and stamp each content excerpt.
-                cur_bank = ""
+                # The raw context is Markdown with retrieval-header lines
+                # («--- [дата] файл — БАНК · секция (актуальность: …) ---»).  Split
+                # it into (bank, body) BLOCKS — the header starts a block, the
+                # lines after it (until the next header) are the chunk body — then
+                # build ONE clean excerpt per block (whole-body, sentence-bounded)
+                # instead of an arbitrary mid-sentence line.
+                blocks: list[tuple[str, str]] = []
+                cur_bank, cur_body = "", []
                 for line in regime_raw.split("\n"):
-                    line = line.strip()
-                    if not line:
+                    s = line.strip()
+                    if not s:
                         continue
-                    if line.startswith("---"):
-                        # Header: «… — <bank> · <section> (актуальность …)».
-                        m = re.search(r"—\s*([^·()]+?)\s*(?:·|\(|$)", line)
+                    if s.startswith("---"):
+                        if cur_body:
+                            blocks.append((cur_bank, " ".join(cur_body)))
+                            cur_body = []
+                        m = re.search(r"—\s*([^·()]+?)\s*(?:·|\(|$)", s)
                         cur_bank = (m.group(1).strip() if m else "")
                         if cur_bank in ("—", "Unknown"):
                             cur_bank = ""
                         continue                     # retrieval header, not text
-                    line = re.sub(r"\*\*(.*?)\*\*", r"\1", line)   # **bold** → bold
-                    line = line.lstrip("#*•- ").strip()
-                    if len(line) > 30:
-                        regime_rag_confirm.append({"text": line[:200], "bank": cur_bank})
+                    cur_body.append(s)
+                if cur_body:
+                    blocks.append((cur_bank, " ".join(cur_body)))
+
+                seen_banks: set[str] = set()
+                seen_text:  set[str] = set()
+
+                def _add_excerpt(bank: str, body: str) -> bool:
+                    exc = _clean_rag_excerpt(body)
+                    if len(exc) < 45 or exc in seen_text:
+                        return False
+                    regime_rag_confirm.append({"text": exc, "bank": bank})
+                    seen_text.add(exc)
+                    return True
+
+                # Pass 1 — one clean excerpt per DISTINCT bank.
+                for bank, body in blocks:
+                    bkey = (bank or "").lower()
+                    if bkey and bkey in seen_banks:
+                        continue
+                    if _add_excerpt(bank, body):
+                        if bkey:
+                            seen_banks.add(bkey)
                         if len(regime_rag_confirm) >= 3:
+                            break
+                # Pass 2 — if fewer than 3 banks were available, fill the rest.
+                if len(regime_rag_confirm) < 3:
+                    for bank, body in blocks:
+                        if _add_excerpt(bank, body) and len(regime_rag_confirm) >= 3:
                             break
 
         sections = []

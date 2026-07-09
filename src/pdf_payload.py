@@ -225,16 +225,30 @@ def _build_regime_consistency(regime: Optional[dict],
 
     if risk_on and len(stress) >= 2:
         return {"status": "diverges", "signals": stress,
-                "note": ("Режим risk-on по моментуму, но FRED показывает стресс: "
-                         + ", ".join(stress)
+                "note": ("Режим «рост» по динамике рынка, но независимые данные FRED "
+                         "показывают стресс: " + ", ".join(stress)
                          + ". Позиционирование стоит трактовать осторожно.")}
     if (not risk_on) and have_any and not stress:
         return {"status": "diverges", "signals": [],
-                "note": ("Режим risk-off по моментуму, но макро-сигналы FRED "
-                         "спокойны (кривая/спред/VIX в норме) — возможен ранний "
-                         "разворот.")}
-    return {"status": "aligned", "signals": stress,
-            "note": "Макро-сигналы FRED согласуются с моментум-режимом."}
+                "note": ("Режим «спад/замедление» по динамике рынка, но независимые "
+                         "данные FRED спокойны (кривая доходности, кредитный спред и "
+                         "VIX в норме) — возможен ранний разворот к росту.")}
+    # aligned — spell out WHICH FRED signals were checked (замечание R2#2:
+    # «какие макро-сигналы?» — раньше нота была безымянной).
+    labelled: list[str] = []
+    if yc  is not None: labelled.append(f"кривая доходности 10Y−2Y {yc:+.2f} пп")
+    if hy  is not None: labelled.append(f"кредитный спред HY {hy:.2f}%")
+    if vix is not None: labelled.append(f"индекс страха VIX {vix:.0f}")
+    if be  is not None: labelled.append(f"инфляционные ожидания {be:.2f}%")
+    if stress:   # aligned WITH stress → the macro data confirms a cautious regime
+        note = ("Независимые данные FRED подтверждают осторожный режим — "
+                + ", ".join(stress) + ".")
+    elif labelled:
+        note = ("Независимые данные FRED (" + ", ".join(labelled)
+                + ") — в спокойной зоне, стресс-сигналов нет: подтверждают режим.")
+    else:
+        note = "Независимые макро-данные FRED не противоречат режиму."
+    return {"status": "aligned", "signals": stress, "note": note}
 
 
 def _model_display_name(model_id: str) -> str:
@@ -1262,7 +1276,9 @@ def build_payload(results: dict, tier: str,
         "ai_model_used":         _model_display_name((ai_summary or {}).get("model_used", "")),
         # Bot @username for the report's «Применить идею» deep-link
         # (t.me/<bot>?start=scn_<n>).  Env-configurable; strips a leading «@».
-        "bot_username":          os.getenv("BOT_USERNAME", "RampBot").lstrip("@"),
+        # Default is the LIVE bot handle so the link works even if BOT_USERNAME
+        # is unset (замечание R2#4 — ссылка вела на несуществующий RampBot).
+        "bot_username":          os.getenv("BOT_USERNAME", "KEN_investment_bot").lstrip("@"),
         "ai_action_impact":      (ai_summary or {}).get("ai_action_impact", ""),
         # Per-KPI AI notes (CVaR / Sharpe / MaxDD cards) — plain-language.
         "ai_cvar_note":          (ai_summary or {}).get("ai_cvar_note", ""),

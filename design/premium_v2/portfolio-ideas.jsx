@@ -167,7 +167,7 @@ const IdeaCard = ({ idea, open, onToggle, isHighlight }) => {
 // confirm «Да/Нет»); «Да» deep-links to the Telegram bot, which runs the
 // Scenario-tier analysis and charges the 1 token there (t.me/<bot>?start=scn_N).
 const scenarioDeepLink = (bot, n) =>
-  `https://t.me/${encodeURIComponent(String(bot || 'RampBot').replace(/^@/, ''))}`
+  `https://t.me/${encodeURIComponent(String(bot || 'KEN_investment_bot').replace(/^@/, ''))}`
   + `?start=scn_${String(n).replace(/[^0-9A-Za-z_]/g, '')}`;
 
 const ApplyIdeaModal = ({ ideas, botUsername, onClose }) => {

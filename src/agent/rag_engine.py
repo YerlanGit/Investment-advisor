@@ -36,6 +36,23 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger("FinancialRAG")
 
+# ── Ingestion-artifact source names ──────────────────────────────────────────
+# Before 2026-07-05 the Cloud Function / boot-ingest passed a NamedTemporaryFile
+# path to ingest_pdf without doc_metadata["filename"], so `source` became the
+# tmp basename («tmpl3mmhrmf.pdf»).  Those garbage sources survive as duplicates
+# of a report that was LATER re-ingested under its proper name → the «база: N
+# отчётов» count over-counts (замечание R2#6: 48 shown vs. 29 real) and the
+# fragments pollute retrieval.  Detect them so the inventory ignores them and a
+# boot purge can remove them.  Pattern = Python's tempfile default: tmp + 6-16
+# chars from [A-Za-z0-9_] + .pdf (nothing that looks like a real report name).
+_TEMP_SOURCE_RE = re.compile(r"^tmp[A-Za-z0-9_]{5,16}\.pdf$", re.IGNORECASE)
+
+
+def _is_temp_source(src) -> bool:
+    """True for ingestion-artifact source names (tmp file basenames)."""
+    return bool(_TEMP_SOURCE_RE.match(str(src or "").strip()))
+
+
 # ── Recency weights ─────────────────────────────────────────────────────────
 W_SEMANTIC = 0.60   # вес семантической близости к запросу
 W_RECENCY  = 0.40   # вес свежести документа
@@ -391,8 +408,13 @@ class FinancialRAG:
 
     # ── Utility ───────────────────────────────────────────────────────────────
 
-    def list_documents(self) -> list[dict]:
-        """Returns a summary of all ingested documents, sorted by date desc."""
+    def list_documents(self, *, include_temp: bool = False) -> list[dict]:
+        """Returns a summary of all ingested documents, sorted by date desc.
+
+        Ingestion-artifact sources (tmp basenames, `include_temp=False`) are
+        excluded so the «база: N отчётов» inventory counts REAL reports only
+        (замечание R2#6).  Pass `include_temp=True` for maintenance/purge paths.
+        """
         if self.collection.count() == 0:
             return []
 
@@ -401,6 +423,8 @@ class FinancialRAG:
         seen: dict[str, dict] = {}
         for meta in all_data["metadatas"]:
             src = meta.get("source", "?")
+            if not include_temp and _is_temp_source(src):
+                continue                        # skip pre-fix tmp-named artifacts
             if src not in seen:
                 seen[src] = {
                     "source":     src,
@@ -413,3 +437,29 @@ class FinancialRAG:
             seen[src]["chunks"] += 1
 
         return sorted(seen.values(), key=lambda x: x["timestamp"], reverse=True)
+
+    def purge_temp_sources(self) -> int:
+        """Delete chunks whose `source` is an ingestion artifact (tmp basename).
+
+        These are stale duplicates of reports since re-ingested under their real
+        names (upsert with new ids left the old tmp-id chunks behind).  Removing
+        them corrects BOTH the «отчётов» and «чанков» counts and cleans up
+        retrieval.  Best-effort; returns the number of chunks deleted."""
+        try:
+            if self.collection.count() == 0:
+                return 0
+            got = self.collection.get(include=["metadatas"])
+            ids = got.get("ids") or []
+            metas = got.get("metadatas") or []
+            temp_ids = [i for i, m in zip(ids, metas)
+                        if _is_temp_source((m or {}).get("source"))]
+            if temp_ids:
+                self.collection.delete(ids=temp_ids)
+                logger.info("RAG: purged %d chunk(s) from %d tmp-named source(s).",
+                            len(temp_ids),
+                            len({(m or {}).get("source") for m in metas
+                                 if _is_temp_source((m or {}).get("source"))}))
+            return len(temp_ids)
+        except Exception as exc:
+            logger.warning("RAG: purge_temp_sources skipped (%s).", exc)
+            return 0

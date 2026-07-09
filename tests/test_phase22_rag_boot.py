@@ -55,6 +55,7 @@ class RagBootIngestBehaviourTest(unittest.TestCase):
     def test_skip_when_store_has_all_inbox_pdfs(self) -> None:
         # Populated store AND every INBOX PDF already ingested → no-op.
         fake_rag = mock.MagicMock()
+        fake_rag.purge_temp_sources.return_value = 0
         fake_rag.collection.count.return_value = 42
         fake_rag.list_documents.return_value = [
             {"source": "goldman_sachs_outlook_Q3_2026.pdf"}]
@@ -75,6 +76,7 @@ class RagBootIngestBehaviourTest(unittest.TestCase):
         # #4 self-heal: populated store, but INBOX has a NEW report not yet in
         # the store → ingest ONLY the missing one, then republish.
         fake_rag = mock.MagicMock()
+        fake_rag.purge_temp_sources.return_value = 0
         fake_rag.collection.count.return_value = 2106
         fake_rag.ingest_pdf.return_value = 11
         fake_rag.list_documents.return_value = [
@@ -99,6 +101,7 @@ class RagBootIngestBehaviourTest(unittest.TestCase):
     @unittest.skipUnless(_HAS_STORAGE, "google-cloud-storage not installed")
     def test_ingests_inbox_pdfs_when_store_empty(self) -> None:
         fake_rag = mock.MagicMock()
+        fake_rag.purge_temp_sources.return_value = 0
         fake_rag.collection.count.return_value = 0        # STORE empty
         fake_rag.ingest_pdf.return_value = 7              # 7 chunks/PDF
 
@@ -123,6 +126,7 @@ class RagBootIngestBehaviourTest(unittest.TestCase):
     @unittest.skipUnless(_HAS_STORAGE, "google-cloud-storage not installed")
     def test_empty_inbox_does_not_publish(self) -> None:
         fake_rag = mock.MagicMock()
+        fake_rag.purge_temp_sources.return_value = 0
         fake_rag.collection.count.return_value = 0
         bucket = mock.MagicMock()
         bucket.list_blobs.return_value = []               # no PDFs in INBOX
@@ -142,6 +146,68 @@ class RagBootIngestBehaviourTest(unittest.TestCase):
              mock.patch("agent.rag_engine.FinancialRAG",
                         side_effect=RuntimeError("chromadb boom")):
             entrypoint._boot_ingest_from_inbox()   # must not raise
+
+    @unittest.skipUnless(_HAS_STORAGE, "google-cloud-storage not installed")
+    def test_purge_only_republishes_even_with_empty_inbox(self) -> None:
+        # R2#6: a boot that only PURGED tmp-named artifacts (no new INBOX PDFs)
+        # must still republish the cleaned store to STORE.
+        fake_rag = mock.MagicMock()
+        fake_rag.purge_temp_sources.return_value = 17     # removed 17 chunks
+        fake_rag.collection.count.return_value = 5090
+        bucket = mock.MagicMock(); bucket.list_blobs.return_value = []
+        client = mock.MagicMock(); client.bucket.return_value = bucket
+        with mock.patch.dict(os.environ, {"RAG_BOOT_INGEST": "on"}), \
+             mock.patch("agent.rag_engine.FinancialRAG", return_value=fake_rag), \
+             mock.patch("google.cloud.storage.Client", return_value=client), \
+             mock.patch.object(entrypoint, "_upload_chroma_db_to_store") as up:
+            entrypoint._boot_ingest_from_inbox()
+            fake_rag.ingest_pdf.assert_not_called()       # nothing to ingest
+            up.assert_called_once()                       # but purge is published
+
+
+class TempSourceInventoryTest(unittest.TestCase):
+    """R2#6 — «база: N отчётов» must count REAL reports, excluding tmp-named
+    ingestion artifacts (pre-2026-07-05 the source metadata was a tmp basename),
+    and purge_temp_sources() must remove those stale chunks."""
+
+    def test_is_temp_source_matches_only_artifacts(self) -> None:
+        from agent.rag_engine import _is_temp_source
+        for real in ["goldman_sachs_Q3_2026.pdf", "GS_Outlook.pdf", "tmp.pdf",
+                     "report_tmp_final.pdf", ""]:
+            self.assertFalse(_is_temp_source(real), real)
+        for art in ["tmpl3mmhrmf.pdf", "tmp3mmhrmf.pdf", "TMPabcdef12.PDF"]:
+            self.assertTrue(_is_temp_source(art), art)
+
+    def test_list_documents_excludes_temp_sources(self) -> None:
+        from agent.rag_engine import FinancialRAG
+        rag = FinancialRAG.__new__(FinancialRAG)   # no chromadb __init__
+        metas = ([{"source": "goldman_Q3_2026.pdf", "doc_timestamp": 3}] * 4
+                 + [{"source": "morgan_2026.pdf", "doc_timestamp": 2}] * 3
+                 + [{"source": "tmpl3mmhrmf.pdf", "doc_timestamp": 1}] * 5)  # artifact
+        rag.collection = mock.MagicMock()
+        rag.collection.count.return_value = len(metas)
+        rag.collection.get.return_value = {"metadatas": metas}
+        docs = rag.list_documents()
+        srcs = {d["source"] for d in docs}
+        self.assertEqual(srcs, {"goldman_Q3_2026.pdf", "morgan_2026.pdf"})  # 2, not 3
+        self.assertEqual(sum(d["chunks"] for d in docs), 7)   # real chunks only
+        # include_temp=True keeps everything (maintenance path)
+        self.assertEqual(len(rag.list_documents(include_temp=True)), 3)
+
+    def test_purge_temp_sources_deletes_only_artifacts(self) -> None:
+        from agent.rag_engine import FinancialRAG
+        rag = FinancialRAG.__new__(FinancialRAG)
+        rag.collection = mock.MagicMock()
+        rag.collection.count.return_value = 4
+        rag.collection.get.return_value = {
+            "ids":       ["a_ch0", "a_ch1", "tmpl3mmhrmf.pdf_ch0", "tmpXk29ab01.pdf_ch0"],
+            "metadatas": [{"source": "a.pdf"}, {"source": "a.pdf"},
+                          {"source": "tmpl3mmhrmf.pdf"}, {"source": "tmpXk29ab01.pdf"}],
+        }
+        n = rag.purge_temp_sources()
+        self.assertEqual(n, 2)
+        rag.collection.delete.assert_called_once_with(
+            ids=["tmpl3mmhrmf.pdf_ch0", "tmpXk29ab01.pdf_ch0"])
 
 
 class IngestLogicalFilenameTest(unittest.TestCase):
