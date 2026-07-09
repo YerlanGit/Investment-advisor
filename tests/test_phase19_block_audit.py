@@ -3,10 +3,11 @@ BLOCK 1–4 audit/refactor (2026-06-16) — focused unit tests.
 
 Covers the surgical changes made for the Lead-Quant-Architect audit:
 
-  BLOCK 1.2  Model routing            → BASE=Sonnet 4.6, DEEP=Opus 4.8 (current
+  BLOCK 1.2  Model routing            → BASE=Sonnet 5, DEEP=Opus 4.8 (current
                                          IDs honouring the intent; 2024 IDs
                                          rejected as a regression).
-  BLOCK 1.2  Temperature guard        → Opus omits `temperature`, Sonnet keeps it.
+  BLOCK 1.2  Temperature guard        → current-gen models (Opus 4.8, Sonnet 5)
+                                         omit `temperature`; older Sonnet 4.6 keeps it.
   BLOCK 1.1  Idea freshness directive → period-stamped recency clause present.
   BLOCK 2.3  High-priority effect     → simulate only the non-deferred actions.
   BLOCK 3.4  Macro enrichment         → UNRATE + GDP in catalog; gated regime
@@ -33,23 +34,25 @@ if str(SRC) not in sys.path:
 # ─────────────────────────────────────────────────────────────────────────────
 class ModelRoutingTest(unittest.TestCase):
     def test_default_routing_is_current_generation(self):
-        """BASE→Sonnet 4.6, DEEP→Opus 4.8 (NOT the 2024 -3-* IDs)."""
+        """BASE→Sonnet 5, DEEP→Opus 4.8 (NOT the 2024 -3-* IDs)."""
         import importlib
         # Ensure no env override leaks in from the host.
         for k in ("ANTHROPIC_MODEL_BASE", "ANTHROPIC_MODEL_DEEP"):
             os.environ.pop(k, None)
         import ai_narrative
         importlib.reload(ai_narrative)
-        self.assertEqual(ai_narrative.MODEL_BASE, "claude-sonnet-4-6")
+        self.assertEqual(ai_narrative.MODEL_BASE, "claude-sonnet-5")
         self.assertEqual(ai_narrative.MODEL_DEEP, "claude-opus-4-8")
         # The outdated 2024 IDs must NOT be the routing target.
         self.assertNotIn("claude-3", ai_narrative.MODEL_BASE)
         self.assertNotIn("claude-3", ai_narrative.MODEL_DEEP)
 
     def test_temperature_guard_matches_routing(self):
-        """DEEP (Opus) omits temperature; BASE (Sonnet) keeps it."""
+        """Both default tiers (Opus 4.8, Sonnet 5) omit temperature; the
+        env-override-restorable Sonnet 4.6 still accepts it."""
         from ai_narrative import _model_supports_temperature
         self.assertFalse(_model_supports_temperature("claude-opus-4-8"))
+        self.assertFalse(_model_supports_temperature("claude-sonnet-5"))
         self.assertTrue(_model_supports_temperature("claude-sonnet-4-6"))
 
     def test_env_override_still_wins(self):
@@ -325,11 +328,14 @@ class SmartMoneyTest(unittest.TestCase):
 # ─────────────────────────────────────────────────────────────────────────────
 class CoVeRowsTest(unittest.TestCase):
     def test_llm_checker_rows_present(self):
+        # CoVe-consolidation (2026-07-09): the hallucination + math checkers are
+        # now ONE merged row covering both concerns.
         from finance.data_lineage import build_lineage
         rows = build_lineage({}, ai_summary={"verdict": "x", "bullets": ["y"]})
-        names = [r["name"] for r in rows]
-        self.assertIn("LLM-чекер: контроль галлюцинаций", names)
-        self.assertIn("LLM-чекер: проверка вычислений", names)
+        checker = [r for r in rows if r["name"].startswith("LLM-чекеры")]
+        self.assertEqual(len(checker), 1)
+        self.assertIn("галлюцинации", checker[0]["note"])
+        self.assertIn("вычисления", checker[0]["note"])
 
     def test_smart_money_row_present_and_gated(self):
         from finance.data_lineage import build_lineage
@@ -840,14 +846,16 @@ class PremiumMapperAuditTest(unittest.TestCase):
         self.assertEqual(r["driversAsOf"], "2026-07-04")
         self.assertEqual(r["consistency"]["status"], "aligned")
         self.assertTrue(r["ragBacked"])              # real excerpts win…
-        self.assertIn("goldman.pdf", r["ragSignals"][0])
+        # 2026-07-09 (#5): ragSignals are now {text, bank, ok} objects.
+        self.assertIn("goldman.pdf", r["ragSignals"][0]["text"])
+        self.assertIn("ok", r["ragSignals"][0])      # ✓/⚠ checkpoint present
         # …and the driver state pill speaks Russian, not the raw token.
         self.assertEqual(r["drivers"][0]["state"], "актуально")
         # Without RAG excerpts the chips fall back to momentum, honestly labeled.
         p.pop("regime_rag_confirm")
         r2 = build_design_data(p, "deep")["regime"]
         self.assertFalse(r2["ragBacked"])
-        self.assertIn("SPY обгоняет IEF", r2["ragSignals"][0])
+        self.assertIn("SPY обгоняет IEF", r2["ragSignals"][0]["text"])
 
     def test_quadrant_labels_match_engine_semantics(self):
         # Audit 2026-07-05 (R-1): both charts had RECOVERY/SLOWDOWN swapped vs

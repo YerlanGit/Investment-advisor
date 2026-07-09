@@ -1089,6 +1089,14 @@ Object.assign(window, {
 });
 /* Holdings section — interactive expandable rows + filter chips */
 
+// «Открыть бумагу» destination.  The report is a STATIC page (no backend), so
+// the button opens the security's public TradingView page in a new tab.  The
+// engine tags tickers in Tradernet format (AAPL.US · KSPI.KZ · BRK.B.US); we
+// strip a trailing exchange suffix (.US/.KZ/…) but keep in-symbol dots (BRK.B).
+const securityUrl = t => {
+  const sym = String(t || '').trim().replace(/\.[A-Za-z]{2,4}$/, '');
+  return sym ? `https://www.tradingview.com/symbols/${encodeURIComponent(sym)}/` : '#';
+};
 const StatusBadge = ({
   status
 }) => status === 'HOTSPOT' ? /*#__PURE__*/React.createElement("span", {
@@ -1212,7 +1220,11 @@ const HoldingRow = ({
     className: "text-[11px] tracking-widest uppercase text-ink-500 font-mono"
   }, "Фундаментал · SEC EDGAR"), /*#__PURE__*/React.createElement("div", {
     className: "text-[15px] text-ink-900 font-medium mt-0.5"
-  }, h.name)), /*#__PURE__*/React.createElement("button", {
+  }, h.name)), /*#__PURE__*/React.createElement("a", {
+    href: securityUrl(h.t),
+    target: "_blank",
+    rel: "noopener noreferrer",
+    title: `Открыть ${h.t} на TradingView (котировки, график, новости)`,
     className: "flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-ink-900 text-white text-[11px] font-medium hover:bg-ink-800 transition"
   }, "Открыть бумагу ", /*#__PURE__*/React.createElement(Icons.ArrowR, {
     size: 12,
@@ -1761,6 +1773,87 @@ const IdeaCard = ({
                                           ${isHighlight ? 'bg-white/8 text-white/60' : 'bg-ink-900/5 text-ink-700'}`
   }, s)))))));
 };
+
+// «Применить идею» flow.  The report is a STATIC page — it CANNOT charge a
+// token itself.  So the button opens a two-step modal (pick 1 of 4 ideas →
+// confirm «Да/Нет»); «Да» deep-links to the Telegram bot, which runs the
+// Scenario-tier analysis and charges the 1 token there (t.me/<bot>?start=scn_N).
+const scenarioDeepLink = (bot, n) => `https://t.me/${encodeURIComponent(String(bot || 'RampBot').replace(/^@/, ''))}` + `?start=scn_${String(n).replace(/[^0-9A-Za-z_]/g, '')}`;
+const ApplyIdeaModal = ({
+  ideas,
+  botUsername,
+  onClose
+}) => {
+  const [sel, setSel] = React.useState(null);
+  const go = () => {
+    if (!sel) return;
+    window.open(scenarioDeepLink(botUsername, sel.n), '_blank', 'noopener,noreferrer');
+    onClose();
+  };
+  return /*#__PURE__*/React.createElement("div", {
+    className: "fixed inset-0 z-50 flex items-center justify-center p-4",
+    style: {
+      background: 'rgba(28,27,26,0.55)',
+      backdropFilter: 'blur(4px)'
+    },
+    onClick: onClose
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "w-full max-w-lg rounded-4xl bg-cream-50 shadow-card overflow-hidden",
+    onClick: e => e.stopPropagation()
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "px-6 pt-6 pb-4 border-b border-ink-900/8"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center gap-2 text-[11px] tracking-widest uppercase text-ink-500 font-mono"
+  }, /*#__PURE__*/React.createElement(Icons.Sparkles, {
+    size: 13,
+    stroke: 1.8,
+    className: "text-gold-600"
+  }), " Применить идею"), /*#__PURE__*/React.createElement("button", {
+    onClick: onClose,
+    "aria-label": "Закрыть",
+    className: "w-8 h-8 rounded-full bg-ink-900/5 text-ink-700 hover:bg-ink-900/10 flex items-center justify-center text-[13px]"
+  }, "✕")), /*#__PURE__*/React.createElement("h3", {
+    className: "text-[22px] font-light text-ink-900 mt-3 tracking-tight"
+  }, sel ? 'Подтвердите запуск' : 'Выберите идею для сценарного анализа')), !sel ? /*#__PURE__*/React.createElement("div", {
+    className: "p-4 space-y-2 max-h-[60vh] overflow-y-auto"
+  }, ideas.map(idea => /*#__PURE__*/React.createElement("button", {
+    key: idea.n,
+    onClick: () => setSel(idea),
+    className: "w-full text-left rounded-2xl px-4 py-3 bg-white/70 border border-ink-900/6 hover:border-ink-900/20 transition flex items-start gap-3"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "text-[11px] font-mono text-ink-400 mt-1"
+  }, idea.n), /*#__PURE__*/React.createElement("span", {
+    className: "min-w-0"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "block text-[10px] tracking-widest uppercase text-ink-400 font-mono"
+  }, idea.cat), /*#__PURE__*/React.createElement("span", {
+    className: "block text-[15px] text-ink-900 font-medium leading-tight mt-0.5"
+  }, idea.title))))) : /*#__PURE__*/React.createElement("div", {
+    className: "p-6"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "rounded-2xl p-4 bg-gold-400/15 border border-gold-400/40"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "text-[10px] tracking-widest uppercase font-mono text-gold-700 mb-1.5"
+  }, "Сценарный анализ"), /*#__PURE__*/React.createElement("p", {
+    className: "text-[14px] text-ink-900 leading-relaxed"
+  }, "Сделать ", /*#__PURE__*/React.createElement("span", {
+    className: "font-semibold"
+  }, "Scenario Analysis"), " для идеи «", sel.title, "» — с вас спишется ", /*#__PURE__*/React.createElement("span", {
+    className: "font-semibold"
+  }, "1 токен"), ".")), /*#__PURE__*/React.createElement("p", {
+    className: "text-[12px] text-ink-500 mt-3 leading-relaxed font-light"
+  }, "Откроется бот RAMP в Telegram и запустит сценарный анализ вашего портфеля. Токен списывается только после готового отчёта."), /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center gap-3 mt-5"
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: go,
+    className: "flex-1 px-4 py-2.5 rounded-full bg-ink-900 text-white text-[13px] font-semibold hover:bg-ink-800 transition"
+  }, "Да"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setSel(null),
+    className: "flex-1 px-4 py-2.5 rounded-full bg-white/70 border border-ink-900/10 text-ink-700 text-[13px] font-semibold hover:bg-white transition"
+  }, "Нет")))));
+};
 const Ideas = () => {
   const ideas = window.PORTFOLIO.ideas;
   const [open, setOpen] = React.useState({
@@ -1770,6 +1863,7 @@ const Ideas = () => {
     ...open,
     [n]: !open[n]
   });
+  const [applyOpen, setApplyOpen] = React.useState(false);
   return /*#__PURE__*/React.createElement("section", {
     id: "ideas",
     className: "rise",
@@ -1794,11 +1888,16 @@ const Ideas = () => {
     size: 13,
     stroke: 1.8
   }), " Экспорт PDF"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setApplyOpen(true),
     className: "flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-ink-900 text-white text-[12px] font-medium hover:bg-ink-800 transition"
   }, /*#__PURE__*/React.createElement(Icons.Sparkles, {
     size: 13,
     stroke: 1.8
-  }), " Применить идею"))), /*#__PURE__*/React.createElement("div", {
+  }), " Применить идею"))), applyOpen && /*#__PURE__*/React.createElement(ApplyIdeaModal, {
+    ideas: ideas,
+    botUsername: (window.PORTFOLIO.meta || {}).botUsername,
+    onClose: () => setApplyOpen(false)
+  }), /*#__PURE__*/React.createElement("div", {
     className: "rounded-4xl p-6 mb-6 relative overflow-hidden",
     style: {
       background: 'linear-gradient(120deg, #fbf3d9 0%, #f6ebc0 100%)'

@@ -126,7 +126,7 @@ Telegram /start
 ---
 
 ## 3. `tests/` — pytest-сьюты (30 файлов)
-CI гоняет `python -m pytest tests/ -q` (baseline **601 passed, 10 skipped**).
+CI гоняет `python -m pytest tests/ -q` (baseline **594 passed, 8 skipped**).
 Именование: `test_phase*.py` — по фазам разработки; `test_freedom_*.py` — брокер;
 `test_factor_decomposition.py`, `test_phase23_scenario.py`, `test_phase24_scenario_report.py` — фичи этой сессии.
 `fetch_logs.py` — вспомогательный.

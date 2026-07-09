@@ -51,15 +51,50 @@ class RagBootIngestGateTest(unittest.TestCase):
 
 
 class RagBootIngestBehaviourTest(unittest.TestCase):
-    def test_skip_when_store_already_populated(self) -> None:
+    @unittest.skipUnless(_HAS_STORAGE, "google-cloud-storage not installed")
+    def test_skip_when_store_has_all_inbox_pdfs(self) -> None:
+        # Populated store AND every INBOX PDF already ingested → no-op.
         fake_rag = mock.MagicMock()
         fake_rag.collection.count.return_value = 42
+        fake_rag.list_documents.return_value = [
+            {"source": "goldman_sachs_outlook_Q3_2026.pdf"}]
+        blob = mock.MagicMock()
+        blob.name = "goldman_sachs_outlook_Q3_2026.pdf"
+        bucket = mock.MagicMock(); bucket.list_blobs.return_value = [blob]
+        client = mock.MagicMock(); client.bucket.return_value = bucket
         with mock.patch.dict(os.environ, {"RAG_BOOT_INGEST": "on"}), \
              mock.patch("agent.rag_engine.FinancialRAG", return_value=fake_rag), \
+             mock.patch("google.cloud.storage.Client", return_value=client), \
              mock.patch.object(entrypoint, "_upload_chroma_db_to_store") as up:
             entrypoint._boot_ingest_from_inbox()
-            fake_rag.ingest_pdf.assert_not_called()   # nothing to do
+            fake_rag.ingest_pdf.assert_not_called()   # nothing missing
             up.assert_not_called()
+
+    @unittest.skipUnless(_HAS_STORAGE, "google-cloud-storage not installed")
+    def test_ingests_only_missing_pdfs_when_store_populated(self) -> None:
+        # #4 self-heal: populated store, but INBOX has a NEW report not yet in
+        # the store → ingest ONLY the missing one, then republish.
+        fake_rag = mock.MagicMock()
+        fake_rag.collection.count.return_value = 2106
+        fake_rag.ingest_pdf.return_value = 11
+        fake_rag.list_documents.return_value = [
+            {"source": "old_report.pdf"}]
+        old, new = mock.MagicMock(), mock.MagicMock()
+        old.name = "old_report.pdf"
+        new.name = "morgan_stanley_2026_update.pdf"       # NOT ingested yet
+        bucket = mock.MagicMock(); bucket.list_blobs.return_value = [old, new]
+        client = mock.MagicMock(); client.bucket.return_value = bucket
+        with mock.patch.dict(os.environ, {"RAG_BOOT_INGEST": "on"}), \
+             mock.patch("agent.rag_engine.FinancialRAG", return_value=fake_rag), \
+             mock.patch("google.cloud.storage.Client", return_value=client), \
+             mock.patch.object(entrypoint, "_upload_chroma_db_to_store",
+                               return_value=5) as up:
+            entrypoint._boot_ingest_from_inbox()
+        fake_rag.ingest_pdf.assert_called_once()          # only the NEW one
+        _, kwargs = fake_rag.ingest_pdf.call_args
+        self.assertEqual(kwargs["doc_metadata"]["filename"],
+                         "morgan_stanley_2026_update.pdf")
+        up.assert_called_once()                           # republished to STORE
 
     @unittest.skipUnless(_HAS_STORAGE, "google-cloud-storage not installed")
     def test_ingests_inbox_pdfs_when_store_empty(self) -> None:
@@ -135,27 +170,37 @@ class IngestLogicalFilenameTest(unittest.TestCase):
         self.assertIn('"1825"', src)                   # 5-year default
         self.assertIn("period_days: int | None = None", src)
 
-    def test_regime_rag_chips_are_demarkdowned(self) -> None:
-        """The regime chips must carry CONTENT, not retrieval headers/markdown."""
+    def test_regime_rag_chips_are_demarkdowned_and_bank_tagged(self) -> None:
+        """The regime chips must carry CONTENT (not retrieval headers/markdown)
+        AND the issuing BANK recovered from the header (замечание #5)."""
         import re as _re
         raw_lines = [
-            "--- [2026-06-01] tmpl3mmhrmf.pdf — **Global Direction** (актуальность: 91%) ---",
+            "--- [2026-06-01] gs_outlook.pdf — Goldman Sachs · Global Direction "
+            "(актуальность: 91%) ---",
             "**against spread duration risk** and further tightening ahead",
             "Despite tight spreads, the recent move higher in yields is supportive",
         ]
-        # Mirror the tg_bot._fetch_rag_context filter (kept in sync by hand).
-        out = []
+        # Mirror the tg_bot._fetch_rag_context filter (kept in sync by hand):
+        # track the bank from each header, stamp each content excerpt.
+        out, cur_bank = [], ""
         for line in raw_lines:
             line = line.strip()
-            if not line or line.startswith("---"):
+            if not line:
+                continue
+            if line.startswith("---"):
+                m = _re.search(r"—\s*([^·()]+?)\s*(?:·|\(|$)", line)
+                cur_bank = (m.group(1).strip() if m else "")
+                if cur_bank in ("—", "Unknown"):
+                    cur_bank = ""
                 continue
             line = _re.sub(r"\*\*(.*?)\*\*", r"\1", line)
             line = line.lstrip("#*•- ").strip()
             if len(line) > 30:
-                out.append(line[:200])
+                out.append({"text": line[:200], "bank": cur_bank})
         self.assertEqual(len(out), 2)                      # header dropped
-        self.assertNotIn("**", " ".join(out))              # markdown stripped
-        self.assertNotIn("tmpl3mmhrmf", " ".join(out))
+        self.assertNotIn("**", " ".join(o["text"] for o in out))  # markdown stripped
+        self.assertEqual(out[0]["bank"], "Goldman Sachs")  # bank recovered
+        self.assertNotIn("gs_outlook", out[0]["text"])
 
 
 if __name__ == "__main__":

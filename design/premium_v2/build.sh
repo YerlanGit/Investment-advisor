@@ -12,9 +12,15 @@ npm install --no-audit --no-fund \
 # the automatic runtime would emit an `import` that breaks a classic <script>).
 echo '{ "presets": [["@babel/preset-react", { "runtime": "classic" }]] }' > babel.config.json
 
-# 1) Tailwind → static CSS (scans the JSX for used utilities; custom theme in tailwind.config.js)
+# 1) Tailwind → static CSS (scans the JSX for used utilities; custom theme in tailwind.config.js).
+#    The content glob in tailwind.config.js is ROOT-relative (`./design/**/*.jsx`),
+#    so Tailwind MUST scan with CWD = repo root — otherwise it matches zero files
+#    and emits an empty reset-only CSS (the whole report renders unstyled).
 echo "@tailwind base;@tailwind components;@tailwind utilities;" > tailwind.in.css
-npx tailwindcss -c tailwind.config.js -i tailwind.in.css -o report.compiled.css --minify
+( cd ../.. && ./design/premium_v2/node_modules/.bin/tailwindcss \
+    -c design/premium_v2/tailwind.config.js \
+    -i design/premium_v2/tailwind.in.css \
+    -o design/premium_v2/report.compiled.css --minify )
 
 # 2) Component bundles — DATA-FREE (the data file is injected at render time as
 #    window.DEEP / window.PORTFOLIO).  Concatenate in dependency order, app LAST.

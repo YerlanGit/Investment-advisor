@@ -1,10 +1,30 @@
 # AUDIT.md — RAMP Bot · Институциональный аудит и стратегия
 
-> **Версия:** 2026-07-05 (§−16 финальный 360-аудит + фиксы «Режима» R-1…R-9 · §−15 RAG-наблюдаемость/инфляция-overlay/un-cut/миграция бакетов · §−14 Roadmap A/B/C) · **Базовый коммит:** `ed85a8d` (merge PR #47 → `main`)
+> **Версия:** 2026-07-09 (§−17 ревью прод-отчётов #1–#6) · 2026-07-05 (§−16 финальный 360-аудит + фиксы «Режима» R-1…R-9 · §−15 RAG-наблюдаемость/инфляция-overlay/un-cut/миграция бакетов · §−14 Roadmap A/B/C) · **Базовый коммит:** `ed85a8d` (merge PR #47 → `main`)
 > **Текущая ветка:** `claude/bank-rag-deep-analysis-cf106s` — Premium V2 в проде; коммиты на GitHub **Verified ✅** (`Claude <noreply@anthropic.com>`)
 > **Аудитор:** CTO / Lead Quant Architect / Lead UI / DevSecOps
 > **Верификация:** живые прод-отчёты 2026-06-09 → **2026-07-05** (`base/deep.html`, U148046720); рендер-верификация Playwright/Chromium (390/360px); **раунд 16 — pytest 552 passed, 12 skipped** (полный прогон после каждого изменения ядра)
 > **Карты:** `REPORT_SECTIONS.md` (секция→builder→шаблон) · `REPORT_SECTIONS_AUDIT.md` (посекционный аудит живых отчётов)
+
+---
+
+## −17. Ревью прод-отчётов BASE+DEEP (2026-07-09, раунд 17) — 6 замечаний владельца
+
+> **Контекст:** ревью живых BASE+DEEP от 09.07. Шесть замечаний закрыты; **pytest 594 passed,
+> 8 skipped**; бандлы пересобраны (`build.sh`), смоук-рендер 3 тиров зелёный.
+
+| # | Было | Стало |
+|---|---|---|
+| 1 | ИИ-комментарий BASE писал «8 из каждых 10 **рублей**» на USD-портфеле (промпт содержал «на каждый **рубль** риска» → учил модель валюте); модель BASE = Sonnet 4.6 | нейтрализовано на «единицу риска» + общий `currency_rule` в ОБА промпта (запрещает выдумывать валюту, доли — без валюты). **BASE → `claude-sonnet-5`** (owner-approved); Sonnet 5 добавлен в `_TEMPERATURE_UNSUPPORTED_PREFIXES` (иначе `temperature=0.7` → HTTP 400) |
+| 2 | Кнопка «Открыть бумагу» (BASE holdings) — мёртвая (без onClick) | `<a>` на страницу бумаги TradingView (`securityUrl` срезает биржевой суффикс Tradernet, хранит внутрисимвольные точки), новая вкладка |
+| 3 | Кнопка «Применить идею» — мёртвая (BASE); в DEEP её не было | `ApplyIdeaModal` (BASE+DEEP): 4 идеи → выбор → «Scenario Analysis для идеи «…» — спишется 1 токен» ДА/НЕТ. **ДА** → deep-link `t.me/<bot>?start=scn_<n>`; `cmd_start` ловит `scn_` → сценарный tier (`kb_confirm`→`cb_confirm`); токен списывается в боте, не в статичном HTML |
+| 4 | `Bank RAG · база: 20 отчётов` не обновилась после 8 новых PDF | корень — Cloud-Function segfault (§ INFRA_NETWORKING, память 1→4Gi, закрыт ранее). Счётчик читается вживую (`collection.count()`); `_download_chroma_db` зеркалит STORE на каждом буте. **boot-ingest теперь инкрементальный** — ингестит INBOX-PDF, которых НЕТ в store (сравнение по `source`), а не только при пустом store → счётчик восстанавливается на рестарте |
+| 5 | DEEP «Частичное подтверждение ИИ»: RAG-выдержки без ссылки на банк; нет чек-пойнта сигналов | `regime_rag_confirm` несёт `{text, bank}` (банк восстановлен из retrieval-хедера, раньше срезался); `ragSignals[]{text,bank,ok}` → бейдж банка + ✓/⚠ (⚠ при `stance=diverges`) в `deep-stress-regime.jsx` |
+| 6 | CoVe — 24 строки, список визуально перегружен | `data_lineage.build_lineage` **24 → 16**: (Риск-метрики + Euler-TRC/MCTR)→1, (SEC Z-scores + Altman/Piotroski/Coverage)→1, (6 FRED-серий)→1 агрегат (худший статус + note), (2 LLM-чекера)→1 |
+
+> **Сопутствующий фикс:** `build.sh` Tailwind-шаг запускался из `design/premium_v2/`, но `content`-глоб
+> в `tailwind.config.js` — корне-относительный (`./design/**/*.jsx`) → сканировал 0 файлов и выдавал
+> пустой reset-CSS. Теперь шаг идёт из корня репо (subshell) — CSS снова полный (30 КБ).
 
 ---
 

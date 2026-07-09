@@ -148,24 +148,24 @@ def validate_stress_comment(text: str) -> str:
 # models — pinning them would REGRESS quality below the project's current
 # Haiku-4.5/Sonnet-4.6 stack and cost MORE.  We honour the INTENT with the
 # current-generation IDs instead:
-#   BASE → Sonnet 4.6  (was Haiku 4.5 — a clear quality lift for the volume tier)
+#   BASE → Sonnet 5   (2026-07-09 upgrade from Sonnet 4.6 — latest-gen quality
+#                       for the volume tier; owner-approved «обновить на Sonnet 5»)
 #   DEEP → Opus  4.8   (the planned upgrade that was already guard-ready below)
 # Both remain env-overridable so cost/latency can be tuned without a deploy
-# (e.g. ANTHROPIC_MODEL_BASE=claude-haiku-4-5-20251001 to restore the cheaper
-# BASE tier).  NOTE the cost delta the owner is explicitly opting into:
-# BASE Haiku→Sonnet ≈3× ($1/$5 → $3/$15), DEEP Sonnet→Opus ≈1.7× ($3/$15 → $5/$25).
-MODEL_BASE = os.getenv("ANTHROPIC_MODEL_BASE", "claude-sonnet-4-6")
+# (e.g. ANTHROPIC_MODEL_BASE=claude-sonnet-4-6 or claude-haiku-4-5-20251001 to
+# restore the cheaper BASE tier).
+MODEL_BASE = os.getenv("ANTHROPIC_MODEL_BASE", "claude-sonnet-5")
 MODEL_DEEP = os.getenv("ANTHROPIC_MODEL_DEEP", "claude-opus-4-8")
 
 # Sprint-5 (idea staleness): the narrative + stock-picks are produced by ONE
-# model call, and that call ran at temperature 0.1 — near-deterministic, so a
-# stable macro regime produced byte-identical "ideas" month after month.
-# BLOCK 1.1 (06-22): the BASE tier (Sonnet) still parroted the same blue-chips,
-# so the default is raised 0.5 → 0.7 and the band widened to 0.5–0.85 — more
-# idea exploration while Structured Outputs (forced tool_use) still guarantee
-# the JSON shape.  The risk NUMBERS are engine-computed (deterministic)
-# regardless of this temperature — only the prose / picks vary.  (DEEP runs on
-# Opus, which ignores temperature; its variety comes from the prompt directive.)
+# model call.  This `temperature` knob is retained for env-override BACK-COMPAT
+# (e.g. ANTHROPIC_MODEL_BASE=claude-sonnet-4-6 restores a temperature-accepting
+# BASE model) — it is applied ONLY when `_model_supports_temperature(model)` is
+# true.  As of the 2026-07-09 upgrade BOTH default tiers (BASE=Sonnet 5,
+# DEEP=Opus 4.8) REJECT `temperature`, so by default it is omitted and idea
+# variety comes from the prompt-level freshness directive (ideas_rule) + the
+# day-rotating angle.  The risk NUMBERS are engine-computed (deterministic)
+# regardless — only the prose / picks vary.
 def _resolve_temperature() -> float:
     try:
         t = float(os.getenv("ANTHROPIC_TEMPERATURE", "0.7"))
@@ -176,13 +176,17 @@ def _resolve_temperature() -> float:
 
 NARRATIVE_TEMPERATURE = _resolve_temperature()
 
-# Sprint-5.1 (§4.2): Opus 4.7/4.8 REJECT the `temperature` param (HTTP 400);
-# they expose only adaptive thinking.  Now that the DEEP tier defaults to
-# Opus (BLOCK 1.2) this guard is LOAD-BEARING, not hypothetical: the API call
-# omits `temperature` for the DEEP narrative and relies on the prompt-level
-# freshness directive (ideas_rule) for idea variety instead.  BASE stays on
-# Sonnet, which still accepts `temperature`, so its 0.5 exploration is intact.
-_TEMPERATURE_UNSUPPORTED_PREFIXES = ("claude-opus-4-7", "claude-opus-4-8")
+# Sprint-5.1 (§4.2): the current-generation models REJECT the `temperature`
+# param (HTTP 400); they expose only adaptive thinking.  This applies to BOTH
+# the DEEP tier (Opus 4.7/4.8) AND — since the 2026-07-09 upgrade — the BASE
+# tier (Sonnet 5).  So this guard is LOAD-BEARING for both tiers now: the API
+# call omits `temperature` and idea variety comes entirely from the prompt-level
+# freshness directive (ideas_rule) + the day-rotating angle, NOT from sampling.
+_TEMPERATURE_UNSUPPORTED_PREFIXES = (
+    "claude-opus-4-7",
+    "claude-opus-4-8",
+    "claude-sonnet-5",
+)
 
 
 def _model_supports_temperature(model: str) -> bool:
@@ -732,6 +736,19 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
         "дальше используй простое слово.\n"
     )
 
+    # Валютное правило (замечание 2026-07-09): модель писала «8 из каждых 10
+    # РУБЛЕЙ», хотя портфель в USD — недопустимо.  Инжектим в ОБА промпта.
+    _rcur = str(((summary.get("reporting") or {}).get("currency")) or "USD").upper()
+    _cur_word = {"USD": "долларов", "KZT": "тенге", "EUR": "евро",
+                 "RUB": "рублей"}.get(_rcur, "единиц")
+    currency_rule = (
+        "ВАЛЮТА — СТРОГО:\n"
+        f"- Портфель оценён в {_rcur}. НЕ придумывай другую валюту. Слово «рубль/рублей» "
+        f"ЗАПРЕЩЕНО, если валюта не RUB.\n"
+        "- Для долей и концентрации НЕ привязывай к валюте: пиши «почти 80%» или «8 из "
+        f"каждых 10 вложенных» (без названия валюты). Если нужна валюта — только «{_cur_word}».\n"
+    )
+
     rag_block = ""
     rag_rule  = ""
     if market_context:
@@ -757,7 +774,15 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
     # block + a binding rule so the regime narrative is grounded in the
     # retrieved chunks first.
     if regime_rag_confirm:
-        _lines = "\n".join(f"- {str(s)[:200]}" for s in regime_rag_confirm[:3])
+        # Each item is either a plain excerpt (legacy) or {text, bank} (2026-07-09
+        # #5): render «[BANK] excerpt» so the model attributes the bank view.
+        def _rag_line(s):
+            if isinstance(s, dict):
+                _t = str(s.get("text", ""))[:200]
+                _b = str(s.get("bank", "")).strip()
+                return f"[{_b}] {_t}" if _b else _t
+            return str(s)[:200]
+        _lines = "\n".join(f"- {_rag_line(s)}" for s in regime_rag_confirm[:3])
         rag_block += (
             "\n\n=== RAG-ПОДТВЕРЖДЕНИЕ РЕЖИМА (выдержки из банковских PDF) ===\n"
             + _wrap_untrusted("rag_regime_confirm", _lines)
@@ -911,7 +936,7 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
             '  "bullets": ["4 пункта ≤120 знаков — КАЖДЫЙ связывает 2 разных раздела отчёта [Источник]"],\n'
             '  "ai_cvar_note": "≤120 знаков — простыми словами: в 5% худших дней теряется ≈X$ (≈Y% портфеля). '
             'Это [нормально/высоко] потому что [причина в 3-5 словах]",\n'
-            '  "ai_sharpe_note": "≤120 знаков — простыми словами: на каждый рубль риска портфель зарабатывает X. '
+            '  "ai_sharpe_note": "≤120 знаков — простыми словами: на каждую единицу риска портфель зарабатывает X. '
             '[Сравни с нормой 1.0]. [Хорошо/плохо] потому что [причина]",\n'
             '  "ai_mdd_note": "≤120 знаков — простыми словами: портфель уже падал на X% от максимума '
             '(≈Y$). [Приемлемо/опасно] для [профиля]",\n'
@@ -969,6 +994,7 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
             "отчёта (см. правило DATA-DRIVEN ниже). "
             "why — конкретные цифры (ROE, маржа, Бета) с тегом [Источник].\n"
             f"{plain_rule}"
+            f"{currency_rule}"
             f"{contradiction_rule}"
             f"{signal_sync_rule}"
             f"{held_rule}"
@@ -1139,6 +1165,7 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
         "(см. правило DATA-DRIVEN ниже).\n"
         "- why: конкретные цифры (ROE, маржа, Beta, P/E, momentum) с тегом [источник].\n"
         f"{plain_rule}"
+        f"{currency_rule}"
         f"{contradiction_rule}"
         f"{signal_sync_rule}"
         f"{held_rule}"

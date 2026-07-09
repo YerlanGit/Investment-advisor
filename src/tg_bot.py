@@ -615,8 +615,11 @@ def _fetch_rag_context(results: dict) -> tuple[str, list[str], str, dict]:
             micro_query = "Outlook, target price, recommendation for: " + ", ".join(tickers)
             micro_ctx   = rag.get_market_sentiment(query=micro_query, n_results=3)
 
-        # Regime confirmation — look for reports that discuss the current macro regime
-        regime_rag_confirm: list[str] = []
+        # Regime confirmation — look for reports that discuss the current macro
+        # regime.  Each excerpt is tagged with its ISSUING BANK (recovered from
+        # the retrieval header) so the DEEP report can attribute the bank view
+        # instead of showing an anonymous excerpt (замечание 2026-07-09 #5).
+        regime_rag_confirm: list[dict] = []
         regime = results.get("regime") or {}
         regime_label = regime.get("regime", "")
         if regime_label:
@@ -627,17 +630,26 @@ def _fetch_rag_context(results: dict) -> tuple[str, list[str], str, dict]:
             regime_raw = rag.get_market_sentiment(query=regime_query, n_results=2)
             if regime_raw and "NO PDF DATA" not in regime_raw:
                 # 2026-07-05: the raw context is Markdown with retrieval-header
-                # lines («--- [дата] файл … (актуальность: …) ---»); those
-                # headers and **bold** markers leaked verbatim into the report's
-                # regime chips.  Keep CONTENT lines only, de-markdowned.
+                # lines («--- [дата] файл — БАНК · секция (актуальность: …) ---»);
+                # those headers and **bold** markers must NOT leak into chips, but
+                # the BANK inside the header is exactly the attribution we want —
+                # track it as we walk the block and stamp each content excerpt.
+                cur_bank = ""
                 for line in regime_raw.split("\n"):
                     line = line.strip()
-                    if not line or line.startswith("---"):
+                    if not line:
+                        continue
+                    if line.startswith("---"):
+                        # Header: «… — <bank> · <section> (актуальность …)».
+                        m = re.search(r"—\s*([^·()]+?)\s*(?:·|\(|$)", line)
+                        cur_bank = (m.group(1).strip() if m else "")
+                        if cur_bank in ("—", "Unknown"):
+                            cur_bank = ""
                         continue                     # retrieval header, not text
                     line = re.sub(r"\*\*(.*?)\*\*", r"\1", line)   # **bold** → bold
                     line = line.lstrip("#*•- ").strip()
                     if len(line) > 30:
-                        regime_rag_confirm.append(line[:200])
+                        regime_rag_confirm.append({"text": line[:200], "bank": cur_bank})
                         if len(regime_rag_confirm) >= 3:
                             break
 
@@ -1072,9 +1084,18 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
     slug    = message.text.split(maxsplit=1)[1].strip() if " " in (message.text or "") else ""
     profile = await get_profile(user_id)
 
+    # «Применить идею» deep-link from a delivered report: t.me/<bot>?start=scn_<n>.
+    # The static HTML report cannot charge a token, so it hands off here and the
+    # bot runs the Scenario tier + charges the 1 token via the normal confirm
+    # flow.  Strip the marker so it is NOT mistaken for a news-source slug.
+    scn_idea: str | None = None
+    if slug.startswith("scn_"):
+        scn_idea = re.sub(r"[^0-9A-Za-z]", "", slug[4:])[:8] or "—"
+        slug = ""
+
     if profile is None:
         # NEW user — launch onboarding; token grant is deferred until mandate approval.
-        await state.update_data(slug=slug)
+        await state.update_data(slug=slug, scn_idea=scn_idea)
         await state.set_state(Onboarding.Q1)
         q    = QUESTIONS[0]
         sent = await message.answer(
@@ -1090,7 +1111,24 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
     else:
         # RETURNING user — original flow unchanged.
         await init_user(user_id)  # returns False — no double-grant
-        if slug:
+        if scn_idea is not None:
+            # Report «Применить идею» → Scenario-tier confirmation.  Reuses the
+            # existing scenario flow (kb_confirm → cb_confirm): the token is
+            # charged here, bot-side, only after the report is rendered.
+            cost    = TIER_COST["scenario"]
+            balance = await get_balance(user_id)
+            await state.update_data(tier="scenario", context_slug="idea")
+            await message.answer(
+                f"🎯 *Сценарный анализ по идее №{scn_idea} из вашего отчёта*\n\n"
+                "Прогоним ваш портфель через сценарную модель: вклад позиций в "
+                "риск (Euler-MCTR), фондирование и walk-forward бэктест.\n\n"
+                f"💳 Спишется *{cost}* токен · баланс: *{balance}*.\n\n"
+                "Запустить сценарный анализ?",
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=kb_confirm("scenario", "idea"),
+            )
+            await state.set_state(AnalysisFlow.awaiting_approval)
+        elif slug:
             await state.update_data(context_slug=slug)
             await message.answer(
                 f"👋 Привет! Я вижу, вы пришли из нашего канала _{_source_label(slug)}_.\n\n"
