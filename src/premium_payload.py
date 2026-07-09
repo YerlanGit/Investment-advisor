@@ -245,7 +245,17 @@ def _map_deep(p: dict, meta: dict) -> dict:
     # (explainers) while the REAL bank excerpts (regime_rag_confirm) were a dead
     # payload key.  Prefer the true RAG confirmations when the KB returned any;
     # fall back to momentum explainers with an honest label (ragBacked=False).
-    _rag_confirm = [str(x) for x in _list(p, "regime_rag_confirm") if str(x).strip()]
+    # 2026-07-09 (#5): each RAG excerpt now carries its issuing BANK (attribution)
+    # and a ✓/⚠ checkpoint (⚠ only when the AI stance diverges from the model).
+    _stance = _txt(rc, "stance") if _g(rc, "stance") else ""
+    _rag_ok = _stance != "diverges"
+    def _rag_item(x):
+        if isinstance(x, dict):
+            return {"text": _txt(x, "text"), "bank": _txt(x, "bank") if _g(x, "bank") else "",
+                    "ok": _rag_ok}
+        return {"text": str(x), "bank": "", "ok": _rag_ok}
+    _rag_confirm = [_rag_item(x) for x in _list(p, "regime_rag_confirm")
+                    if (str(x.get("text", "")).strip() if isinstance(x, dict) else str(x).strip())]
     _cons = _g(p, "regime_consistency", default={}) or {}
     regime = {
         "name": _txt(reg, "label").split()[0] if _g(reg, "label") else DASH,
@@ -257,7 +267,8 @@ def _map_deep(p: dict, meta: dict) -> dict:
         "growth": _num(reg, "growth"), "cycle": _num(reg, "cycle"),
         "dot": {"growth": _num(reg, "growth"), "cycle": _num(reg, "cycle")},
         "ragSignals": (_rag_confirm[:4] if _rag_confirm
-                       else [str(x) for x in _list(reg, "explainers")][:4]),
+                       else [{"text": str(x), "bank": "", "ok": _rag_ok}
+                             for x in _list(reg, "explainers")][:4]),
         "ragBacked": bool(_rag_confirm),
         "drivers": drivers,
         # R-2: the drivers header used to hardcode a design-mock date — carry the
@@ -822,6 +833,9 @@ def build_design_data(payload: dict | None, tier: str = "base",
         "session": generated_at or DASH,
         "nav": _txt(p, "total_value_usd"),
         "positions": _g(p, "holdings_count", default=DASH),
+        # Bot @username for the «Применить идею» → Scenario deep-link (the report
+        # is static HTML; charging the token happens bot-side after the handoff).
+        "botUsername": _txt(p, "bot_username") if _g(p, "bot_username") else "RampBot",
     }
     return _map_deep(p, meta) if is_deep else _map_base(p, meta)
 

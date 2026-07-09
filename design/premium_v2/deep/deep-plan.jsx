@@ -5,6 +5,80 @@ const actionChipCls = {
   TRIM:'bg-gold-500/18 text-gold-700', SELL:'bg-rust-500 text-white',
 };
 
+// «Применить идею» → Scenario deep-link (same behaviour as the BASE report).
+// Static page cannot charge a token; «Да» hands off to the Telegram bot, which
+// runs the Scenario-tier analysis and charges 1 token there.
+const scenarioDeepLink = (bot, n) =>
+  `https://t.me/${encodeURIComponent(String(bot || 'RampBot').replace(/^@/, ''))}`
+  + `?start=scn_${String(n).replace(/[^0-9A-Za-z_]/g, '')}`;
+
+const ApplyIdeaModal = ({ ideas, botUsername, onClose }) => {
+  const [sel, setSel] = React.useState(null);
+  const go = () => {
+    if (!sel) return;
+    window.open(scenarioDeepLink(botUsername, sel.n), '_blank', 'noopener,noreferrer');
+    onClose();
+  };
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+         style={{ background:'rgba(28,27,26,0.55)', backdropFilter:'blur(4px)' }}
+         onClick={onClose}>
+      <div className="w-full max-w-lg rounded-4xl bg-cream-50 shadow-card overflow-hidden"
+           onClick={(e)=>e.stopPropagation()}>
+        <div className="px-6 pt-6 pb-4 border-b border-ink-900/8">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-[11px] tracking-widest uppercase text-ink-500 font-mono">
+              <Icons.Sparkles size={13} stroke={1.8} className="text-gold-600"/> Применить идею
+            </div>
+            <button onClick={onClose} aria-label="Закрыть"
+                    className="w-8 h-8 rounded-full bg-ink-900/5 text-ink-700 hover:bg-ink-900/10 flex items-center justify-center text-[13px]">✕</button>
+          </div>
+          <h3 className="text-[22px] font-light text-ink-900 mt-3 tracking-tight">
+            {sel ? 'Подтвердите запуск' : 'Выберите идею для сценарного анализа'}
+          </h3>
+        </div>
+
+        {!sel ? (
+          <div className="p-4 space-y-2 max-h-[60vh] overflow-y-auto">
+            {ideas.map(idea => (
+              <button key={idea.n} onClick={()=>setSel(idea)}
+                className="w-full text-left rounded-2xl px-4 py-3 bg-white/70 border border-ink-900/6 hover:border-ink-900/20 transition flex items-start gap-3">
+                <span className="text-[11px] font-mono text-ink-400 mt-1">{idea.n}</span>
+                <span className="min-w-0">
+                  <span className="block text-[10px] tracking-widest uppercase text-ink-400 font-mono">{idea.cat}</span>
+                  <span className="block text-[15px] text-ink-900 font-medium leading-tight mt-0.5">{idea.title}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="p-6">
+            <div className="rounded-2xl p-4 bg-gold-400/15 border border-gold-400/40">
+              <div className="text-[10px] tracking-widest uppercase font-mono text-gold-700 mb-1.5">Сценарный анализ</div>
+              <p className="text-[14px] text-ink-900 leading-relaxed">
+                Сделать <span className="font-semibold">Scenario Analysis</span> для идеи «{sel.title}» — с вас спишется <span className="font-semibold">1 токен</span>.
+              </p>
+            </div>
+            <p className="text-[12px] text-ink-500 mt-3 leading-relaxed font-light">
+              Откроется бот RAMP в Telegram и запустит сценарный анализ вашего портфеля. Токен списывается только после готового отчёта.
+            </p>
+            <div className="flex items-center gap-3 mt-5">
+              <button onClick={go}
+                className="flex-1 px-4 py-2.5 rounded-full bg-ink-900 text-white text-[13px] font-semibold hover:bg-ink-800 transition">
+                Да
+              </button>
+              <button onClick={()=>setSel(null)}
+                className="flex-1 px-4 py-2.5 rounded-full bg-white/70 border border-ink-900/10 text-ink-700 text-[13px] font-semibold hover:bg-white transition">
+                Нет
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 const ActionPlan = ({ rows }) => (
   <div className="glass-strong rounded-4xl p-7 shadow-card">
     <div className="flex items-start justify-between gap-4 flex-wrap mb-5">
@@ -193,19 +267,32 @@ const Plan = () => {
   const p = window.DEEP;
   const [open, setOpen] = React.useState({ '01': true });
   const toggle = (n) => setOpen(o => ({ ...o, [n]: !o[n] }));
+  const [applyOpen, setApplyOpen] = React.useState(false);
   return (
     <section id="plan" className="rise" data-screen-label="05 Action Plan">
-      <div className="mb-6">
-        <div className="flex items-center gap-2 text-[11px] tracking-widest uppercase text-ink-500 font-mono mb-2">
-          <span className="w-1.5 h-1.5 rounded-full bg-gold-400"/> Action Plan · Effect · AI Ideas · DEEP
+      <div className="flex items-end justify-between gap-4 flex-wrap mb-6">
+        <div>
+          <div className="flex items-center gap-2 text-[11px] tracking-widest uppercase text-ink-500 font-mono mb-2">
+            <span className="w-1.5 h-1.5 rounded-full bg-gold-400"/> Action Plan · Effect · AI Ideas · DEEP
+          </div>
+          <h2 className="text-[40px] leading-[1.05] tracking-[-0.02em] font-light text-ink-900">
+            От идей к конкретным уровням<span className="text-ink-400">.</span>
+          </h2>
+          <p className="text-[15px] text-ink-500 mt-2 font-light max-w-[680px]">
+            Конкретные уровни Buy / Sell / Stop, оценка эффекта до/после и стратегические идеи с кандидатами.
+          </p>
         </div>
-        <h2 className="text-[40px] leading-[1.05] tracking-[-0.02em] font-light text-ink-900">
-          От идей к конкретным уровням<span className="text-ink-400">.</span>
-        </h2>
-        <p className="text-[15px] text-ink-500 mt-2 font-light max-w-[680px]">
-          Конкретные уровни Buy / Sell / Stop, оценка эффекта до/после и стратегические идеи с кандидатами.
-        </p>
+        <button onClick={()=>setApplyOpen(true)}
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-ink-900 text-white text-[12px] font-medium hover:bg-ink-800 transition">
+          <Icons.Sparkles size={13} stroke={1.8}/> Применить идею
+        </button>
       </div>
+
+      {applyOpen && (
+        <ApplyIdeaModal ideas={p.ideas}
+                        botUsername={(p.meta || {}).botUsername}
+                        onClose={()=>setApplyOpen(false)}/>
+      )}
 
       <div className="space-y-5">
         <ActionPlan rows={p.actionPlan}/>

@@ -243,6 +243,7 @@ def _model_display_name(model_id: str) -> str:
         "claude-haiku-4-5-20251001": "Claude Haiku 4.5",
         "claude-haiku-4-5":          "Claude Haiku 4.5",
         "claude-sonnet-4-6":         "Claude Sonnet 4.6",
+        "claude-sonnet-5":           "Claude Sonnet 5",
         "claude-opus-4-8":           "Claude Opus 4.8",
         "claude-opus-4-7":           "Claude Opus 4.7",
         "fallback":                  "Fallback (нет API)",
@@ -1259,6 +1260,9 @@ def build_payload(results: dict, tier: str,
         "ideas_count":           ideas_count,
         "used_rag":              bool((ai_summary or {}).get("used_rag")),
         "ai_model_used":         _model_display_name((ai_summary or {}).get("model_used", "")),
+        # Bot @username for the report's «Применить идею» deep-link
+        # (t.me/<bot>?start=scn_<n>).  Env-configurable; strips a leading «@».
+        "bot_username":          os.getenv("BOT_USERNAME", "RampBot").lstrip("@"),
         "ai_action_impact":      (ai_summary or {}).get("ai_action_impact", ""),
         # Per-KPI AI notes (CVaR / Sharpe / MaxDD cards) — plain-language.
         "ai_cvar_note":          (ai_summary or {}).get("ai_cvar_note", ""),

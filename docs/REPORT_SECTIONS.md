@@ -9,7 +9,7 @@
 > → HTML по подписанной ссылке.
 >
 > ИИ-поля приходят отдельной веткой: `generate_narrative()` (`src/ai_narrative.py`) → `ai_summary` → те же payload-ключи.
-> Обновлено: 2026-07-04 (RAG-наблюдаемость: инвентарь базы + чекер ИИ-цитирования; инфляция в regime-overlay; grace-завершение комментариев ИИ; миграция бакетов `-investadv`). Ранее: 2026-06-16 (Sprint 6 · BLOCK 1–4).
+> Обновлено: 2026-07-09 (ревью прод-отчётов: BASE→Sonnet 5 + currency-rule; CoVe 24→16 строк; кнопки «Открыть бумагу»/«Применить идею»→Scenario deep-link; regime RAG — банк-источник + ✓/⚠). Ранее: 2026-07-04 (RAG-наблюдаемость), 2026-06-16 (Sprint 6 · BLOCK 1–4).
 
 ## Легенда
 - **Ключ** — ключ в `payload` (в шаблоне читается как `data.<ключ>`).
@@ -44,7 +44,7 @@
 | **Smart Money · инсайдеры (SEC Form 4)** | `smart_money.{status,enabled,rows[],headline,hint}` | `_build_smart_money` (+ блок B2.4 в deep-шаблоне) | `finance/smart_money.py` (gated `SMART_MONEY_INSIDERS`); видна всегда: active-таблица или плашка «источник не активирован». Архитектура → `SMART_MONEY.md` |
 | Детерминированная сверка FRED↔моментум | `regime_consistency.status/note/signals` | `_build_regime_consistency` | Sprint 5/R3: пороги — инверсия<0, HY>5.5%, VIX>25 |
 | AI-подтверждение режима | `regime_confirmation.stance/summary/signals` | прокидка из `ai_summary` | DEEP-only; ✓/⚠/✗ |
-| RAG-подтверждение | `regime_rag_confirm[]` | `tg_bot._fetch_rag_context` (returns ctx, confirm[], rag_status, kb_stats) | выдержки банковских PDF (при пустой базе — пусто) |
+| RAG-подтверждение (+ банк + ✓/⚠) | `regime_rag_confirm[]` → `regime.ragSignals[]{text,bank,ok}` | `tg_bot._fetch_rag_context` → `premium_payload` | 2026-07-09 (#5): каждая выдержка несёт **банк-источник** (восстановлен из retrieval-хедера `— БАНК · секция`) + **чек-пойнт** ✓/⚠ (⚠ только когда `confirmStance=diverges`). DEEP «Частичное подтверждение ИИ»: `deep-stress-regime.jsx` рисует бейдж банка + иконку. Пустая база → фолбэк на моментум-объяснители (`ragBacked=false`) |
 
 **Как менять:** сигналы классификатора → `regime.py` (`SHORT/MEDIUM_WIN`, компоненты осей); пороги сверки → `_build_regime_consistency`; геометрия SVG → `_regime_dot_coords` + анкор `qExpansion` в deep-шаблоне.
 
@@ -57,6 +57,7 @@
 | Под-секция | Ключи | Builder | Движок |
 |---|---|---|---|
 | Таблица активов (вес, β, TRC, P&L, action) | `assets[]`, `hotspots[]` | `build_payload` (per-asset цикл) | Эйлер-TRC: `calculate_structural_risk`; 🔥 hotspot: TRC > `scoring.HOTSPOT_TRC_PCT` (SSOT, Sprint 5.1/S4) |
+| **Кнопка «Открыть бумагу»** (BASE, раскрытая строка; 2026-07-09 #2) | `h.t` (тикер) | `portfolio-holdings.jsx` `securityUrl(t)` | Была мёртвой (без onClick). Теперь `<a>` открывает страницу бумаги на **TradingView** (`https://www.tradingview.com/symbols/<SYM>/`) в новой вкладке; суффикс биржи Tradernet (`.US/.KZ`) срезается, внутрисимвольные точки (`BRK.B`) сохраняются. Статичный отчёт → внешняя ссылка, без бэкенда |
 | Секторный пай + бейдж плеча | `sectors[]`, `pie_chart_data[]`, `leverage_metrics` | `build_payload` (sector-блок) | Плечо: `investment_logic` (леверидж из отрицательного кэша). Бейдж подписан: Gross=(лонг+\|маржа\|)/капитал, Плечо=лонг/капитал (Sprint 5.1/L1) |
 | Концентрация HHI + warnings | `sector_concentration`, `asset_concentration`, `sector_warnings`, `sector_groups`, `sector_complex` | `_build_concentration`, `build_sector_groups` | SSOT супер-группы «Tech-комплекс» |
 | Риск-водопад | `risk_waterfall` | `_build_risk_waterfall` | standalone vol vs диверсифицированный |
@@ -86,11 +87,12 @@
 | Элемент | Ключи | Builder | Источник |
 |---|---|---|---|
 | Карточки идей (4 сценария) | `ai_ideas{growth/diversification/hedge/rotation}`, `ideas_count` | `_build_ai_ideas` | `ai_summary.stock_picks` (ключи `boost_alpha/rebalance/protect_capital/`**`smart_money`**) — 4-я карточка **Smart Money** (институционалы+инсайдеры) вместо «режима» (06-23); рендерится в bucket `rotation` |
-| Генерация пиков (LLM) | — | — | `ai_narrative._user_prompt`: **DATA-DRIVEN** (5.1) + **СВЕЖЕСТЬ ИДЕЙ** (6.2/1.1 — **ДНЕВНОЙ** якорь `YYYY-MM-DD` + дневной `УГОЛ РОТАЦИИ` из `_IDEA_ROTATION_ANGLES`, бан расширен на V/MA/GS/UNH/PG/AVGO); `temperature=0.7` на BASE (Sonnet, env, band 0.5–0.85). **Routing: BASE=`claude-sonnet-4-6`, DEEP=`claude-opus-4-8`**; Opus опускает `temperature` → дисперсию даёт директива |
+| Генерация пиков (LLM) | — | — | `ai_narrative._user_prompt`: **DATA-DRIVEN** (5.1) + **СВЕЖЕСТЬ ИДЕЙ** (6.2/1.1 — **ДНЕВНОЙ** якорь `YYYY-MM-DD` + дневной `УГОЛ РОТАЦИИ` из `_IDEA_ROTATION_ANGLES`, бан расширен на V/MA/GS/UNH/PG/AVGO). **Routing (2026-07-09): BASE=`claude-sonnet-5`, DEEP=`claude-opus-4-8`** — оба опускают `temperature` (400 при передаче), дисперсию даёт директива + дневной угол; env-override на `claude-sonnet-4-6` возвращает temperature-band 0.5–0.85 |
 | Фильтры пиков | — | — | `_remove_held_picks` → `_check_pick_contradictions` → `_backfill_empty_scenarios` |
 | Фолбэк-каталог (без API) | — | — | `_fallback_stock_picks`: 3 кандидата/слот + **месячная ротация** (Sprint 5.1) |
+| **Кнопка «Применить идею»** (2026-07-09 #3; BASE+DEEP) | `meta.botUsername` (env `BOT_USERNAME`, default `RampBot`) | `pdf_payload.bot_username` → `premium_payload.meta.botUsername`; UI `ApplyIdeaModal` в `portfolio-ideas.jsx` (BASE) и `deep/deep-plan.jsx` (DEEP) | Модал: 4 идеи → выбор → «Сделать Scenario Analysis для идеи «…» — спишется 1 токен» ДА/НЕТ. **ДА** → deep-link `t.me/<bot>?start=scn_<n>`. Статичный HTML НЕ списывает токен — списание в боте: `tg_bot.cmd_start` ловит `scn_`, ведёт в сценарный tier через `kb_confirm("scenario")` → `cb_confirm` |
 
-**Как менять:** правила промпта → `ideas_rule` в `_user_prompt`; каталог → списки `_BOOST_*`/`_BALANCE*`/`_PROTECT`/`_REGIME_*`; пайплайн-подписи карточек → `_PIPELINE_BASE/_PIPELINE_DEEP` в `pdf_payload`.
+**Как менять:** правила промпта → `ideas_rule` в `_user_prompt`; каталог → списки `_BOOST_*`/`_BALANCE*`/`_PROTECT`/`_REGIME_*`; пайплайн-подписи карточек → `_PIPELINE_BASE/_PIPELINE_DEEP` в `pdf_payload`; модал/deep-link → `ApplyIdeaModal` + `scenarioDeepLink` в JSX, обработчик `scn_` → `tg_bot.cmd_start`.
 
 ---
 
@@ -148,7 +150,7 @@
 | Элемент | Ключи | Builder |
 |---|---|---|
 | Integrity-панель ✓/⚠ | `integrity_checks[]` | `_build_integrity_checks` — RAG 3-state (used/no_match/unavailable) **+ инвентарь базы** (`M отчётов · K чанков`, 2026-07-04) **+ пилл «ИИ↔банк-аналитика»** (⚠ когда ИИ ссылается на банки при пустой базе). Футер красит собственный символ строки (fix двойного `✓`) |
-| CoVe data-lineage (24 строки при 6 FRED) | `cove_lineage[]` | `finance/data_lineage.build_lineage` — источники: Quant Engine, TRC-Euler, **факторная независимость κ+max\|corr\|** (4.6), Tradernet-цены, **валютный слой FX+ставка** (`_fx_status`), SEC (Z-scores + Altman/Piotroski), CDS, FRED-макро (6 серий), Action levels, Black-Litterman, режим, стресс, **Smart-Money/инсайдеры** (gated, 3.5), **Bank RAG** (+ инвентарь база: отчёты/чанки/отрывки), **ИИ-цитирование банк-аналитики** (`_rag_citation_status`, 2026-07-04: проверенные [RAG]-цитаты vs. банк-консенсус из памяти модели), AI, **LLM-чекеры галлюцинаций + проверки вычислений** (4.8) |
+| CoVe data-lineage (**16 строк**, консолидировано 2026-07-09; было 24) | `cove_lineage[]` | `finance/data_lineage.build_lineage`. **Консолидация #6** — объединены похожие по логике: (1) **Риск-метрики + Euler-TRC/MCTR** → 1 строка (одна ковариация MAC3); (2) две SEC-строки (Z-scores + Altman/Piotroski/Coverage) → 1; (3) **6 FRED-серий** → 1 агрегат «Макро-драйверы (FRED)» (бейдж = худший статус, note перечисляет проблемные); (4) два LLM-чекера → 1. Остальные строки: факторная независимость κ+max\|corr\| (4.6), Tradernet-цены, валютный слой FX+ставка, CDS, Action levels, Black-Litterman, режим, стресс, Smart-Money (gated), **Bank RAG** (+ инвентарь база: отчёты/чанки/отрывки), **ИИ-цитирование банк-аналитики** (проверенные [RAG]-цитаты vs. банк-консенсус из памяти), AI-вердикт |
 | Data quality | `data_quality` | `build_payload` (факторы N/10, SEC-пропуски) |
 | AI-вердикт/буллеты | `ai_verdict`, `ai_plain_summary`, `ai_bullets` | прокидка из `ai_summary` |
 

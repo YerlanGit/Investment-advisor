@@ -123,38 +123,56 @@ def _upload_chroma_db_to_store() -> int:
 
 
 def _boot_ingest_from_inbox() -> None:
-    """Fallback: when the synced ChromaDB is EMPTY but the INBOX bucket holds
-    PDFs, ingest them in-container and publish the store back to STORE — so RAG
-    works even if the Cloud Function / Eventarc path is misconfigured (wrong
-    region, missing trigger, embedding-model download failure).  Runs on a
-    daemon thread so it never blocks the health probe or the bot event loop;
-    every failure is swallowed (RAG simply stays empty, as before)."""
+    """Fallback: ingest INBOX PDFs that are NOT yet in the ChromaDB store, then
+    publish the store back to STORE — so RAG works even if the Cloud Function /
+    Eventarc path is misconfigured (wrong region, missing trigger, embedding-
+    model download failure).  Runs on a daemon thread so it never blocks the
+    health probe or the bot event loop; every failure is swallowed.
+
+    Self-heals BOTH cases (замечание #4 — «база не обновилась после 8 новых
+    отчётов»):
+      • empty store        → ingest every INBOX PDF (original behaviour);
+      • non-empty store     → ingest only the INBOX PDFs whose filename is not
+        already an ingested `source`, so incrementally-added reports are picked
+        up on the next boot even when the Cloud Function silently failed.
+    """
     if not _rag_boot_ingest_enabled():
         return
     try:
         from agent.rag_engine import FinancialRAG  # noqa: PLC0415
         rag = FinancialRAG(db_path=CHROMA_LOCAL_PATH)
-        # Already populated (synced from STORE)?  Nothing to do — zero cost once
-        # the store exists, so this fallback is a no-op on the happy path.
         already = int(rag.collection.count())
-        if already > 0:
-            logger.info("RAG boot-ingest: store already has %d chunks — skip.", already)
-            return
 
         from google.cloud import storage  # noqa: PLC0415
         client = storage.Client()
         pdfs = [b for b in client.bucket(RAG_INBOX_BUCKET).list_blobs()
                 if b.name.lower().endswith(".pdf")]
         if not pdfs:
-            logger.info("RAG boot-ingest: INBOX gs://%s has no PDFs — RAG stays empty.",
-                        RAG_INBOX_BUCKET)
+            logger.info("RAG boot-ingest: INBOX gs://%s has no PDFs — RAG stays %s.",
+                        RAG_INBOX_BUCKET, "empty" if already == 0 else "as-is")
             return
-        logger.info("RAG boot-ingest: STORE empty, INBOX gs://%s has %d PDF(s) — "
-                    "ingesting in-container.", RAG_INBOX_BUCKET, len(pdfs))
+
+        # Which INBOX PDFs are missing from the store?  Compare by normalised
+        # basename against the already-ingested `source` filenames.
+        def _norm(name) -> str:
+            return os.path.basename(str(name or "")).strip().lower()
+        ingested: set[str] = set()
+        if already > 0:
+            try:
+                ingested = {_norm(d.get("source")) for d in rag.list_documents()}
+            except Exception:
+                ingested = set()
+        missing = [b for b in pdfs if _norm(os.path.basename(b.name)) not in ingested]
+        if not missing:
+            logger.info("RAG boot-ingest: store has %d chunks · all %d INBOX PDF(s) "
+                        "already ingested — skip.", already, len(pdfs))
+            return
+        logger.info("RAG boot-ingest: store has %d chunks · %d of %d INBOX PDF(s) "
+                    "missing — ingesting in-container.", already, len(missing), len(pdfs))
 
         import tempfile  # noqa: PLC0415
         total = 0
-        for blob in pdfs:
+        for blob in missing:
             fname = os.path.basename(blob.name)
             tmp_path = None
             try:
@@ -170,7 +188,8 @@ def _boot_ingest_from_inbox() -> None:
                 if tmp_path and os.path.exists(tmp_path):
                     os.unlink(tmp_path)
 
-        logger.info("RAG boot-ingest: ingested %d chunks from %d PDF(s).", total, len(pdfs))
+        logger.info("RAG boot-ingest: ingested %d chunks from %d new PDF(s).",
+                    total, len(missing))
         if total > 0:
             _upload_chroma_db_to_store()
     except Exception as exc:

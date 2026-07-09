@@ -10,6 +10,7 @@ const DEEP = {
     generated: '23.06.2026 07:05 UTC+5',
     nav: 13692,
     positions: 11,
+    botUsername: 'RampBot',
   },
 
   verdict: {
@@ -254,9 +255,11 @@ const DEEP = {
     cycle: 0.05,
     // position on quadrant in [-0.2..0.2]
     dot: { growth:0.14, cycle:0.05 },
+    ragBacked: true,
     ragSignals: [
-      'SPY обгоняет IEF на +14,3% за 60 дней (акции vs облигации)',
-      'Small-caps лидируют: IWM − SPY +5,1% за 60 дней',
+      { ok:true,  bank:'Goldman Sachs', text:'Базовый сценарий — продолжение экспансии: рост ВВП США выше тренда, мягкая посадка подтверждается опережающими индикаторами.' },
+      { ok:true,  bank:'JPMorgan',      text:'Кредитные спреды остаются узкими, цикл риск-он; предпочтение циклическим и качественным акциям.' },
+      { ok:false, bank:'Barclays',      text:'Предупреждение: оценки акций роста растянуты — тактически предпочитаем value над growth.' },
     ],
     drivers: [
       { name:'10Y−2Y Treasury spread', val:'+0,27 пп', trend:'▼ −0,19 за 1м', state:'актуально', tone:'pos' },
@@ -278,31 +281,26 @@ const DEEP = {
     regimeAI: 'Рынок: экономика растёт (уверенность 74%) — не перегрев и не спад. Goldman и JPMorgan в такой фазе советуют циклические и качественные акции, Barclays — недооценённые акции над акциями роста.',
   },
 
-  // CoVe — chain-of-verification provenance
+  // CoVe — chain-of-verification provenance.  Consolidated 2026-07-09
+  // (24 → 16 rows): Quant-risk+Euler, the two SEC lines, the six FRED series,
+  // and the two LLM-checkers are each merged into a single logical row.
   cove: [
-    { st:'ok',   title:'Vol · CVaR · TE · IR · Max DD', meta:'Quant Engine MAC3 · Wilder RMA · EWMA hl=63 ⊕ Ledoit-Wolf 70/30 · Politis-Romano bootstrap CI' },
-    { st:'ok',   title:'TRC (Euler) · MCTR · CVaR',     meta:'Quant Engine MAC3 · MCTR = Σw/σ_p · ERC%ᵢ = wᵢ·MCTRᵢ/σ_p' },
+    { st:'ok',   title:'Риск-метрики: Vol · CVaR · TE · IR · Max DD · TRC/MCTR (Euler)', meta:'Quant Engine MAC3 · Wilder RMA · EWMA hl=63 ⊕ Ledoit-Wolf 70/30 · Politis-Romano bootstrap CI · Euler-декомпозиция (MCTR = Σw/σ_p)' },
     { st:'warn', title:'Факторная независимость',        meta:'Σ=B·F·Bᵀ+D · κ=61,59 · max|corr|=0,8899 · близки к коллинеарности (FACTOR_ORTHOGONALIZE вкл.)' },
-    { st:'ok',   title:'Цены и история активов',         meta:'Tradernet (Freedom Broker) · Daily CLOSE · окно 730д · ATR via OHLC · as_of 2026-06-21' },
+    { st:'ok',   title:'Цены и история активов',         meta:'Tradernet (Freedom Broker) · Daily CLOSE · окно 1825д · ATR via OHLC · as_of 2026-06-21' },
     { st:'ok',   title:'Валютный слой',                  meta:'Base = USD · RFR 4,50% · конверсия не требуется (все активы в USD)' },
-    { st:'ok',   title:'Fundamental Z-scores',           meta:'SEC EDGAR CompanyFacts · 10-K FY · sector-normalised MAD · Group B factors' },
-    { st:'ok',   title:'Altman-Z · Piotroski-F',         meta:'SEC EDGAR CompanyFacts · разностный расчёт по балансу и P&L (annual filings)' },
+    { st:'ok',   title:'Фундамент (SEC EDGAR): Z-scores · Altman-Z / Piotroski-F / Coverage', meta:'SEC EDGAR CompanyFacts · 10-K FY · sector-normalised MAD (Group B) ⊕ баланс/P&L' },
     { st:'warn', title:'CDS spreads (credit signal)',    meta:'FRED HY proxy + WGB sovereign · sanity 1–3000 bps · 9/10 loaded · 1 gated out' },
     { st:'ok',   title:'Action levels (Buy / Sell / Stop)', meta:'Quant Engine · ATR Wilder + SMA50/200 + RSI(14) + MACD(12,26,9) · 11 позиций' },
     { st:'ok',   title:'Black-Litterman target weights', meta:'Quant Engine · reverse-opt prior + score-views · τ=0,05 · 10 позиций reweighted' },
     { st:'ok',   title:'Регим-классификатор',            meta:'Quant Engine · Growth × Cycle · окно 60д · Expansion · confidence 74%' },
     { st:'warn', title:'Стресс-сценарии',                meta:'Quant Engine · parametric factor shocks · per-asset β · 7 сценариев · 2 proxy' },
-    { st:'ok',   title:'10Y−2Y Treasury spread',         meta:'FRED · T10Y2Y · daily · QualityGate · as_of 2026-06-22' },
-    { st:'ok',   title:'US HY OAS (ICE BofA)',           meta:'FRED · BAMLH0A0HYM2 · daily · QualityGate · as_of 2026-06-19' },
-    { st:'ok',   title:'CBOE VIX',                       meta:'FRED · VIXCLS · daily · QualityGate · as_of 2026-06-19' },
-    { st:'ok',   title:'10Y Breakeven Inflation',        meta:'FRED · T10YIE · daily · QualityGate · as_of 2026-06-22' },
-    { st:'warn', title:'US Unemployment Rate',           meta:'FRED · UNRATE · monthly · as_of 2026-05-01 (устаревает)' },
-    { st:'warn', title:'Real GDP growth (SAAR)',         meta:'FRED · A191RL1Q225SBEA · quarterly · as_of 2026-01-01 (устаревает)' },
+    { st:'warn', title:'Макро-драйверы (FRED)',          meta:'FRED St. Louis Fed · yield curve · HY · VIX · breakeven · unemployment · GDP · 6 серий · требуют внимания: безработица, GDP' },
     { st:'fail', title:'Smart-Money (инсайдеры Form 4)', meta:'SEC EDGAR · Form 4 · SMART_MONEY_INSIDERS=0 (выкл. по умолчанию)' },
-    { st:'ok',   title:'Bank RAG (выдержки)',            meta:'ChromaDB · GS / MS / JPM PDF reports · cosine retrieval ≥0,72' },
+    { st:'ok',   title:'Bank RAG (выдержки)',            meta:'ChromaDB · GS / MS / JPM PDF reports · cosine retrieval (semantic 0,6 ⊕ recency 0,4)' },
+    { st:'ok',   title:'ИИ-цитирование банк-аналитики',  meta:'CoVe · [RAG:файл] (проверено) vs. банк-консенсус из знаний модели' },
     { st:'ok',   title:'AI verdict · bullets',           meta:'Anthropic · Claude Opus 4.8 · advisory only · не является ИИР' },
-    { st:'ok',   title:'LLM-чекер: галлюцинации',        meta:'CoVe · held-filter + data-driven + contradiction-filter активны' },
-    { st:'ok',   title:'LLM-чекер: вычисления',          meta:'CoVe · leverage-phrasing + stress-cap + no-self-aggregation активны' },
+    { st:'ok',   title:'LLM-чекеры: галлюцинации + вычисления', meta:'CoVe · held-filter + data-driven + фильтр противоречий ⊕ stress-cap + no-self-aggregation — настроены' },
   ],
 
   // data-quality chips (footer)

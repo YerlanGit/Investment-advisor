@@ -4,18 +4,24 @@
 `✗ RAG: банк. отчёты` / `Bank RAG (выдержки) · база: 0 отчётов`. Ниже — как за 8 шагов найти
 точку обрыва. Выполняйте сверху вниз, первый «красный» шаг = причина.
 
-> ## ⭐ Самый надёжный путь (2026-07-04): встроенный boot-ingest бота
+> ## ⭐ Самый надёжный путь (2026-07-04; инкрементальный с 2026-07-09): boot-ingest бота
 > Cloud Function → Eventarc — хрупкая цепочка (регион бакета, скачивание embedding-модели,
-> fail-soft деплой). Поэтому бот теперь **сам ингестит PDF на буте**, если STORE пуст, а в INBOX
-> есть PDF — прямо в контейнере, где уже есть зависимости, «запечённая» embedding-модель и
-> запиненный chromadb, после чего публикует базу обратно в STORE. Это **обходит Cloud Function
-> целиком**.
+> fail-soft деплой). Поэтому бот **сам ингестит PDF на буте** прямо в контейнере, где уже есть
+> зависимости, «запечённая» embedding-модель и запиненный chromadb, после чего публикует базу
+> обратно в STORE. Это **обходит Cloud Function целиком**.
+>
+> **Инкрементально (2026-07-09, замечание #4 «счётчик базы не обновился после 8 новых отчётов»):**
+> раньше boot-ingest срабатывал ТОЛЬКО когда STORE пуст — если в STORE уже были старые отчёты,
+> он пропускал новые PDF из INBOX, и `Bank RAG · база: N отчётов` не рос. Теперь он сравнивает
+> **имена файлов INBOX против уже ингестированных `source`** и ингестит **только недостающие**,
+> даже при непустом STORE. Плюс `_download_chroma_db` зеркалит STORE на КАЖДОМ буте, а счётчик
+> читается вживую (`collection.count()`), поэтому после ингеста цифра обновляется на след. рестарте.
 >
 > Чтобы им воспользоваться: (1) положите PDF в INBOX
 > `gcloud storage cp reports/*.pdf gs://ramp-bot-chroma-db-inbox-investadv/`; (2) **перезапустите
 > бот** (новая ревизия Cloud Run — см. §6); (3) в бут-логах будет
-> `RAG boot-ingest: STORE empty, INBOX … has N PDF(s) — ingesting in-container` →
-> `RAG boot-ingest: ingested K chunks` → `published … blob(s) → gs://ramp-bot-chroma-db-investadv/…`.
+> `RAG boot-ingest: store has N chunks · K of M INBOX PDF(s) missing — ingesting in-container` →
+> `RAG boot-ingest: ingested K chunks from K new PDF(s)` → `published … blob(s) → …-investadv/…`.
 > Выключатель: `RAG_BOOT_INGEST=0`. Бакет INBOX переопределяется `RAG_INBOX_BUCKET`.
 > Если и это не сработало — идите по шагам ниже (права SA на бакеты, имена, регион).
 

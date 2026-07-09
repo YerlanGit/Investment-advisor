@@ -153,10 +153,25 @@ const RegimeBlock = ({ r }) => {
             {r.consistency.status==='aligned' ? '✓ ' : '⚠ '}{r.consistency.note}
           </div>
         ) : null}
-        <div className="mt-4 pt-3 border-t border-ink-900/8 flex flex-wrap gap-2">
-          {r.ragSignals.map((s,i) => (
-            <span key={i} className="text-[10.5px] text-ink-600 bg-white/60 border border-ink-900/6 rounded-full px-3 py-1 font-mono">{r.ragBacked?'RAG':'Моментум'} · {s}</span>
-          ))}
+        <div className="mt-4 pt-3 border-t border-ink-900/8">
+          <div className="text-[10px] tracking-widest uppercase font-mono text-ink-400 mb-2">
+            {r.ragBacked ? 'Из банковской аналитики · RAG' : 'Моментум-объяснители'}
+          </div>
+          <div className="space-y-1.5">
+            {r.ragSignals.map((s,i) => (
+              <div key={i} className="flex items-start gap-2">
+                {/* ✓/⚠ checkpoint — подтверждает (✓) или предупреждает (⚠) сигнал режима */}
+                {s.ok
+                  ? <Icons.Check size={12} className="text-sage-600 mt-0.5 flex-shrink-0" stroke={2.4}/>
+                  : <Icons.Warning size={12} className="text-gold-700 mt-0.5 flex-shrink-0" stroke={2}/>}
+                {/* Ссылка на банк-источник выдержки */}
+                {s.bank
+                  ? <span className="text-[10px] font-mono font-bold tracking-wider text-ink-900 bg-ink-900/6 rounded px-1.5 py-0.5 flex-shrink-0">{s.bank}</span>
+                  : <span className="text-[10px] font-mono font-semibold tracking-wider text-ink-400 flex-shrink-0">{r.ragBacked?'RAG':'Моментум'}</span>}
+                <span className="text-[11.5px] text-ink-700 leading-snug font-light">{s.text}</span>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </div>

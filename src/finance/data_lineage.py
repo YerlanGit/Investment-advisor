@@ -125,8 +125,10 @@ def _tradernet_status(results: dict, today: date) -> dict:
 
 def _sec_status(results: dict, today: date) -> list[dict]:
     """
-    Two rows: fundamental Z-scores + financial-health metrics.
-    Both depend on SEC EDGAR CompanyFacts JSON.
+    ONE merged row (2026-07-09) covering both fundamental Z-scores and
+    financial-health metrics — both depend on the same SEC EDGAR CompanyFacts
+    JSON and share one status.  Returns a 1-element list to keep the caller's
+    `rows.extend(...)` contract stable.
     Status downgrades based on:
       - number of skipped tickers (default/EM_Proxy sector)
       - age of the OLDEST 10-K filing in the universe
@@ -165,18 +167,16 @@ def _sec_status(results: dict, today: date) -> list[dict]:
             status = "warn" if status == "ok" else status
 
     note_str = " · ".join(notes)
+    # CoVe-consolidation (2026-07-09): the fundamental Z-scores and the
+    # financial-health metrics both derive from the SAME SEC EDGAR CompanyFacts
+    # filings with the SAME coverage/freshness status — merged into one row so
+    # the panel does not show two SEC lines that always move together.
     return [
         _row(
-            name   = "Fundamental Z-scores",
+            name   = "Фундамент (SEC EDGAR): Z-scores · Altman-Z / Piotroski-F / Coverage",
             source = "SEC EDGAR CompanyFacts",
-            method = "10-K FY · sector-normalised MAD · Group B factors",
-            status = status,
-            note   = note_str,
-        ),
-        _row(
-            name   = "Altman-Z · Piotroski-F · Interest Coverage",
-            source = "SEC EDGAR CompanyFacts",
-            method = "разностный расчёт по балансу и P&L (annual filings)",
+            method = "10-K FY · sector-normalised MAD (Group B) ⊕ разностный "
+                     "расчёт по балансу и P&L (Altman-Z · Piotroski-F · Interest Coverage)",
             status = status,
             note   = note_str,
         ),
@@ -229,34 +229,52 @@ def _cds_status(results: dict) -> dict:
 
 def _macro_status(results: dict) -> list[dict]:
     """
-    One row per FRED series in macro_drivers — reuses the status field the
-    MacroFeed already produced (ok / stale / missing / error).
+    ONE aggregated FRED row (2026-07-09).  Previously emitted one line PER
+    series (yield curve · HY · VIX · breakeven · unemployment · GDP → up to 6
+    rows), which dominated the CoVe panel.  Now the per-series MacroFeed statuses
+    are folded into a single row: the badge shows the WORST state across the pack
+    and the note lists any series that need attention (the rest are "свежие").
     """
+    # BLOCK 3.4: PMI is discontinued on FRED; the pack is now yield curve · HY ·
+    # VIX · breakeven · unemployment · real-GDP growth.
+    method = ("yield curve · HY spread · VIX · breakeven · unemployment · "
+              "GDP growth · QualityGate freshness + sanity")
     macro = results.get("macro_drivers") or {}
     if not macro:
         return [_row(
             name   = "Макро-драйверы (FRED)",
             source = "FRED St. Louis Fed",
-            # BLOCK 3.4: PMI is discontinued on FRED; the pack is now yield
-            # curve · HY · VIX · breakeven · unemployment · real-GDP growth.
-            method = "yield curve · HY spread · VIX · breakeven · "
-                     "unemployment · GDP growth",
+            method = method,
             status = "missing",
             note   = "FRED_API_KEY not set (see .env.template)",
         )]
-    rows: list[dict] = []
+    # Severity ranking so the aggregate badge surfaces the worst state.
+    _sev = {"error": 4, "stale": 3, "warn": 2, "missing": 1, "ok": 0}
+    worst = "ok"
+    flagged: list[str] = []
+    oldest_days: Optional[float] = None
     for key, m in macro.items():
-        rows.append(_row(
-            name   = m.get("label", key),
-            source = f"FRED · {m.get('series_id', '?')}",
-            method = f"{m.get('publish_cadence', 'daily')} · QualityGate "
-                     f"freshness + sanity range",
-            status         = m.get("status", "error"),
-            as_of          = m.get("as_of"),
-            freshness_days = m.get("freshness_days"),
-            note           = m.get("note", ""),
-        ))
-    return rows
+        st = str(m.get("status", "error"))
+        if _sev.get(st, 4) > _sev.get(worst, 0):
+            worst = st
+        if st != "ok":
+            flagged.append(f"{m.get('label', key)}: {st}")
+        fd = m.get("freshness_days")
+        if isinstance(fd, (int, float)):
+            oldest_days = fd if oldest_days is None else max(oldest_days, fd)
+    n = len(macro)
+    if flagged:
+        note = f"{n} серий · требуют внимания: " + " · ".join(flagged[:4])
+    else:
+        note = f"{n} серий · все в окне свежести"
+    return [_row(
+        name   = "Макро-драйверы (FRED)",
+        source = "FRED St. Louis Fed",
+        method = method,
+        status = worst,
+        freshness_days = int(oldest_days) if oldest_days is not None else None,
+        note   = note,
+    )]
 
 
 def _action_levels_status(results: dict) -> dict:
@@ -469,7 +487,9 @@ def _factor_diagnostic_status(results: dict) -> dict:
 
 def _llm_checker_status(ai_summary: Optional[dict],
                         leveraged: bool = False) -> list[dict]:
-    """BLOCK 4.8 — explicit LLM verification rows.
+    """BLOCK 4.8 — explicit LLM verification row (ONE merged row since
+    2026-07-09; returns a 1-element list to keep the `rows.extend(...)` call
+    stable).
 
     The narrative is advisory, but it passes through deterministic CHECKERS
     before it reaches the user; CoVe must show them so "the AI said so" is
@@ -484,35 +504,29 @@ def _llm_checker_status(ai_summary: Optional[dict],
     a = ai_summary or {}
     have_ai = bool(a.get("verdict") or a.get("bullets"))
     status  = "ok" if have_ai else "missing"
-    # Honesty (audit 06-23): these rows reflect that the post-LLM filters are
-    # CONFIGURED in the pipeline, not a per-run pass/trip count — so the copy
-    # says "настроены" (configured), not "активны" (which over-claimed that they
-    # ran AND caught something on this specific run).
-    note_h  = ("held-filter + data-driven + contradiction-filter настроены"
-               if have_ai else "AI не вызывался")
     # Leverage/debt phrasing is HIDDEN unless the book is actually margin-funded
     # (cash balance < 0): on an unlevered portfolio the «плечо ≈Nx» validator is
     # not applicable, and the rule is to keep every leverage/debt term out of the
     # report when cash is non-negative.  The other two math validators always show.
     _checks_m = (["плечо ≈Nx (без «удваивается»)"] if leveraged else []) + [
-        "упоминание выпуклого капа стресса", "запрет ре-агрегации секторов"]
-    _note_validators = ("leverage-phrasing + " if leveraged else "") + \
-        "stress-cap + no-self-aggregation настроены"
-    note_m  = (_note_validators if have_ai else "AI не вызывался")
+        "выпуклый кап стресса", "запрет ре-агрегации секторов"]
+    # CoVe-consolidation (2026-07-09): the hallucination-guard and math-
+    # verification checkers are ONE audit layer (post-LLM CoVe) — merged into a
+    # single row.  Honesty (audit 06-23): the copy says "настроены" (configured
+    # in the pipeline), not "активны" (which over-claimed a per-run trip count).
+    if have_ai:
+        note = ("галлюцинации: held-filter + data-driven + фильтр противоречий · "
+                "вычисления: " + " · ".join(_checks_m) + " — настроены")
+    else:
+        note = "AI не вызывался"
     return [
         _row(
-            name   = "LLM-чекер: контроль галлюцинаций",
-            source = "CoVe · post-LLM фильтры",
-            method = "held-tickers · DATA-DRIVEN идеи · фильтр противоречий пиков",
+            name   = "LLM-чекеры: галлюцинации + вычисления",
+            source = "CoVe · post-LLM фильтры и валидаторы нарратива",
+            method = ("held-tickers · DATA-DRIVEN идеи · фильтр противоречий пиков ⊕ "
+                      + " · ".join(_checks_m)),
             status = status,
-            note   = note_h,
-        ),
-        _row(
-            name   = "LLM-чекер: проверка вычислений",
-            source = "CoVe · валидаторы нарратива",
-            method = " · ".join(_checks_m),
-            status = status,
-            note   = note_m,
+            note   = note,
         ),
     ]
 
@@ -588,18 +602,16 @@ def build_lineage(results: dict,
     today = today or _today_utc()
     rows: list[dict] = []
 
-    # Quant Engine — always-on baseline.
+    # Quant Engine — always-on baseline.  CoVe-consolidation (2026-07-09):
+    # the portfolio-risk metrics and their Euler risk-attribution share ONE
+    # source (MAC3) and one covariance estimate — merged into a single row so
+    # the audit panel is not padded with two near-identical Quant-Engine lines.
     rows.append(_row(
-        name   = "Vol · CVaR · TE · IR · Max DD",
+        name   = "Риск-метрики: Vol · CVaR · TE · IR · Max DD · TRC/MCTR (Euler)",
         source = "Quant Engine MAC3",
         method = "Wilder RMA · EWMA hl=63 (λ≈0.99) ⊕ Ledoit-Wolf 70/30 · "
-                 "Politis-Romano bootstrap CI",
-        status = "ok",
-    ))
-    rows.append(_row(
-        name   = "TRC (Euler decomposition) · MCTR · CVaR",
-        source = "Quant Engine MAC3",
-        method = "MCTR = Σw/σ_p · ERC%_i = w_i·MCTR_i/σ_p",
+                 "Politis-Romano bootstrap CI · Euler-декомпозиция "
+                 "(MCTR = Σw/σ_p · ERC%_i = w_i·MCTR_i/σ_p)",
         status = "ok",
     ))
 

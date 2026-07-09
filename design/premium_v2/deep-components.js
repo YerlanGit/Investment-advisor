@@ -2358,11 +2358,29 @@ const RegimeBlock = ({
   }, b.t)))), r.consistency && r.consistency.note ? /*#__PURE__*/React.createElement("div", {
     className: `mt-3 text-[11px] leading-snug ${r.consistency.status === 'aligned' ? 'text-sage-600' : 'text-gold-700'}`
   }, r.consistency.status === 'aligned' ? '✓ ' : '⚠ ', r.consistency.note) : null, /*#__PURE__*/React.createElement("div", {
-    className: "mt-4 pt-3 border-t border-ink-900/8 flex flex-wrap gap-2"
-  }, r.ragSignals.map((s, i) => /*#__PURE__*/React.createElement("span", {
+    className: "mt-4 pt-3 border-t border-ink-900/8"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "text-[10px] tracking-widest uppercase font-mono text-ink-400 mb-2"
+  }, r.ragBacked ? 'Из банковской аналитики · RAG' : 'Моментум-объяснители'), /*#__PURE__*/React.createElement("div", {
+    className: "space-y-1.5"
+  }, r.ragSignals.map((s, i) => /*#__PURE__*/React.createElement("div", {
     key: i,
-    className: "text-[10.5px] text-ink-600 bg-white/60 border border-ink-900/6 rounded-full px-3 py-1 font-mono"
-  }, r.ragBacked ? 'RAG' : 'Моментум', " · ", s))))));
+    className: "flex items-start gap-2"
+  }, s.ok ? /*#__PURE__*/React.createElement(Icons.Check, {
+    size: 12,
+    className: "text-sage-600 mt-0.5 flex-shrink-0",
+    stroke: 2.4
+  }) : /*#__PURE__*/React.createElement(Icons.Warning, {
+    size: 12,
+    className: "text-gold-700 mt-0.5 flex-shrink-0",
+    stroke: 2
+  }), s.bank ? /*#__PURE__*/React.createElement("span", {
+    className: "text-[10px] font-mono font-bold tracking-wider text-ink-900 bg-ink-900/6 rounded px-1.5 py-0.5 flex-shrink-0"
+  }, s.bank) : /*#__PURE__*/React.createElement("span", {
+    className: "text-[10px] font-mono font-semibold tracking-wider text-ink-400 flex-shrink-0"
+  }, r.ragBacked ? 'RAG' : 'Моментум'), /*#__PURE__*/React.createElement("span", {
+    className: "text-[11.5px] text-ink-700 leading-snug font-light"
+  }, s.text))))))));
 };
 const StressRegime = () => {
   const p = window.DEEP;
@@ -2411,6 +2429,86 @@ const actionChipCls = {
   HOLD: 'bg-ink-900/6 text-ink-600',
   TRIM: 'bg-gold-500/18 text-gold-700',
   SELL: 'bg-rust-500 text-white'
+};
+
+// «Применить идею» → Scenario deep-link (same behaviour as the BASE report).
+// Static page cannot charge a token; «Да» hands off to the Telegram bot, which
+// runs the Scenario-tier analysis and charges 1 token there.
+const scenarioDeepLink = (bot, n) => `https://t.me/${encodeURIComponent(String(bot || 'RampBot').replace(/^@/, ''))}` + `?start=scn_${String(n).replace(/[^0-9A-Za-z_]/g, '')}`;
+const ApplyIdeaModal = ({
+  ideas,
+  botUsername,
+  onClose
+}) => {
+  const [sel, setSel] = React.useState(null);
+  const go = () => {
+    if (!sel) return;
+    window.open(scenarioDeepLink(botUsername, sel.n), '_blank', 'noopener,noreferrer');
+    onClose();
+  };
+  return /*#__PURE__*/React.createElement("div", {
+    className: "fixed inset-0 z-50 flex items-center justify-center p-4",
+    style: {
+      background: 'rgba(28,27,26,0.55)',
+      backdropFilter: 'blur(4px)'
+    },
+    onClick: onClose
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "w-full max-w-lg rounded-4xl bg-cream-50 shadow-card overflow-hidden",
+    onClick: e => e.stopPropagation()
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "px-6 pt-6 pb-4 border-b border-ink-900/8"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center gap-2 text-[11px] tracking-widest uppercase text-ink-500 font-mono"
+  }, /*#__PURE__*/React.createElement(Icons.Sparkles, {
+    size: 13,
+    stroke: 1.8,
+    className: "text-gold-600"
+  }), " Применить идею"), /*#__PURE__*/React.createElement("button", {
+    onClick: onClose,
+    "aria-label": "Закрыть",
+    className: "w-8 h-8 rounded-full bg-ink-900/5 text-ink-700 hover:bg-ink-900/10 flex items-center justify-center text-[13px]"
+  }, "✕")), /*#__PURE__*/React.createElement("h3", {
+    className: "text-[22px] font-light text-ink-900 mt-3 tracking-tight"
+  }, sel ? 'Подтвердите запуск' : 'Выберите идею для сценарного анализа')), !sel ? /*#__PURE__*/React.createElement("div", {
+    className: "p-4 space-y-2 max-h-[60vh] overflow-y-auto"
+  }, ideas.map(idea => /*#__PURE__*/React.createElement("button", {
+    key: idea.n,
+    onClick: () => setSel(idea),
+    className: "w-full text-left rounded-2xl px-4 py-3 bg-white/70 border border-ink-900/6 hover:border-ink-900/20 transition flex items-start gap-3"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "text-[11px] font-mono text-ink-400 mt-1"
+  }, idea.n), /*#__PURE__*/React.createElement("span", {
+    className: "min-w-0"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "block text-[10px] tracking-widest uppercase text-ink-400 font-mono"
+  }, idea.cat), /*#__PURE__*/React.createElement("span", {
+    className: "block text-[15px] text-ink-900 font-medium leading-tight mt-0.5"
+  }, idea.title))))) : /*#__PURE__*/React.createElement("div", {
+    className: "p-6"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "rounded-2xl p-4 bg-gold-400/15 border border-gold-400/40"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "text-[10px] tracking-widest uppercase font-mono text-gold-700 mb-1.5"
+  }, "Сценарный анализ"), /*#__PURE__*/React.createElement("p", {
+    className: "text-[14px] text-ink-900 leading-relaxed"
+  }, "Сделать ", /*#__PURE__*/React.createElement("span", {
+    className: "font-semibold"
+  }, "Scenario Analysis"), " для идеи «", sel.title, "» — с вас спишется ", /*#__PURE__*/React.createElement("span", {
+    className: "font-semibold"
+  }, "1 токен"), ".")), /*#__PURE__*/React.createElement("p", {
+    className: "text-[12px] text-ink-500 mt-3 leading-relaxed font-light"
+  }, "Откроется бот RAMP в Telegram и запустит сценарный анализ вашего портфеля. Токен списывается только после готового отчёта."), /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center gap-3 mt-5"
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: go,
+    className: "flex-1 px-4 py-2.5 rounded-full bg-ink-900 text-white text-[13px] font-semibold hover:bg-ink-800 transition"
+  }, "Да"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setSel(null),
+    className: "flex-1 px-4 py-2.5 rounded-full bg-white/70 border border-ink-900/10 text-ink-700 text-[13px] font-semibold hover:bg-white transition"
+  }, "Нет")))));
 };
 const ActionPlan = ({
   rows
@@ -2683,13 +2781,14 @@ const Plan = () => {
     ...o,
     [n]: !o[n]
   }));
+  const [applyOpen, setApplyOpen] = React.useState(false);
   return /*#__PURE__*/React.createElement("section", {
     id: "plan",
     className: "rise",
     "data-screen-label": "05 Action Plan"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "mb-6"
-  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-end justify-between gap-4 flex-wrap mb-6"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "flex items-center gap-2 text-[11px] tracking-widest uppercase text-ink-500 font-mono mb-2"
   }, /*#__PURE__*/React.createElement("span", {
     className: "w-1.5 h-1.5 rounded-full bg-gold-400"
@@ -2699,7 +2798,17 @@ const Plan = () => {
     className: "text-ink-400"
   }, ".")), /*#__PURE__*/React.createElement("p", {
     className: "text-[15px] text-ink-500 mt-2 font-light max-w-[680px]"
-  }, "Конкретные уровни Buy / Sell / Stop, оценка эффекта до/после и стратегические идеи с кандидатами.")), /*#__PURE__*/React.createElement("div", {
+  }, "Конкретные уровни Buy / Sell / Stop, оценка эффекта до/после и стратегические идеи с кандидатами.")), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setApplyOpen(true),
+    className: "flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-ink-900 text-white text-[12px] font-medium hover:bg-ink-800 transition"
+  }, /*#__PURE__*/React.createElement(Icons.Sparkles, {
+    size: 13,
+    stroke: 1.8
+  }), " Применить идею")), applyOpen && /*#__PURE__*/React.createElement(ApplyIdeaModal, {
+    ideas: p.ideas,
+    botUsername: (p.meta || {}).botUsername,
+    onClose: () => setApplyOpen(false)
+  }), /*#__PURE__*/React.createElement("div", {
     className: "space-y-5"
   }, /*#__PURE__*/React.createElement(ActionPlan, {
     rows: p.actionPlan

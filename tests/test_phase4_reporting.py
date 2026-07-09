@@ -1605,8 +1605,10 @@ class DataLineageTest(unittest.TestCase):
              "SEC_Filing_Date": None},
         ])
         rows = build_lineage(r, None, today=date(2026, 5, 17))
+        # CoVe-consolidation (2026-07-09): fundamental Z-scores + financial-
+        # health metrics are now ONE merged SEC row.
         sec_rows = [x for x in rows if x["source"] == "SEC EDGAR CompanyFacts"]
-        self.assertEqual(len(sec_rows), 2)
+        self.assertEqual(len(sec_rows), 1)
         for s in sec_rows:
             self.assertEqual(s["status"], "warn")
             self.assertIn("2 тикеров", s["note"])
@@ -1626,15 +1628,18 @@ class DataLineageTest(unittest.TestCase):
             self.assertIn("AAPL", s["note"])
 
     def test_macro_drivers_status_flows_through(self) -> None:
-        """When MacroFeed reports 'stale' for VIX, lineage reflects it."""
+        """When MacroFeed reports 'stale' for VIX, the aggregated FRED row
+        surfaces the worst state and names the flagged series.  CoVe-
+        consolidation (2026-07-09): 6 per-series rows → 1 aggregate row."""
         from finance.data_lineage import build_lineage
         r = self._full_results()
         r["macro_drivers"]["vix"]["status"] = "stale"
         r["macro_drivers"]["vix"]["note"]   = "FRED 503"
         rows = build_lineage(r, None, today=date(2026, 5, 17))
-        vix_row = next(x for x in rows if x["name"] == "CBOE VIX")
-        self.assertEqual(vix_row["status"], "stale")
-        self.assertEqual(vix_row["note"],   "FRED 503")
+        macro_row = next(x for x in rows if x["name"] == "Макро-драйверы (FRED)")
+        self.assertEqual(macro_row["status"], "stale")   # worst-of aggregate
+        self.assertIn("CBOE VIX", macro_row["note"])     # flagged series named
+        self.assertIn("stale", macro_row["note"])
 
     def test_macro_drivers_missing_when_no_key(self) -> None:
         """No macro_drivers in results → single 'missing' row."""
@@ -1810,9 +1815,11 @@ class DataLineageTest(unittest.TestCase):
         from finance.data_lineage import build_lineage
         rows = build_lineage({}, None, today=date(2026, 5, 17))
         self.assertGreater(len(rows), 5)
-        # Must contain at least one row per major source category.
+        # Must contain at least one row per major source category.  CoVe-
+        # consolidation (2026-07-09): the risk metrics + Euler attribution are
+        # now one merged Quant-Engine row.
         names = {r["name"] for r in rows}
-        self.assertIn("Vol · CVaR · TE · IR · Max DD", names)
+        self.assertTrue(any(n.startswith("Риск-метрики: Vol · CVaR") for n in names))
 
     # ─── Volatility factor expansion ───────────────────────────────────
 
