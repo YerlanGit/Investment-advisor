@@ -148,12 +148,17 @@ _EXCHANGE_TO_CURRENCY: dict[str, str] = {
     "US":    "USD",     # NASDAQ / NYSE / AMEX
     "KZ":    "KZT",     # KASE
     "AIX":   "USD",     # Astana International Exchange — predominantly USD-quoted
-    "IL":    "GBP",     # London (HSBK.IL / KAP.IL trade in GBp practically;
-                        # we still convert through GBP→USD downstream)
-    "LSE":   "GBP",
+    # F-7 (2026-07-10): LSE listings quote in PENCE sterling (GBp, vendor code
+    # "GBX"), NOT pounds.  Mapping them straight to "GBP" fed pence prices into
+    # a pounds cross-rate — a ×100 valuation error for any non-override .IL/.L
+    # ticker.  GBX is converted as price÷100 → GBP → cross-rate (see
+    # convert_price_matrix / _PENCE_SCALE).  USD-settling GDRs (HSBK.IL,
+    # KAP.IL) keep their explicit USD override below.
+    "IL":    "GBX",     # London IOB — pence quotes
+    "LSE":   "GBX",
     "HK":    "HKD",
     "TO":    "CAD",
-    "L":     "GBP",
+    "L":     "GBX",     # London main market — pence quotes
     "DE":    "EUR",
     "PA":    "EUR",
 }
@@ -286,6 +291,15 @@ def align_fx_to_prices(
 # the module dependency-free and unit-testable with mock providers.
 FxProvider = Callable[[str, str], Optional[pd.Series]]
 
+# F-7: minor-unit (pence-style) currency codes → (major unit, scale).
+# A "GBX" price is pence sterling: divide by 100 to get pounds, THEN apply
+# the GBP cross-rate.  The registry keeps the design open for other
+# minor-unit quotes (e.g. ZAc — South African cents) without touching the
+# conversion loop.
+_PENCE_SCALE: dict[str, tuple[str, float]] = {
+    "GBX": ("GBP", 0.01),   # pence sterling → pounds
+}
+
 
 @dataclass
 class PriceTransformResult:
@@ -360,14 +374,30 @@ def convert_price_matrix(
     dropped: list[str] = []
 
     for ticker, asset_ccy in needs_conversion.items():
-        if asset_ccy not in fx_cache:
-            raw = fx_provider(asset_ccy, rep_ccy)
+        # F-7: minor-unit quotes (GBX = pence sterling) are scaled to their
+        # MAJOR unit first (÷100 → GBP), then the major-unit cross-rate
+        # applies.  The FX cache is keyed by the major unit so a GBX and a
+        # GBP ticker share one fetched series.
+        lookup_ccy, unit_scale = _PENCE_SCALE.get(asset_ccy, (asset_ccy, 1.0))
+
+        if lookup_ccy == rep_ccy:
+            # Pence of the reporting currency itself (e.g. GBX book reported
+            # in GBP): a pure deterministic unit change, no FX series needed.
+            converted[ticker] = prices[ticker].astype(float) * unit_scale
+            fx_records.append(FxConversion(pair=f"{asset_ccy}{rep_ccy}",
+                                            coverage_pct=100.0,
+                                            last_value=unit_scale,
+                                            fallback_used=False))
+            continue
+
+        if lookup_ccy not in fx_cache:
+            raw = fx_provider(lookup_ccy, rep_ccy)
             if raw is None or len(raw) == 0:
                 logger.warning(
                     "FX %s→%s not available — DROPPING %s from the risk matrix "
-                    "(H-1: no currency mixing).", asset_ccy, rep_ccy, ticker)
-                fx_cache[asset_ccy] = pd.Series(dtype=float)
-                fx_records.append(FxConversion(pair=f"{asset_ccy}{rep_ccy}",
+                    "(H-1: no currency mixing).", lookup_ccy, rep_ccy, ticker)
+                fx_cache[lookup_ccy] = pd.Series(dtype=float)
+                fx_records.append(FxConversion(pair=f"{lookup_ccy}{rep_ccy}",
                                                 coverage_pct=0.0,
                                                 last_value=float("nan"),
                                                 fallback_used=True))
@@ -375,19 +405,20 @@ def convert_price_matrix(
                 continue
             aligned, rec = align_fx_to_prices(raw, prices.index,
                                               lag_one_day=lag_one_day)
-            rec = FxConversion(pair=f"{asset_ccy}{rep_ccy}",
+            rec = FxConversion(pair=f"{lookup_ccy}{rep_ccy}",
                                coverage_pct=rec.coverage_pct,
                                last_value=rec.last_value,
                                fallback_used=rec.fallback_used)
-            fx_cache[asset_ccy] = aligned
+            fx_cache[lookup_ccy] = aligned
             fx_records.append(rec)
 
-        fx_aligned = fx_cache[asset_ccy]
+        fx_aligned = fx_cache[lookup_ccy]
         if fx_aligned.empty:
             # Same currency as a ticker already found unconvertible above.
             dropped.append(ticker)
             continue
-        converted[ticker] = prices[ticker].astype(float) * fx_aligned.astype(float)
+        converted[ticker] = (prices[ticker].astype(float) * unit_scale
+                             * fx_aligned.astype(float))
 
     if dropped:
         # Drop the unconvertible columns so they cannot enter the covariance

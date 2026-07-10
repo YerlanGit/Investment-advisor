@@ -63,12 +63,51 @@ class ConsolidationTest(unittest.TestCase):
 class MathFirewallTest(unittest.TestCase):
 
     def test_firewall_strips_inf(self) -> None:
+        """F-6 semantics: ±Inf never survives; interior/trailing gaps are
+        ffill-ed; LEADING NaNs are PRESERVED by design — back-filling them
+        copied an asset's first quote over its pre-listing period (look-ahead
+        bias that dragged young assets' σ/β toward zero)."""
         from finance.investment_logic import MAC3RiskEngine
         eng = MAC3RiskEngine()
         df = pd.DataFrame({"A": [1.0, np.inf, 3.0], "B": [np.nan, 2.0, -np.inf]})
         out = eng.math_firewall(df)
-        self.assertTrue(np.isfinite(out.to_numpy()).all(),
-                        "no Inf/NaN may survive the firewall")
+        arr = out.to_numpy()
+        self.assertFalse(np.isinf(arr).any(), "no Inf may survive the firewall")
+        # Interior Inf→NaN gaps are carried over by ffill…
+        self.assertEqual(out["A"].tolist(), [1.0, 1.0, 3.0])
+        self.assertEqual(out["B"].iloc[2], 2.0)      # trailing -inf → ffill(2.0)
+        # …but the pre-listing (leading) NaN must stay NaN (no look-ahead).
+        self.assertTrue(np.isnan(out["B"].iloc[0]),
+                        "leading NaN must survive — bfill was a look-ahead")
+
+    def test_firewall_sparse_asset_guard(self) -> None:
+        """F-6: a young listing (< MIN_OVERLAP_TDAYS finite prices) is dropped
+        from the STRUCTURAL model instead of collapsing the common dropna
+        window for the whole book."""
+        from finance.investment_logic import MAC3RiskEngine
+        eng = MAC3RiskEngine()
+        idx = pd.date_range("2023-01-02", periods=400, freq="B")
+        rng = np.random.default_rng(11)
+        prices = {}
+        for i, tkr in enumerate(eng.factor_tickers.values()):
+            r = np.random.default_rng(300 + i).normal(0.0004, 0.01, len(idx))
+            prices[tkr] = 100.0 * np.exp(np.cumsum(r))
+        prices["AAA.US"] = 100.0 * np.exp(np.cumsum(rng.normal(0.0005, 0.012, len(idx))))
+        # Young listing: only the last 20 sessions have quotes.
+        young = np.full(len(idx), np.nan)
+        young[-20:] = 50.0 * np.exp(np.cumsum(rng.normal(0.001, 0.02, 20)))
+        prices["NEWIPO.US"] = young
+        data = pd.DataFrame(prices, index=idx)
+
+        cov, fdf, metrics = eng.calculate_structural_risk(
+            data, ["AAA.US", "NEWIPO.US"],
+            {"AAA.US": 0.7, "NEWIPO.US": 0.3},
+        )
+        # The young asset is excluded from the structural model…
+        self.assertNotIn("NEWIPO.US", list(cov.index))
+        self.assertIn("AAA.US", list(cov.index))
+        # …and the surviving window was NOT collapsed to the IPO's 20 days.
+        self.assertGreater(len(getattr(eng, "_last_port_log_returns", [])), 300)
 
 
 # ── H6: waterfall geometry precomputed in backend ──────────────────────────

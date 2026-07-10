@@ -197,9 +197,16 @@ def get_history_frame(
         axis=1,
     ).sort_index() if loaded else pd.DataFrame()
 
-    # Forward/back-fill non-trading days (weekends, holidays)
+    # Forward-fill non-trading days (weekends, cross-exchange holidays).
+    # F-6 (2026-07-10): the old trailing .bfill() also filled LEADING NaNs —
+    # i.e. it copied an asset's FIRST quote backwards over its entire
+    # pre-listing period.  Those fabricated flat prices are a look-ahead:
+    # they turn into zero log-returns that bias a young asset's σ and betas
+    # toward zero and corrupt its correlations.  Interior gaps are what the
+    # fill is for, and ffill alone covers them; leading NaNs now stay NaN so
+    # the engine's row-level dropna gives the honest common-date window.
     if not df.empty:
-        df = df.ffill().bfill()
+        df = df.ffill()
 
     return HistoryResult(data=df, loaded=loaded, failed=still_failed, retried=retried_ok)
 
