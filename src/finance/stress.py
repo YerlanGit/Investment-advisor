@@ -198,6 +198,58 @@ DEFAULT_SCENARIOS: list[ScenarioSpec] = [
 ]
 
 
+# ── F-1: raw-space → residual-space shock transformation ────────────────────
+#
+# The scenario catalog above is calibrated against RAW factor moves (MTUM fell
+# −15% in Q2-2022 — a move that INCLUDES its market component).  The engine's
+# default-on hierarchical orthogonalization, however, regresses each style/EM
+# factor against its core parent(s) and fits asset betas on the RESIDUAL
+# series — so «Beta_Momentum» is a beta to MARKET-NEUTRAL momentum.  Applying
+# a raw child shock to a residual beta double-counts the parent leg (the
+# market part of the −15% is already delivered through Beta_Market × −10%).
+#
+# The exact fix follows from the linear algebra of the residualization
+# F_resid_child = F_raw_child − Σ_p β̂_{child→p}·F_raw_p (+const):
+#
+#     shock_resid_child = shock_raw_child − Σ_p β̂_{child→p} · shock_raw_p
+#
+# with parent (core) shocks unchanged.  Substituting back shows the portfolio
+# impact w'·B_resid·shock_resid equals w'·B_raw·shock_raw identically — i.e.
+# the stress table becomes INVARIANT to FACTOR_ORTHOGONALIZE (exact for OLS;
+# Ridge α=0.001 is OLS to within float noise).  A child NOT named by the
+# scenario still needs the transform (raw semantics say its RAW move is 0, so
+# its residual move is −Σ β̂·shock_parent).
+
+def residualize_shocks(shocks: dict[str, float],
+                       ortho_betas: dict[str, dict[str, float]],
+                       ) -> dict[str, float]:
+    """
+    Map a RAW-factor shock vector into the engine's residual factor space.
+
+    Args:
+        shocks      : {factor: raw_period_decimal_shock} — the scenario as
+                      calibrated (raw historical factor moves).
+        ortho_betas : {child: {parent: β̂}} fitted by
+                      ``orthogonalize_factors_hierarchical(..., return_betas=True)``.
+                      Empty/None ⇒ orthogonalization did not run ⇒ identity.
+
+    Returns a NEW dict; the input is never mutated.  Children of shocked
+    parents enter the result even when absent from ``shocks`` (their raw move
+    is 0 by scenario semantics, so their residual move is −Σ β̂·shock_parent).
+    """
+    if not ortho_betas:
+        return dict(shocks)
+    out = dict(shocks)
+    for child, parents in ortho_betas.items():
+        parent_leg = sum(float(coef) * float(shocks.get(parent, 0.0))
+                         for parent, coef in (parents or {}).items())
+        raw_child = float(shocks.get(child, 0.0))
+        adjusted  = raw_child - parent_leg
+        if child in shocks or abs(adjusted) > 1e-12:
+            out[child] = adjusted
+    return out
+
+
 # ── Core engine ─────────────────────────────────────────────────────────────
 
 def _beta_columns(perf_df: pd.DataFrame) -> list[str]:
@@ -224,13 +276,25 @@ def apply_scenario(perf_df: pd.DataFrame,
                     *,
                     port_vol_ann:        float = 0.0,
                     ann_return_baseline: float = DEFAULT_ANN_RETURN_FOR_RECOVERY,
+                    ortho_betas:         Optional[dict] = None,
                     ) -> dict:
     """
     Apply a single stress scenario.
 
+    Args (beyond the spec/portfolio):
+        ortho_betas : F-1 — child→parent OLS betas from the engine's factor
+                      orthogonalization.  When provided (non-empty), the RAW
+                      shock catalog is mapped into the residual factor space
+                      the Beta_* columns actually live in (see
+                      ``residualize_shocks``).  None/{} ⇒ identity (legacy
+                      raw-beta engine).
+
     Returns a dict with:
       • name, category, coverage, note            (passthrough from spec)
-      • shocks                                    (the input shock vector)
+      • shocks                                    (the RAW input shock vector —
+                                                   human-calibrated display)
+      • shocks_applied / residualized             (F-1: the vector the math
+                                                   actually used + flag)
       • port_pct, port_dollar                     (gross shock PnL)
       • max_dd_pct                                (intra-period worst day est.)
       • recovery_months                           (estimate, None for gains)
@@ -244,6 +308,8 @@ def apply_scenario(perf_df: pd.DataFrame,
         "coverage":  scenario.coverage,
         "note":      scenario.note,
         "shocks":    dict(scenario.shocks),
+        "shocks_applied":     dict(scenario.shocks),
+        "residualized":       False,
         "port_pct":           0.0,
         "port_dollar":        0.0,
         "max_dd_pct":         0.0,
@@ -256,8 +322,18 @@ def apply_scenario(perf_df: pd.DataFrame,
     if perf_df is None or perf_df.empty or total_value <= 0:
         return out
 
+    # F-1: transform the raw scenario into the residual space when the engine
+    # orthogonalized its factors.  Display fields keep the RAW vector (that is
+    # what the calibration notes describe); the math below uses the applied one.
+    shocks_applied = residualize_shocks(scenario.shocks, ortho_betas or {})
+    out["shocks_applied"] = {k: round(float(v), 6) for k, v in shocks_applied.items()}
+    out["residualized"]   = shocks_applied != dict(scenario.shocks)
+
     beta_cols = _beta_columns(perf_df)
     available_factors = {_factor_from_beta_col(c) for c in beta_cols}
+    # Coverage is reported against the HUMAN-declared factors (raw catalog);
+    # the residual transform only redistributes those same legs, so the
+    # coverage semantics the report shows stay stable across engine modes.
     requested_factors = set(scenario.shocks.keys())
     used_factors      = sorted(requested_factors & available_factors)
     missing_factors   = sorted(requested_factors - available_factors)
@@ -278,12 +354,15 @@ def apply_scenario(perf_df: pd.DataFrame,
             continue
         w_i = cv / total_value
 
-        # Σ_f β_{i,f} · shock_f for shocks whose factor is present in betas.
+        # Σ_f β_{i,f} · shock_f over the APPLIED (possibly residualized)
+        # vector, for factors present in the fitted betas.
         delta_log_ret_raw = 0.0
-        for f in used_factors:
+        for f, shk in shocks_applied.items():
             beta_col = f"Beta_{f}"
+            if f not in available_factors:
+                continue
             beta_val = _safe_float(row.get(beta_col), 0.0)
-            delta_log_ret_raw += beta_val * scenario.shocks[f]
+            delta_log_ret_raw += beta_val * float(shk)
 
         # H4: convex saturation above ±20% with asymptote at ±35%.
         delta_log_ret = _convex_cap(delta_log_ret_raw)
@@ -342,6 +421,7 @@ def run_stress_scenarios(perf_df:          pd.DataFrame,
                           port_metrics:     dict,
                           scenarios:        Optional[Iterable[ScenarioSpec]] = None,
                           ann_return_baseline: float = DEFAULT_ANN_RETURN_FOR_RECOVERY,
+                          ortho_betas:      Optional[dict] = None,
                           ) -> list[dict]:
     """
     Run the full stress table.
@@ -354,6 +434,10 @@ def run_stress_scenarios(perf_df:          pd.DataFrame,
                              intra-period drawdown estimates).
         scenarios          : iterable of ScenarioSpec; defaults to DEFAULT_SCENARIOS.
         ann_return_baseline: long-run annual return used for recovery time.
+        ortho_betas        : F-1 — child→parent betas from the engine's factor
+                             orthogonalization; maps the raw shock catalog into
+                             the residual space the Beta_* columns live in.
+                             None/{} when orthogonalization did not run.
 
     Returns:
         list[dict] — one row per scenario in the input order.  Always returns
@@ -367,7 +451,8 @@ def run_stress_scenarios(perf_df:          pd.DataFrame,
     return [
         apply_scenario(perf_df, total_value, sc,
                         port_vol_ann=port_vol_ann,
-                        ann_return_baseline=ann_return_baseline)
+                        ann_return_baseline=ann_return_baseline,
+                        ortho_betas=ortho_betas)
         for sc in scenarios
     ]
 
@@ -381,6 +466,7 @@ __all__ = [
     "ScenarioSpec",
     "DEFAULT_SCENARIOS",
     "apply_scenario",
+    "residualize_shocks",
     "run_stress_scenarios",
     "_convex_cap",
 ]

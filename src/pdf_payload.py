@@ -1910,6 +1910,20 @@ def _build_integrity_checks(results: dict,
                    if has_ci else "точечная оценка (мало данных)"),
     })
 
+    # 5b. F-4 (2026-07-10): Sharpe/Sortino estimator basis — the numerator is
+    # the realised geometric return over the FULL window while the denominator
+    # is the recency-weighted STRUCTURAL vol (EWMA(63)⊕Ledoit-Wolf).  The
+    # mixed horizons are deliberate; the panel makes the basis auditable so
+    # the headline Sharpe can be compared против классического sample-оценщика.
+    if metrics.get("sharpe_basis_note"):
+        checks.append({
+            "status": "✓",
+            "label":  "Базис Sharpe/Sortino",
+            "detail": ("числитель: геом. доходность за всё окно · "
+                       "знаменатель: структурная σ EWMA(63)⊕LW "
+                       "(взвешена к последним ~3 мес)"),
+        })
+
     # 6. RAG (bank research retrieval) — 3-state status from the backend so the
     # panel never shows the misleading binary "не использован" for a portfolio
     # that simply had no matching bank report (or an empty knowledge base).

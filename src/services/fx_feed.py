@@ -54,6 +54,12 @@ logger = logging.getLogger("FxFeed")
 FRED_FX_SERIES: dict[tuple[str, str], tuple[str, float]] = {
     ("USD", "KZT"): ("DEXKZUS", +1.0),
     ("KZT", "USD"): ("DEXKZUS", -1.0),   # inverted
+    # F-7 (2026-07-10): GBP cross for LSE listings.  DEXUSUK is quoted as
+    # «U.S. Dollars per One British Pound» → GBP→USD is the direct series.
+    # Pence handling (GBX ÷100 → GBP) happens upstream in
+    # finance.currency.convert_price_matrix — this pair only ever sees POUNDS.
+    ("GBP", "USD"): ("DEXUSUK", +1.0),
+    ("USD", "GBP"): ("DEXUSUK", -1.0),   # inverted
 }
 
 

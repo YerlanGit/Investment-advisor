@@ -27,6 +27,7 @@ _MANDATE_BL_CONSTRAINTS: dict[str, dict[str, float]] = {
 # Multi-period (1м / 3м / 6м / 12м / YTD) returns live in a separate module
 # so they can be unit-tested without pulling in sklearn / engine dependencies.
 from finance.period_returns import (
+    MIN_OVERLAP_TDAYS as _MIN_OVERLAP_TDAYS,
     compute_period_returns_table as _compute_period_returns_table,
     build_portfolio_log_returns as _build_portfolio_log_returns,
     compute_benchmark_stats as _compute_benchmark_stats,
@@ -98,7 +99,8 @@ def factor_orthogonalize_enabled() -> bool:
         "0", "false", "no", "off", "")
 
 
-def orthogonalize_factors_hierarchical(f_data: "pd.DataFrame") -> "pd.DataFrame":
+def orthogonalize_factors_hierarchical(f_data: "pd.DataFrame",
+                                       return_betas: bool = False):
     """
     Residualize each style/EM factor against its core macro parent(s).
 
@@ -107,11 +109,20 @@ def orthogonalize_factors_hierarchical(f_data: "pd.DataFrame") -> "pd.DataFrame"
     (child − OLS_fit_on_parents) + child_mean, so its level/scale is preserved
     while the shared parent beta is removed.  Falls back to the input unchanged
     when the core parents are absent or history is too short (<10 rows).
+
+    F-1 (2026-07-10): with ``return_betas=True`` the function ALSO returns the
+    fitted child→parent OLS coefficients ``{child: {parent: beta}}``.  The
+    stress engine needs them to transform its RAW-factor shock catalog into
+    the SAME residual space these betas live in — otherwise a raw «Momentum
+    −15%» shock (which historically INCLUDED MTUM's market component) is
+    applied to a market-neutral residual beta and the market leg of the shock
+    is double-counted.  See ``finance.stress.residualize_shocks``.
     """
     if f_data is None or f_data.empty or len(f_data) < 10:
-        return f_data
+        return (f_data, {}) if return_betas else f_data
     cols = list(f_data.columns)
     out = f_data.copy()
+    ortho_betas: dict[str, dict[str, float]] = {}
     for child, parents in _FACTOR_PARENTS.items():
         if child not in cols:
             continue
@@ -125,9 +136,11 @@ def orthogonalize_factors_hierarchical(f_data: "pd.DataFrame") -> "pd.DataFrame"
             beta, *_ = np.linalg.lstsq(X, y, rcond=None)
             resid = y - X @ beta
             out[child] = resid + float(np.mean(y))   # keep the factor's own mean
+            # beta[0] is the intercept; beta[1:] align with `par`.
+            ortho_betas[child] = {p: float(b) for p, b in zip(par, beta[1:])}
         except Exception:
             continue
-    return out
+    return (out, ortho_betas) if return_betas else out
 
 
 def _nearest_psd(mat: "np.ndarray", floor: float = 1e-12) -> "np.ndarray":
@@ -365,12 +378,21 @@ class MAC3RiskEngine:
         Защита от 'битых' данных (галлюцинаций API).
 
         Replaces ±Inf with NaN BEFORE the directional fill so a single
-        infinite price tick can't survive ffill/bfill and poison the
-        covariance matrix or Sharpe/CVaR downstream.  ffill→bfill then
-        carries the last/next finite value across the gap.
+        infinite price tick can't survive the fill and poison the covariance
+        matrix or Sharpe/CVaR downstream.  ffill then carries the last finite
+        value across interior gaps and up to the frame's end.
+
+        F-6 (2026-07-10): the old trailing ``.bfill()`` is REMOVED — it filled
+        LEADING NaNs by copying an asset's first quote backwards over its
+        pre-listing period.  Those flat phantom prices are a look-ahead bias:
+        zero log-returns that shrink a young asset's σ/β toward zero and
+        distort its correlations.  Leading NaNs now survive the firewall by
+        design; the covariance path handles them via the row-level dropna
+        (honest common-date window) plus the sparse-asset guard in
+        ``calculate_structural_risk``.
         """
         cleaned = df.replace([np.inf, -np.inf], np.nan)
-        return cleaned.ffill().bfill()
+        return cleaned.ffill()
 
     # ── Bootstrap CVaR (stationary block bootstrap, Politis-Romano 1994) ─────
     @staticmethod
@@ -682,6 +704,10 @@ class MAC3RiskEngine:
         # (no data / no factors / short history / zero weights) must never
         # leave a STALE decomposition from a previous call on the engine.
         self._last_factor_decomposition = {}
+        # F-1: reset the orthogonalization betas alongside — a stale map from a
+        # previous call would residualize stress shocks that were fitted on
+        # different data (or when this run skips orthogonalization entirely).
+        self._last_ortho_betas = {}
         resolved_assets = self.resolve_tickers(asset_tickers)
 
         # Restrict to columns we actually need and drop all-NaN columns BEFORE
@@ -692,6 +718,28 @@ class MAC3RiskEngine:
         needed_cols = [*self.factor_tickers.values(), *resolved_assets]
         available = [c for c in needed_cols if c in data.columns]
         data = data[available].dropna(axis=1, how='all')
+
+        # F-6: sparse-history guard.  With leading NaNs no longer bfilled (the
+        # look-ahead fix in math_firewall / history.py), the row-level dropna
+        # below shrinks the common window to the YOUNGEST surviving column.  A
+        # thinly-listed asset with a few weeks of quotes must not collapse the
+        # whole book's 5-year window — drop it from the STRUCTURAL model
+        # instead (same graceful contract as a missing ticker: its weight in
+        # weights_dict still dilutes portfolio risk; price/PnL keep coming
+        # from the broker).  Factor ETFs are exempt — long histories by
+        # construction, and losing one would silently change the model.
+        _factor_cols = set(self.factor_tickers.values())
+        sparse_assets = [
+            c for c in data.columns
+            if c not in _factor_cols
+            and int(data[c].notna().sum()) < _MIN_OVERLAP_TDAYS
+        ]
+        if sparse_assets:
+            logger.warning(
+                "Структурная модель: исключены %d актив(ов) с историей "
+                "< %d торговых дней (защита общего окна дат): %s",
+                len(sparse_assets), _MIN_OVERLAP_TDAYS, ", ".join(sparse_assets))
+            data = data.drop(columns=sparse_assets)
 
         # Логарифмические доходности для агрегации факторов
         returns = np.log(data / data.shift(1)).dropna()
@@ -714,7 +762,12 @@ class MAC3RiskEngine:
         # Gated; default OFF leaves the production decomposition unchanged.
         _orthogonalized = factor_orthogonalize_enabled()
         if _orthogonalized:
-            f_data = orthogonalize_factors_hierarchical(f_data)
+            # F-1: capture the child→parent OLS betas so the stress engine can
+            # transform its RAW-space shock catalog into this residual space
+            # (shock_resid = shock_raw − Σ β̂·shock_parent).  Without the
+            # transform the market leg of a style shock is double-counted.
+            f_data, self._last_ortho_betas = orthogonalize_factors_hierarchical(
+                f_data, return_betas=True)
 
         # F-3: underdetermined-regression guard.  Ridge fits K factor betas per
         # asset and LedoitWolf/EWMA estimate a KxK factor covariance — with
@@ -1029,6 +1082,20 @@ class MAC3RiskEngine:
             # H4 disclaimer is always present — even on portfolios where
             # no scenario hits the convex cap, the user sees the policy.
             "stress_test_disclaimer": _STRESS_TEST_DISCLAIMER,
+            # F-4 (2026-07-10): the Sharpe/Sortino estimator mixes horizons BY
+            # DESIGN — numerator = realised geometric return over the FULL
+            # lookback window (equal-weighted), denominator = STRUCTURAL vol
+            # from the EWMA(hl=63)⊕Ledoit-Wolf factor covariance (weighted
+            # toward the last ~3 months).  A calm recent regime therefore
+            # reads HIGHER than a classical sample-Sharpe and vice versa.
+            # Surfaced to the QC/Integrity panel so the basis is auditable.
+            "sharpe_basis_note": (
+                "Sharpe/Sortino: числитель — реализованная геометрическая "
+                "доходность за всё окно наблюдений; знаменатель — структурная "
+                "волатильность EWMA(hl=63)⊕Ledoit-Wolf, взвешенная к последним "
+                "~3 месяцам. В спокойном свежем рынке оценка выше классической "
+                "sample-Sharpe, после недавнего стресса — ниже."
+            ),
             # BLOCK 4.6: factor-multicollinearity diagnostic (κ + max|corr|),
             # surfaced to the CoVe panel so collinear factors are visible.
             "factor_diagnostics": getattr(self, "_last_factor_diagnostic", {}),
@@ -1549,6 +1616,11 @@ class UniversalPortfolioManager:
                 total_value  = total_portfolio_value,
                 port_metrics = port_metrics,
                 ann_return_baseline = _recovery_rate,
+                # F-1: the Beta_* columns in perf_df live in the RESIDUAL factor
+                # space when orthogonalization ran; hand the fitted child→parent
+                # betas to the stress engine so it maps the raw shock catalog
+                # into the same space (invariant to FACTOR_ORTHOGONALIZE).
+                ortho_betas  = getattr(self.engine, "_last_ortho_betas", {}) or {},
             )
         except Exception as exc:
             logger.warning("stress scenarios build failed: %s", exc)
