@@ -149,6 +149,12 @@ def compute_period_returns_table(port_log: pd.Series,
 
 MIN_OVERLAP_TDAYS = 60   # ≈ 3 trading months — floor for a usable return series
 
+# F-15 (2026-07-10): a day enters the portfolio return series only when names
+# carrying at least this share of the kept weight actually traded that day —
+# guards the renormalised composite against days where most of the book is
+# missing (e.g. a KZ-only holiday when just one local listing printed).
+MIN_DAILY_COVERAGE = 0.5
+
 
 def build_portfolio_log_returns(price_df: "pd.DataFrame | None",
                                  weights: dict,
@@ -188,16 +194,32 @@ def build_portfolio_log_returns(price_df: "pd.DataFrame | None",
     total_w = sum(raw_w.values())
     if total_w <= 1e-9:
         return None, info
-    norm_w = np.array([raw_w[c] / total_w for c in keep_cols], dtype=float)
 
     panel   = price_df[keep_cols]
-    log_ret = np.log(panel / panel.shift(1)).dropna()
-    if len(log_ret) < 2:
+    log_ret = np.log(panel / panel.shift(1))       # NaN when either day missing
+
+    # F-15 (2026-07-10): per-day MASKED weighting replaces the old row-level
+    # ``dropna()``.  The row-dropna shrank the series to the INTERSECTION of
+    # the kept names' histories — one young listing (kept because it clears
+    # ``min_obs``) truncated five years of portfolio history to its own
+    # lifespan, which nulled the 12М/6М period rows (rendered «+0.0%») and
+    # flattened the first half of the equity curve.  Instead, each day uses
+    # the weights of the names actually TRADING that day, renormalised —
+    # standard composite-backfill convention, no look-ahead, no synthetic
+    # prices:  r_port(t) = Σᵢ wᵢ·rᵢ(t)·1[present] / Σᵢ wᵢ·1[present].
+    # Days covering less than MIN_DAILY_COVERAGE of the kept weight stay NaN
+    # (a lone thin listing must not represent the whole book for that day).
+    w_ser    = pd.Series(raw_w, dtype=float).reindex(panel.columns)
+    present  = log_ret.notna()
+    coverage = present.mul(w_ser, axis=1).sum(axis=1)
+    weighted = log_ret.mul(w_ser, axis=1).sum(axis=1, min_count=1)
+    covered  = coverage >= MIN_DAILY_COVERAGE * total_w   # mask BEFORE dividing
+    port_log = (weighted[covered] / coverage[covered]).dropna()
+    if len(port_log) < 2:
         info["covered_weight"] = round(total_w, 4)
         return None, info
 
-    port_log = pd.Series(log_ret.values @ norm_w, index=log_ret.index,
-                         name="port_log")
+    port_log = port_log.rename("port_log")
     info.update(kept=keep_cols, covered_weight=round(total_w, 4),
                 n_days=int(len(port_log)))
     return port_log, info

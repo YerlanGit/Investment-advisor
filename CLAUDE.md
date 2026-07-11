@@ -12,7 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Verification
 - Run the Python suite from the repo root: `python -m pytest tests/ -q`
-  (CI mirrors this in `.github/workflows/python-ci.yml`; the deploy gate re-runs it in Cloud Build). Baseline: **612 passed, 8 skipped** (2026-07-10 Sprint-1 math fixes F-1/F-4/F-6/F-7: +14 tests, см. `tests/test_phase25_math_sprint1.py` и `docs/AUDIT_360_2026-07-10.md`).
+  (CI mirrors this in `.github/workflows/python-ci.yml`; the deploy gate re-runs it in Cloud Build). Baseline: **626 passed, 8 skipped** (2026-07-10 Sprint-1 math fixes F-1/F-4/F-6/F-7 +14 tests `tests/test_phase25_math_sprint1.py`; 2026-07-11 post-release hotfix F-14…F-17 +14 tests `tests/test_phase26_report_fixes.py` — forward-E[r] gate/clamp, masked composite series, mapper None-rows, RAG-excerpt cleaning; см. `docs/AUDIT_360_2026-07-10.md` ЧАСТЬ 6).
 - `src/` and `tests/` are both present; update both surfaces together when behavior changes.
 - Report templates live in `src/templates/` — smoke-render via `html_renderer.render_report_html(None, <user_id>, ...)`; Premium bundles rebuild via `design/premium_v2/build.sh` → synced to `src/premium_assets/`. **The Tailwind step MUST scan with CWD = repo root** (the `content` glob in `tailwind.config.js` is root-relative `./design/**/*.jsx`); `build.sh` now runs it via a repo-root subshell, otherwise it matches zero files and emits an empty reset-only CSS (whole report unstyled).
 
