@@ -91,7 +91,7 @@ Telegram /start
 ### 2.3 `src/finance/` — квант-движок (вся математика)
 | Файл | Функция |
 |---|---|
-| `investment_logic.py` | **Ядро MAC3**: `analyze_all`, Ridge-беты, ковариация EWMA(63)⊕Ledoit-Wolf + PSD-проекция, иерархическая ортогонализация (F-1: экспорт β̂ child→parent), Euler-декомпозиция, bootstrap-CVaR (SHA-256 seed), Marginal VaR, sparse-guard окна (F-6), загрузка цен (lookback 1825). |
+| `investment_logic.py` | **Ядро MAC3**: `analyze_all`, Ridge-беты, ковариация EWMA(63)⊕Ledoit-Wolf + PSD-проекция, иерархическая ортогонализация (F-1: экспорт β̂ child→parent), Euler-декомпозиция, bootstrap-CVaR (SHA-256 seed), Marginal VaR, sparse-guard окна (F-6), форвардная E[r] = β·μ без альфы + кламп [−50%,+100%] + гейт панели на окно ≥252 дней (F-14), загрузка цен (lookback 1825). |
 | `stress.py` | Параметрические стресс-сценарии: β×шок, convexity cap (20%→асимптота 35%), `residualize_shocks` (F-1 — маппинг raw-шоков в residual-пространство). |
 | `scoring.py` | 4-Pillar скоры F/V/T/C, robust-z (MAD), composite risk 0-100 (SSOT), классификатор классов активов, hotspot-порог. |
 | `scoring_orchestrator.py` | Оркестратор 4-Pillar: сектора, динамические SEC-когорты, действия Buy/Hold/Trim/Sell. |
@@ -102,7 +102,7 @@ Telegram /start
 | `scenario_report.py` | Сборка payload сценарного отчёта из `results` (0 LLM). |
 | `regime.py` | Классификатор режима (Growth×Cycle оси + FRED-оверлей level⊕trend, ±0.05). |
 | `technicals.py` | RSI-14/MACD/Bollinger-Z/SMA/momentum 12-1/52w-high/volume-confirm (пилар T). |
-| `period_returns.py` | Мульти-период (1м/3м/6м/12м/YTD), TE/IR (лог-пространство, pairwise), sparse-robust портфельная серия. |
+| `period_returns.py` | Мульти-период (1м/3м/6м/12м/YTD), TE/IR (лог-пространство, pairwise), sparse-robust портфельная серия — маскированная композитная с по-дневной ренормализацией весов, `MIN_DAILY_COVERAGE=0.5` (F-15). |
 | `portfolio_series.py` | Временные ряды портфеля (equity curve) для бота. |
 | `currency.py` | Base-Currency (H2): FX-трансформация цен (лаг T−1), GBX-пенсы ÷100 (F-7), RFR-реестр, H-1 дроп неконвертируемых. |
 | `sec_edgar.py` | Фундаментал SEC CompanyFacts: ROE/маржа/долг/рост, Altman-Z, Piotroski-F, FCF. |
@@ -141,7 +141,7 @@ Telegram /start
 
 ---
 
-## 3. `tests/` — pytest-сьюты (31 файл; CI: `python -m pytest tests/ -q`)
+## 3. `tests/` — pytest-сьюты (32 файла; CI: `python -m pytest tests/ -q`)
 
 | Файл | Что покрывает |
 |---|---|
@@ -168,6 +168,7 @@ Telegram /start
 | `test_phase23_scenario.py` | Сценарный движок (Панели A/B). |
 | `test_phase24_scenario_report.py` | Сценарный отчёт + тариф тиров. |
 | `test_phase25_math_sprint1.py` | **Спринт-1 математики**: F-1 инвариантность стресса к ортогонализации, F-4 базис Sharpe, F-7 GBX. |
+| `test_phase26_report_fixes.py` | **Post-release hotfix 2026-07-11** (сломанный DEEP-отчёт): F-14 гейт/кламп форвардной E[r] (e2e analyze_all), F-15 маскированная композитная серия, F-16 пропуск None-строк в premium-mapper, F-17 очистка RAG-выдержек. |
 | `test_factor_decomposition.py` | Факторная декомпозиция дисперсии + двойники. |
 | `test_freedom_auth.py` / `_client.py` / `_history.py` / `_models.py` | Tradernet: подпись, клиент, история, модели. |
 | `fetch_logs.py` · `query.txt` | Вспомогательные (не тесты). |

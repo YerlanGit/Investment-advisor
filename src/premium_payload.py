@@ -750,6 +750,16 @@ def _map_performance(p: dict) -> dict:
     first = next(iter(prt.values()), {}) if isinstance(prt, dict) else {}
     periods = []
     for r in _list(first, "periods"):
+        # F-16 (2026-07-10): a period whose window exceeds the available
+        # history arrives with portfolio_num=None / portfolio="—".  The old
+        # `_num(default=_pct("—"))` coerced that to 0.0 → the live BASE report
+        # showed «12М +0.0% · +0.0пп vs S&P» and the chart nested a flat first
+        # half out of the phantom zeros.  Data-less rows are now SKIPPED — the
+        # component renders only real windows and the summary falls back to
+        # the longest available one.
+        if _g(r, "portfolio_num") is None and \
+           str(_g(r, "portfolio") or "—").strip() in ("", "—", "н/д"):
+            continue
         # §−14 A-1: numeric twins first; string-parse is the legacy fallback.
         _pp = _num(r, "portfolio_num", default=_pct(_g(r, "portfolio")))
         _ss = _num(r, "benchmark_num", default=_pct(_g(r, "benchmark")))

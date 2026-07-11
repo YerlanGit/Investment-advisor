@@ -568,17 +568,43 @@ def _safe_float(val, default: float = 0.0) -> float:
         return default
 
 
+# F-17 (2026-07-10): leading remnants of the issuing bank's own letterhead —
+# a chunk often starts mid-header («…J.P. Morgan Putting these pieces
+# together…» → body opens with «Morgan Putting…»).  The attribution already
+# comes from the retrieval metadata, so a dangling name fragment at the start
+# of the EXCERPT is pure noise — strip it when followed by a capitalised word.
+# The optional name tails are POSSESSIVE (`?+`, py3.11+): without it the engine
+# backtracks on «Morgan Stanley expects…» (lowercase verb → full name fails →
+# retry with bare «Morgan» + capital «S» of «Stanley») and strips HALF the
+# bank name; possessive tails make the match all-or-nothing.
+_RAG_BANK_REMNANT_RE = re.compile(
+    r"^(?:(?:J\.?\s?P\.?\s?)?Morgan(?:\s+Stanley)?+|Goldman(?:\s+Sachs)?+|Sachs|"
+    r"Stanley|Barclays|JPMorgan(?:\s+Chase)?+|Chase|Citi(?:group|bank)?+|UBS|"
+    r"HSBC|BofA|Bank\s+of\s+America|Deutsche\s+Bank|Wells\s+Fargo)"
+    r"[\s:—–-]+(?=[A-ZА-Я])")
+# Runs of ≥3 numeric/percent tokens are chart-axis labels scraped from the
+# PDF («12% 10% 8% 6% 4% 2%»), never prose — cut the run and what follows it.
+_RAG_AXIS_RUN_RE = re.compile(
+    r"\s*(?:[-+]?\d+(?:[.,]\d+)?%?\s+){2,}[-+]?\d+(?:[.,]\d+)?%?(?:\s|$)")
+
+
 def _clean_rag_excerpt(text: str, max_len: int = 190) -> str:
     """Turn a raw RAG chunk into a clean, readable excerpt (замечание R2#3 —
-    выдержки обрывались на середине слова: «ury/…», «…mod-»).
+    выдержки обрывались на середине слова: «ury/…», «…mod-»; F-17 — «Morgan
+    Putting…», «mod- estly», осевые подписи «12% 10% 8%…» из PDF-графиков).
 
     - collapse whitespace + strip markdown;
-    - drop a leading mid-word fragment (a chunk boundary can cut a word, so the
-      body may open with «ury/German…» — skip to the first sentence/word start);
+    - re-join PDF line-break hyphenation («mod- estly» → «modestly»);
+    - drop a leading mid-word fragment OR a dangling bank-letterhead remnant;
+    - cut chart-axis number runs (and the label soup that trails them);
+    - reject excerpts that are mostly non-prose (letters < 55% of tokens);
     - truncate on a WORD boundary with an ellipsis, never mid-word.
     """
     t = re.sub(r"\*\*(.*?)\*\*", r"\1", str(text or ""))          # de-bold
     t = re.sub(r"\s+", " ", t).strip().lstrip("#*•-—·> ").strip()
+    # PDF hyphenation artifact: a line break inside a word survives extraction
+    # as «xxx- yyy» (lowercase on both sides) — re-join without the hyphen.
+    t = re.sub(r"([a-zа-яё])- ([a-zа-яё])", r"\1\2", t)
     if not t:
         return ""
     if t[:1].islower():                       # opened mid-word → find a clean start
@@ -589,7 +615,22 @@ def _clean_rag_excerpt(text: str, max_len: int = 190) -> str:
             m2 = re.search(r"[A-ZА-Я0-9]", t)  # else first capital / digit (if near)
             if m2 and m2.start() < 45:
                 t = t[m2.start():]
+    t = _RAG_BANK_REMNANT_RE.sub("", t.strip()).strip()
+    # Chart-axis runs: keep the prose BEFORE the first run, drop the run and
+    # everything after it (what follows an axis is chart legend soup).
+    m_axis = _RAG_AXIS_RUN_RE.search(t)
+    if m_axis:
+        t = t[:m_axis.start()].rstrip(",;:—–- ")
     t = t.strip()
+    if not t:
+        return ""
+    # Prose gate: if most tokens are numbers/symbols the chunk is a table or
+    # a chart, not a quotable sentence — reject so the caller picks the next
+    # candidate block (Pass-2 in _fetch_rag_context).
+    tokens = t.split()
+    lettered = sum(1 for w in tokens if re.search(r"[A-Za-zА-Яа-яё]{2,}", w))
+    if tokens and lettered / len(tokens) < 0.55:
+        return ""
     if len(t) > max_len:                      # truncate on a word boundary + «…»
         t = t[:max_len].rsplit(" ", 1)[0].rstrip(",;:—- ") + "…"
     return t.strip()

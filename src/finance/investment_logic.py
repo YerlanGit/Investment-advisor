@@ -708,6 +708,10 @@ class MAC3RiskEngine:
         # previous call would residualize stress shocks that were fitted on
         # different data (or when this run skips orthogonalization entirely).
         self._last_ortho_betas = {}
+        # F-14: number of common observations the Ridge regression actually
+        # used — BLOCK 5 gates the FORWARD expected-return panel on it (an
+        # annualised forecast off a sub-year window is not publishable).
+        self._last_regression_nobs = 0
         resolved_assets = self.resolve_tickers(asset_tickers)
 
         # Restrict to columns we actually need and drop all-NaN columns BEFORE
@@ -785,6 +789,9 @@ class MAC3RiskEngine:
                 len(returns), min_obs, k_factors,
             )
             return pd.DataFrame(), pd.DataFrame(), {}
+        # F-14: record the effective regression window (common date rows) so
+        # analyze_all can gate the forward expected-return panel on it.
+        self._last_regression_nobs = int(len(returns))
         
         # Защита от отсутствующих тикеров:
         existing_resolved = [r for r in resolved_assets if r in returns.columns]
@@ -1432,8 +1439,9 @@ class UniversalPortfolioManager:
         #   2. GEOMETRIC annualisation: E[r_ann] = exp(mean_daily_log * 252) - 1
         #      This avoids the arithmetic overestimate (arithmetic: mean*252).
         #   3. Map ETF tickers → factor key names (Beta_Market ← Market ← SPY.US).
-        #   4. Expected return = Alpha_ann + Σ beta_k * E[r_k_ann]
-        #      Alpha (intercept) from Ridge regression is included.
+        #   4. Expected return = Σ beta_k * E[r_k_ann] — β·μ ONLY.  The Ridge
+        #      intercept (realised idiosyncratic drift) is EXCLUDED from the
+        #      forward forecast (F-14); it stays visible via Alpha_Specific.
         #   5. Specific Alpha = actual return - expected return (in %).
         present_factor_keys = [
             k for k, v in self.engine.factor_tickers.items() if v in all_data.columns
@@ -1458,22 +1466,39 @@ class UniversalPortfolioManager:
         if beta_cols and not factor_mu_daily_by_key.empty:
             beta_factor_keys = [c[len('Beta_'):] for c in beta_cols]
             mu_vec = factor_mu_daily_by_key.reindex(beta_factor_keys).fillna(0.0).values
-            # F-2: assemble the WHOLE expectation in daily-log space first
-            # (alpha intercept + Σβ·μ are both Ridge log-return quantities),
-            # then geometric-annualise ONCE.  The previous version added an
-            # arithmetically-annualised log alpha (α·252) to geometric simple
-            # factor returns (exp(μ·252)−1) — a units mismatch inherited by
-            # Alpha_Specific.
+            # F-14 (2026-07-10, пост-релизный фикс «218.4%»): the FORWARD
+            # expectation is now β·μ ONLY — the Ridge intercept (realised
+            # idiosyncratic drift) is EXCLUDED from the forecast.  Institutional
+            # convention: alpha is not a persistent premium, and annualising it
+            # geometrically explodes on short regression windows — after F-6
+            # removed the bfill look-ahead, the common window honestly shrinks
+            # to the youngest listing, and a leveraged single-stock ETF's bull
+            # streak extrapolated to «ожид. дох. 218.4% · Sharpe 11.29» on the
+            # live cover.  β are bounded by Ridge and μ_f is estimated on the
+            # FULL factor history (factor ETFs always span the whole lookback),
+            # so the β·μ expectation stays economically sane.  The realised
+            # drift remains visible через Alpha_Specific below.
             factor_log_daily = df[beta_cols].fillna(0).values @ mu_vec
-            alpha_col = 'Specific_Alpha_Daily'
-            if alpha_col in df.columns:
-                alpha_log_daily = df[alpha_col].fillna(0).values
-            else:
-                alpha_log_daily = 0.0
-            expected_log_daily = alpha_log_daily + factor_log_daily
+            expected_log_daily = factor_log_daily
             df['Expected_Return'] = np.exp(
                 expected_log_daily * self.engine.trading_days) - 1.0
-            # Specific Alpha: actual holding-period return minus expected (in %)
+            # Belt-and-suspenders: clamp the per-asset FORWARD expectation to a
+            # publishable band — a runaway β on a noisy short window must not
+            # print a four-digit forecast.  Clamped names are counted for QC.
+            _ER_LO, _ER_HI = -0.50, 1.00
+            _clamped_n = int(((df['Expected_Return'] < _ER_LO)
+                              | (df['Expected_Return'] > _ER_HI)).sum())
+            if _clamped_n:
+                logger.warning(
+                    "Expected_Return clamped to [%.0f%%, %.0f%%] for %d asset(s).",
+                    _ER_LO * 100, _ER_HI * 100, _clamped_n)
+            df['Expected_Return'] = df['Expected_Return'].clip(_ER_LO, _ER_HI)
+            if isinstance(port_metrics, dict):
+                port_metrics["expected_return_clamped_n"] = _clamped_n
+            # Specific Alpha: actual holding-period return minus the
+            # FACTOR-IMPLIED return (in %) — i.e. the realised excess the
+            # factor model does NOT explain.  This is exactly the textbook
+            # «specific alpha» reading; the forecast column above stays clean.
             df['Alpha_Specific'] = (df['Return_Pct'] - df['Expected_Return']) * 100
 
         # ── BLOCK 5: portfolio-level FORWARD expected annual return ──────────
@@ -1489,6 +1514,21 @@ class UniversalPortfolioManager:
         # model returned, so every downstream surface reads one figure.
         if 'Expected_Return' in df.columns and isinstance(port_metrics, dict):
             try:
+                # F-14: gate the ANNUALISED forward panel on the regression
+                # window.  With the F-6 look-ahead fix the common window is the
+                # honest intersection of listings — when it is shorter than one
+                # trading year, an annualised forward claim off it is noise
+                # (the live «218.4% · Sharpe 11.29» cover bug).  The per-asset
+                # Expected_Return column stays (bounded β·μ), only the
+                # portfolio-level panel degrades to «—».
+                _nobs = int(getattr(self.engine, "_last_regression_nobs", 0) or 0)
+                port_metrics["expected_return_window_days"] = _nobs
+                if _nobs < self.engine.trading_days:
+                    logger.warning(
+                        "Forward expected-return panel skipped: regression "
+                        "window %d < %d trading days.",
+                        _nobs, self.engine.trading_days)
+                    raise StopIteration          # → graceful skip below
                 _exp = df['Expected_Return']
                 _w_risky = 0.0
                 _er_weighted = 0.0
@@ -1510,6 +1550,8 @@ class UniversalPortfolioManager:
                     (_port_exp - _rfr) / _vol if _vol > 0 else None)
                 port_metrics["Expected_Return_Cash_Weight"] = round(_cash_w, 4)
                 port_metrics["Expected_Return_Invested_Weight"] = round(_w_risky, 4)
+            except StopIteration:
+                pass                             # sub-year window — panel «—»
             except Exception as _exc:
                 logger.warning("portfolio expected-return aggregation skipped: %s", _exc)
 
