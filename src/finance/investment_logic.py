@@ -99,6 +99,53 @@ def factor_orthogonalize_enabled() -> bool:
         "0", "false", "no", "off", "")
 
 
+# ── F-23 — daily-reset leveraged ETPs: structural variance drag ──────────────
+# A k×-daily-reset product's log return is ≈ k·r_u − ½k(k−1)σ_u² per day: the
+# −½k(k−1)σ_u² variance drag is CONTRACTUAL (rebalancing cost), not luck.  In
+# the factor regression that drag lands in the intercept α̂ — which the F-14
+# forward panel rightly EXCLUDES for ordinary names (realised idiosyncratic
+# drift is not a persistent premium).  For registry-flagged leveraged ETPs the
+# NEGATIVE part of α̂ is retained, so β·μ no longer overstates their forward
+# return (a 2× ETF at 90% vol carries ~20 pp/yr of drag).  Positive α̂ is
+# never added back — the adjustment can only lower a forecast.
+# Base symbols (exchange suffix stripped); extend via LEVERAGED_ETP_EXTRA
+# (comma-separated) without a redeploy.
+_LEVERAGED_ETP_BASES = {
+    "CONL", "XNDU",                                   # held in live books
+    "TQQQ", "SQQQ", "QLD", "SSO", "SDS", "SPXL", "SPXS", "UPRO", "SPXU",
+    "SOXL", "SOXS", "TNA", "TZA", "LABU", "LABD", "TECL", "TECS",
+    "TSLL", "TSLQ", "NVDL", "NVDS", "MSTX", "MSTU", "MSTZ",
+    "YINN", "YANG", "CWEB", "WEBL", "FAS", "FAZ", "TMF", "TMV",
+    "UVXY", "SVXY", "BITX", "ETHU",
+}
+
+
+def _is_leveraged_etp(ticker: str) -> bool:
+    """True when the BASE symbol (suffix stripped) is a known daily-reset
+    leveraged/inverse ETP, or is listed in the LEVERAGED_ETP_EXTRA env var."""
+    base = str(ticker or "").split(".")[0].strip().upper()
+    if not base:
+        return False
+    extra = {b.strip().upper()
+             for b in os.getenv("LEVERAGED_ETP_EXTRA", "").split(",") if b.strip()}
+    return base in _LEVERAGED_ETP_BASES or base in extra
+
+
+def apply_leveraged_drag(expected_log_daily: "np.ndarray",
+                         tickers,
+                         alpha_daily) -> "np.ndarray":
+    """F-23: add min(α̂_daily, 0) to the forward daily log expectation of
+    leveraged-ETP tickers only.  Pure function so the policy is unit-testable:
+    ordinary names and positive alphas pass through untouched."""
+    out = np.asarray(expected_log_daily, dtype=float).copy()
+    alpha = pd.to_numeric(pd.Series(list(alpha_daily)), errors="coerce")\
+              .fillna(0.0).values
+    for i, t in enumerate(tickers):
+        if i < len(out) and i < len(alpha) and _is_leveraged_etp(t):
+            out[i] += min(float(alpha[i]), 0.0)
+    return out
+
+
 def orthogonalize_factors_hierarchical(f_data: "pd.DataFrame",
                                        return_betas: bool = False):
     """
@@ -712,6 +759,9 @@ class MAC3RiskEngine:
         # used — BLOCK 5 gates the FORWARD expected-return panel on it (an
         # annualised forecast off a sub-year window is not publishable).
         self._last_regression_nobs = 0
+        # F-20: reset the sparse-exclusion list alongside (same staleness
+        # contract as the ortho betas above).
+        self._last_sparse_dropped = []
         resolved_assets = self.resolve_tickers(asset_tickers)
 
         # Restrict to columns we actually need and drop all-NaN columns BEFORE
@@ -744,6 +794,10 @@ class MAC3RiskEngine:
                 "< %d торговых дней (защита общего окна дат): %s",
                 len(sparse_assets), _MIN_OVERLAP_TDAYS, ", ".join(sparse_assets))
             data = data.drop(columns=sparse_assets)
+        # F-20: expose the exclusions so the Action Plan can annotate WHY a
+        # name has no beta / BL target / quantity instead of printing a bare
+        # directional call (live report: «SELL SPCX» with qty=null).
+        self._last_sparse_dropped = list(sparse_assets)
 
         # Логарифмические доходности для агрегации факторов
         returns = np.log(data / data.shift(1)).dropna()
@@ -975,6 +1029,37 @@ class MAC3RiskEngine:
         # returns).  Sum(weights) < 1 by design when cash sits in the
         # portfolio — that dilutes risk correctly without renormalisation.
         port_returns_daily = a_data.values @ weights
+        port_series_index  = a_data.index
+        # F-22 (2026-07-11): realized-metrics basis — masked composite series.
+        # The intersection window `a_data` shrinks to the YOUNGEST kept listing
+        # (honest windows after F-6), silently re-basing Sharpe / Annualised
+        # Return / MaxDD / VaR / CVaR onto a sub-year window when the book
+        # holds one young name.  Rebuild the portfolio series over the FULL
+        # price panel with per-day renormalised weights of the names actually
+        # trading that day (the same composite-backfill convention as the
+        # period-returns table and the equity curve), re-scaled by Σw so cash
+        # dilution is preserved: on full-coverage days the composite equals
+        # `a_data @ weights` EXACTLY, and when it adds no history the legacy
+        # path is kept bit-for-bit (β/Σ regression stays on the intersection
+        # window — only the REALIZED panel gains history).
+        try:
+            _w_by_res = {res: float(weights_dict.get(orig, 0.0) or 0.0)
+                         for orig, res in zip(valid_originals, valid_resolved)}
+            _total_w  = float(sum(_w_by_res.values()))
+            _comp, _comp_info = _build_portfolio_log_returns(
+                data[valid_resolved], _w_by_res)
+            if _comp is not None and _total_w > 0 and len(_comp) > len(a_data):
+                port_returns_daily = _comp.values * _total_w
+                port_series_index  = _comp.index
+                logger.info(
+                    "Realized-metrics basis: composite %d дн "
+                    "(окно пересечения %d дн, покрыто весов %.0f%%).",
+                    len(_comp), len(a_data),
+                    float(_comp_info.get("covered_weight", 0.0)) * 100)
+        except Exception as _exc:
+            logger.warning(
+                "Composite series unavailable — realized metrics fall back "
+                "to the intersection window: %s", _exc)
         # H3 (Phase-3): expose the date-indexed portfolio log-return series so
         # the Telegram equity-curve SVG consumes it instead of recomputing
         # `log(prices/prices.shift) @ weights` in the bot layer.  Stored on
@@ -982,7 +1067,7 @@ class MAC3RiskEngine:
         # into results["port_log_returns"].
         try:
             self._last_port_log_returns = pd.Series(port_returns_daily,
-                                                    index=a_data.index)
+                                                    index=port_series_index)
         except Exception:
             self._last_port_log_returns = None
         # H3: geometric daily RFR — `(1+r)^(1/252)-1` rather than `r/252`.
@@ -1076,6 +1161,10 @@ class MAC3RiskEngine:
             "Max_Euler_Risk_Pct":    max_erc,
             "Composite_Risk_Score":  composite_risk,
             "Positive_Days_Pct":     (port_returns_daily > 0).mean() * 100 if len(port_returns_daily) > 0 else 0,
+            # F-22: how many trading days the REALIZED panel (Sharpe numerator,
+            # Annualised_Return, VaR/CVaR, MaxDD) was computed on — composite
+            # window when it extends the intersection, else the intersection.
+            "realized_window_days":  int(len(port_returns_daily)),
             # H2 audit trail — surfaced to the report's QC panel.
             "reporting_currency":    self.reporting_currency.value,
             "risk_free_rate_annual": self.current_rfr_annual,
@@ -1098,7 +1187,9 @@ class MAC3RiskEngine:
             # Surfaced to the QC/Integrity panel so the basis is auditable.
             "sharpe_basis_note": (
                 "Sharpe/Sortino: числитель — реализованная геометрическая "
-                "доходность за всё окно наблюдений; знаменатель — структурная "
+                "доходность за всё окно наблюдений (композитная серия: дни "
+                "считаются по именам, реально торговавшимся, веса "
+                "ренормализуются по-дневно); знаменатель — структурная "
                 "волатильность EWMA(hl=63)⊕Ledoit-Wolf, взвешенная к последним "
                 "~3 месяцам. В спокойном свежем рынке оценка выше классической "
                 "sample-Sharpe, после недавнего стресса — ниже."
@@ -1480,6 +1571,19 @@ class UniversalPortfolioManager:
             # drift remains visible через Alpha_Specific below.
             factor_log_daily = df[beta_cols].fillna(0).values @ mu_vec
             expected_log_daily = factor_log_daily
+            # F-23: leveraged daily-reset ETPs — retain the NEGATIVE part of
+            # the regression intercept (structural variance drag) so β·μ does
+            # not overstate their forward return.  Ordinary names untouched.
+            if 'Specific_Alpha_Daily' in df.columns:
+                try:
+                    expected_log_daily = apply_leveraged_drag(
+                        expected_log_daily, list(df.index),
+                        df['Specific_Alpha_Daily'])
+                    _dragged = [t for t in df.index if _is_leveraged_etp(t)]
+                    if _dragged and isinstance(port_metrics, dict):
+                        port_metrics["leveraged_drag_tickers"] = _dragged
+                except Exception as _exc:
+                    logger.warning("Leveraged-ETP drag skipped: %s", _exc)
             df['Expected_Return'] = np.exp(
                 expected_log_daily * self.engine.trading_days) - 1.0
             # Belt-and-suspenders: clamp the per-asset FORWARD expectation to a
@@ -1877,6 +1981,16 @@ class UniversalPortfolioManager:
                     "hotspot": s.hotspot}
                 for t, s in asset_scores.items()
             }
+            # F-20: originals of the names the sparse-guard excluded from the
+            # structural model (resolved → original via base-symbol match), so
+            # the plan can say WHY a row has no beta/target/quantity.
+            _sparse_res = set(getattr(self.engine, "_last_sparse_dropped", []) or [])
+            _uncovered = {
+                orig for orig, res in zip(actual_risky, port_resolved)
+                if res in _sparse_res
+                or str(res).split(".")[0] in {str(s).split(".")[0]
+                                              for s in _sparse_res}
+            } if _sparse_res else set()
             rows = build_action_plan(
                 perf_table      = perf,
                 asset_scores    = ap_scores,
@@ -1887,6 +2001,7 @@ class UniversalPortfolioManager:
                 # (Conservative tighter, Aggressive wider) — levels are no
                 # longer one-size-fits-all.
                 risk_mandate    = self.engine.risk_mandate,
+                uncovered       = _uncovered,
             )
             action_plan_rows = [r.as_dict() for r in rows]
         except Exception as exc:

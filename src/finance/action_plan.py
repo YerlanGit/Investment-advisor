@@ -196,6 +196,7 @@ def build_action_plan(*,
                       bl_records: Optional[list[dict]] = None,
                       portfolio_value: float = 0.0,
                       risk_mandate: str = "MODERATE",
+                      uncovered: Optional[set] = None,
                       ) -> list[AssetActionRow]:
     """
     Stitch per-asset action with quantitative levels.
@@ -210,6 +211,10 @@ def build_action_plan(*,
         bl_records     : Optional list of records from BLResult.as_records();
                          provides delta_w_pp + posterior_mu.
         portfolio_value: Used to convert delta_w_pp to a quantity recommendation.
+        uncovered      : F-20 — tickers the sparse-history guard excluded from
+                         the structural model (no beta / BL target / quantity);
+                         their rows are annotated so a bare directional call
+                         («SELL» with qty=—) is explainable in the report.
 
     Returns a list of AssetActionRow ready for the PDF Action Plan table.
     The list is sorted: Trim / Sell first (highest priority), then Strong
@@ -295,6 +300,10 @@ def build_action_plan(*,
         if rsi is not None:
             if rsi > 75: reason_bits.append("RSI hot")
             elif rsi < 30: reason_bits.append("RSI oversold")
+        # F-20: name excluded from the structural model (short history) —
+        # say so instead of leaving an unexplained qty-less directional row.
+        if uncovered and ticker in uncovered:
+            reason_bits.append("вне модели: история < 60 торг. дней")
         reason = " · ".join(reason_bits) if reason_bits else action
 
         rows.append(AssetActionRow(
