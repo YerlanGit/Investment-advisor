@@ -103,7 +103,7 @@ Telegram /start
 | `regime.py` | Классификатор режима (Growth×Cycle оси + FRED-оверлей level⊕trend, ±0.05). |
 | `technicals.py` | RSI-14/MACD/Bollinger-Z/SMA/momentum 12-1/52w-high/volume-confirm (пилар T). |
 | `period_returns.py` | Мульти-период (1м/3м/6м/12м/YTD), TE/IR (лог-пространство, pairwise), sparse-robust портфельная серия — маскированная композитная с по-дневной ренормализацией весов, `MIN_DAILY_COVERAGE=0.5` (F-15). |
-| `portfolio_series.py` | Временные ряды портфеля (equity curve) для бота. |
+| `portfolio_series.py` | Временные ряды портфеля (equity curve + KPI-спарклайны); серия — из готового композита `port_log_returns` (F-21), легаси-фолбэк с фильтром <60 дн. |
 | `currency.py` | Base-Currency (H2): FX-трансформация цен (лаг T−1), GBX-пенсы ÷100 (F-7), RFR-реестр, H-1 дроп неконвертируемых. |
 | `sec_edgar.py` | Фундаментал SEC CompanyFacts: ROE/маржа/долг/рост, Altman-Z, Piotroski-F, FCF. |
 | `cds_feed.py` | Кредитный сигнал (CDS-прокси, free-слой). |
@@ -141,7 +141,7 @@ Telegram /start
 
 ---
 
-## 3. `tests/` — pytest-сьюты (32 файла; CI: `python -m pytest tests/ -q`)
+## 3. `tests/` — pytest-сьюты (33 файла; CI: `python -m pytest tests/ -q`)
 
 | Файл | Что покрывает |
 |---|---|
@@ -169,6 +169,7 @@ Telegram /start
 | `test_phase24_scenario_report.py` | Сценарный отчёт + тариф тиров. |
 | `test_phase25_math_sprint1.py` | **Спринт-1 математики**: F-1 инвариантность стресса к ортогонализации, F-4 базис Sharpe, F-7 GBX. |
 | `test_phase26_report_fixes.py` | **Post-release hotfix 2026-07-11** (сломанный DEEP-отчёт): F-14 гейт/кламп форвардной E[r] (e2e analyze_all), F-15 маскированная композитная серия, F-16 пропуск None-строк в premium-mapper, F-17 очистка RAG-выдержек. |
+| `test_phase27_composite_metrics.py` | **Композитная база метрик** (F-20…F-23): реализованные Sharpe/CAGR/CVaR/MaxDD на композите полной панели (легаси бит-в-бит на полных), спарклайны из `port_log_returns`, drag плечевых ETP (`apply_leveraged_drag`), аннотация вне-модельных имён в Action Plan. |
 | `test_factor_decomposition.py` | Факторная декомпозиция дисперсии + двойники. |
 | `test_freedom_auth.py` / `_client.py` / `_history.py` / `_models.py` | Tradernet: подпись, клиент, история, модели. |
 | `fetch_logs.py` · `query.txt` | Вспомогательные (не тесты). |
@@ -231,6 +232,7 @@ Telegram /start
 ### Домены / подсистемы
 | Файл | Статус | Назначение |
 |---|---|---|
+| [`METHODOLOGY_SPARSE_AND_LEVERAGED.md`](METHODOLOGY_SPARSE_AND_LEVERAGED.md) | 📌 | Молодые бумаги (SPCX) и плечевые ETP (CONL) в риск-метриках: композитная конвенция, drag, roadmap пер-активных окон/Vasicek. |
 | [`SMART_MONEY.md`](SMART_MONEY.md) | 📌 | Архитектура Smart-Money / инсайдеры (SEC Form 4). |
 | [`PRODUCTION_READINESS.md`](PRODUCTION_READINESS.md) | 🟢 | Пер-подсистемные оценки готовности + GA-блокеры. |
 | [`INFRA_NETWORKING.md`](INFRA_NETWORKING.md) | 🟢 | Прод-инциденты Cloud Run: WAF-блок цен (статический egress) + segfault RAG-ингеста. Команды фикса. |

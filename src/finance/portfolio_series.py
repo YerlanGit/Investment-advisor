@@ -101,44 +101,72 @@ def compute_kpi_trend_series(results: dict) -> Optional[dict]:
     MaxDD are decimals, Sharpe a bare ratio), or None when there is not enough
     history (≥ 90 daily price obs and ≥ 3 valid snapshots).  The caller scales /
     renders; no rendering here.
+
+    F-21 (2026-07-11): the series source is the engine's masked composite
+    (results["port_log_returns"] — per-day renormalised weights, full panel;
+    same series as the equity curve and the headline KPIs).  The previous
+    in-module reconstruction row-dropna'd ALL held names — one listing with
+    < 60 days of quotes (e.g. SPCX) collapsed the joint window below the
+    minimum and every sparkline silently rendered «нет истории».  The legacy
+    reconstruction is kept only as a fallback for callers that pass a results
+    dict without the precomputed series.
     """
     try:
-        history = results.get("history_result")
-        perf    = results.get("performance_table")
-        if perf is None or getattr(perf, "empty", True) or history is None:
-            return None
-        prices = getattr(history, "data", None)
-        if prices is None or getattr(prices, "empty", True) or len(prices) < 90:
-            return None
+        port_lr = None
+        plr = results.get("port_log_returns")
+        if plr is not None and getattr(plr, "__len__", None) and len(plr) >= 90:
+            port_lr = pd.Series(
+                np.asarray(getattr(plr, "values", plr), dtype=float))
+            port_lr = port_lr[np.isfinite(port_lr.values)]
+            if len(port_lr) < 90:
+                port_lr = None
 
-        total_val = float(results.get("total_value") or 1.0)
-        cols: list[str] = []
-        weights: list[float] = []
-        for _, row in perf.iterrows():
-            t  = str(row.get("Ticker", "")).strip()
-            cv = float(row.get("Current_Value", 0) or 0)
-            if not t or cv <= 0:
-                continue
-            # perf carries the broker's ORIGINAL tickers; the price frame is
-            # keyed by RESOLVED tickers (e.g. AAPL → AAPL.US).  Match exact
-            # first, then fall back to the base symbol before the dot.
-            if t in prices.columns:
-                col = t
-            else:
-                base = t.split(".")[0]
-                col  = next((c for c in prices.columns
-                             if c.split(".")[0] == base), None)
-            if col is not None:
-                cols.append(col)
-                weights.append(cv / total_val)
-        if not cols:
-            return None
+        if port_lr is None:
+            # Legacy fallback: rebuild from prices (pre-F-21 path).
+            history = results.get("history_result")
+            perf    = results.get("performance_table")
+            if perf is None or getattr(perf, "empty", True) or history is None:
+                return None
+            prices = getattr(history, "data", None)
+            if prices is None or getattr(prices, "empty", True) or len(prices) < 90:
+                return None
 
-        w        = np.array(weights)
-        daily_lr = np.log(prices[cols] / prices[cols].shift(1)).dropna()
-        if len(daily_lr) < 60:
-            return None
-        port_lr = (daily_lr * w).sum(axis=1)
+            total_val = float(results.get("total_value") or 1.0)
+            cols: list[str] = []
+            weights: list[float] = []
+            for _, row in perf.iterrows():
+                t  = str(row.get("Ticker", "")).strip()
+                cv = float(row.get("Current_Value", 0) or 0)
+                if not t or cv <= 0:
+                    continue
+                # perf carries the broker's ORIGINAL tickers; the price frame is
+                # keyed by RESOLVED tickers (e.g. AAPL → AAPL.US).  Match exact
+                # first, then fall back to the base symbol before the dot.
+                if t in prices.columns:
+                    col = t
+                else:
+                    base = t.split(".")[0]
+                    col  = next((c for c in prices.columns
+                                 if c.split(".")[0] == base), None)
+                if col is not None:
+                    cols.append(col)
+                    weights.append(cv / total_val)
+            if not cols:
+                return None
+
+            w        = np.array(weights)
+            # F-21: per-column min-history filter mirrors the engine's
+            # sparse-guard so one thin listing cannot null the joint window.
+            keep = [c for c in cols
+                    if int(prices[c].notna().sum()) >= 60]
+            if not keep:
+                return None
+            w = np.array([wi for c, wi in zip(cols, weights) if c in keep])
+            daily_lr = np.log(prices[keep] / prices[keep].shift(1)).dropna()
+            if len(daily_lr) < 60:
+                return None
+            port_lr = (daily_lr * w).sum(axis=1)
+
         if len(port_lr) > 252:
             port_lr = port_lr.iloc[-252:]
 
