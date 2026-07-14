@@ -1910,6 +1910,62 @@ def _build_integrity_checks(results: dict,
                    if has_ci else "точечная оценка (мало данных)"),
     })
 
+    # 5a. P-2/P-3/P-5 (audit F1/A2/A3): окно реализованных метрик + вердикт
+    # надёжности VaR + χ²-ДИ выборочной σ.  Раньше realized_window_days
+    # вычислялся, но гас между payload и шаблоном — наружу выходило «чистое»
+    # число с ложной точностью.
+    _rw = metrics.get("realized_window_days")
+    if _rw:
+        _insuff = metrics.get("var_reliability") == "insufficient_history"
+        _vci    = metrics.get("volatility_ci") or {}
+        _detail = f"{int(_rw)} торговых дней"
+        if _insuff:
+            _detail += " — VaR/CVaR ненадёжны (< 100 наблюдений)"
+        if _vci.get("lo_mult") and _vci.get("hi_mult"):
+            _detail += (f" · σ ×[{float(_vci['lo_mult']):.2f}, "
+                        f"{float(_vci['hi_mult']):.2f}] (χ², 95%)")
+        checks.append({
+            "status": "⚠" if _insuff else "✓",
+            "label":  "Окно риск-метрик",
+            "detail": _detail,
+        })
+
+    # 5b'. P-1/P-2 (audit C5/F1): плечевые daily-reset ETP — разложение
+    # эрозии форварда на контрактный variance drag и комиссию, по имени.
+    _lev_adj = metrics.get("leveraged_adjustments") or {}
+    if _lev_adj:
+        _parts = []
+        for _t, _d in list(_lev_adj.items())[:3]:
+            if _d.get("method") == "contractual":
+                _lbl = (f"{_t}: {_d.get('L'):+.0f}×"
+                        + (f" {_d['underlying']}" if _d.get("underlying") else ""))
+                _parts.append(
+                    f"{_lbl} · drag {float(_d.get('drag_ann_pct') or 0):.1f} пп/г"
+                    f" · комиссия {float(_d.get('fee_ann_pct') or 0):.1f} пп/г")
+            else:
+                _parts.append(f"{_t}: эмпирический drag "
+                              f"{float(_d.get('drag_ann_pct') or 0):.1f} пп/г (α̂)")
+        _more = len(_lev_adj) - 3
+        if _more > 0:
+            _parts.append(f"+{_more} ещё")
+        checks.append({
+            "status": "✓",
+            "label":  "Плечевые ETP",
+            "detail": "прогноз понижен: " + " · ".join(_parts),
+        })
+
+    # 5b''. P-4 (audit B1): статистическая надёжность бет короткого окна.
+    if metrics.get("beta_reliability") == "noisy_short_window":
+        _erw = metrics.get("expected_return_window_days")
+        checks.append({
+            "status": "⚠",
+            "label":  "Надёжность бет",
+            "detail": (f"SE(β) > 50% |β| на окне регрессии "
+                       f"{int(_erw)} дн — беты статистически шумные"
+                       if _erw else
+                       "SE(β) > 50% |β| — беты статистически шумные"),
+        })
+
     # 5b. F-4 (2026-07-10): Sharpe/Sortino estimator basis — the numerator is
     # the realised geometric return over the FULL window while the denominator
     # is the recency-weighted STRUCTURAL vol (EWMA(63)⊕Ledoit-Wolf).  The

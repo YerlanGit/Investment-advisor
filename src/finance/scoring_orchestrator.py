@@ -69,11 +69,16 @@ def _is_credit_not_applicable(ticker: str, sector: Optional[str]) -> bool:
     Asset-class guard: True when the Credit pillar (CDS / Altman / Piotroski /
     InterestCoverage) is conceptually meaningless for this position.
 
-    Triggers on either condition (defensive OR — sector classification can
+    Triggers on any condition (defensive OR — sector classification can
     be sparse on KZ-listed ETFs):
       • sector ∈ {Commodities, Gold, Silver, Oil, Bonds}
       • ticker stem starts with a known sovereign-bond or pure-commodity
         ETF prefix
+      • P-6 (audit E1/M-4, 2026-07-13): ticker is a daily-reset leveraged/
+        inverse ETP wrapper (CONL, TQQQ, …) — свопная обёртка без
+        корпоративной отчётности; без этого guard'а F-пиллар деградировал к
+        макро-тилту сектора 'Other' и печатал фантомный фундаментальный
+        вердикт (реестр: finance/leveraged.py, dependency-light).
 
     NaN-safe: a missing sector can arrive as float('nan') (pandas fills
     unmapped Fundamental_Sector cells with NaN, and `NaN or ""` returns NaN
@@ -88,7 +93,13 @@ def _is_credit_not_applicable(ticker: str, sector: Optional[str]) -> bool:
     if s in _CREDIT_NA_SECTORS:
         return True
     stem = str(ticker or "").upper().split(".")[0]
-    return stem.startswith(_CREDIT_NA_TICKER_PREFIXES)
+    if stem.startswith(_CREDIT_NA_TICKER_PREFIXES):
+        return True
+    try:
+        from finance.leveraged import is_leveraged_etp
+        return is_leveraged_etp(stem)
+    except Exception:       # реестр недоступен → прежнее поведение
+        return False
 
 
 # CDS lookup callable type:

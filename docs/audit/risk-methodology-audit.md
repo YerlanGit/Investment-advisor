@@ -5,6 +5,11 @@
 > **Ветка:** `claude/audit-risk-methodology-6cfoz3` (задание: `audit/risk-methodology`)
 > **Тесты:** `tests/test_phase28_risk_methodology_audit.py` — 10 passed / 8 xfailed (спецификации недостающих возможностей)
 > **Связанные документы:** `docs/METHODOLOGY_SPARSE_AND_LEVERAGED.md` (реализация F-20…F-23), `docs/AUDIT_360_2026-07-10.md`
+>
+> **⚡ ОБНОВЛЕНИЕ 2026-07-13 (второй проход):** правки **P-1…P-8 из §5
+> ВНЕДРЕНЫ** — см. раздел «Было/Стало» в конце документа. Из 8 xfail-
+> спецификаций 7 стали проходящими тестами (29 passed / 1 xfail);
+> итоговый вывод пересмотрен.
 
 ---
 
@@ -185,6 +190,49 @@
 
 ---
 
-## Итоговый вывод
+## Итоговый вывод (первый проход, до внедрения правок)
 
 **Реализованным (историческим) риск-метрикам — σ, historical VaR/CVaR, MaxDD, Sharpe — на книгах с CONL-подобными инструментами доверять для risk-based sizing МОЖНО (компаундинг дневного ресета учтён по построению, наивного L-масштабирования в коде нет), но форвардные оценки и стресс-сценарии по leveraged ETP, а также любые метрики книг, где окно истории < ~100 торговых дней или доминируют молодые листинги, до внедрения P-1…P-4 пригодны только как directional indicators — без ДИ на σ/ρ/β и без явного разложения drag система подаёт эти числа с ложной точностью.**
+
+---
+
+## Было/Стало — внедрение правок P-1…P-8 (2026-07-13, второй проход)
+
+Все правки §5 реализованы (кроме сознательно отложенной портфельной
+weighted-profitability агрегации — её отсутствие конструктивно безопасно,
+см. E1). Прод-инварианты сохранены: числа — в движке, формат — в
+`pdf_payload`, шаблоны/JSX не тронуты (integrity-чипы рендерятся генерически).
+
+| # | Было (вердикт аудита) | Стало | Код |
+|---|---|---|---|
+| P-1 | C1/C3/C5: реестр только имён; drag = min(α̂,0); ER не отделён — **PARTIAL/FAIL** | Реестр {L, база, ER} (`LEVERAGED_ETP_REGISTRY`; CONL=2× COIN, ER 1.04%); для известного L — контрактный drag −½L(L−1)σ_u² (σ_u=σ_ETP/\|L\|) + fee −ER/252 **раздельно**; α̂-фолбэк для имён без параметров; env `LEVERAGED_ETP_PARAMS` — **C1 PASS · C3 PASS · C5 PASS** | `finance/leveraged.py`; `investment_logic.py::apply_leveraged_forward` (QC `leveraged_adjustments`) |
+| P-2 | F1: `realized_window_days`/`leveraged_drag_tickers` гасли в payload — **PARTIAL** | Чипы integrity-панели: «Окно риск-метрик» (N дней + σ-ДИ + ⚠ при <100), «Плечевые ETP» (drag/fee по имени, contractual/empirical), «Надёжность бет» (⚠ при шумных SE) — **F1 PASS** | `pdf_payload.py::_build_integrity_checks` (чипы 5a/5b'/5b'') |
+| P-3 | A2/D2: точечный VaR на окне 60–99 печатался без флага — **PARTIAL** | `var_reliability` = `ok`/`insufficient_history` (порог `MIN_RELIABLE_TAIL_OBS`=100) в portfolio_metrics + ⚠-чип — **A2 PASS · D2 PASS** | `investment_logic.py` |
+| P-4 | B1/B2: SE(β) нет; сжатия нет — **FAIL** | SE(β)=σ_ε/(σ_f·√T) → `beta_standard_errors` + вердикт `beta_reliability` (warning при max SE/\|β\|>0.5 на окне <252); Vasicek w=n/(n+120) за флагом `BETA_SHRINKAGE` (**default OFF** до валидации Σ; prior Market=1.0, для ETP — L) — **B1 PASS · B2 PASS (за флагом)** | `investment_logic.py` |
+| P-5 | A3/D4: ДИ σ и ρ нет — **FAIL** | `finance/inference.py`: χ²-ДИ σ (Wilson–Hilferty, без scipy; T=20→[0.76,1.46] ✓, T=31→[0.80,1.34] ✓) и Fisher-ДИ ρ (ρ̂=0.3, n=20→[−0.16,0.66] ✓); `volatility_ci` в metrics, `max_corr_ci95`+`corr_window_days` в factor_diagnostics — **A3 PASS · D4 PASS** | `finance/inference.py`; `investment_logic.py` |
+| P-6 | E1/M-4: CONL получал фантомный макро-тилт в F-пилларе — **PARTIAL** | LETF-обёртки в guard «нет отчётности»: `_is_credit_not_applicable` += `is_leveraged_etp` → F/C-пиллары N/A — **E1 PASS** | `scoring_orchestrator.py` |
+| P-7 | H-2: линейный β·shock + cap ±35% срезал контрактную выпуклость LETF — **PARTIAL** | Path-dependent импакт реестровых имён: `(1+X_u)^L·exp(−½L(L−1)σ_u²·63)−1` (2× при базе −25% → −46.5%, а не капнутые −33%); cap к LETF не применяется; флаг `path_dependent` + счётчик `letf_path_n` — **C2-стресс PASS · C6-стресс PASS** | `finance/stress.py`; σ-карта из `analyze_all` |
+| P-8 | E4/M-5: SEC-покрытие только в штуках — **PARTIAL** | CoVe-строка: «N тикеров без SEC покрытия (X% книги по весу)» — **E4 PASS** | `finance/data_lineage.py::_sec_status` |
+
+**Тесты после внедрения:** `tests/test_phase28_risk_methodology_audit.py`
+29 passed / 1 xfail (спецификация weighted-profitability); полный прогон
+**662 passed / 13 skipped / 1 xfailed** (локальная среда; было 633/13 до
+аудита). Smoke-render трёх тиров — OK.
+
+**Открытые пункты (не блокирующие):** L-4 lock-up/price-discovery (LOW);
+Vasicek включить после валидационного прогона Σ на живых ступенчатых книгах
+(`BETA_SHRINKAGE=1`); ER-значения реестра — поддерживаемые константы
+(уточнять при листинге новых имён); портфельная weighted-profitability —
+только при появлении продуктовой потребности (xfail-спецификация готова).
+
+## Итоговый вывод (после внедрения P-1…P-8)
+
+**Системе можно доверять risk-based sizing по книгам с молодыми листингами и
+daily-reset leveraged ETP в пределах раскрываемых ею оговорок: исторические
+метрики честны по построению (как и были), форвард LETF теперь несёт
+контрактный drag с раздельной комиссией, стресс — path-dependent выпуклость,
+а короткие окна (< 100 наблюдений), широкие σ-ДИ и шумные беты явно
+флагуются в отчёте вместо ложной точности. Directional-статус сохраняется
+только для книг, ЦЕЛИКОМ состоящих из имён моложе 60 торговых дней (они вне
+структурной модели — метрики честно не печатаются), и для бет 60–250-дневных
+окон до включения Vasicek-сжатия.**

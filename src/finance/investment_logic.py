@@ -52,6 +52,30 @@ from finance.simulate import simulate_after_plan as _simulate_after_plan
 # sklearn-free; gracefully degrades when FRED_API_KEY is missing or network
 # is unreachable.
 from services.macro_data import MacroFeed as _MacroFeed
+# P-5 (audit risk-methodology): small-window confidence intervals — χ² for
+# the sample σ, Fisher z for correlations.  Dependency-light (stdlib only).
+from finance.inference import (
+    fisher_rho_ci as _fisher_rho_ci,
+    sigma_ci_multiplier as _sigma_ci_multiplier,
+)
+
+# P-3 (audit A2/D2): historical VaR/CVaR quantiles need ~100 observations for
+# a stable 95% tail; below this the point estimates are published with an
+# explicit "insufficient_history" reliability verdict instead of silently.
+MIN_RELIABLE_TAIL_OBS = 100
+
+# P-4 (audit B2, roadmap METHODOLOGY_SPARSE_AND_LEVERAGED §2.2): Vasicek
+# shrinkage of regression betas toward a prior — GATED, default OFF, because
+# it changes Σ on staggered books and needs its own validation pass before
+# production.  w = n/(n+n₀); prior: Market → 1.0 (or the ETP's leverage L for
+# registry names), style/EM factors → 0.0.
+BETA_SHRINKAGE_ENV = "BETA_SHRINKAGE"
+BETA_SHRINKAGE_PRIOR_OBS_ENV = "BETA_SHRINKAGE_PRIOR_OBS"
+
+
+def beta_shrinkage_enabled() -> bool:
+    return str(os.getenv(BETA_SHRINKAGE_ENV, "")).strip().lower() in (
+        "1", "true", "yes", "on")
 
 
 # ── BLOCK 3.5 — hierarchical factor orthogonalization (gated) ────────────────
@@ -99,36 +123,34 @@ def factor_orthogonalize_enabled() -> bool:
         "0", "false", "no", "off", "")
 
 
-# ── F-23 — daily-reset leveraged ETPs: structural variance drag ──────────────
+# ── F-23 / P-1 — daily-reset leveraged ETPs: structural variance drag ────────
 # A k×-daily-reset product's log return is ≈ k·r_u − ½k(k−1)σ_u² per day: the
 # −½k(k−1)σ_u² variance drag is CONTRACTUAL (rebalancing cost), not luck.  In
 # the factor regression that drag lands in the intercept α̂ — which the F-14
 # forward panel rightly EXCLUDES for ordinary names (realised idiosyncratic
-# drift is not a persistent premium).  For registry-flagged leveraged ETPs the
-# NEGATIVE part of α̂ is retained, so β·μ no longer overstates their forward
-# return (a 2× ETF at 90% vol carries ~20 pp/yr of drag).  Positive α̂ is
-# never added back — the adjustment can only lower a forecast.
-# Base symbols (exchange suffix stripped); extend via LEVERAGED_ETP_EXTRA
-# (comma-separated) without a redeploy.
-_LEVERAGED_ETP_BASES = {
-    "CONL", "XNDU",                                   # held in live books
-    "TQQQ", "SQQQ", "QLD", "SSO", "SDS", "SPXL", "SPXS", "UPRO", "SPXU",
-    "SOXL", "SOXS", "TNA", "TZA", "LABU", "LABD", "TECL", "TECS",
-    "TSLL", "TSLQ", "NVDL", "NVDS", "MSTX", "MSTU", "MSTZ",
-    "YINN", "YANG", "CWEB", "WEBL", "FAS", "FAZ", "TMF", "TMV",
-    "UVXY", "SVXY", "BITX", "ETHU",
-}
+# drift is not a persistent premium).
+#
+# P-1 (2026-07-13, audit risk-methodology): the name-only registry moved to
+# `finance/leveraged.py` and now carries the leverage multiplier L, the
+# underlying and the expense ratio.  For names with a KNOWN L the forward
+# drag is the CONTRACTUAL −½L(L−1)σ_u² (σ_u = σ_ETP/|L| from the ETP's own
+# daily history) plus the fee −ER/252, disclosed separately (C5).  Names in
+# the registry WITHOUT parameters keep the F-23 empirical fallback
+# min(α̂, 0).  Either way the adjustment can only LOWER a forecast (the
+# anti-218% guard is preserved).  Extend via LEVERAGED_ETP_EXTRA (names) or
+# LEVERAGED_ETP_PARAMS (full parameters) without a redeploy.
+from finance.leveraged import (
+    contractual_drag_daily as _contractual_drag_daily,
+    etp_info as _etp_info,
+    is_leveraged_etp as _is_leveraged_etp_impl,
+)
 
 
 def _is_leveraged_etp(ticker: str) -> bool:
     """True when the BASE symbol (suffix stripped) is a known daily-reset
-    leveraged/inverse ETP, or is listed in the LEVERAGED_ETP_EXTRA env var."""
-    base = str(ticker or "").split(".")[0].strip().upper()
-    if not base:
-        return False
-    extra = {b.strip().upper()
-             for b in os.getenv("LEVERAGED_ETP_EXTRA", "").split(",") if b.strip()}
-    return base in _LEVERAGED_ETP_BASES or base in extra
+    leveraged/inverse ETP (registry finance/leveraged.py or env extras).
+    Kept as the historical name — tests and callers import it from here."""
+    return _is_leveraged_etp_impl(ticker)
 
 
 def apply_leveraged_drag(expected_log_daily: "np.ndarray",
@@ -136,7 +158,10 @@ def apply_leveraged_drag(expected_log_daily: "np.ndarray",
                          alpha_daily) -> "np.ndarray":
     """F-23: add min(α̂_daily, 0) to the forward daily log expectation of
     leveraged-ETP tickers only.  Pure function so the policy is unit-testable:
-    ordinary names and positive alphas pass through untouched."""
+    ordinary names and positive alphas pass through untouched.  Retained as
+    the EMPIRICAL fallback for registry names without a known multiplier —
+    `apply_leveraged_forward` below routes between this and the contractual
+    formula."""
     out = np.asarray(expected_log_daily, dtype=float).copy()
     alpha = pd.to_numeric(pd.Series(list(alpha_daily)), errors="coerce")\
               .fillna(0.0).values
@@ -144,6 +169,69 @@ def apply_leveraged_drag(expected_log_daily: "np.ndarray",
         if i < len(out) and i < len(alpha) and _is_leveraged_etp(t):
             out[i] += min(float(alpha[i]), 0.0)
     return out
+
+
+def apply_leveraged_forward(expected_log_daily: "np.ndarray",
+                            tickers,
+                            alpha_daily,
+                            sigma_daily_map: "dict | None" = None,
+                            ) -> "tuple[np.ndarray, dict]":
+    """P-1: forward adjustment for daily-reset leveraged ETPs, with the
+    contractual/empirical split disclosed per ticker.
+
+    For each registry ticker:
+      • L known AND σ_ETP available → contractual: drag = −½L(L−1)(σ_ETP/|L|)²,
+        fee = −ER/252 — applied INSTEAD of the α̂ fallback (α̂ already contains
+        the realised drag; applying both would double-count);
+      • otherwise → empirical F-23 fallback min(α̂, 0).
+    Ordinary names pass through untouched.  Every adjustment is ≤ 0.
+
+    Returns (adjusted_array, details) where details maps ticker →
+    {method, L, underlying, drag_daily, fee_daily, drag_ann_pct, fee_ann_pct}
+    for the QC panel (audit C5: drag and cost-of-leverage are separate rows).
+    """
+    out = np.asarray(expected_log_daily, dtype=float).copy()
+    alpha = pd.to_numeric(pd.Series(list(alpha_daily)), errors="coerce")\
+              .fillna(0.0).values
+    sigma_daily_map = sigma_daily_map or {}
+    details: dict[str, dict] = {}
+    for i, t in enumerate(tickers):
+        if i >= len(out) or i >= len(alpha):
+            continue
+        info = _etp_info(t)
+        if info is None:
+            continue
+        sigma = sigma_daily_map.get(str(t))
+        if info.leverage is not None and sigma is not None and \
+                np.isfinite(float(sigma)) and float(sigma) > 0:
+            drag, fee = _contractual_drag_daily(
+                info.leverage, float(sigma), info.expense_ratio)
+            out[i] += drag + fee
+            details[str(t)] = {
+                "method":       "contractual",
+                "L":            float(info.leverage),
+                "underlying":   info.underlying,
+                "drag_daily":   round(drag, 8),
+                "fee_daily":    round(fee, 8),
+                # Annualised display twins (log→simple on each component so
+                # the QC panel reads in pp/yr without re-deriving).
+                "drag_ann_pct": round((np.exp(drag * 252) - 1.0) * 100, 2),
+                "fee_ann_pct":  round((np.exp(fee * 252) - 1.0) * 100, 2),
+            }
+        else:
+            emp = min(float(alpha[i]), 0.0)
+            out[i] += emp
+            details[str(t)] = {
+                "method":       "empirical_alpha",
+                "L":            (float(info.leverage)
+                                 if info.leverage is not None else None),
+                "underlying":   info.underlying,
+                "drag_daily":   round(emp, 8),
+                "fee_daily":    0.0,
+                "drag_ann_pct": round((np.exp(emp * 252) - 1.0) * 100, 2),
+                "fee_ann_pct":  0.0,
+            }
+    return out, details
 
 
 def orthogonalize_factors_hierarchical(f_data: "pd.DataFrame",
@@ -872,6 +960,19 @@ class MAC3RiskEngine:
         B_matrix = [] # Экспозиции
         specific_variances = [] # Специфический риск
         exposures_report = {}
+        # P-4 (audit B1): SE(β_k) ≈ σ_ε / (σ_{f_k}·√T) — точная OLS-формула
+        # для ОРТОГОНАЛЬНЫХ регрессоров; факторы ортогонализованы по умолчанию
+        # (BLOCK 3.5), для legacy raw-режима это нижняя граница SE.  Кэшируем
+        # входы один раз на весь цикл.
+        _f_std_daily = f_data.std(ddof=1)
+        _reg_T = int(len(f_data))
+        beta_se_map: dict[str, dict[str, float]] = {}
+        # P-4b: Vasicek-сжатие (default OFF — см. beta_shrinkage_enabled).
+        _shrink_on = beta_shrinkage_enabled()
+        try:
+            _shrink_n0 = max(1, int(os.getenv(BETA_SHRINKAGE_PRIOR_OBS_ENV, "120")))
+        except (TypeError, ValueError):
+            _shrink_n0 = 120
 
         for asset in valid_originals:
             y = a_data[asset]
@@ -883,7 +984,32 @@ class MAC3RiskEngine:
             model = Ridge(alpha=0.001, fit_intercept=True).fit(X, y)
             betas = model.coef_
             alpha = model.intercept_
-            residuals = np.asarray(y - model.predict(X), dtype=float)
+
+            # P-4b: Vasicek shrinkage toward the prior (Market → 1.0, либо L
+            # для реестровых ETP; стили/EM → 0).  Интерсепт и остатки
+            # ПЕРЕсчитываются с сжатыми бетами, чтобы D в Σ = B·F·Bᵀ + D
+            # остался согласованным.  Выключено по умолчанию — прод не
+            # меняется, пока сжатие не пройдёт отдельную валидацию.
+            if _shrink_on:
+                _w_shr = _reg_T / (_reg_T + _shrink_n0)
+                _lev = None
+                try:
+                    from finance.leveraged import leverage_of as _lev_of
+                    _lev = _lev_of(asset)
+                except Exception:
+                    _lev = None
+                prior = np.array([
+                    (float(_lev) if (_lev is not None and k == "Market") else
+                     1.0 if k == "Market" else 0.0)
+                    for k in f_data.columns], dtype=float)
+                betas = _w_shr * np.asarray(betas, dtype=float) \
+                    + (1.0 - _w_shr) * prior
+                alpha = float(np.mean(y)
+                              - np.asarray(X.mean().values, dtype=float) @ betas)
+                residuals = np.asarray(
+                    y - (X.values @ betas + alpha), dtype=float)
+            else:
+                residuals = np.asarray(y - model.predict(X), dtype=float)
 
             # Guard: ddof=1 variance needs ≥2 finite residuals, else it
             # divides by (n-1)=0 → NaN/Inf that would poison D and the
@@ -899,6 +1025,19 @@ class MAC3RiskEngine:
 
             B_matrix.append(betas)
             specific_variances.append(spec_var)
+
+            # P-4 (audit B1): standard errors of the fitted betas.
+            # SE(β_k) = σ_ε / (σ_{f_k}·√T); NaN-safe on degenerate factors.
+            if finite_res.size >= 2 and _reg_T > 0:
+                _res_sd = float(np.std(finite_res, ddof=1))
+                _se_row: dict[str, float] = {}
+                for _k in f_data.columns:
+                    _fsd = float(_f_std_daily.get(_k, 0.0) or 0.0)
+                    if _fsd > 0 and np.isfinite(_res_sd):
+                        _se_row[str(_k)] = round(
+                            _res_sd / (_fsd * np.sqrt(_reg_T)), 6)
+                if _se_row:
+                    beta_se_map[str(asset)] = _se_row
 
             exposures_report[asset] = {f'Beta_{k}': b for k, b in zip(f_data.columns, betas)}
             exposures_report[asset]['Specific_Alpha_Daily'] = alpha
@@ -954,10 +1093,17 @@ class MAC3RiskEngine:
                 _off  = _corr - np.eye(_corr.shape[0])
                 _max_off = float(np.max(np.abs(_off))) if _off.size else 0.0
                 _cond    = float(np.linalg.cond(_corr))
+                # P-5 (audit D4): Fisher z-ДИ на максимальную |off-diag|
+                # корреляцию — на коротком окне регрессии знак/величина ρ̂
+                # статистически не определены, и ДИ делает это видимым.
+                _corr_ci = _fisher_rho_ci(_max_off, int(len(returns)))
                 factor_diagnostic = {
                     "n_factors":        int(_F.shape[0]),
                     "factors":          list(f_data.columns),
                     "max_abs_corr":     round(_max_off, 4),
+                    "max_corr_ci95":    ([round(x, 4) for x in _corr_ci]
+                                         if _corr_ci else None),
+                    "corr_window_days": int(len(returns)),
                     "condition_number": round(_cond, 2),
                     "near_collinear":   bool(_max_off > 0.95 or _cond > 30.0),
                     # BLOCK 3.5: whether the hierarchical orthogonalization was
@@ -1141,6 +1287,27 @@ class MAC3RiskEngine:
             mandate=getattr(self, "risk_mandate", "MODERATE"),
         )
 
+        # P-4 (audit B1): сводный вердикт надёжности бет — максимальная
+        # ОТНОСИТЕЛЬНАЯ SE по Market-оси; > 0.5 на окне регрессии короче
+        # торгового года ⇒ беты статистически шумные (β=1.8 при SE=1.0
+        # неотличима от 1.0) — warning в лог + вердикт в metrics.
+        _beta_reliability = "ok"
+        try:
+            _rel_ses = []
+            for _a, _ses in beta_se_map.items():
+                _b_mkt = float(exposures_report.get(_a, {}).get("Beta_Market", 0.0) or 0.0)
+                _se_mkt = float(_ses.get("Market", 0.0) or 0.0)
+                if abs(_b_mkt) > 1e-9 and _se_mkt > 0:
+                    _rel_ses.append(_se_mkt / abs(_b_mkt))
+            if _rel_ses and max(_rel_ses) > 0.5 and _reg_T < self.trading_days:
+                _beta_reliability = "noisy_short_window"
+                logger.warning(
+                    "Беты статистически шумные: max SE(β_Market)/|β| = %.2f "
+                    "на окне %d торг. дней (< %d).",
+                    max(_rel_ses), _reg_T, self.trading_days)
+        except Exception:
+            _beta_reliability = "ok"
+
         # Sharpe / Sortino with currency-matched, geometrically-compounded RFR
         # (H1+H3).  ann_return is geometric simple-return, RFR is annual
         # simple-return — both already in the same units (no fractional/log mix).
@@ -1165,6 +1332,26 @@ class MAC3RiskEngine:
             # Annualised_Return, VaR/CVaR, MaxDD) was computed on — composite
             # window when it extends the intersection, else the intersection.
             "realized_window_days":  int(len(port_returns_daily)),
+            # P-3 (audit A2/D2): explicit reliability verdict for the
+            # historical VaR/CVaR quantiles — ~100 obs is the floor for a
+            # stable 95% tail; below it the numbers print WITH the flag.
+            "var_reliability":       ("ok"
+                                      if len(port_returns_daily) >= MIN_RELIABLE_TAIL_OBS
+                                      else "insufficient_history"),
+            # P-5 (audit A3): χ²-ДИ множители на выборочную σ реализованного
+            # окна — «σ известна с точностью ×[lo, hi]».  None на окнах < 2.
+            "volatility_ci":         (
+                {"lo_mult": round(_vci[0], 3), "hi_mult": round(_vci[1], 3),
+                 "window_days": int(len(port_returns_daily)),
+                 "confidence": 0.95}
+                if (_vci := _sigma_ci_multiplier(int(len(port_returns_daily))))
+                else None),
+            # P-4 (audit B1): SE(β) per asset/factor + сводный флаг
+            # надёжности: max относительная SE по Market-оси > 0.5 на окне
+            # короче года ⇒ беты статистически шумные.
+            "beta_standard_errors":  beta_se_map,
+            "beta_reliability":      _beta_reliability,
+            "beta_shrinkage_applied": bool(_shrink_on),
             # H2 audit trail — surfaced to the report's QC panel.
             "reporting_currency":    self.reporting_currency.value,
             "risk_free_rate_annual": self.current_rfr_annual,
@@ -1534,6 +1721,28 @@ class UniversalPortfolioManager:
         #      intercept (realised idiosyncratic drift) is EXCLUDED from the
         #      forward forecast (F-14); it stays visible via Alpha_Specific.
         #   5. Specific Alpha = actual return - expected return (in %).
+        # P-1/P-7: σ_ETP (daily, ddof=1) for each registry leveraged-ETP name,
+        # from its OWN price history — shared by the forward-drag adjustment
+        # and the path-dependent stress branch.  ≥60 obs floor (sparse-guard
+        # parity); thinner names simply stay absent from the map.
+        letf_sigma_map: dict[str, float] = {}
+        try:
+            for _t in df.index:
+                if not _is_leveraged_etp(_t):
+                    continue
+                _res_l = self.engine.resolve_tickers([_t])
+                _col = _res_l[0] if _res_l else None
+                if _col and _col in all_data.columns:
+                    _pr = all_data[_col].dropna()
+                    if len(_pr) >= _MIN_OVERLAP_TDAYS:
+                        _lr = np.log(_pr / _pr.shift(1)).dropna()
+                        _sd = float(_lr.std(ddof=1))
+                        if np.isfinite(_sd) and _sd > 0:
+                            letf_sigma_map[str(_t)] = _sd
+        except Exception as _exc:
+            logger.warning("LETF sigma map skipped: %s", _exc)
+            letf_sigma_map = {}
+
         present_factor_keys = [
             k for k, v in self.engine.factor_tickers.items() if v in all_data.columns
         ]
@@ -1571,17 +1780,23 @@ class UniversalPortfolioManager:
             # drift remains visible через Alpha_Specific below.
             factor_log_daily = df[beta_cols].fillna(0).values @ mu_vec
             expected_log_daily = factor_log_daily
-            # F-23: leveraged daily-reset ETPs — retain the NEGATIVE part of
-            # the regression intercept (structural variance drag) so β·μ does
-            # not overstate their forward return.  Ordinary names untouched.
+            # F-23/P-1: leveraged daily-reset ETPs — lower the forward by the
+            # CONTRACTUAL variance drag −½L(L−1)σ_u² + fee −ER/252 when the
+            # multiplier L is in the registry (finance/leveraged.py), else by
+            # the empirical min(α̂,0) fallback.  Ordinary names untouched.
             if 'Specific_Alpha_Daily' in df.columns:
                 try:
-                    expected_log_daily = apply_leveraged_drag(
+                    # letf_sigma_map построена выше (≥60 obs floor); имена
+                    # тоньше порога падают в α̂-фолбэк (α̂=0 → no-op,
+                    # бит-в-бит пре-P-1 поведение).
+                    expected_log_daily, _lev_details = apply_leveraged_forward(
                         expected_log_daily, list(df.index),
-                        df['Specific_Alpha_Daily'])
-                    _dragged = [t for t in df.index if _is_leveraged_etp(t)]
-                    if _dragged and isinstance(port_metrics, dict):
-                        port_metrics["leveraged_drag_tickers"] = _dragged
+                        df['Specific_Alpha_Daily'], letf_sigma_map)
+                    if _lev_details and isinstance(port_metrics, dict):
+                        port_metrics["leveraged_adjustments"] = _lev_details
+                        # Back-compat key (pre-P-1 consumers/tests).
+                        port_metrics["leveraged_drag_tickers"] = \
+                            list(_lev_details.keys())
                 except Exception as _exc:
                     logger.warning("Leveraged-ETP drag skipped: %s", _exc)
             df['Expected_Return'] = np.exp(
@@ -1767,6 +1982,10 @@ class UniversalPortfolioManager:
                 # betas to the stress engine so it maps the raw shock catalog
                 # into the same space (invariant to FACTOR_ORTHOGONALIZE).
                 ortho_betas  = getattr(self.engine, "_last_ortho_betas", {}) or {},
+                # P-7: реестровые daily-reset ETP считаются path-dependent —
+                # (1+X_u)^L·exp(−½L(L−1)σ_u²·63)−1 вместо линейного β·shock
+                # с капом ±35% (кап срезал КОНТРАКТНУЮ выпуклость плеча).
+                letf_sigma_daily = letf_sigma_map,
             )
         except Exception as exc:
             logger.warning("stress scenarios build failed: %s", exc)
