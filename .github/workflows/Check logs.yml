@@ -84,9 +84,10 @@ jobs:
         severity  = (os.environ.get("SEVERITY") or "DEFAULT").strip().upper()
         limit     = int(os.environ.get("LIMIT") or "0")
 
-        # «ALL» — удобный синоним для «все уровни» (DEFAULT = самый низкий).
+        # «ALL»/DEFAULT/пусто — значит «все уровни».
         if severity in ("ALL", ""):
             severity = "DEFAULT"
+        want_all_levels = severity == "DEFAULT"
 
         # --- окно времени -------------------------------------------------
         # Явный интервал start/end имеет приоритет; иначе — «последние N часов».
@@ -100,9 +101,15 @@ jobs:
         filter_parts = [
             'resource.type="cloud_run_revision"',
             f'resource.labels.service_name="{service}"',
-            f'severity>="{severity}"',
             f'timestamp>="{since}"',
         ]
+        # ВАЖНО: для «всех логов» severity-клаузу НЕ добавляем вовсе.
+        # В Cloud Logging `severity>="DEFAULT"` на практике возвращает только
+        # записи с уровнем ровно DEFAULT (а Cloud Run пишет обычный stdout
+        # как DEFAULT), из-за чего INFO/WARNING/ERROR терялись. Без клаузы
+        # возвращаются записи ВСЕХ уровней. Порог добавляем только когда он > DEFAULT.
+        if not want_all_levels:
+            filter_parts.append(f'severity>="{severity}"')
         if end_arg:
             filter_parts.append(f'timestamp<="{end_arg}"')
         log_filter = " AND ".join(filter_parts)
@@ -162,9 +169,11 @@ jobs:
                 "trace":     getattr(e, "trace", None),
             })
 
+        sev_label = "ALL (все уровни)" if want_all_levels else f"≥ {severity}"
+
         # --- файлы для артефакта (полные, без обрезки) --------------------
         header = (
-            f"# Cloud Run logs — service={service}, severity>={severity}\n"
+            f"# Cloud Run logs — service={service}, severity={sev_label}\n"
             f"# window: {since} .. {end_arg or 'now'}\n"
             f"# filter: {log_filter}\n"
             f"# entries: {len(records)}\n"
@@ -180,7 +189,7 @@ jobs:
         # --- превью в консоль + step summary (тут обрезаем для читаемости) -
         summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
         out_lines = [
-            f"### Cloud Run logs — `{service}` (severity ≥ {severity})\n",
+            f"### Cloud Run logs — `{service}` (severity {sev_label})\n",
             f"Окно: `{since}` .. `{end_arg or 'now'}` · Найдено записей: **{len(records)}**\n",
             f"Полная выгрузка — в артефакте **cloud-run-logs** (`cloud_run_logs.log` / `.json`).\n",
         ]
