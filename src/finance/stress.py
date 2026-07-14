@@ -277,6 +277,7 @@ def apply_scenario(perf_df: pd.DataFrame,
                     port_vol_ann:        float = 0.0,
                     ann_return_baseline: float = DEFAULT_ANN_RETURN_FOR_RECOVERY,
                     ortho_betas:         Optional[dict] = None,
+                    letf_sigma_daily:    Optional[dict] = None,
                     ) -> dict:
     """
     Apply a single stress scenario.
@@ -288,6 +289,16 @@ def apply_scenario(perf_df: pd.DataFrame,
                       the Beta_* columns actually live in (see
                       ``residualize_shocks``).  None/{} ⇒ identity (legacy
                       raw-beta engine).
+        letf_sigma_daily : P-7 (audit H-2) — {ticker: дневная σ_ETP} для
+                      реестровых daily-reset ETP.  Для имени с известным
+                      плечом L импакт считается PATH-DEPENDENT:
+                      (1+X_u)^L·exp(−½L(L−1)σ_u²·63)−1, где X_u = линейный
+                      β·shock ÷ L — вместо линейной аппроксимации с convex-cap
+                      ±35% (кап калиброван под нестабильность бет ОБЫЧНЫХ
+                      имён; у LETF выпуклость КОНТРАКТНАЯ, срезать её — значит
+                      систематически недооценивать хвост: 2× ETP в базе −25%
+                      теряет ~−46%, а не капнутые −32%).  None/{} или имя без
+                      σ/L ⇒ прежний линейный путь (бит-в-бит).
 
     Returns a dict with:
       • name, category, coverage, note            (passthrough from spec)
@@ -347,6 +358,8 @@ def apply_scenario(perf_df: pd.DataFrame,
     port_pct = 0.0
     by_asset: list[dict] = []
     convexity_applied = 0          # how many positions hit the cap (audit)
+    letf_path_applied = 0          # P-7: how many LETF rows went path-dependent
+    letf_sigma_daily = letf_sigma_daily or {}
     for _, row in perf_df.iterrows():
         ticker = str(row.get("Ticker", "—"))
         cv     = _safe_float(row.get("Current_Value"), 0.0)
@@ -364,19 +377,43 @@ def apply_scenario(perf_df: pd.DataFrame,
             beta_val = _safe_float(row.get(beta_col), 0.0)
             delta_log_ret_raw += beta_val * float(shk)
 
-        # H4: convex saturation above ±20% with asymptote at ±35%.
-        delta_log_ret = _convex_cap(delta_log_ret_raw)
-        if abs(delta_log_ret_raw) > CONVEXITY_THRESHOLD:
-            convexity_applied += 1
+        # P-7 (audit H-2): daily-reset LETF with a known multiplier — the
+        # period impact is computed through the reset mechanics instead of
+        # the linear β·shock + convex cap.  The linear Σβ·shock already
+        # embeds ~L× the underlying move (betas are fitted on the ETP's own
+        # returns), so the implied underlying move is X_u = linear/L.
+        path_dependent = False
+        sigma_d = _safe_float(letf_sigma_daily.get(ticker), 0.0)
+        if sigma_d > 0:
+            try:
+                from finance.leveraged import (
+                    leverage_of, path_dependent_period_return)
+                L = leverage_of(ticker)
+            except Exception:
+                L = None
+            if L:
+                x_u = delta_log_ret_raw / float(L)
+                delta_log_ret = path_dependent_period_return(
+                    L, x_u, sigma_d,
+                    horizon_days=int(QUARTER_FRACTION_OF_YEAR * 252))
+                path_dependent = True
+                letf_path_applied += 1
+
+        if not path_dependent:
+            # H4: convex saturation above ±20% with asymptote at ±35%.
+            delta_log_ret = _convex_cap(delta_log_ret_raw)
+            if abs(delta_log_ret_raw) > CONVEXITY_THRESHOLD:
+                convexity_applied += 1
         contrib_pct = w_i * delta_log_ret         # fraction of total portfolio
         port_pct   += contrib_pct
         by_asset.append({
             "ticker":           ticker,
             "weight_pct":       round(w_i * 100, 2),
-            "asset_delta_pct":  round(delta_log_ret * 100, 2),    # ΔPnL_i / V_i (after cap)
-            "asset_delta_raw":  round(delta_log_ret_raw * 100, 2),# pre-cap, for transparency
+            "asset_delta_pct":  round(delta_log_ret * 100, 2),    # ΔPnL_i / V_i (after cap/path)
+            "asset_delta_raw":  round(delta_log_ret_raw * 100, 2),# pre-cap linear, for transparency
             "contrib_pct":      round(contrib_pct * 100, 3),      # of total portfolio
             "contrib_dollar":   round(contrib_pct * total_value, 2),
+            "path_dependent":   path_dependent,                   # P-7 audit flag
         })
 
     # Sort contributions by absolute impact (worst first).
@@ -385,6 +422,7 @@ def apply_scenario(perf_df: pd.DataFrame,
     out["port_pct"]    = round(port_pct, 4)              # decimal, e.g. -0.093
     out["port_dollar"] = round(port_pct * total_value, 2)
     out["convexity_applied_n"] = convexity_applied       # H4 audit count
+    out["letf_path_n"]         = letf_path_applied       # P-7 audit count
 
     # Intra-period max drawdown estimate (only for losing scenarios).
     if port_pct < 0:
@@ -422,6 +460,7 @@ def run_stress_scenarios(perf_df:          pd.DataFrame,
                           scenarios:        Optional[Iterable[ScenarioSpec]] = None,
                           ann_return_baseline: float = DEFAULT_ANN_RETURN_FOR_RECOVERY,
                           ortho_betas:      Optional[dict] = None,
+                          letf_sigma_daily: Optional[dict] = None,
                           ) -> list[dict]:
     """
     Run the full stress table.
@@ -438,6 +477,10 @@ def run_stress_scenarios(perf_df:          pd.DataFrame,
                              orthogonalization; maps the raw shock catalog into
                              the residual space the Beta_* columns live in.
                              None/{} when orthogonalization did not run.
+        letf_sigma_daily   : P-7 — {ticker: дневная σ_ETP} реестровых
+                             daily-reset ETP; включает path-dependent расчёт
+                             их импакта (см. apply_scenario).  None/{} ⇒
+                             прежний линейный путь для всех имён.
 
     Returns:
         list[dict] — one row per scenario in the input order.  Always returns
@@ -452,7 +495,8 @@ def run_stress_scenarios(perf_df:          pd.DataFrame,
         apply_scenario(perf_df, total_value, sc,
                         port_vol_ann=port_vol_ann,
                         ann_return_baseline=ann_return_baseline,
-                        ortho_betas=ortho_betas)
+                        ortho_betas=ortho_betas,
+                        letf_sigma_daily=letf_sigma_daily)
         for sc in scenarios
     ]
 

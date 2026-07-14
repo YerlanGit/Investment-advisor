@@ -156,7 +156,22 @@ def _sec_status(results: dict, today: date) -> list[dict]:
     notes: list[str] = []
     status = "ok"
     if skipped:
-        notes.append(f"{len(skipped)} тикеров без SEC покрытия")
+        # P-8 (audit E4/M-5): покрытие в % ВЕСА книги, не только в штуках —
+        # «3 тикера без покрытия» может значить и 5%, и 60% портфеля.
+        _w_note = ""
+        try:
+            total_v = float(results.get("total_value") or 0.0)
+            if perf is not None and not perf.empty and total_v > 0 \
+                    and "Current_Value" in perf.columns:
+                mask_cv = perf["Ticker"].astype(str).isin(skipped) \
+                    if "Ticker" in perf.columns else \
+                    perf.index.astype(str).isin(skipped)
+                skipped_v = float(perf.loc[mask_cv, "Current_Value"]
+                                  .fillna(0.0).sum())
+                _w_note = f" ({skipped_v / total_v * 100:.0f}% книги по весу)"
+        except Exception:
+            _w_note = ""
+        notes.append(f"{len(skipped)} тикеров без SEC покрытия{_w_note}")
         status = "warn"
     if oldest_age_m is not None:
         if oldest_age_m >= SEC_FILING_STALE_MONTHS:

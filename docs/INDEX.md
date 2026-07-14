@@ -92,7 +92,9 @@ Telegram /start
 | Файл | Функция |
 |---|---|
 | `investment_logic.py` | **Ядро MAC3**: `analyze_all`, Ridge-беты, ковариация EWMA(63)⊕Ledoit-Wolf + PSD-проекция, иерархическая ортогонализация (F-1: экспорт β̂ child→parent), Euler-декомпозиция, bootstrap-CVaR (SHA-256 seed), Marginal VaR, sparse-guard окна (F-6), форвардная E[r] = β·μ без альфы + кламп [−50%,+100%] + гейт панели на окно ≥252 дней (F-14), загрузка цен (lookback 1825). |
-| `stress.py` | Параметрические стресс-сценарии: β×шок, convexity cap (20%→асимптота 35%), `residualize_shocks` (F-1 — маппинг raw-шоков в residual-пространство). |
+| `stress.py` | Параметрические стресс-сценарии: β×шок, convexity cap (20%→асимптота 35%), `residualize_shocks` (F-1 — маппинг raw-шоков в residual-пространство), path-dependent импакт реестровых LETF `(1+X_u)^L·exp(−½L(L−1)σ_u²·63)−1` (P-7). |
+| `leveraged.py` | **P-1 (2026-07-13)**: реестр daily-reset leveraged/inverse ETP {L, базовый актив, expense ratio} (CONL=2× COIN…), API `leverage_of`/`etp_info`/`is_leveraged_etp`, контрактный drag −½L(L−1)σ_u² и fee −ER/252 раздельно, path-формула для стресса; env `LEVERAGED_ETP_EXTRA`/`LEVERAGED_ETP_PARAMS`. Stdlib-only. → `docs/METHODOLOGY_SPARSE_AND_LEVERAGED.md §6` |
+| `inference.py` | **P-5 (2026-07-13)**: ДИ малых окон без scipy — χ²-ДИ волатильности (Wilson–Hilferty; T=20→×[0.76,1.46]) и Fisher z-ДИ корреляции (ρ̂=0.3, n=20→[−0.16,0.66]); питает `volatility_ci` и `max_corr_ci95`. Stdlib-only. |
 | `scoring.py` | 4-Pillar скоры F/V/T/C, robust-z (MAD), composite risk 0-100 (SSOT), классификатор классов активов, hotspot-порог. |
 | `scoring_orchestrator.py` | Оркестратор 4-Pillar: сектора, динамические SEC-когорты, действия Buy/Hold/Trim/Sell. |
 | `factor_decomposition.py` | Euler-декомпозиция дисперсии ПО ФАКТОРАМ + «факторные двойники» + unique-risk (аддитивный слой). |
@@ -141,7 +143,7 @@ Telegram /start
 
 ---
 
-## 3. `tests/` — pytest-сьюты (33 файла; CI: `python -m pytest tests/ -q`)
+## 3. `tests/` — pytest-сьюты (34 файла; CI: `python -m pytest tests/ -q`)
 
 | Файл | Что покрывает |
 |---|---|
@@ -170,6 +172,7 @@ Telegram /start
 | `test_phase25_math_sprint1.py` | **Спринт-1 математики**: F-1 инвариантность стресса к ортогонализации, F-4 базис Sharpe, F-7 GBX. |
 | `test_phase26_report_fixes.py` | **Post-release hotfix 2026-07-11** (сломанный DEEP-отчёт): F-14 гейт/кламп форвардной E[r] (e2e analyze_all), F-15 маскированная композитная серия, F-16 пропуск None-строк в premium-mapper, F-17 очистка RAG-выдержек. |
 | `test_phase27_composite_metrics.py` | **Композитная база метрик** (F-20…F-23): реализованные Sharpe/CAGR/CVaR/MaxDD на композите полной панели (легаси бит-в-бит на полных), спарклайны из `port_log_returns`, drag плечевых ETP (`apply_leveraged_drag`), аннотация вне-модельных имён в Action Plan. |
+| `test_phase28_risk_methodology_audit.py` | **Аудит методологии + правки P-1…P-8 (2026-07-13)**: LETF-decay инварианты (daily-reset −24.6% vs наивные −4%), реестр плеч + контрактный drag/fee, χ²/Fisher-ДИ, `var_reliability`, SE(β)+Vasicek (флаг), F/C-N/A для LETF-обёрток, path-dependent стресс, каверт-чипы + SEC-покрытие по весу; 1 xfail — спецификация weighted-profitability. → `docs/audit/risk-methodology-audit.md` |
 | `test_factor_decomposition.py` | Факторная декомпозиция дисперсии + двойники. |
 | `test_freedom_auth.py` / `_client.py` / `_history.py` / `_models.py` | Tradernet: подпись, клиент, история, модели. |
 | `fetch_logs.py` · `query.txt` | Вспомогательные (не тесты). |
