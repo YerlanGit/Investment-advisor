@@ -3,6 +3,10 @@ name: Cloud Run Logs Check
 # Запускается:
 #   • вручную через GitHub UI (workflow_dispatch) — основной режим
 #   • автоматически при push в main — sanity-check после деплоя
+#
+# Логи выгружаются в артефакт `cloud-run-logs` (скачивается со страницы прогона):
+#   • cloud_run_logs.log  — человекочитаемый текст, БЕЗ обрезки, oldest→newest
+#   • cloud_run_logs.json — структурированные записи (timestamp/severity/message/…)
 on:
   workflow_dispatch:
     inputs:
@@ -11,17 +15,25 @@ on:
         required: false
         default: 'ramp-bot'
       hours:
-        description: 'За сколько часов назад тянуть логи'
+        description: 'За сколько часов назад тянуть логи (игнорируется, если задан start_time)'
         required: false
         default: '6'
+      start_time:
+        description: 'Начало интервала, RFC3339 UTC (напр. 2026-05-02T14:30:00Z). Переопределяет hours'
+        required: false
+        default: ''
+      end_time:
+        description: 'Конец интервала, RFC3339 UTC (напр. 2026-05-03T00:00:00Z). Пусто = «до сейчас»'
+        required: false
+        default: ''
       severity:
-        description: 'Минимальный уровень: DEFAULT | INFO | WARNING | ERROR'
+        description: 'Минимальный уровень: DEFAULT (=все логи) | INFO | WARNING | ERROR'
         required: false
-        default: 'WARNING'
+        default: 'DEFAULT'
       limit:
-        description: 'Максимум записей'
+        description: 'Максимум записей (0 = без ограничения — все за период)'
         required: false
-        default: '200'
+        default: '1000'
   push:
     branches: [ main ]
 
@@ -52,61 +64,138 @@ jobs:
 
     - name: 'Fetch Cloud Run logs'
       env:
-        SERVICE:  ${{ github.event.inputs.service  || 'ramp-bot' }}
-        HOURS:    ${{ github.event.inputs.hours    || '6' }}
-        SEVERITY: ${{ github.event.inputs.severity || 'WARNING' }}
-        LIMIT:    ${{ github.event.inputs.limit    || '200' }}
+        SERVICE:    ${{ github.event.inputs.service    || 'ramp-bot' }}
+        HOURS:      ${{ github.event.inputs.hours      || '6' }}
+        START_TIME: ${{ github.event.inputs.start_time || '' }}
+        END_TIME:   ${{ github.event.inputs.end_time   || '' }}
+        SEVERITY:   ${{ github.event.inputs.severity   || 'DEFAULT' }}
+        LIMIT:      ${{ github.event.inputs.limit      || '1000' }}
       run: |
         python <<'PY'
+        import json
         import os
         from datetime import datetime, timedelta, timezone
         from google.cloud import logging as gcl
 
-        service  = os.environ["SERVICE"]
-        hours    = int(os.environ["HOURS"])
-        severity = os.environ["SEVERITY"].upper()
-        limit    = int(os.environ["LIMIT"])
+        service   = os.environ["SERVICE"]
+        hours     = int(os.environ["HOURS"] or "6")
+        start_arg = os.environ.get("START_TIME", "").strip()
+        end_arg   = os.environ.get("END_TIME", "").strip()
+        severity  = (os.environ.get("SEVERITY") or "DEFAULT").strip().upper()
+        limit     = int(os.environ.get("LIMIT") or "0")
 
-        since = (datetime.now(timezone.utc) - timedelta(hours=hours)).strftime(
-            "%Y-%m-%dT%H:%M:%SZ"
-        )
-        log_filter = (
-            f'resource.type="cloud_run_revision" '
-            f'AND resource.labels.service_name="{service}" '
-            f'AND severity>="{severity}" '
-            f'AND timestamp>="{since}"'
-        )
+        # «ALL» — удобный синоним для «все уровни» (DEFAULT = самый низкий).
+        if severity in ("ALL", ""):
+            severity = "DEFAULT"
+
+        # --- окно времени -------------------------------------------------
+        # Явный интервал start/end имеет приоритет; иначе — «последние N часов».
+        if start_arg:
+            since = start_arg
+        else:
+            since = (datetime.now(timezone.utc) - timedelta(hours=hours)).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            )
+
+        filter_parts = [
+            'resource.type="cloud_run_revision"',
+            f'resource.labels.service_name="{service}"',
+            f'severity>="{severity}"',
+            f'timestamp>="{since}"',
+        ]
+        if end_arg:
+            filter_parts.append(f'timestamp<="{end_arg}"')
+        log_filter = " AND ".join(filter_parts)
+
+        # 0 (или отрицательное) → без ограничения: тянем всё за период.
+        max_results = limit if limit > 0 else None
+        page_size   = min(limit, 1000) if limit > 0 else 1000
 
         print(f"Filter: {log_filter}")
-        print(f"Limit:  {limit}")
+        print(f"Limit:  {'без ограничения' if max_results is None else max_results}")
         print("-" * 80)
 
         client = gcl.Client()
+        # DESCENDING → берём именно САМЫЕ СВЕЖИЕ N записей за период,
+        # затем разворачиваем в хронологический порядок для файла.
         entries = list(client.list_entries(
             filter_=log_filter,
             order_by=gcl.DESCENDING,
-            page_size=limit,
-            max_results=limit,
+            page_size=page_size,
+            max_results=max_results,
         ))
+        entries.reverse()  # oldest → newest
 
+        def extract_message(entry):
+            """Достаём осмысленный текст из любого типа записи."""
+            p = entry.payload
+            if isinstance(p, dict):
+                for key in ("message", "msg", "MESSAGE", "log", "text"):
+                    val = p.get(key)
+                    if val:
+                        return str(val)
+                return json.dumps(p, ensure_ascii=False, default=str)
+            if p not in (None, ""):
+                return str(p)
+            # Нет payload (типично для request-логов) — собираем из httpRequest.
+            http = getattr(entry, "http_request", None)
+            if http:
+                method = http.get("requestMethod") or http.get("request_method") or ""
+                url    = http.get("requestUrl")    or http.get("request_url")    or ""
+                status = http.get("status") or ""
+                latency = http.get("latency") or ""
+                parts = [x for x in (method, url, f"-> {status}" if status else "", latency) if x]
+                return " ".join(str(x) for x in parts) or "(пустая запись)"
+            return "(пустая запись)"
+
+        records = []
+        for e in entries:
+            ts  = e.timestamp.isoformat() if e.timestamp else "?"
+            sev = str(e.severity or "DEFAULT")
+            msg = extract_message(e)
+            records.append({
+                "timestamp": ts,
+                "severity":  sev,
+                "message":   msg,
+                "log_name":  getattr(e, "log_name", None),
+                "insert_id": getattr(e, "insert_id", None),
+                "trace":     getattr(e, "trace", None),
+            })
+
+        # --- файлы для артефакта (полные, без обрезки) --------------------
+        header = (
+            f"# Cloud Run logs — service={service}, severity>={severity}\n"
+            f"# window: {since} .. {end_arg or 'now'}\n"
+            f"# filter: {log_filter}\n"
+            f"# entries: {len(records)}\n"
+            + "-" * 80 + "\n"
+        )
+        with open("cloud_run_logs.log", "w", encoding="utf-8") as fh:
+            fh.write(header)
+            for r in records:
+                fh.write(f"[{r['timestamp']}] {r['severity']:8s} {r['message']}\n")
+        with open("cloud_run_logs.json", "w", encoding="utf-8") as fh:
+            json.dump(records, fh, ensure_ascii=False, indent=2, default=str)
+
+        # --- превью в консоль + step summary (тут обрезаем для читаемости) -
         summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
-        out_lines = [f"### Cloud Run logs — `{service}` (severity ≥ {severity}, last {hours}h)\n",
-                     f"Найдено записей: **{len(entries)}**\n"]
-
-        if not entries:
+        out_lines = [
+            f"### Cloud Run logs — `{service}` (severity ≥ {severity})\n",
+            f"Окно: `{since}` .. `{end_arg or 'now'}` · Найдено записей: **{len(records)}**\n",
+            f"Полная выгрузка — в артефакте **cloud-run-logs** (`cloud_run_logs.log` / `.json`).\n",
+        ]
+        if not records:
             print("Нет записей по фильтру — сервис работает чисто или фильтр слишком узкий.")
             out_lines.append("> Нет записей по заданному фильтру.\n")
         else:
+            PREVIEW = 100  # в summary кладём последние 100 строк, чтобы не раздувать
+            preview = records[-PREVIEW:]
+            if len(records) > PREVIEW:
+                out_lines.append(f"_Превью: последние {PREVIEW} из {len(records)} (полностью — в артефакте)._\n")
             out_lines.append("```")
-            for e in entries:
-                ts = e.timestamp.isoformat() if e.timestamp else "?"
-                sev = (e.severity or "DEFAULT")
-                if isinstance(e.payload, dict):
-                    msg = e.payload.get("message") or str(e.payload)
-                else:
-                    msg = str(e.payload)
-                msg = msg.strip().replace("\n", " ")[:500]
-                line = f"[{ts}] {sev:8s} {msg}"
+            for r in preview:
+                msg = r["message"].strip().replace("\n", " ")[:500]
+                line = f"[{r['timestamp']}] {r['severity']:8s} {msg}"
                 print(line)
                 out_lines.append(line)
             out_lines.append("```")
@@ -115,3 +204,14 @@ jobs:
             with open(summary_path, "a", encoding="utf-8") as fh:
                 fh.write("\n".join(out_lines) + "\n")
         PY
+
+    - name: 'Upload logs artifact'
+      if: always()
+      uses: 'actions/upload-artifact@v4'
+      with:
+        name: 'cloud-run-logs'
+        path: |
+          cloud_run_logs.log
+          cloud_run_logs.json
+        if-no-files-found: 'warn'
+        retention-days: 14
