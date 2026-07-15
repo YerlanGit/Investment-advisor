@@ -451,17 +451,43 @@ async def get_benchmark_ticker(telegram_id: int) -> str | None:
         return row[0]
 
 
-async def save_connection_mode(telegram_id: int, mode: str) -> None:
-    """Persist the user's portfolio source choice ('template' or 'freedom')."""
+async def save_connection_mode(telegram_id: int, mode: str) -> bool:
+    """Persist the user's portfolio source choice ('template' or 'freedom').
+
+    Stored as a column on the ``user_profiles`` row, which is created during
+    onboarding (mandate approval) BEFORE the connection step — so in the normal
+    flow the row exists and the UPDATE succeeds.
+
+    If the row is somehow missing (e.g. the connection step was reached without
+    a completed profile), the UPDATE matches nothing.  Previously this failed
+    SILENTLY: the write was lost, ``get_connection_mode`` then returned the
+    default ``'template'``, and the user — who believed they had linked their
+    broker — was quietly served a DEMO portfolio (see incident 2026-07-14,
+    user 88202680).  We now surface that lost write as a WARNING and report it
+    to the caller so it can react instead of pretending the save succeeded.
+
+    Returns ``True`` when the mode was persisted, ``False`` when no profile row
+    existed (nothing was written).
+    """
     async with _get_conn() as db:
-        await db.execute(
+        cursor = await db.execute(
             "UPDATE user_profiles "
             "SET connection_mode = ?, updated_at = CURRENT_TIMESTAMP "
             "WHERE telegram_id = ?",
             (mode, telegram_id),
         )
         await db.commit()
+        persisted = cursor.rowcount != 0
+    if persisted:
         logger.info("Режим подключения пользователя %s: %s.", telegram_id, mode)
+    else:
+        logger.warning(
+            "Режим подключения пользователя %s НЕ сохранён (mode=%s): нет строки профиля "
+            "(UPDATE затронул 0 строк). Пользователь останется в режиме 'template' по "
+            "умолчанию — пройдите онбординг до конца перед привязкой брокера.",
+            telegram_id, mode,
+        )
+    return persisted
 
 
 async def get_connection_mode(telegram_id: int) -> str:

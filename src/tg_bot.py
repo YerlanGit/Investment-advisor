@@ -1764,15 +1764,54 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
             await state.clear()
             return
         if keys is None:
-            api_key    = os.getenv("FREEDOM_API_KEY",    "demo")
-            secret_key = os.getenv("FREEDOM_API_SECRET", "")
-            login      = os.getenv("FREEDOM_LOGIN",      "")
+            # conn_mode == "freedom" but no personal keys in the vault.  Do NOT
+            # fall back to the shared service-level FREEDOM_API_KEY for a regular
+            # user — that key belongs to the service account, and using it would
+            # fetch (and show) SOMEONE ELSE'S portfolio.  Only an admin (the
+            # owner of the service key) may use it, for their own testing.
+            if _is_admin(user_id):
+                api_key    = os.getenv("FREEDOM_API_KEY",    "demo")
+                secret_key = os.getenv("FREEDOM_API_SECRET", "")
+                login      = os.getenv("FREEDOM_LOGIN",      "")
+                logger.warning(
+                    "KEY SOURCE: env/service  user=%s (admin) — vault пуст, "
+                    "используются сервисные ключи.", user_id,
+                )
+            else:
+                logger.warning(
+                    "KEY SOURCE: MISSING  user=%s — conn_mode=freedom, но ключей в vault нет; "
+                    "сервисный ключ чужому пользователю НЕ подставляем, просим переподключить.",
+                    user_id,
+                )
+                _release_user_slot(user_id)
+                await callback.message.answer(
+                    "⚠️ *Брокер не подключён.*\n\n"
+                    "Похоже, ваши ключи не сохранились — привяжите счёт заново в "
+                    "/start → 🔗 Freedom Broker API.\n\n"
+                    "✅ Токен *не списан*.",
+                    parse_mode=ParseMode.MARKDOWN,
+                )
+                await state.clear()
+                return
         else:
             login, api_key, secret_key = keys
             login      = (login      or "").strip()
             api_key    = (api_key    or "").strip()
             secret_key = (secret_key or "").strip()
+            logger.info(
+                "KEY SOURCE: vault  user=%s  api_key_present=%s  secret_present=%s",
+                user_id, bool(api_key), bool(secret_key),
+            )
     else:
+        # No active freedom connection → the demo/template portfolio.  Logged
+        # explicitly so a user who expected live broker data but landed on demo
+        # is diagnosable (incident 2026-07-14 user 88202680: the silent demo
+        # fallback looked like a bug «entered API → got demo»).
+        logger.info(
+            "PORTFOLIO SOURCE: demo/template  user=%s  conn_mode=%s "
+            "(no active freedom connection — using the template portfolio).",
+            user_id, conn_mode,
+        )
         api_key, secret_key, login = "demo", "", ""
 
     try:
