@@ -183,7 +183,7 @@ async def init_db() -> None:
         import os
         if os.getenv("PURGE_DB_ON_START", "0") == "1":
             logger.warning("PURGE_DB_ON_START=1 — удаляю все таблицы для чистого старта!")
-            for table in ("transactions", "user_profiles", "users"):
+            for table in ("transactions", "user_profiles", "user_connection", "users"):
                 await db.execute(f"DROP TABLE IF EXISTS {table}")
             await db.commit()
 
@@ -243,6 +243,31 @@ async def init_db() -> None:
                 await db.commit()
             except Exception:
                 pass  # Column already present — safe to ignore.
+
+        # Fix A1 (2026-07-16): connection mode lives in its OWN keyed table, so
+        # persisting it never depends on the heavyweight user_profiles row
+        # (whose NOT NULL columns forbid partial inserts).  The old UPDATE-only
+        # write could silently no-op when the profile row was missing → the
+        # user landed in demo (incident 2026-07-14).
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS user_connection (
+                telegram_id     INTEGER PRIMARY KEY,
+                connection_mode TEXT NOT NULL DEFAULT 'template',
+                updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        # Idempotent backfill — copy ONLY 'freedom' rows from the legacy
+        # column.  'template' was that column's DEFAULT, so a legacy 'template'
+        # carries no signal of an explicit user choice (absence of a
+        # user_connection row already means «не выбирал» — the distinction the
+        # billing logic relies on).  ON CONFLICT DO NOTHING keeps re-runs from
+        # overwriting newer values (works on both SQLite ≥3.24 and Postgres).
+        await db.execute("""
+            INSERT INTO user_connection (telegram_id, connection_mode)
+            SELECT telegram_id, 'freedom' FROM user_profiles
+            WHERE connection_mode = 'freedom'
+            ON CONFLICT(telegram_id) DO NOTHING
+        """)
 
         await db.commit()
 
@@ -454,53 +479,66 @@ async def get_benchmark_ticker(telegram_id: int) -> str | None:
 async def save_connection_mode(telegram_id: int, mode: str) -> bool:
     """Persist the user's portfolio source choice ('template' or 'freedom').
 
-    Stored as a column on the ``user_profiles`` row, which is created during
-    onboarding (mandate approval) BEFORE the connection step — so in the normal
-    flow the row exists and the UPDATE succeeds.
+    Fix A1 (2026-07-16): stored in the dedicated ``user_connection`` table via
+    UPSERT, so the write physically cannot be lost to a missing profile row.
+    (The old UPDATE against ``user_profiles`` silently no-oped without one —
+    the user then defaulted to 'template' and was served a demo portfolio;
+    incident 2026-07-14, user 88202680.)
 
-    If the row is somehow missing (e.g. the connection step was reached without
-    a completed profile), the UPDATE matches nothing.  Previously this failed
-    SILENTLY: the write was lost, ``get_connection_mode`` then returned the
-    default ``'template'``, and the user — who believed they had linked their
-    broker — was quietly served a DEMO portfolio (see incident 2026-07-14,
-    user 88202680).  We now surface that lost write as a WARNING and report it
-    to the caller so it can react instead of pretending the save succeeded.
-
-    Returns ``True`` when the mode was persisted, ``False`` when no profile row
-    existed (nothing was written).
+    Returns ``True`` when the mode was persisted (UPSERT always writes),
+    ``False`` only if the statement unexpectedly affected no rows.
     """
     async with _get_conn() as db:
         cursor = await db.execute(
-            "UPDATE user_profiles "
-            "SET connection_mode = ?, updated_at = CURRENT_TIMESTAMP "
-            "WHERE telegram_id = ?",
-            (mode, telegram_id),
+            """
+            INSERT INTO user_connection (telegram_id, connection_mode, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(telegram_id) DO UPDATE SET
+                connection_mode = excluded.connection_mode,
+                updated_at      = CURRENT_TIMESTAMP
+            """,
+            (telegram_id, mode),
         )
         await db.commit()
         persisted = cursor.rowcount != 0
     if persisted:
         logger.info("Режим подключения пользователя %s: %s.", telegram_id, mode)
-    else:
-        logger.warning(
-            "Режим подключения пользователя %s НЕ сохранён (mode=%s): нет строки профиля "
-            "(UPDATE затронул 0 строк). Пользователь останется в режиме 'template' по "
-            "умолчанию — пройдите онбординг до конца перед привязкой брокера.",
-            telegram_id, mode,
+    else:  # pragma: no cover — UPSERT affecting 0 rows would be an SQLite bug
+        logger.error(
+            "Режим подключения пользователя %s НЕ сохранён (mode=%s): UPSERT "
+            "затронул 0 строк.", telegram_id, mode,
         )
     return persisted
 
 
-async def get_connection_mode(telegram_id: int) -> str:
-    """Return 'template' or 'freedom'. Defaults to 'template' when no profile exists."""
+async def get_connection_mode_explicit(telegram_id: int) -> str | None:
+    """Return the EXPLICITLY chosen mode ('template' | 'freedom') or ``None``.
+
+    ``None`` means the user has never completed a source choice (no
+    ``user_connection`` row) — the billing logic must NOT treat that as demo
+    consent (Fix C).  Legacy 'freedom' users are backfilled into this table by
+    ``init_db``; legacy 'template' values are intentionally NOT backfilled
+    because that was the old column's default and proves nothing.
+    """
     async with _get_conn() as db:
         cursor = await db.execute(
-            "SELECT connection_mode FROM user_profiles WHERE telegram_id = ?",
+            "SELECT connection_mode FROM user_connection WHERE telegram_id = ?",
             (telegram_id,),
         )
         row = await cursor.fetchone()
         if row is None or row[0] is None:
-            return "template"
+            return None
         return row[0]
+
+
+async def get_connection_mode(telegram_id: int) -> str:
+    """Return 'template' or 'freedom'. Defaults to 'template' when never chosen.
+
+    Compatibility wrapper over :func:`get_connection_mode_explicit` — callers
+    that must distinguish «явно выбрал демо» from «не выбирал» use the explicit
+    variant instead.
+    """
+    return (await get_connection_mode_explicit(telegram_id)) or "template"
 
 
 async def save_benchmark_ticker(telegram_id: int, ticker: str) -> None:

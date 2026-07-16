@@ -60,6 +60,7 @@ from db_tokenomics import (
     get_balance,
     get_benchmark_ticker,
     get_connection_mode,
+    get_connection_mode_explicit,
     get_profile,
     get_last_report_snapshot,
     init_db,
@@ -255,6 +256,54 @@ def _save_keys_sync(user_id: int, login: str, api_key: str, secret_key: str) -> 
     """Blocking helper — must be run in a thread executor."""
     vault = SecureVault(db_name=VAULT_DB)
     vault.save_user_keys(str(user_id), login, api_key, secret_key)
+
+
+def _has_vault_keys_sync(user_id: int) -> bool:
+    """Blocking helper — existence check only, never decrypts (Fix B)."""
+    vault = SecureVault(db_name=VAULT_DB)
+    return vault.has_user(str(user_id))
+
+
+async def _resolve_portfolio_source(user_id: int) -> tuple[str, str | None]:
+    """Resolve the portfolio source for a report request (Fixes B + C).
+
+    Returns ``(source, stored_mode)`` where source is one of:
+      * ``'freedom'``      — live broker portfolio;
+      * ``'demo'``         — the user EXPLICITLY chose the template portfolio;
+      * ``'undetermined'`` — no explicit choice and no keys → the caller must
+        refuse to build a (paid) report and ask the user to pick a source.
+
+    Vault keys ALWAYS win (product decision 2026-07-16): stored keys are proof
+    the user linked their broker, so even a lost/'template' stored mode
+    resolves to 'freedom' — and the mode is self-healed back to 'freedom' so
+    the recovery stops firing (incident 2026-07-14, user 88202680).
+    """
+    loop   = asyncio.get_running_loop()
+    stored = await get_connection_mode_explicit(user_id)
+    if await loop.run_in_executor(None, _has_vault_keys_sync, user_id):
+        if stored != "freedom":
+            logger.warning(
+                "CONN MODE RECOVERED user=%s: режим был %r, но в vault есть "
+                "ключи → freedom (само-лечение).", user_id, stored,
+            )
+            await save_connection_mode(user_id, "freedom")
+        return "freedom", stored
+    if stored == "freedom":
+        # Mode says freedom but the vault is empty — the freedom branch shows
+        # the re-link message (or admin service keys); NOT silently demo.
+        return "freedom", stored
+    if stored == "template":
+        return "demo", stored
+    return "undetermined", stored
+
+
+def _effective_cost(tier: str, source: str) -> int:
+    """Token price of a report given its portfolio source.
+
+    Демо-отчёты бесплатны (product decision 2026-07-16) — платится только
+    однозначно определённый ЖИВОЙ источник.
+    """
+    return 0 if source == "demo" else TIER_COST[tier]
 
 
 def _fetch_and_analyze_sync(api_key: str, secret_key: str = "",
@@ -1506,7 +1555,9 @@ async def cb_connect_choice(callback: CallbackQuery, state: FSMContext) -> None:
         await save_connection_mode(user_id, "template")
         await callback.message.edit_text(
             "✅ *Демо-режим активирован.*\n\n"
-            "Для анализа будет использоваться шаблонный институциональный портфель.",
+            "Для анализа будет использоваться шаблонный институциональный "
+            "портфель.\n\n"
+            "📋 Отчёты по демо-портфелю *бесплатны* — токены не списываются.",
             parse_mode=ParseMode.MARKDOWN,
         )
         await state.clear()
@@ -1721,11 +1772,33 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
         )
         return
 
+    # Fix C: the portfolio source decides the price (демо бесплатно), so it is
+    # resolved BEFORE the balance gate — a 0-balance user may still run demo.
+    # An undetermined source must never produce a (paid) report.
+    source, stored_mode = await _resolve_portfolio_source(user_id)
+    if source == "undetermined":
+        logger.warning(
+            "PORTFOLIO SOURCE: undetermined  user=%s  stored_mode=%r — "
+            "нет ни явного выбора, ни ключей; отчёт не формируем.",
+            user_id, stored_mode,
+        )
+        _release_user_slot(user_id)
+        await callback.message.edit_text(
+            "⚠️ *Источник портфеля не выбран.*\n\n"
+            "Привяжите брокерский счёт или выберите демо-режим: "
+            "/start → 📡 подключение портфеля.\n\n"
+            "✅ Токен *не списан*.",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        await state.clear()
+        return
+    cost = _effective_cost(tier, source)
+
     # H1 (Phase-3): NO upfront deduction.  Read-only balance pre-check —
     # refuse if the user cannot afford the report, but DO NOT charge until
     # Checkpoint 3 (report successfully rendered + uploaded to GCS).
     balance = await get_balance(user_id)
-    if balance < cost:
+    if cost > 0 and balance < cost:
         _release_user_slot(user_id)
         await callback.message.edit_text(
             f"❌ *Недостаточно токенов.*\n\n"
@@ -1736,20 +1809,26 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
         await state.clear()
         return
 
-    await callback.message.edit_text(
-        f"⏳ Подключаюсь к Freedom Broker и загружаю портфель…\n\n"
-        f"💳 Токен спишется *только после готового отчёта* "
-        f"(сейчас на балансе: *{balance}*).",
-        parse_mode=ParseMode.MARKDOWN,
-    )
+    if source == "demo":
+        await callback.message.edit_text(
+            "⏳ Загружаю *демо-портфель (шаблон)*…\n\n"
+            "📋 Отчёт по демо-портфелю *бесплатный* — токены не списываются.",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+    else:
+        await callback.message.edit_text(
+            f"⏳ Подключаюсь к Freedom Broker и загружаю портфель…\n\n"
+            f"💳 Токен спишется *только после готового отчёта* "
+            f"(сейчас на балансе: *{balance}*).",
+            parse_mode=ParseMode.MARKDOWN,
+        )
 
     # ── Шаг 1 — подгружаем портфель (быстрая часть) ──────────────────────
     loop = asyncio.get_running_loop()
     profile    = await get_profile(user_id)
     bench_tick = _resolve_bench_ticker(profile)
-    conn_mode  = await get_connection_mode(user_id)
 
-    if conn_mode == "freedom":
+    if source == "freedom":
         try:
             keys = await loop.run_in_executor(None, _get_keys_sync, user_id)
         except MasterKeyRotatedError as exc:
@@ -1803,14 +1882,12 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
                 user_id, bool(api_key), bool(secret_key),
             )
     else:
-        # No active freedom connection → the demo/template portfolio.  Logged
-        # explicitly so a user who expected live broker data but landed on demo
-        # is diagnosable (incident 2026-07-14 user 88202680: the silent demo
-        # fallback looked like a bug «entered API → got demo»).
+        # source == "demo": the user EXPLICITLY chose the template portfolio
+        # (an accidental/default demo is impossible — _resolve_portfolio_source
+        # returns 'undetermined' for that and we bailed out above).
         logger.info(
-            "PORTFOLIO SOURCE: demo/template  user=%s  conn_mode=%s "
-            "(no active freedom connection — using the template portfolio).",
-            user_id, conn_mode,
+            "PORTFOLIO SOURCE: demo/explicit  user=%s (шаблонный портфель "
+            "выбран пользователем; отчёт бесплатный).", user_id,
         )
         api_key, secret_key, login = "demo", "", ""
 
@@ -1858,8 +1935,11 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
 
     # ── Шаг 2 — концьерж-уведомление + превью портфеля ──────────────────
     preview_md = _format_portfolio_preview(df)
+    demo_line = ("📋 *Источник: ДЕМО-портфель (шаблон) — отчёт бесплатный.*\n\n"
+                 if source == "demo" else "")
     await callback.message.answer(
         "✅ *Портфель успешно получен и принят в обработку.*\n\n"
+        f"{demo_line}"
         f"{preview_md}\n\n"
         f"Запускаю *{TIER_LABEL[tier]}* — пришлю ссылку на отчёт через "
         "*5–10 минут*. Можно продолжать пользоваться ботом.",
@@ -2104,14 +2184,19 @@ async def _run_analysis_background(
         # This is the single charge point in the whole flow.  Any earlier
         # failure (broker / engine / render) never reaches here, so the user
         # is never charged for a report they didn't receive.
-        try:
-            await deduct_tokens(user_id, cost, reason=f"{tier}_analysis")
-            charged = True
-        except InsufficientFundsError:
-            # Extremely unlikely (balance was pre-checked + single-flight),
-            # but the report is already delivered — log and don't double-bill.
+        # cost == 0 → демо-отчёт (Fix C): бесплатен, deduct пропускается
+        # (deduct_tokens отвергает amount <= 0).
+        if cost > 0:
+            try:
+                await deduct_tokens(user_id, cost, reason=f"{tier}_analysis")
+                charged = True
+            except InsufficientFundsError:
+                # Extremely unlikely (balance was pre-checked + single-flight),
+                # but the report is already delivered — log and don't double-bill.
+                charged = False
+                logger.error("Post-CP3 deduct failed for %s (report already sent).", user_id)
+        else:
             charged = False
-            logger.error("Post-CP3 deduct failed for %s (report already sent).", user_id)
         balance_after = await get_balance(user_id)
 
         # Persist this report's key metrics for future MoM comparison
@@ -2129,13 +2214,18 @@ async def _run_analysis_background(
         except Exception as snap_exc:
             logger.warning("Failed to save report snapshot: %s", snap_exc)
 
+        billing_line = (
+            f"💳 С баланса списан *{cost}* токен · остаток: "
+            f"*{balance_after}* токен(а)."
+            if cost > 0 else
+            "📋 Отчёт по *демо-портфелю* — *бесплатно*, токены не списаны."
+        )
         await bot.send_message(
             chat_id,
             "✅ *Расчёты успешно завершены.* Мы подготовили детальную "
             "аналитику и нашли перспективные точки роста для вашего "
             "портфеля. Все подробности доступны по ссылке выше 👆\n\n"
-            f"💳 С баланса списан *{cost}* токен · остаток: "
-            f"*{balance_after}* токен(а).",
+            f"{billing_line}",
             parse_mode=ParseMode.MARKDOWN,
         )
 
@@ -2145,16 +2235,22 @@ async def _run_analysis_background(
         # самим сценарным отчётом кнопка не нужна.
         if tier in (TIER_BASE, TIER_DEEP):
             try:
+                is_demo = cost == 0
+                if is_demo:
+                    # Приватный маркер для cb_scenario_cached: сценарный отчёт
+                    # по демо-портфелю тоже бесплатен (консистентность Fix C).
+                    results["_demo_portfolio"] = True
                 _cache_results_for_scenario(user_id, results)
+                scenario_price = "*бесплатно* (демо-портфель)" if is_demo else "*1 токен*"
                 await bot.send_message(
                     chat_id,
                     "🎯 *Хотите сценарную диагностику этого же портфеля?*\n\n"
                     "Вклад каждой позиции в риск (Euler-MCTR), выживаемость в "
                     "3 макро-режимах, слабые звенья для ребаланса и бэктест "
-                    "трендового правила — *1 токен*, считается мгновенно из "
-                    "уже загруженных данных.",
+                    f"трендового правила — {scenario_price}, считается мгновенно "
+                    "из уже загруженных данных.",
                     parse_mode=ParseMode.MARKDOWN,
-                    reply_markup=_kb_scenario_cta(),
+                    reply_markup=_kb_scenario_cta(free=is_demo),
                 )
             except Exception as cta_exc:
                 logger.warning("Scenario CTA/cache failed for %s: %s", user_id, cta_exc)
@@ -2497,10 +2593,11 @@ def _get_cached_results(user_id: int) -> dict | None:
     return results
 
 
-def _kb_scenario_cta() -> InlineKeyboardMarkup:
+def _kb_scenario_cta(free: bool = False) -> InlineKeyboardMarkup:
     """Inline-кнопка «Сценарный анализ» под готовым BASE/DEEP отчётом."""
+    price = "бесплатно" if free else "1 токен"
     return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="🎯 Сценарный анализ этого портфеля (1 токен)",
+        InlineKeyboardButton(text=f"🎯 Сценарный анализ этого портфеля ({price})",
                              callback_data="scenario:cached"),
     ]])
 
@@ -2526,10 +2623,13 @@ async def cb_scenario_cached(callback: CallbackQuery, state: FSMContext) -> None
             parse_mode=ParseMode.MARKDOWN,
         )
         return
-    cost = TIER_COST[TIER_SCENARIO]
+    # Fix C: сценарный отчёт по кэшу ДЕМО-прогона тоже бесплатен (маркер
+    # ставится в _run_analysis_background перед кэшированием).
+    cost = _effective_cost(
+        TIER_SCENARIO, "demo" if results.get("_demo_portfolio") else "freedom")
     try:
         balance = await get_balance(user_id)
-        if balance < cost:
+        if cost > 0 and balance < cost:
             await callback.message.answer(
                 f"❌ *Недостаточно токенов.* Нужен *{cost}*, доступно *{balance}*.\n\n"
                 "Пополните баланс: /topup.",
@@ -2548,10 +2648,14 @@ async def cb_scenario_cached(callback: CallbackQuery, state: FSMContext) -> None
             None, _build_pdf_payload, results, TIER_SCENARIO)
         await _send_report(callback.message.bot, callback.message.chat.id,
                            user_id, TIER_SCENARIO, payload)
-        await deduct_tokens(user_id, cost, reason="scenario_analysis")
-        bal = await get_balance(user_id)
+        if cost > 0:
+            await deduct_tokens(user_id, cost, reason="scenario_analysis")
+            bal = await get_balance(user_id)
+            billing = f"💳 Списан *{cost}* токен · остаток *{bal}*."
+        else:
+            billing = "📋 Демо-портфель — *бесплатно*, токены не списаны."
         await callback.message.answer(
-            f"✅ Сценарный анализ готов. 💳 Списан *{cost}* токен · остаток *{bal}*.",
+            f"✅ Сценарный анализ готов. {billing}",
             parse_mode=ParseMode.MARKDOWN,
         )
     except RuntimeError as exc:
