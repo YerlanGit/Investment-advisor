@@ -59,7 +59,6 @@ from db_tokenomics import (
     InsufficientFundsError,
     get_balance,
     get_benchmark_ticker,
-    get_connection_mode,
     get_connection_mode_explicit,
     get_profile,
     get_last_report_snapshot,
@@ -278,19 +277,19 @@ async def _resolve_portfolio_source(user_id: int) -> tuple[str, str | None]:
     resolves to 'freedom' — and the mode is self-healed back to 'freedom' so
     the recovery stops firing (incident 2026-07-14, user 88202680).
     """
-    loop   = asyncio.get_running_loop()
     stored = await get_connection_mode_explicit(user_id)
-    if await loop.run_in_executor(None, _has_vault_keys_sync, user_id):
-        if stored != "freedom":
-            logger.warning(
-                "CONN MODE RECOVERED user=%s: режим был %r, но в vault есть "
-                "ключи → freedom (само-лечение).", user_id, stored,
-            )
-            await save_connection_mode(user_id, "freedom")
-        return "freedom", stored
     if stored == "freedom":
-        # Mode says freedom but the vault is empty — the freedom branch shows
-        # the re-link message (or admin service keys); NOT silently demo.
+        # Vault check is redundant here — the freedom branch resolves keys
+        # itself (re-link message / admin service keys when the vault is
+        # empty), so we skip a vault open on the common path.
+        return "freedom", stored
+    loop = asyncio.get_running_loop()
+    if await loop.run_in_executor(None, _has_vault_keys_sync, user_id):
+        logger.warning(
+            "CONN MODE RECOVERED user=%s: режим был %r, но в vault есть "
+            "ключи → freedom (само-лечение).", user_id, stored,
+        )
+        await save_connection_mode(user_id, "freedom")
         return "freedom", stored
     if stored == "template":
         return "demo", stored
@@ -304,17 +303,6 @@ def _effective_cost(tier: str, source: str) -> int:
     однозначно определённый ЖИВОЙ источник.
     """
     return 0 if source == "demo" else TIER_COST[tier]
-
-
-def _fetch_and_analyze_sync(api_key: str, secret_key: str = "",
-                            login: str = "",
-                            bench_ticker: str | None = None) -> dict:
-    """
-    Blocking: fetches portfolio from broker, runs MAC3 engine.
-    Must be run in a thread executor.
-    """
-    df = FreedomConnector(api_key, secret_key, login).fetch_portfolio()
-    return UniversalPortfolioManager().analyze_all(df, profile_benchmark=bench_ticker)
 
 
 def _fetch_portfolio_sync(api_key: str, secret_key: str = "", login: str = ""):
@@ -968,76 +956,6 @@ def _build_pdf_payload(results: dict, tier: str,
         payload["scenarios"] = scenarios
 
     return payload
-
-
-# ── MAC3 pipeline ─────────────────────────────────────────────────────────────
-
-async def _build_analysis_payload(user_id: int, tier: str) -> dict:
-    """Async orchestrator: vault → broker → MAC3 engine → PDF payload."""
-    loop      = asyncio.get_running_loop()
-    conn_mode = await get_connection_mode(user_id)
-
-    profile    = await get_profile(user_id)
-    bench_tick = _resolve_bench_ticker(profile)
-
-    if conn_mode == "freedom":
-        keys = await loop.run_in_executor(None, _get_keys_sync, user_id)
-        if keys is None:
-            api_key    = os.getenv("FREEDOM_API_KEY",    "demo")
-            secret_key = os.getenv("FREEDOM_API_SECRET", "")
-            login      = os.getenv("FREEDOM_LOGIN",      "")
-            # Never log any portion of a live broker key — log only presence.
-            logger.info(
-                "KEY SOURCE: env-vars  user=%s  api_key_present=%s  secret_present=%s  login_present=%s",
-                user_id,
-                bool(api_key and api_key != "demo"),
-                bool(secret_key),
-                bool(login),
-            )
-        else:
-            login, api_key, secret_key = keys
-            login      = (login      or "").strip()
-            api_key    = (api_key    or "").strip()
-            secret_key = (secret_key or "").strip()
-            # Never log any portion of a live broker key — log only presence.
-            logger.info(
-                "KEY SOURCE: vault  user=%s  api_key_present=%s  secret_present=%s  login_present=%s",
-                user_id,
-                bool(api_key),
-                bool(secret_key),
-                bool(login),
-            )
-    else:
-        api_key    = "demo"
-        secret_key = ""
-        login      = ""
-
-    try:
-        results = await loop.run_in_executor(
-            None, _fetch_and_analyze_sync, api_key, secret_key, login, bench_tick
-        )
-    except BrokerAuthError:
-        raise  # Propagate as-is so cb_confirm can show the specific auth message
-    except BrokerEmptyPortfolioError:
-        raise  # Propagate as-is so cb_confirm can show the empty-portfolio message
-    except RealPortfolioRequired:
-        raise  # MAC3 gate fired — broker API failed, no live data; cb_confirm handles UI
-    except RuntimeError as exc:
-        logger.error("Freedom Broker API ошибка для %s: %s", user_id, exc)
-        raise RuntimeError(
-            f"Не удалось получить данные от Freedom Broker: {exc}\n\n"
-            "Проверьте, что ваш API-ключ действителен, и повторите попытку."
-        ) from exc
-
-    if profile:
-        gate_limits = {
-            "max_portfolio_volatility": profile["target_volatility"] * 1.2
-        }
-        gate = run_gatekeeper(results, user_limits=gate_limits, user_profile=profile)
-        if not gate["passed"]:
-            logger.warning("Gatekeeper нарушения: %s", gate["critical"])
-
-    return _build_pdf_payload(results, tier)
 
 
 # ── Keyboard builders ─────────────────────────────────────────────────────────
@@ -1775,7 +1693,24 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
     # Fix C: the portfolio source decides the price (демо бесплатно), so it is
     # resolved BEFORE the balance gate — a 0-balance user may still run demo.
     # An undetermined source must never produce a (paid) report.
-    source, stored_mode = await _resolve_portfolio_source(user_id)
+    # Guarded: this touches the tokenomics DB and (when mode isn't 'freedom')
+    # the vault file on gcsfuse — an I/O error escaping here would leak the
+    # single-flight slot and lock the user out until restart.
+    try:
+        source, stored_mode = await _resolve_portfolio_source(user_id)
+    except Exception as exc:                       # noqa: BLE001
+        error_id = uuid.uuid4().hex[:12]
+        logger.exception("Source resolution failed for %s [%s]: %s",
+                         user_id, error_id, exc)
+        _release_user_slot(user_id)
+        await callback.message.edit_text(
+            "ℹ️ *Не удалось определить источник портфеля.*\n\n"
+            f"Код ошибки для поддержки: `{error_id}`\n\n"
+            "✅ Токен *не списан*. Попробуйте ещё раз через пару минут.",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        await state.clear()
+        return
     if source == "undetermined":
         logger.warning(
             "PORTFOLIO SOURCE: undetermined  user=%s  stored_mode=%r — "
@@ -2189,14 +2124,10 @@ async def _run_analysis_background(
         if cost > 0:
             try:
                 await deduct_tokens(user_id, cost, reason=f"{tier}_analysis")
-                charged = True
             except InsufficientFundsError:
                 # Extremely unlikely (balance was pre-checked + single-flight),
                 # but the report is already delivered — log and don't double-bill.
-                charged = False
                 logger.error("Post-CP3 deduct failed for %s (report already sent).", user_id)
-        else:
-            charged = False
         balance_after = await get_balance(user_id)
 
         # Persist this report's key metrics for future MoM comparison
@@ -2613,7 +2544,7 @@ async def cb_scenario_cached(callback: CallbackQuery, state: FSMContext) -> None
         await callback.message.answer(
             "⌛ Данные прошлого отчёта уже устарели.\n\n"
             "Запустите *🎯 Сценарный анализ* из меню /start — он посчитается "
-            "с нуля (тоже 1 токен).",
+            "с нуля.",
             parse_mode=ParseMode.MARKDOWN,
         )
         return

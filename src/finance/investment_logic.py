@@ -1550,8 +1550,8 @@ class UniversalPortfolioManager:
         # 0-row frame → `total = df['Current_Value'].sum()` = 0 →
         # `df['Current_Value']/total` = all-NaN → Ridge fit + bootstrap CVaR
         # explode with cryptic errors.  Bail out with a user-facing message
-        # the existing handler (`RealPortfolioRequired` is caught by
-        # tg_bot._build_analysis_payload) already understands.
+        # the existing handler (`RealPortfolioRequired` is caught in
+        # tg_bot._run_analysis_background) already understands.
         if raw_df is None or raw_df.empty:
             logger.warning("MAC3 ENGINE GATE ▸ empty portfolio (0 rows) — halting.")
             raise RealPortfolioRequired(
