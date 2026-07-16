@@ -94,6 +94,22 @@ class SecureVault:
         # Log only the fact, never the keys.
         logger.info("Credentials for user %s encrypted and stored.", user_id)
 
+    def has_user(self, user_id) -> bool:
+        """Return True if credentials are STORED for this user.
+
+        Existence check only — never decrypts, so it works even when the
+        master key has rotated past its grace window (unlike
+        ``get_user_keys``, which raises ``MasterKeyRotatedError`` then).
+        Used by the bot to recover a lost connection_mode: stored keys are
+        proof the user linked their broker (Fix B, 2026-07-16).
+        """
+        with closing(sqlite3.connect(self.db_name)) as conn:
+            cursor = conn.execute(
+                'SELECT 1 FROM api_credentials WHERE user_id = ? LIMIT 1',
+                (user_id,),
+            )
+            return cursor.fetchone() is not None
+
     def get_user_keys(self, user_id):
         """Достаём из базы и расшифровываем оба ключа.
 
