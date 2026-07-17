@@ -32,6 +32,19 @@ _BM_CONCRETE_MAP = {
 }
 
 
+def _benchmark_display_name(ticker: str) -> str:
+    """Human-readable name for a benchmark ticker (e.g. QQQ.US → 'Nasdaq 100').
+
+    Uses the canonical BENCHMARK_LIST (profile_manager) so the equity-curve
+    label matches the rest of the report; falls back to the bare ticker.
+    """
+    try:
+        from profile_manager import BENCHMARK_LIST
+        return BENCHMARK_LIST.get(ticker, ticker)
+    except Exception:                                 # pragma: no cover - defensive
+        return ticker
+
+
 def compute_equity_curve_series(
     results: dict,
 ) -> tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[str]]:
@@ -69,18 +82,33 @@ def compute_equity_curve_series(
         bm_data = results.get("benchmark_comparison") or {}
         bm_log: Optional[np.ndarray] = None
         chosen_bm_name: Optional[str] = None
-        # Prefer the profile benchmark when present (its prices were already
-        # fetched); otherwise the first concrete benchmark that loaded.
-        names_to_try = (list(_BM_CONCRETE_MAP.keys())
-                        if "Профильный бенчмарк" in bm_data
-                        else list(bm_data.keys()))
-        for name in names_to_try:
-            ticker = _BM_CONCRETE_MAP.get(name)
-            if ticker and ticker in prices.columns:
-                chosen_bm_name = name
-                bm_series = prices[ticker].dropna()
-                bm_log = np.log(bm_series / bm_series.shift(1)).dropna().values
-                break
+
+        def _bm_line(ticker: str) -> np.ndarray:
+            series = prices[ticker].dropna()
+            return np.log(series / series.shift(1)).dropna().values
+
+        # 1) Honour the user's PROFILE benchmark — the actual ticker chosen in
+        #    onboarding (e.g. QQQ.US for Nasdaq 100).  The previous code iterated
+        #    the fixed _BM_CONCRETE_MAP in dict order and picked the FIRST
+        #    available ticker (S&P 500 / SPY.US, always present as a factor), so
+        #    the equity-curve line ignored the user's choice entirely
+        #    (bug 2026-07-16: benchmark switched to Nasdaq → curve stayed S&P 500).
+        profile_ticker = results.get("profile_benchmark_ticker")
+        if (profile_ticker and "Профильный бенчмарк" in bm_data
+                and profile_ticker in prices.columns):
+            chosen_bm_name = _benchmark_display_name(profile_ticker)
+            bm_log = _bm_line(profile_ticker)
+        else:
+            # 2) Fallback: the first concrete benchmark that actually loaded
+            #    (used when no profile benchmark was chosen, or its prices are
+            #    missing).  Iterates the comparison set, skipping the generic
+            #    "Профильный бенчмарк" key (not in _BM_CONCRETE_MAP).
+            for name in list(bm_data.keys()):
+                ticker = _BM_CONCRETE_MAP.get(name)
+                if ticker and ticker in prices.columns:
+                    chosen_bm_name = name
+                    bm_log = _bm_line(ticker)
+                    break
         if chosen_bm_name:
             logger.info("Equity curve benchmark = %s", chosen_bm_name)
         return port_log, bm_log, chosen_bm_name

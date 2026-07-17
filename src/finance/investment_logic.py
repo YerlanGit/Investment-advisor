@@ -2334,6 +2334,11 @@ class UniversalPortfolioManager:
             "risk_mandate":      getattr(self.engine, "risk_mandate", "MODERATE"),
             "risk_free_rate": self.engine.current_rfr_annual,
             "benchmark_comparison": benchmark_results,
+            # The user's chosen benchmark TICKER (e.g. QQQ.US), so downstream
+            # visuals (equity-curve line) can honour the actual choice instead
+            # of defaulting to the first concrete benchmark.  None → no profile
+            # benchmark selected.
+            "profile_benchmark_ticker": profile_benchmark,
             "period_returns_table": period_returns_table,
             "return_series_coverage": return_coverage,
             "stress_scenarios": stress_scenarios,

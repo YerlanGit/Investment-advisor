@@ -232,6 +232,7 @@ Telegram /start
 |---|---|---|
 | [`ROADMAP_SCENARIO_TIER.md`](ROADMAP_SCENARIO_TIER.md) | 🗺 | Тир Scenario Analysis. **Ядро + UI/тир реализованы (2026-07-07).** |
 | [`ROADMAP_DATA_RESILIENCE.md`](ROADMAP_DATA_RESILIENCE.md) | 🗺 | Устойчивость данных. **§4-б lookback 730→1825 ВКЛЮЧЁН (2026-07-07).** |
+| [`ROADMAP_IBKR_INTEGRATION.md`](ROADMAP_IBKR_INTEGRATION.md) | 🗺 | Второй брокер Interactive Brokers по образцу Freedom. Абстракция `BrokerConnector`, read-only, OAuth Web API. **Спроектирован, не начат (2026-07-16).** |
 
 ### Домены / подсистемы
 | Файл | Статус | Назначение |
