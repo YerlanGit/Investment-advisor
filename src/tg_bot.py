@@ -1210,6 +1210,26 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
                 reply_markup=kb_analysis_choice(),
             )
         else:
+            # A profile can exist while the portfolio SOURCE is undetermined
+            # (connection lost pre-persistence / legacy 'template' default not
+            # migrated).  /start is the natural place to heal that: offer the
+            # source choice FIRST, otherwise the user loops between the menu
+            # and the «Источник портфеля не выбран» guard in cb_confirm.
+            try:
+                source, _stored = await _resolve_portfolio_source(user_id)
+            except Exception as exc:               # noqa: BLE001 — never block /start
+                logger.warning("Source resolution on /start failed for %s: %s",
+                               user_id, exc)
+                source = None
+            if source == "undetermined":
+                await message.answer(
+                    "📡 *Сначала подключите источник портфеля.*\n\n"
+                    "Похоже, подключение не завершено или было сброшено. "
+                    "Выберите, как анализировать ваш портфель:",
+                    parse_mode=ParseMode.MARKDOWN,
+                    reply_markup=kb_connect_choice(),
+                )
+                return
             balance = await get_balance(user_id)
             await message.answer(
                 f"📊 *RAMP — Risk & Asset Management Platform*\n\n"
@@ -1718,12 +1738,17 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
             user_id, stored_mode,
         )
         _release_user_slot(user_id)
+        # Recovery must be ONE TAP away: a returning user has no other path to
+        # the connection screen (/start skips it once a profile exists), so
+        # pointing them at /start created a dead loop — attach the source
+        # keyboard right here instead (bug 2026-07-16, 2nd user stuck).
         await callback.message.edit_text(
             "⚠️ *Источник портфеля не выбран.*\n\n"
-            "Привяжите брокерский счёт или выберите демо-режим: "
-            "/start → 📡 подключение портфеля.\n\n"
+            "Похоже, подключение не завершено или было сброшено. "
+            "Выберите источник прямо здесь:\n\n"
             "✅ Токен *не списан*.",
             parse_mode=ParseMode.MARKDOWN,
+            reply_markup=kb_connect_choice(),
         )
         await state.clear()
         return
