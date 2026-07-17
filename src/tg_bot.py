@@ -137,6 +137,16 @@ class AnalysisFlow(StatesGroup):
     awaiting_approval = State()
 
 
+class MandateEdit(StatesGroup):
+    """B1 (2026-07-17) — точечное редактирование мандата из /mandate.
+
+    Benchmark/Universe переиспользуют состояния Onboarding.* с флагом
+    ``edit_mode=True`` в FSM-данных (обработчики ob:* ветвятся по флагу);
+    отдельное состояние нужно только выбору риск-профиля вручную.
+    """
+    Profile = State()
+
+
 # ── Onboarding question definitions ──────────────────────────────────────────
 # Each option tuple: (button_label, score_points, callback_data)
 
@@ -207,6 +217,13 @@ TIER_LABEL = {"base": "Базовый отчёт",
               "scenario": "Сценарный анализ",
               "deep": "Глубокий анализ"}
 TIER_SCENARIO_LABEL = TIER_LABEL[TIER_SCENARIO]
+
+# Цена токена (ВАЖНОЕ изменение 2026-07-17): 1 токен = 2 500 ₸ (KZT);
+# пакет — 10 токенов за 25 000 ₸.  Единственный источник правды для копирайта
+# /balance, /topup и /help (менять ЗДЕСЬ, не в текстах).
+TOKEN_PRICE_KZT      = 2_500
+TOKEN_PACK_TOKENS    = 10
+TOKEN_PACK_PRICE_KZT = TOKEN_PRICE_KZT * TOKEN_PACK_TOKENS   # 25 000 ₸
 
 SOURCE_GREETING: dict[str, str] = {
     "news_apple": "новостей Apple",
@@ -513,8 +530,13 @@ def _build_factor_radar_svg(results: dict) -> str:
         return factor_radar_svg({})
 
 
-# Benchmark β profile for "Δ vs benchmark" column in the factor table.
-# S&P 500 has Market β ≈ 1.0 and ~0.0 on all other style/macro factors.
+# S&P 500 BASELINE when benchmark betas are unavailable (B1 2026-07-17).
+# The PRIMARY source for the "Δ vs benchmark" column is now
+# results["benchmark_factor_profile"] — the REAL factor betas of the user's
+# mandate benchmark fitted by the engine (investment_logic.fit_factor_betas).
+# This constant (Market β ≈ 1.0, rest ≈ 0 — exactly the S&P 500 profile) is
+# kept as the explicit graceful fallback: no benchmark chosen / no history →
+# the column and its label degrade to S&P 500 together, never mismatched.
 _BENCH_FACTOR_BETAS = {axis: (1.0 if axis == "Market" else 0.0)
                         for axis in _RADAR_FACTOR_AXES}
 
@@ -574,19 +596,28 @@ def _build_factor_betas_table(results: dict) -> list[dict]:
     """
     Template-friendly factor-β table for the DEEP factor-radar section.
 
-    Each row: {axis, beta, bench, delta, missing}.  Bench is the SPX-like
-    baseline (Market = 1.0, rest = 0.0); delta = β_port − β_bench rounded
-    to 2 dp.  Missing axes get beta=0.0 + missing=True so the template
-    can render them as muted "n/a" rows instead of dropping them silently.
+    Each row: {axis, beta, bench, delta, missing}.  Bench is the REAL factor-β
+    of the user's mandate benchmark (results["benchmark_factor_profile"],
+    B1 2026-07-17) with a graceful fallback to the S&P 500 constant
+    (Market = 1.0, rest = 0.0) when the profile is absent; delta =
+    β_port − β_bench rounded to 2 dp.  Missing axes get beta=0.0 +
+    missing=True so the template can render them as muted "n/a" rows
+    instead of dropping them silently.
     """
     betas, missing, _coverage = _compute_factor_betas(results)
     if not betas:
         return []
+    bench_profile = results.get("benchmark_factor_profile") or {}
+    bench_betas   = (bench_profile.get("betas")
+                     if isinstance(bench_profile, dict) else None) or None
     missing_set = set(missing)
     rows: list[dict] = []
     for axis in _RADAR_FACTOR_AXES:
-        b     = float(betas.get(axis, 0.0))
-        bench = float(_BENCH_FACTOR_BETAS.get(axis, 0.0))
+        b = float(betas.get(axis, 0.0))
+        if bench_betas:
+            bench = float(bench_betas.get(axis, 0.0))
+        else:
+            bench = float(_BENCH_FACTOR_BETAS.get(axis, 0.0))
         rows.append({
             "axis":    axis,
             "beta":    round(b, 2),
@@ -842,6 +873,9 @@ def _build_pdf_payload(results: dict, tier: str,
             # видны МОДЕЛИ (не только чипам отчёта) — ai_regime_comment и
             # regime_confirmation обязаны опираться на них в первую очередь.
             regime_rag_confirm=regime_rag_confirm,
+            # B1 (2026-07-17): мандат клиента (limits_dict/профиль) — идеи ИИ
+            # не должны предлагать классы активов с лимитом 0–0.
+            user_mandate=user_profile,
         )
         # Propagate the 3-state RAG status into the summary so the integrity
         # panel shows the truth (used / queried-no-match / unavailable) for
@@ -1057,6 +1091,115 @@ def kb_confirm(tier: str, context_slug: str) -> InlineKeyboardMarkup:
     ]])
 
 
+# ── /mandate menu (B1 2026-07-17: progressive disclosure вместо ре-анкеты) ───
+
+def kb_mandate_menu() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🎯 Сменить бенчмарк",
+                              callback_data="mandate:edit:bench")],
+        [InlineKeyboardButton(text="🧬 Изменить классы активов",
+                              callback_data="mandate:edit:universe")],
+        [InlineKeyboardButton(text="⚖️ Изменить риск-профиль",
+                              callback_data="mandate:edit:profile")],
+        [InlineKeyboardButton(text="🔄 Пройти анкету заново",
+                              callback_data="mandate:edit:requiz")],
+        [InlineKeyboardButton(text="⬅️ Закрыть",
+                              callback_data="mandate:close")],
+    ])
+
+
+# Опорный балл для ручного выбора профиля («экспертный» режим): середина
+# диапазона каждой полосы _PROFILE_MAP (6–8 / 9–12 / 13–15 / 16–18).
+_PROFILE_PIVOT_SCORE = {
+    "Консервативный":       7,
+    "Умеренный":            10,
+    "Умеренно-агрессивный": 14,
+    "Агрессивный":          17,
+}
+
+
+def kb_mandate_profile(current: str | None) -> InlineKeyboardMarkup:
+    rows = []
+    for name, score in _PROFILE_PIVOT_SCORE.items():
+        prefix = "✅ " if name == current else ""
+        rows.append([InlineKeyboardButton(
+            text=f"{prefix}{name}",
+            callback_data=f"mandate:profile:{score}")])
+    rows.append([InlineKeyboardButton(text="⬅️ Назад",
+                                      callback_data="mandate:back")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def kb_mandate_changed() -> InlineKeyboardMarkup:
+    """CTA после сохранённого изменения мандата."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📊 Заказать новый отчёт",
+                              callback_data="mandate:report")],
+        [InlineKeyboardButton(text="🎛 Меню мандата",
+                              callback_data="mandate:back")],
+    ])
+
+
+def _mandate_overview_text(profile: dict) -> str:
+    """Текущий мандат из строки БД (get_profile) — шапка меню /mandate."""
+    name     = profile.get("profile_name") or "—"
+    vol_pct  = int(round(float(profile.get("target_volatility") or 0) * 100))
+    te_pct   = int(round(float(profile.get("target_te") or 0) * 100))
+    bench_tk = _resolve_bench_ticker(profile)
+    bench    = BENCHMARK_LIST.get(bench_tk or "", bench_tk or "—")
+    limits   = profile.get("limits_dict") or {}
+    lines = [
+        "🎛 *Ваш инвестиционный мандат*\n",
+        f"Профиль: *{name}*",
+        f"Бенчмарк: *{bench}*",
+        f"Целевая волатильность: *{vol_pct}%* · Tracking Error: *{te_pct}%*",
+        "\n📊 *Классы активов:*",
+    ]
+    for key in ASSET_KEYS:
+        if key not in limits:
+            continue
+        try:
+            lo, hi = limits[key]
+        except (TypeError, ValueError):
+            continue
+        display = ASSET_DISPLAY.get(key, key)
+        if not lo and not hi:
+            lines.append(f"  •  {display}: ❌ не включено")
+        else:
+            lines.append(f"  •  {display}: {lo}–{hi}%")
+    lines.append(
+        "\nЧто изменить?\n"
+        "_Изменения бесплатны и вступят в силу в следующем отчёте._"
+    )
+    return "\n".join(lines)
+
+
+async def _reset_state_keep_message(state: FSMContext) -> None:
+    """Сброс FSM-состояния/edit-режима с сохранением id активного сообщения,
+    чтобы следующий экран редактировался на месте, а не плодил сообщения."""
+    data      = await state.get_data()
+    ob_msg_id = data.get("ob_message_id")
+    await state.clear()
+    if ob_msg_id:
+        await state.update_data(ob_message_id=ob_msg_id)
+
+
+async def _show_mandate_menu(target: Message | CallbackQuery,
+                             state: FSMContext, user_id: int) -> None:
+    """Показать/обновить экран /mandate (переиспользует _edit_or_answer)."""
+    profile = await get_profile(user_id)
+    if profile is None:
+        msg = target.message if isinstance(target, CallbackQuery) else target
+        await msg.answer(
+            "⚠️ У вас ещё нет профиля. Используйте /start для регистрации.",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        return
+    await _reset_state_keep_message(state)
+    await _edit_or_answer(target, state,
+                          _mandate_overview_text(profile), kb_mandate_menu())
+
+
 # ── Shared UI helpers ─────────────────────────────────────────────────────────
 
 async def _edit_or_answer(
@@ -1132,7 +1275,8 @@ async def _show_analysis_menu(message: Message, slug: str) -> None:
             "🎯 *Сценарный* (1 токен) — вклад позиций в риск (Euler-MCTR), "
             "выживаемость в 3 макро-режимах, слабые звенья, бэктест правила.\n"
             "🔬 *Глубокий* (2 токена) — всё из базового + факторное разложение, "
-            "4-Pillar, стресс-сценарии, режим, банковская аналитика.",
+            "4-Pillar, стресс-сценарии, режим, банковская аналитика.\n\n"
+            "ℹ️ Демо-отчёты бесплатны · мандат и бенчмарк: /mandate · помощь: /help",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=kb_analysis_choice(),
         )
@@ -1267,6 +1411,12 @@ async def cb_question_answer(callback: CallbackQuery, state: FSMContext) -> None
 async def cb_back(callback: CallbackQuery, state: FSMContext) -> None:
     """Roll back to the previous onboarding step."""
     await callback.answer()
+    data = await state.get_data()
+    # B1: в edit-режиме (/mandate) «Назад» возвращает в меню мандата, а не
+    # в предыдущий шаг несуществующей анкеты.
+    if data.get("edit_mode"):
+        await _show_mandate_menu(callback, state, callback.from_user.id)
+        return
     current = await state.get_state()
     # Map current state → previous q_idx (0-based)
     back_map = {
@@ -1328,6 +1478,47 @@ async def cb_universe_confirm(callback: CallbackQuery, state: FSMContext) -> Non
         await callback.message.answer("⚠️ Выберите хотя бы один класс активов.")
         return
 
+    # B1 (edit-режим /mandate): баллы профиля НЕ трогаем — меняется только
+    # вселенная/лимиты.  Сохраняем в БД сразу и возвращаемся в мандат-саммари
+    # (НЕ идём дальше по онбордингу к выбору бенчмарка/подключению).
+    if data.get("edit_mode"):
+        user_id = callback.from_user.id
+        stored  = await get_profile(user_id)
+        if stored is None:
+            await callback.message.answer(
+                "⚠️ Профиль не найден — пройдите /start.",
+                parse_mode=ParseMode.MARKDOWN)
+            await state.clear()
+            return
+        # Опорный балл из БД (клампим в диапазон анкеты на случай легаси).
+        score   = max(6, min(18, int(stored.get("score") or 10)))
+        profile = RiskProfileManager.score_to_profile(score)
+        limits  = RiskProfileManager.apply_universe(profile, universe)
+        await save_profile(
+            telegram_id       = user_id,
+            score             = int(stored.get("score") or score),
+            profile_name      = stored.get("profile_name") or profile["name"],
+            target_volatility = float(stored.get("target_volatility")
+                                      or profile["target_vol"]),
+            target_te         = float(stored.get("target_te")
+                                      or profile["target_te"]),
+            selected_assets   = universe,
+            limits_dict       = limits,
+            benchmark_ticker  = stored.get("benchmark_ticker"),
+        )
+        # Пользователь явно подтвердил изменение кнопкой — мандат остаётся
+        # утверждённым (save_profile сбрасывает флаг для полной ре-анкеты).
+        await approve_mandate(user_id)
+        updated = await get_profile(user_id)
+        await _edit_or_answer(
+            callback, state,
+            "✅ *Классы активов обновлены.*\n\n"
+            + _mandate_overview_text(updated or {}),
+            kb_mandate_changed(),
+        )
+        await _reset_state_keep_message(state)
+        return
+
     # Score from 6 questions (range 6-18)
     score   = sum(data.get(f"q{i}", 0) for i in range(1, NUM_QUESTIONS + 1))
     profile = RiskProfileManager.score_to_profile(score)
@@ -1368,7 +1559,10 @@ async def cb_benchmark_expand(callback: CallbackQuery, state: FSMContext) -> Non
     current = data.get("benchmark_ticker")
     await _edit_or_answer(
         callback, state,
-        "📊 *Выберите бенчмарк*\n\nОтметьте предпочитаемый индекс/фактор:",
+        "📊 *Выберите бенчмарк*\n\n"
+        "ℹ️ Бенчмарк — эталон, с которым сравнивается ваш портфель "
+        "(доходность, Tracking Error, факторное разложение).\n\n"
+        "Отметьте предпочитаемый индекс/фактор:",
         kb_benchmark(current=current),
     )
 
@@ -1397,9 +1591,29 @@ async def cb_benchmark_toggle(callback: CallbackQuery, state: FSMContext) -> Non
 async def cb_benchmark_confirm(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     data      = await state.get_data()
+    bench_tk  = data.get("benchmark_ticker")
+
+    # B1 (edit-режим /mandate): прямой антидот к багу-первопричине — смена
+    # ТОЛЬКО бенчмарка за 2 тапа, без повторной анкеты и без биллинга.
+    # save_benchmark_ticker пишет мгновенно и НЕ сбрасывает утверждение мандата.
+    if data.get("edit_mode"):
+        user_id = callback.from_user.id
+        if bench_tk:
+            await save_benchmark_ticker(user_id, bench_tk)
+        updated = await get_profile(user_id)
+        await _edit_or_answer(
+            callback, state,
+            "✅ *Бенчмарк обновлён.* Следующий отчёт будет сравнивать портфель "
+            f"с *{BENCHMARK_LIST.get(bench_tk or '', bench_tk or '—')}* — и в "
+            "доходности, и в факторном разложении.\n\n"
+            + _mandate_overview_text(updated or {}),
+            kb_mandate_changed(),
+        )
+        await _reset_state_keep_message(state)
+        return
+
     prof      = data["profile_data"]
     universe  = data.get("universe", [])
-    bench_tk  = data.get("benchmark_ticker")
 
     summary = RiskProfileManager.build_mandate_summary(
         prof, prof["limits"], benchmark_ticker=bench_tk,
@@ -2279,19 +2493,25 @@ async def cb_cancel(callback: CallbackQuery, state: FSMContext) -> None:
 # ── Utility commands ──────────────────────────────────────────────────────────
 
 async def cmd_balance(message: Message) -> None:
-    balance = await get_balance(message.from_user.id)
+    balance   = await get_balance(message.from_user.id)
+    price_str = f"{TOKEN_PRICE_KZT:,}".replace(",", " ")
+    pack_str  = f"{TOKEN_PACK_PRICE_KZT:,}".replace(",", " ")
     await message.answer(
         f"💳 *Ваш баланс:* {balance} токен(а)\n\n"
         "Пополнить: /topup\n"
-        "Тарифы: 10 токенов = 5 000 KZT (1 токен = 500 KZT)",
+        f"Тариф: {TOKEN_PACK_TOKENS} токенов = {pack_str} ₸ "
+        f"(1 токен = {price_str} ₸)",
         parse_mode=ParseMode.MARKDOWN,
     )
 
 
 async def cmd_topup(message: Message) -> None:
+    price_str = f"{TOKEN_PRICE_KZT:,}".replace(",", " ")
+    pack_str  = f"{TOKEN_PACK_PRICE_KZT:,}".replace(",", " ")
     await message.answer(
         "💰 *Пополнение баланса*\n\n"
-        "Тариф: *10 токенов за 5 000 KZT* (1 токен = 500 KZT)\n\n"
+        f"Тариф: *{TOKEN_PACK_TOKENS} токенов за {pack_str} ₸* "
+        f"(1 токен = {price_str} ₸)\n\n"
         "Для оплаты обратитесь к администратору или используйте платёжный шлюз (скоро).",
         parse_mode=ParseMode.MARKDOWN,
     )
@@ -2313,7 +2533,8 @@ async def cmd_grant(message: Message) -> None:
     caller = message.from_user.id
     if not _is_admin(caller):
         # Stay invisible to non-admins.
-        await message.answer("Неизвестная команда. Доступные: /balance /topup /support")
+        await message.answer(
+            "Неизвестная команда. Доступные: /balance /topup /mandate /help /support")
         return
 
     parts = (message.text or "").split()
@@ -2377,20 +2598,22 @@ async def msg_text_fallback(message: Message, state: FSMContext) -> None:
 
 
 async def cmd_mandate(message: Message, state: FSMContext) -> None:
-    """Re-run onboarding questionnaire for returning users."""
-    user_id = message.from_user.id
-    profile = await get_profile(user_id)
-    if profile is None:
-        await message.answer(
-            "⚠️ У вас ещё нет профиля. Используйте /start для регистрации.",
-            parse_mode=ParseMode.MARKDOWN,
-        )
-        return
+    """B1 (2026-07-17): меню мандата вместо принудительной ре-анкеты.
 
+    Показывает текущий мандат + точечные правки (бенчмарк / классы активов /
+    риск-профиль / полная анкета).  Смена настроек БЕСПЛАТНА — никакого
+    биллинга в этом флоу нет и быть не должно (guardrail §5.3 ТЗ).
+    """
+    await _show_mandate_menu(message, state, message.from_user.id)
+
+
+async def _start_requiz(target: Message | CallbackQuery, state: FSMContext) -> None:
+    """Полная ре-анкета (прежнее поведение /mandate) — один из пунктов меню."""
     await state.clear()
     await state.set_state(Onboarding.Q1)
-    q = QUESTIONS[0]
-    sent = await message.answer(
+    q   = QUESTIONS[0]
+    msg = target.message if isinstance(target, CallbackQuery) else target
+    sent = await msg.answer(
         "🔄 *Обновление инвестиционного мандата*\n\n"
         "Пройдите анкетирование заново, чтобы обновить ваш профиль.\n\n"
         + q["text"],
@@ -2398,6 +2621,151 @@ async def cmd_mandate(message: Message, state: FSMContext) -> None:
         reply_markup=kb_question(q["options"], q_num=1),
     )
     await state.update_data(ob_message_id=sent.message_id)
+
+
+async def cb_mandate_action(callback: CallbackQuery, state: FSMContext) -> None:
+    """Роутер меню /mandate (`mandate:*`).  Билинг здесь ЗАПРЕЩЁН."""
+    await callback.answer()
+    action  = callback.data
+    user_id = callback.from_user.id
+
+    if action == "mandate:close":
+        await state.clear()
+        await _show_analysis_menu(callback.message, "")
+        return
+
+    if action == "mandate:report":
+        await state.clear()
+        await _show_analysis_menu(callback.message, "")
+        return
+
+    if action == "mandate:back":
+        await _show_mandate_menu(callback, state, user_id)
+        return
+
+    if action == "mandate:edit:requiz":
+        await _start_requiz(callback, state)
+        return
+
+    profile = await get_profile(user_id)
+    if profile is None:
+        await callback.message.answer(
+            "⚠️ У вас ещё нет профиля. Используйте /start для регистрации.",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        return
+
+    if action == "mandate:edit:bench":
+        current = _resolve_bench_ticker(profile)
+        await state.update_data(edit_mode=True, benchmark_ticker=current)
+        await state.set_state(Onboarding.Benchmark)
+        await _edit_or_answer(
+            callback, state,
+            "🎯 *Смена бенчмарка*\n\n"
+            f"Текущий: *{BENCHMARK_LIST.get(current or '', current or '—')}*.\n\n"
+            "ℹ️ Бенчмарк — эталон, с которым отчёт сравнивает ваш портфель "
+            "(доходность, Tracking Error и факторное разложение).\n\n"
+            "Выберите новый и нажмите «Продолжить»:",
+            kb_benchmark(current=current),
+        )
+        return
+
+    if action == "mandate:edit:universe":
+        selected = list(profile.get("selected_assets") or [])
+        await state.update_data(edit_mode=True, universe=selected)
+        await state.set_state(Onboarding.Universe)
+        await _edit_or_answer(
+            callback, state,
+            "🧬 *Классы активов*\n\n"
+            "Отметьте классы, которые хотите включить в стратегию. "
+            "Баллы риск-профиля не меняются — только вселенная и лимиты.",
+            kb_universe(set(selected)),
+        )
+        return
+
+    if action == "mandate:edit:profile":
+        await state.update_data(edit_mode=True)
+        await state.set_state(MandateEdit.Profile)
+        await _edit_or_answer(
+            callback, state,
+            "⚖️ *Риск-профиль (экспертный режим)*\n\n"
+            "Профиль задаёт целевую волатильность, Tracking Error и лимиты "
+            "классов активов. Обычно он определяется анкетой — меняйте "
+            "вручную, только если понимаете последствия.\n\n"
+            "Ваш выбранный бенчмарк сохранится без изменений.",
+            kb_mandate_profile(profile.get("profile_name")),
+        )
+        return
+
+    if action.startswith("mandate:profile:"):
+        try:
+            score = int(action.rsplit(":", 1)[1])
+        except ValueError:
+            return
+        score    = max(6, min(18, score))
+        new_prof = RiskProfileManager.score_to_profile(score)
+        universe = list(profile.get("selected_assets") or ASSET_KEYS)
+        limits   = RiskProfileManager.apply_universe(new_prof, universe)
+        # Бенчмарк пользователя НЕ перетираем (решение по умолчанию №2 ТЗ) —
+        # дефолт нового профиля лишь подсказываем текстом.
+        kept_bench    = profile.get("benchmark_ticker")
+        default_bench = PROFILE_BENCH_TICKER.get(new_prof["name"])
+        await save_profile(
+            telegram_id       = user_id,
+            score             = score,
+            profile_name      = new_prof["name"],
+            target_volatility = new_prof["target_vol"],
+            target_te         = new_prof["target_te"],
+            selected_assets   = universe,
+            limits_dict       = limits,
+            benchmark_ticker  = kept_bench,
+        )
+        await approve_mandate(user_id)
+        hint = ""
+        if default_bench and kept_bench and default_bench != kept_bench:
+            hint = (f"\n💡 Для профиля «{new_prof['name']}» мы обычно рекомендуем "
+                    f"бенчмарк *{BENCHMARK_LIST.get(default_bench, default_bench)}* — "
+                    "сменить его можно в «🎯 Сменить бенчмарк».\n")
+        updated = await get_profile(user_id)
+        await _edit_or_answer(
+            callback, state,
+            f"✅ *Риск-профиль обновлён: {new_prof['name']}.*\n{hint}\n"
+            + _mandate_overview_text(updated or {}),
+            kb_mandate_changed(),
+        )
+        await _reset_state_keep_message(state)
+        return
+
+
+async def cmd_help(message: Message) -> None:
+    """B1 (2026-07-17): короткая карта возможностей бота."""
+    base_c, scn_c, deep_c = (TIER_COST["base"], TIER_COST["scenario"],
+                             TIER_COST["deep"])
+    price_str = f"{TOKEN_PRICE_KZT:,}".replace(",", " ")       # «2 500»
+    pack_str  = f"{TOKEN_PACK_PRICE_KZT:,}".replace(",", " ")  # «25 000»
+    await message.answer(
+        "🧭 *Помощь по RAMP*\n\n"
+        "*Отчёты (тиры):*\n"
+        f"  📊 Базовый — {base_c} токен: риск-профиль, CVaR/Sharpe, состав, идеи.\n"
+        f"  🎯 Сценарный — {scn_c} токен: вклад позиций в риск, 3 макро-режима, "
+        "бэктест.\n"
+        f"  🔬 Глубокий — {deep_c} токена: + факторное разложение, 4-Pillar, "
+        "стресс-сценарии, банковская аналитика.\n"
+        "  📋 Отчёты по демо-портфелю — *бесплатны*.\n\n"
+        "*Токены:*\n"
+        f"  1 токен = *{price_str} ₸* · пакет {TOKEN_PACK_TOKENS} токенов = "
+        f"*{pack_str} ₸*\n"
+        "  Баланс: /balance · пополнение: /topup. Списание — только после "
+        "готового отчёта.\n\n"
+        "*Мандат и бенчмарк:*\n"
+        "  /mandate — посмотреть и изменить: бенчмарк (2 тапа, без анкеты), "
+        "классы активов, риск-профиль.\n"
+        "  Изменения бесплатны и действуют со следующего отчёта.\n\n"
+        "*Портфель:*\n"
+        "  /start → 🔗 Freedom Broker API (read-only ключи) или 📋 Демо-режим.\n\n"
+        "*Поддержка:* /support",
+        parse_mode=ParseMode.MARKDOWN,
+    )
 
 
 # ── Beta-access middleware ────────────────────────────────────────────────────
@@ -2654,6 +3022,7 @@ def build_dispatcher() -> Dispatcher:
     dp.message.register(cmd_balance,  F.text == "/balance")
     dp.message.register(cmd_topup,    F.text == "/topup")
     dp.message.register(cmd_support,  F.text == "/support")
+    dp.message.register(cmd_help,     F.text == "/help")
     # Admin-only token grant for testing (ADMIN_USER_IDS env gate).
     dp.message.register(cmd_grant,    F.text.startswith("/grant"))
     dp.message.register(cmd_mandate,  F.text == "/mandate")
@@ -2663,6 +3032,8 @@ def build_dispatcher() -> Dispatcher:
     dp.callback_query.register(cb_confirm,          F.data.startswith("confirm:"))
     dp.callback_query.register(cb_scenario_cached,  F.data == "scenario:cached")
     dp.callback_query.register(cb_cancel,           F.data == "cancel")
+    # /mandate menu (B1 2026-07-17) — free mandate edits, no billing here.
+    dp.callback_query.register(cb_mandate_action,   F.data.startswith("mandate:"))
 
     # Sprint-5 (Task 1 — hard text-input filter) MUST be LAST.  Bot navigation
     # is button-driven; the ONLY legitimate free-text inputs are the Freedom
@@ -2727,6 +3098,21 @@ async def main() -> None:
     session = _RetryingSession(timeout=_SESSION_TIMEOUT_S)
     bot = Bot(token=BOT_TOKEN, session=session)
     dp  = build_dispatcher()
+
+    # B1 (2026-07-17): регистрируем команды в «меню ⋮» Telegram-клиента.
+    # Non-fatal: сбой сети здесь не должен ронять бота на старте.
+    try:
+        from aiogram.types import BotCommand
+        await bot.set_my_commands([
+            BotCommand(command="start",   description="Начать / меню анализа"),
+            BotCommand(command="mandate", description="Мой мандат и настройки"),
+            BotCommand(command="balance", description="Баланс токенов"),
+            BotCommand(command="topup",   description="Пополнить токены"),
+            BotCommand(command="help",    description="Помощь"),
+            BotCommand(command="support", description="Поддержка"),
+        ])
+    except Exception as exc:                           # noqa: BLE001
+        logger.warning("set_my_commands failed: %s", exc)
 
     # Graceful shutdown: Cloud Run sends SIGTERM before tearing the
     # container down on a new deploy.  Stopping the poller and CLOSING the
