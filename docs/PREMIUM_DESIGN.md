@@ -107,6 +107,11 @@ V1 (синий IBM-Plex) и V2-reskin (gold, текущий прод) сохра
 - `effect[].before/after/delta` — форматируются per-metric (`_eff_fmt`/`_eff_delta`); источник хранит сырые float.
 - идея `pipeline[]` ← `_pipe_step` (деталь-строка; стадию-метку даёт компонент по позиции).
 - BASE «AI · {модель}» — из `meta.aiModel`, не хардкод.
+- `benchmarkName`/`benchmarkTicker` (DEEP, B1 2026-07-17) ← `payload.benchmark_name/benchmark_ticker`
+  (источник — `results.benchmark_factor_profile`, реальные факторные беты мандатного бенчмарка):
+  столбец FactorTable, легенда радара и плашка секции «Факторное разложение» — динамические;
+  дефолт «S&P 500» = фолбэк-константа, подпись всегда совпадает с числами столбца.
+  DEEP-контракт: 32 → **34 ключа** (`test_phase19_block_audit.PremiumMapperTest`).
 
 **Мобайл (`custom.css`, `@media (max-width:640px)`):**
 - НЕ ставить `min-width:0` на ячейки `grid-cols-[…minmax(0,fr)…]` — треки схлопываются и числа НАКЛАДЫВАЮТСЯ.
