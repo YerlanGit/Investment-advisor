@@ -253,14 +253,19 @@ class PayloadBenchmarkIdentityTest(unittest.TestCase):
 # ── Слой A — скомпилированные ассеты и шаблоны ───────────────────────────────
 
 class CompiledAssetsTest(unittest.TestCase):
-    """Тест-греп: в FactorTable/легенде нет захардкоженного «S&P 500»."""
+    """Тест-греп: в FactorTable/легенде нет захардкоженного «S&P 500».
+
+    NB (build-gate): деплой-гейт гоняет сьют ВНУТРИ Docker-образа, который
+    отгружает `src/` + `tests/`, но НЕ dev-каталог `design/` (Dockerfile COPY).
+    Поэтому .jsx-источник и design/-sample пинятся ТОЛЬКО когда `design/`
+    присутствует (чекаут репо / GitHub CI); ОТГРУЖАЕМЫЕ артефакты (бандл в
+    `src/premium_assets`, v3-шаблон) — безусловно (как в `test_phase19`).
+    """
 
     @classmethod
     def setUpClass(cls):
         cls.bundle = (ROOT / "src" / "premium_assets" /
                       "deep-components.js").read_text(encoding="utf-8")
-        cls.jsx = (ROOT / "design" / "premium_v2" / "deep" /
-                   "deep-factors.jsx").read_text(encoding="utf-8")
 
     def test_bundle_reads_dynamic_benchmark_name(self):
         self.assertIn("benchmarkName", self.bundle)
@@ -272,19 +277,29 @@ class CompiledAssetsTest(unittest.TestCase):
         self.assertNotIn("Почему у S&P 500 ненулевая только Market", self.bundle)
 
     def test_jsx_source_did_not_diverge_from_artifact(self):
-        """Источник (.jsx) и артефакт (.js) обязаны меняться синхронно."""
-        self.assertIn("benchmarkName", self.jsx)
-        self.assertNotIn("Рынок (S&P 500)", self.jsx)
-        design_bundle = (ROOT / "design" / "premium_v2" /
-                         "deep-components.js").read_text(encoding="utf-8")
-        self.assertEqual(design_bundle, self.bundle,
+        """Источник (.jsx) и артефакт (.js) обязаны меняться синхронно —
+        проверяется только при наличии dev-каталога design/ (не в образе)."""
+        jsx_path = ROOT / "design" / "premium_v2" / "deep" / "deep-factors.jsx"
+        design_bundle_path = ROOT / "design" / "premium_v2" / "deep-components.js"
+        if not (jsx_path.exists() and design_bundle_path.exists()):
+            self.skipTest("design/ отсутствует (Docker deploy-gate) — "
+                          "пинятся только отгружаемые артефакты")
+        jsx = jsx_path.read_text(encoding="utf-8")
+        self.assertIn("benchmarkName", jsx)
+        self.assertNotIn("Рынок (S&P 500)", jsx)
+        self.assertEqual(design_bundle_path.read_text(encoding="utf-8"), self.bundle,
                          "design/ и src/premium_assets/ бандлы разошлись — "
                          "прогоните design/premium_v2/build.sh")
 
     def test_sample_data_carries_benchmark_keys(self):
         import json
-        for p in (ROOT / "design" / "premium_v2" / "deep-data.sample.json",
-                  ROOT / "src" / "premium_assets" / "deep-data.sample.json"):
+        # Отгружаемый sample (src/premium_assets) — безусловно; design/-копия —
+        # только если каталог присутствует (dev/CI, не Docker deploy-gate).
+        paths = [ROOT / "src" / "premium_assets" / "deep-data.sample.json"]
+        design_sample = ROOT / "design" / "premium_v2" / "deep-data.sample.json"
+        if design_sample.exists():
+            paths.append(design_sample)
+        for p in paths:
             d = json.loads(p.read_text(encoding="utf-8"))
             self.assertIn("benchmarkName", d, p)
             self.assertIn("benchmarkTicker", d, p)
