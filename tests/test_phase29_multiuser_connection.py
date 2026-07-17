@@ -274,6 +274,35 @@ class ResolvePortfolioSourceTest(unittest.TestCase):
         self.assertEqual(source, "undetermined")
 
 
+class UndeterminedSourceRecoveryTest(unittest.TestCase):
+    """2026-07-16: the undetermined-source guard MUST offer the connection
+    keyboard inline — a returning user has no other path to the connection
+    screen (/start skips it once a profile exists), so pointing at /start
+    created a dead loop (2nd user stuck: /start → меню → «не выбран» → /start…).
+    Source-level assertions, phase-15 style."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.src = (SRC / "tg_bot.py").read_text(encoding="utf-8")
+
+    def test_cb_confirm_guard_offers_source_keyboard(self):
+        marker = "⚠️ *Источник портфеля не выбран.*"   # the message literal
+        self.assertIn(marker, self.src)
+        block = self.src.split(marker, 1)[1][:600]
+        self.assertIn("kb_connect_choice()", block,
+                      "the undetermined-source message must attach the "
+                      "connection keyboard (one-tap recovery)")
+
+    def test_cmd_start_heals_undetermined_source(self):
+        start_body = self.src.split("async def cmd_start", 1)[1].split(
+            "\nasync def ", 1)[0]
+        self.assertIn("_resolve_portfolio_source", start_body)
+        self.assertIn('"undetermined"', start_body)
+        self.assertIn("kb_connect_choice()", start_body,
+                      "/start for a returning user must offer the source "
+                      "choice when the source is undetermined")
+
+
 class EffectiveCostTest(unittest.TestCase):
     """Fix C — демо бесплатно, живой источник по тарифу."""
 
