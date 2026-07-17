@@ -33,7 +33,13 @@ AI-written narrative — in Russian.
    the template schema; `html_renderer.render_report_html()` renders the v3
    banker template and ships a signed Cloud Storage URL to the user.
 5. **Bills tokens** — atomic SQLite tokenomics; the user is charged only after
-   the report is delivered.
+   the report is delivered. Pricing (2026-07-17): **1 token = 2 500 KZT**,
+   pack of 10 = 25 000 KZT (`tg_bot.TOKEN_PRICE_KZT`; tiers: base/scenario
+   1 token, deep 2, demo reports free).
+6. **Mandate menu** — `/mandate` shows the current mandate and edits it in
+   place (benchmark in two taps, asset classes, risk profile, full re-quiz) —
+   free of charge; the chosen benchmark propagates end-to-end, including the
+   DEEP factor-decomposition column (`benchmark_factor_profile`).
 
 ## Repository layout
 

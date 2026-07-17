@@ -1807,7 +1807,8 @@ Object.assign(window, {
 /* DEEP Factors — β-radar + 4-pillar scoring */
 
 const FactorTable = ({
-  factors
+  factors,
+  benchmarkName
 }) => /*#__PURE__*/React.createElement("table", {
   className: "w-full"
 }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", {
@@ -1818,10 +1819,10 @@ const FactorTable = ({
   className: "text-right font-medium py-2"
 }, "β портф."), /*#__PURE__*/React.createElement("th", {
   className: "text-right font-medium py-2",
-  title: "S&P 500 = эталон «рынок»: β_Market = 1, прочие ≈ 0 по построению модели"
-}, "S&P 500"), /*#__PURE__*/React.createElement("th", {
+  title: `${benchmarkName} — факторные беты вашего бенчмарка (его тоже разложили по этим осям)`
+}, benchmarkName), /*#__PURE__*/React.createElement("th", {
   className: "text-right font-medium py-2",
-  title: "Активный наклон портфеля относительно рынка"
+  title: "Активный наклон портфеля относительно бенчмарка"
 }, "Наклон Δ"))), /*#__PURE__*/React.createElement("tbody", null, factors.map((f, i) => {
   const d = f.port - f.mkt;
   const tone = d > 0 ? 'text-gold-700' : d < 0 ? 'text-sage-600' : 'text-ink-400';
@@ -2038,6 +2039,10 @@ const ScoreCard = ({
 };
 const Factors = () => {
   const p = window.DEEP;
+  // B1 (2026-07-17): динамический бенчмарк секции — столбец, легенда и плашка
+  // следуют за мандатным бенчмарком клиента (payload.benchmarkName); фолбэк
+  // «S&P 500» сохраняет прежний вид для легаси-данных и S&P-константы.
+  const benchName = p.benchmarkName || 'S&P 500';
   return /*#__PURE__*/React.createElement("section", {
     id: "factors",
     className: "rise",
@@ -2072,7 +2077,7 @@ const Factors = () => {
     className: "flex items-center gap-2"
   }, /*#__PURE__*/React.createElement("span", {
     className: "w-4 h-0 border-t-2 border-dashed border-ink-700"
-  }), " Рынок (S&P 500)"))), /*#__PURE__*/React.createElement("div", {
+  }), " ", `Бенчмарк (${benchName})`))), /*#__PURE__*/React.createElement("div", {
     className: "grid grid-cols-12 gap-7 items-center"
   }, /*#__PURE__*/React.createElement("div", {
     className: "col-span-12 lg:col-span-5 flex justify-center"
@@ -2082,7 +2087,8 @@ const Factors = () => {
   })), /*#__PURE__*/React.createElement("div", {
     className: "col-span-12 lg:col-span-7"
   }, /*#__PURE__*/React.createElement(FactorTable, {
-    factors: p.factors
+    factors: p.factors,
+    benchmarkName: benchName
   }), /*#__PURE__*/React.createElement("p", {
     className: "text-[11px] text-ink-500 leading-relaxed font-light mt-4"
   }, /*#__PURE__*/React.createElement("span", {
@@ -2091,9 +2097,9 @@ const Factors = () => {
     className: "text-[11px] text-ink-500 leading-relaxed font-light mt-2 rounded-2xl bg-cream-50 border border-ink-900/5 px-3.5 py-2.5"
   }, /*#__PURE__*/React.createElement("span", {
     className: "text-ink-800 font-medium"
-  }, "Почему у S&P 500 ненулевая только Market?"), " В этой модели Market — это и есть S&P 500, поэтому эталон по построению имеет β_Market = 1, а стилевые факторы ≈ 0 (их экспозиция уже «зашита» в рынок). Колонка ", /*#__PURE__*/React.createElement("span", {
+  }, `Столбец «${benchName}»`), " — факторные беты самого бенчмарка (его тоже разложили по этим осям). ", /*#__PURE__*/React.createElement("span", {
     className: "font-medium"
-  }, "Наклон Δ"), " = активный перекос портфеля относительно рынка: именно он и есть полезный сигнал."))), /*#__PURE__*/React.createElement(FactorVariance, {
+  }, "Наклон Δ = β портфеля − β бенчмарка"), " — ваш активный перекос относительно бенчмарка: именно он и есть полезный сигнал. Если ваш бенчмарк — широкий рынок (S&P 500), у него β_Market ≈ 1, а стили ≈ 0; у стилевых и секторных бенчмарков (напр. Nasdaq 100) появляются собственные наклоны — это нормально."))), /*#__PURE__*/React.createElement(FactorVariance, {
     fv: p.factorVariance
   }), /*#__PURE__*/React.createElement("div", {
     className: "mt-5 rounded-2xl bg-cream-50 border border-ink-900/5 px-4 py-3.5 flex items-start gap-3"

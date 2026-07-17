@@ -3,7 +3,8 @@ Premium V2 data mapper (Adapter / anti-corruption layer).
 
 Translates the engine's "heavy" v3 report payload (≈86 keys produced by
 pdf_payload.build_payload) into the STRICT design-data contracts the Premium V2
-React components consume — 32 keys for DEEP, 13 for BASE (see docs/PREMIUM_DESIGN.md
+React components consume — 34 keys for DEEP (B1 2026-07-17:
++benchmarkName/benchmarkTicker), 13 for BASE (see docs/PREMIUM_DESIGN.md
 §3-4 and design/premium_v2/*-data.sample.json).
 
 Strict isolation (Separation of Concerns):
@@ -350,6 +351,11 @@ def _map_deep(p: dict, meta: dict) -> dict:
         "sectorWarn": [_warn_text(x) for x in _list(p, "sector_warnings")][:3] or [DASH],
         "holdingsAI": _txt(p, "ai_holdings_comment"),
         "factors": factors, "factorCoverage": _coverage(p), "factorAI": _txt(p, "ai_factor_comment"),
+        # B1 (2026-07-17): dynamic benchmark identity for the factor section —
+        # column header, radar legend and the explainer plaque read these.
+        # Defaults keep legacy payloads (and the S&P fallback) pixel-identical.
+        "benchmarkName":   str(_g(p, "benchmark_name")   or "S&P 500"),
+        "benchmarkTicker": str(_g(p, "benchmark_ticker") or "SPY.US"),
         "factorVariance": factor_variance,
         # scoresNote dropped — it duplicated scoresAI verbatim (same
         # ai_4pillar_comment rendered twice).  The AI box keeps the comment once.

@@ -571,6 +571,8 @@
   }
  ],
  "factorCoverage": 98.6,
+ "benchmarkName": "Nasdaq 100",
+ "benchmarkTicker": "QQQ.US",
  "factorAI": "Портфель сильно завязан на акции роста (NVDA двигается в 2,3× сильнее рынка, MSFT 1,56×), а не на недооценённые. В растущей экономике Barclays советует value над growth — портфель не совпадает с рекомендацией.",
  "scores": [
   {

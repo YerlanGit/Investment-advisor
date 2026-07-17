@@ -3,8 +3,10 @@
 > Назначение: единая карта поведения бота (`src/tg_bot.py`, `src/entrypoint.py`) —
 > что происходит на каждом шаге, какие состояния FSM, какие колбэки, где списываются
 > токены и как собирается отчёт. Для быстрой навигации при доработках UX/флоу.
-> Обновлено: 2026-07-07 (добавлен тир **Scenario Analysis**, токен-тариф base 1 /
-> scenario 1 / deep 2, inline-CTA сценарного анализа под отчётом).
+> Обновлено: **2026-07-17** (B1: `/mandate` — меню точечных правок вместо ре-анкеты,
+> `/help`, `setMyCommands`, динамический бенчмарк в факторной секции DEEP;
+> **цена токена 2 500 ₸**). Ранее: 2026-07-07 (тир **Scenario Analysis**,
+> токен-тариф base 1 / scenario 1 / deep 2, inline-CTA сценарного анализа).
 
 ---
 
@@ -192,16 +194,41 @@ GCS (`upload_report`) → пользователю подписанная ссы
 
 ## 7. Токеномика (`db_tokenomics.py`)
 
-- Ценообразование: **10 токенов = 5000 KZT** (1 токен = 500 KZT).
+- Ценообразование (**ВАЖНОЕ изменение 2026-07-17**; было 500 ₸):
+  **1 токен = 2 500 KZT · пакет 10 токенов = 25 000 KZT**. Источник правды для
+  копирайта — константы `tg_bot.TOKEN_PRICE_KZT` / `TOKEN_PACK_PRICE_KZT`
+  (менять там, а не в текстах).
 - `INITIAL_TOKENS = 10` — welcome-бонус (однократно).
 - `init_user` — регистрация + бонус (idempotent); `deduct_tokens` — списание;
   `credit_tokens` — пополнение; `get_balance` — баланс; `InsufficientFundsError`.
-- **Команды:**
-  - `/balance` (`cmd_balance`) — текущий баланс;
+- **Команды** (зарегистрированы в «меню ⋮» Telegram через `set_my_commands`,
+  `tg_bot.main`):
+  - `/balance` (`cmd_balance`) — текущий баланс + тариф;
   - `/topup` (`cmd_topup`) — инструкция по пополнению;
   - `/grant` (`cmd_grant`) — админ-начисление (гейт `ADMIN_USER_IDS`);
   - `/support` (`cmd_support`) — поддержка;
-  - `/mandate` (`cmd_mandate`) — просмотр/изменение риск-мандата.
+  - `/help` (`cmd_help`, B1 2026-07-17) — карта тиров/токенов/мандата;
+  - `/mandate` (`cmd_mandate`) — меню мандата (см. §7.1).
+
+### 7.1. `/mandate` — меню точечных правок (B1 2026-07-17)
+
+Раньше `/mandate` сразу перезапускал 6-вопросную анкету — чтобы сменить только
+бенчмарк, клиент проходил всё заново (первопричина инцидента «сменил бенчмарк,
+а отчёт сравнивает с S&P 500»). Теперь `cmd_mandate` показывает текущий мандат
+(`_mandate_overview_text`) + инлайн-меню (`kb_mandate_menu`):
+
+| Кнопка | Callback | Что делает |
+|---|---|---|
+| 🎯 Сменить бенчмарк | `mandate:edit:bench` | `kb_benchmark(current)` → `ob:bench:*` c флагом `edit_mode=True` → по `ob:bench:confirm` — `save_benchmark_ticker` (мгновенно, БЕЗ ре-анкеты и БЕЗ сброса утверждения) → саммари + CTA «Заказать новый отчёт» |
+| 🧬 Изменить классы активов | `mandate:edit:universe` | `kb_universe` (мультивыбор `ob:uni:*`, edit-режим) → по confirm — `apply_universe` + `save_profile` (баллы/цели/бенчмарк сохранены) + `approve_mandate` |
+| ⚖️ Изменить риск-профиль | `mandate:edit:profile` | «экспертный» выбор из 4 профилей (`mandate:profile:<score>`, опорный балл полосы) → пересчёт vol/TE/лимитов; выбранный бенчмарк НЕ перетирается (дефолт нового профиля — только подсказкой) |
+| 🔄 Пройти анкету заново | `mandate:edit:requiz` | прежнее поведение (`Onboarding.Q1`) |
+| ⬅️ Закрыть | `mandate:close` | выход в меню анализа |
+
+Guardrails (§5.3 ТЗ): изменения мандата **бесплатны** — в `mandate:*`-флоу нет
+ни одного вызова `deduct_tokens`; single-flight, whitelist, deep-link `scn_` и
+text-fallback не затронуты. Закрыто тестами
+`tests/test_phase31_benchmark_factor_propagation.py::MandateEditNoBillingTest`.
 
 ---
 
@@ -209,7 +236,8 @@ GCS (`upload_report`) → пользователю подписанная ссы
 
 | Группа | Состояния | Назначение |
 |---|---|---|
-| `Onboarding` | `Q1…Q6`, `Universe`, `Benchmark`, `MandateReview` | риск-профилирование + мандат |
+| `Onboarding` | `Q1…Q6`, `Universe`, `Benchmark`, `MandateReview` | риск-профилирование + мандат; `Universe`/`Benchmark` переиспользуются `/mandate`-меню с флагом `edit_mode=True` в FSM-данных (confirm-обработчики ветвятся: сохранить в БД и вернуться в саммари, а не идти дальше по онбордингу) |
+| `MandateEdit` | `Profile` | ручной выбор риск-профиля из `/mandate` (B1 2026-07-17) |
 | `PortfolioConnection` | `Login`, `ApiKey`, `SecretKey` | ввод ключей Freedom Broker (шифруются) |
 | `AnalysisFlow` | `awaiting_approval` | подтверждение списания перед анализом |
 
@@ -224,7 +252,8 @@ GCS (`upload_report`) → пользователю подписанная ссы
 
 | Callback prefix | Хендлер | Действие |
 |---|---|---|
-| `ob:*` (`ob:back`, `ob:uni:*`, `ob:bench:*`, `ob:mandate:*`) | онбординг-роутер | навигация онбординга |
+| `ob:*` (`ob:back`, `ob:uni:*`, `ob:bench:*`, `ob:mandate:*`) | онбординг-роутер | навигация онбординга; в `edit_mode` confirm/back ведут обратно в `/mandate`-саммари |
+| `mandate:*` (`mandate:edit:{bench,universe,profile,requiz}`, `mandate:profile:<score>`, `mandate:back/close/report`) | `cb_mandate_action` | меню мандата (B1 2026-07-17; бесплатно, без биллинга) |
 | `connect:template` / `connect:freedom` | `cb_connect_choice` | выбор источника портфеля |
 | `analysis:{base,scenario,deep}` | `cb_analysis_choice` | выбор тира |
 | `confirm:<tier>:<slug>` | `cb_confirm` | запуск анализа |
@@ -276,10 +305,22 @@ GCS (`upload_report`) → пользователю подписанная ссы
 ## 11. Где что менять
 
 - **Кнопки/копирайт меню** → `kb_analysis_choice`, `_show_analysis_menu`, `cmd_start`.
-- **Тарифы** → `TIER_COST` / `TIER_LABEL` (`tg_bot.py`).
+- **Тарифы (в токенах)** → `TIER_COST` / `TIER_LABEL` (`tg_bot.py`).
+- **Цена токена в ₸** → `TOKEN_PRICE_KZT` / `TOKEN_PACK_PRICE_KZT` (`tg_bot.py`) —
+  копирайт /balance, /topup, /help читает эти константы (2026-07-17: 2 500 ₸).
+- **Меню /mandate** → `cmd_mandate` / `cb_mandate_action` / `_mandate_overview_text`
+  / `kb_mandate_menu` / `kb_mandate_profile`; edit-ветвления — в
+  `cb_benchmark_confirm`, `cb_universe_confirm`, `cb_back` (флаг `edit_mode`).
+- **Команды в «меню ⋮» Telegram** → `set_my_commands` в `tg_bot.main`.
+- **/help** → `cmd_help` (`tg_bot.py`).
 - **Шаги анализа / прогресс** → `_run_analysis_background`.
 - **Сборка payload по тиру** → `_build_pdf_payload` (base/deep → `pdf_payload`,
   scenario → `finance/scenario_report`).
+- **Бенчмарк в факторной секции DEEP** → движок
+  `finance/investment_logic.fit_factor_betas` + `benchmark_factor_profile` →
+  `_build_factor_betas_table` (`tg_bot.py`) → `benchmark_name/ticker`
+  (`pdf_payload`) → `benchmarkName` (`premium_payload`) →
+  `design/premium_v2/deep/deep-factors.jsx` (после правки — `build.sh`!).
 - **Рендер/маршрут шаблона** → `html_renderer._select_template` + `render_report_html`.
 - **Онбординг-вопросы/скоринг** → `QUESTIONS` (`tg_bot.py`) + `profile_manager`.
 - **Токеномика** → `db_tokenomics.py`.
