@@ -806,6 +806,8 @@ const DEEP = {
     mkt: 0.00
   }],
   factorCoverage: 98.6,
+  benchmarkName: 'Nasdaq 100',
+  benchmarkTicker: 'QQQ.US',
   factorAI: 'Портфель сильно завязан на акции роста (NVDA двигается в 2,3× сильнее рынка, MSFT 1,56×), а не на недооценённые. В растущей экономике Barclays советует value над growth — портфель не совпадает с рекомендацией.',
   // 4-pillar scoring (F/V/T/C, each −2..+2, total ∈ [−6,+6])
   scores: [{
@@ -1699,11 +1701,19 @@ const Waterfall = ({
     total,
     sumStandalone
   } = data;
+  // «Прочие» bridges the shown top-N standalone bars up to the FULL sum so the
+  // waterfall RECONCILES: ΣstandAlone + diversification = total (was detached).
+  const _shown = standalone.reduce((a, s) => a + s.v, 0);
+  const _other = Math.round((sumStandalone - _shown) * 10) / 10;
   const cols = [...standalone.map(s => ({
     t: s.t,
     v: s.v,
     kind: 'pos'
-  })), {
+  })), ...(_other > 0.5 ? [{
+    t: 'Прочие',
+    v: _other,
+    kind: 'pos'
+  }] : []), {
     t: 'Дивер-сификация',
     v: diversification,
     kind: 'neg'
@@ -1712,7 +1722,15 @@ const Waterfall = ({
     v: total,
     kind: 'total'
   }];
-  const maxV = Math.max(sumStandalone, total) * 1.15;
+  let _run = 0,
+    _peak = 0;
+  cols.forEach(c => {
+    if (c.kind === 'pos') {
+      _run += c.v;
+      _peak = Math.max(_peak, _run);
+    }
+  });
+  const maxV = Math.max(_peak, total) * 1.06;
   const W = 520,
     H = height,
     padL = 32,
@@ -1732,17 +1750,17 @@ const Waterfall = ({
       y0 = running;
       y1 = running + c.v;
       running = y1;
-      color = i === 0 ? '#1c1b1a' : i === 1 ? '#f5d04e' : '#3a3833';
+      color = '#1c1b1a'; // standalone bars — all «отдельно» (legend: black)
     } else if (c.kind === 'neg') {
       y0 = running;
       y1 = running + c.v; // v is negative
       running = y1;
-      color = '#c47358';
+      color = '#c47358'; // «диверсификация» (legend: rust)
     } else {
       // total — floor at 0
       y0 = 0;
       y1 = c.v;
-      color = '#1c1b1a';
+      color = '#f5d04e'; // «итог» (legend: gold)
     }
     const top = Math.max(y0, y1);
     const bot = Math.min(y0, y1);
@@ -2169,11 +2187,16 @@ const RegimeQuadrant = ({
   const Y = v => cy - v / SCALE * (inner / 2);
   const dx = X(dot.cycle),
     dy = Y(dot.growth);
+  // Audit 2026-07-05 (R-1): labels pinned to finance/regime.py quadrants —
+  // X=cycle, Y=growth ⇒ top-left (growth+, cycle−) is SLOWDOWN and bottom-right
+  // (growth−, cycle+) is RECOVERY.  The old layout had them SWAPPED (pre-fix
+  // engine semantics), so a Slowdown reading would land the dot in a quadrant
+  // labelled «RECOVERY» — visually contradicting the regime label.
   const quads = [{
     x: pad,
     y: pad,
-    label: 'RECOVERY',
-    fill: '#5d7c5c'
+    label: 'SLOWDOWN',
+    fill: '#a8a293'
   }, {
     x: cx,
     y: pad,
@@ -2187,8 +2210,8 @@ const RegimeQuadrant = ({
   }, {
     x: cx,
     y: cy,
-    label: 'SLOWDOWN',
-    fill: '#a8a293'
+    label: 'RECOVERY',
+    fill: '#5d7c5c'
   }];
   return /*#__PURE__*/React.createElement("svg", {
     viewBox: `0 0 ${size} ${size}`,
@@ -2282,7 +2305,7 @@ const RegimeQuadrant = ({
     fontSize: "8",
     fontFamily: "JetBrains Mono",
     fill: "#6b6862"
-  }, "G +", dot.growth.toFixed(2), " · C +", dot.cycle.toFixed(2)));
+  }, "G ", (dot.growth >= 0 ? '+' : '') + dot.growth.toFixed(2), " · C ", (dot.cycle >= 0 ? '+' : '') + dot.cycle.toFixed(2)));
 };
 
 // ── Mandate compliance bar: allowed band [lo,hi] + tick at value
@@ -2392,29 +2415,39 @@ const HeroStat = ({
   className: "text-[12px] text-ink-500 font-medium tracking-tight"
 }, label));
 
-// Risk gauge card (49 / умеренный)
-const GaugeCard = ({
+// Compact risk-index gauge for the HERO right column (moved up from the main
+// grid — user request «перенеси Индекс риска в эту зону»).  Horizontal layout:
+// gauge on the left, tier + forward return/Sharpe on the right.
+const HeroGaugeCard = ({
   v
 }) => /*#__PURE__*/React.createElement("div", {
-  className: "glass-strong rounded-4xl p-6 shadow-card lift flex flex-col"
+  className: "glass-strong rounded-4xl p-5 shadow-card lift flex items-center gap-5"
 }, /*#__PURE__*/React.createElement("div", {
-  className: "flex items-start justify-between"
-}, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-  className: "text-ink-500 text-[12px] font-medium"
-}, "Индекс риска"), /*#__PURE__*/React.createElement("h3", {
-  className: "text-xl font-semibold tracking-tight text-ink-900 leading-tight"
-}, "Сводный 0–100")), /*#__PURE__*/React.createElement("span", {
-  className: "px-2.5 py-1 rounded-full bg-gold-400/25 text-gold-700 text-[10px] font-mono font-bold tracking-wider uppercase"
-}, v.riskTier)), /*#__PURE__*/React.createElement("div", {
-  className: "flex-1 flex items-center justify-center py-2"
+  className: "flex-shrink-0"
 }, /*#__PURE__*/React.createElement(RiskGauge, {
   value: v.riskIndex,
-  size: 210
+  size: 150
 })), /*#__PURE__*/React.createElement("div", {
-  className: "text-[11px] text-ink-500 text-center font-light"
-}, "Рассчитан для профиля ", /*#__PURE__*/React.createElement("span", {
-  className: "text-ink-900 font-medium"
-}, window.DEEP.meta.profile)));
+  className: "flex flex-col gap-2.5 min-w-0"
+}, /*#__PURE__*/React.createElement("div", {
+  className: "flex items-center gap-2 flex-wrap"
+}, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  className: "text-ink-500 text-[10px] font-medium tracking-widest uppercase"
+}, "Индекс риска"), /*#__PURE__*/React.createElement("h3", {
+  className: "text-base font-semibold tracking-tight text-ink-900 leading-tight"
+}, "Сводный 0–100")), v.riskTier && v.riskTier !== '–' && /*#__PURE__*/React.createElement("span", {
+  className: "px-2 py-0.5 rounded-full bg-gold-400/25 text-gold-700 text-[9px] font-mono font-bold tracking-wider uppercase"
+}, v.riskTier)), v.expReturn && v.expReturn !== '–' && /*#__PURE__*/React.createElement("div", {
+  className: "flex items-center gap-4"
+}, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  className: "text-[9px] text-ink-500 font-medium uppercase tracking-wider"
+}, "Ожид. дох. (год.)"), /*#__PURE__*/React.createElement("div", {
+  className: "num text-lg font-light text-sage-600 leading-none mt-0.5"
+}, v.expReturn)), v.expSharpe && v.expSharpe !== '–' && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  className: "text-[9px] text-ink-500 font-medium uppercase tracking-wider"
+}, "Фвд-Sharpe"), /*#__PURE__*/React.createElement("div", {
+  className: "num text-lg font-light text-ink-900 leading-none mt-0.5"
+}, v.expSharpe)))));
 
 // Verdict / AI summary dark card with bullets
 const VerdictCard = ({
@@ -2440,13 +2473,24 @@ const VerdictCard = ({
 }, v.bullets.map((b, i) => /*#__PURE__*/React.createElement("div", {
   key: i,
   className: "flex items-start gap-3"
-}, /*#__PURE__*/React.createElement("span", {
+}, b.tag ? /*#__PURE__*/React.createElement("span", {
   className: "mt-[3px] px-1.5 py-0.5 rounded-md bg-gold-400/15 text-gold-400 text-[9px] font-mono font-bold tracking-wider uppercase flex-shrink-0 w-[58px] text-center"
-}, b.tag), /*#__PURE__*/React.createElement("p", {
+}, b.tag) : /*#__PURE__*/React.createElement("span", {
+  className: "mt-[3px] w-1.5 h-1.5 rounded-full bg-gold-400/50 flex-shrink-0"
+}), /*#__PURE__*/React.createElement("p", {
   className: "text-white/70 text-[11.5px] leading-snug font-light flex-1"
-}, b.text, /*#__PURE__*/React.createElement("span", {
+}, b.text, b.src && /*#__PURE__*/React.createElement("span", {
   className: "text-white/35 font-mono"
 }, " [", b.src, "]"))))));
+
+// Русская плюрализация: 1 нарушение · 2–4 нарушения · 5+ нарушений (§−14 C-6).
+const _plural = (n, one, few, many) => {
+  const n10 = n % 10,
+    n100 = n % 100;
+  if (n10 === 1 && n100 !== 11) return one;
+  if (n10 >= 2 && n10 <= 4 && (n100 < 12 || n100 > 14)) return few;
+  return many;
+};
 
 // Mandate compliance card
 const MandateCard = ({
@@ -2454,19 +2498,29 @@ const MandateCard = ({
 }) => /*#__PURE__*/React.createElement("div", {
   className: "glass-strong rounded-4xl p-6 shadow-card lift flex flex-col"
 }, /*#__PURE__*/React.createElement("div", {
-  className: "flex items-start justify-between mb-1"
+  className: "flex items-start justify-between mb-1 gap-2"
 }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
   className: "text-ink-500 text-[12px] font-medium"
 }, "Соответствие мандату"), /*#__PURE__*/React.createElement("h3", {
   className: "text-xl font-semibold tracking-tight text-ink-900 leading-tight"
-}, m.profile)), /*#__PURE__*/React.createElement("span", {
-  className: "px-2.5 py-1 rounded-full bg-rust-500/12 text-rust-600 text-[10px] font-semibold tracking-wider uppercase flex items-center gap-1"
+}, m.profile)), m.violations > 0 ? /*#__PURE__*/React.createElement("span", {
+  className: "px-2.5 py-1 rounded-full bg-rust-500/12 text-rust-600 text-[10px] font-semibold tracking-wider uppercase flex items-center gap-1 flex-shrink-0"
 }, /*#__PURE__*/React.createElement(Icons.Warning, {
   size: 11,
   stroke: 2
-}), " ", m.violations, " нарушение")), /*#__PURE__*/React.createElement("div", {
-  className: "text-[10.5px] text-ink-400 font-mono mb-4"
-}, "целевая волат. ≈", m.targetVol, "% · отклонение от ориентира ≤", m.trackingCap, "%"), /*#__PURE__*/React.createElement("div", {
+}), " ", m.violations, " ", _plural(m.violations, 'нарушение', 'нарушения', 'нарушений')) : /*#__PURE__*/React.createElement("span", {
+  className: "px-2.5 py-1 rounded-full bg-sage-500/15 text-sage-600 text-[10px] font-semibold tracking-wider uppercase flex-shrink-0"
+}, "соответствует")), /*#__PURE__*/React.createElement("div", {
+  className: "text-[10.5px] text-ink-400 font-mono mb-2"
+}, "целевая волат. ≈", m.targetVol, "% · отклонение от ориентира ≤", m.trackingCap, "%"), m.leveraged && /*#__PURE__*/React.createElement("div", {
+  className: "flex items-center gap-2 rounded-2xl bg-rust-500/10 border border-rust-500/30 px-3 py-2 mb-3"
+}, /*#__PURE__*/React.createElement(Icons.Warning, {
+  size: 13,
+  className: "text-rust-600 flex-shrink-0",
+  stroke: 2
+}), /*#__PURE__*/React.createElement("span", {
+  className: "text-[11px] text-rust-600 font-medium"
+}, "Маржинальный долг ", m.marginPct > 0 ? `≈${m.marginPct}% NAV` : 'обнаружен', " — позиции частично куплены в долг")), /*#__PURE__*/React.createElement("div", {
   className: "space-y-3.5 mt-auto"
 }, m.rows.map((r, i) => {
   const tone = {
@@ -2492,7 +2546,17 @@ const MandateCard = ({
   }, "допустимо ", r.lo, "–", r.hi, "%"));
 })));
 
-// KPI card
+// KPI card — value + a prominent 12-month trend chart (user request «добавь
+// графики к показателям»).  Draws the design <Sparkline> from the real numeric
+// series; falls back to the server-rendered SVG if only that is present.
+// Per-metric methodology note (hover) — makes the denominators explicit
+// (Sprint-3 #8): Sharpe/Sortino use the STRUCTURAL factor volatility σ, not a
+// realised sample vol.
+const _KPI_METHOD = {
+  sharpe: 'Знаменатель — структурная (факторная) волатильность σ = √(w′Σw), Σ = B·F·Bᵀ + D; числитель — геом. годовая доходность − валютно-сопоставленная RFR.',
+  cvar: 'Средний убыток в худшие 5% дней (1-дневный горизонт), эмпирически + bootstrap-CI.',
+  dd: 'Максимальная просадка пик→дно по реконструированной кривой капитала exp(Σ log-доходностей).'
+};
 const KpiCard = ({
   k
 }) => {
@@ -2501,24 +2565,39 @@ const KpiCard = ({
     good: '#caa01a',
     watch: '#c47358'
   }[k.status];
+  const hasPts = Array.isArray(k.pts) && k.pts.length >= 2;
   return /*#__PURE__*/React.createElement("div", {
     className: "glass-strong rounded-4xl p-6 shadow-card lift flex flex-col",
     style: {
       borderTop: `2px solid ${border}`
     }
   }, /*#__PURE__*/React.createElement("div", {
-    className: "text-[10px] tracking-widest uppercase text-ink-500 font-mono mb-3"
-  }, k.name), /*#__PURE__*/React.createElement("div", {
-    className: "flex items-end justify-between gap-3 mb-3"
-  }, /*#__PURE__*/React.createElement("span", {
+    className: "flex items-center justify-between mb-2"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "text-[10px] tracking-widest uppercase text-ink-500 font-mono cursor-help",
+    title: _KPI_METHOD[k.key] || undefined
+  }, k.name), /*#__PURE__*/React.createElement("span", {
     className: "text-[40px] leading-none font-light num text-ink-900 tracking-tight"
-  }, k.value), /*#__PURE__*/React.createElement("div", {
-    className: "flex-1 h-9 max-w-[130px]"
-  }, /*#__PURE__*/React.createElement(Sparkline, {
+  }, k.value)), /*#__PURE__*/React.createElement("div", {
+    className: "rounded-2xl bg-cream-50/70 border border-ink-900/5 px-3 pt-2 pb-1.5 mb-3"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between text-[8.5px] tracking-widest uppercase text-ink-400 font-mono mb-0.5"
+  }, /*#__PURE__*/React.createElement("span", null, "Динамика · 12 мес"), /*#__PURE__*/React.createElement("span", null, "сейчас")), /*#__PURE__*/React.createElement("div", {
+    className: "h-12"
+  }, hasPts ? /*#__PURE__*/React.createElement(Sparkline, {
     points: k.pts,
     color: k.color,
+    height: 44,
+    width: 300,
     gradId: `spk-${k.key}`
-  }))), /*#__PURE__*/React.createElement("div", {
+  }) : k.svg ? /*#__PURE__*/React.createElement("div", {
+    className: "w-full h-full",
+    dangerouslySetInnerHTML: {
+      __html: k.svg
+    }
+  }) : /*#__PURE__*/React.createElement("div", {
+    className: "w-full h-full flex items-center justify-center text-[9px] text-ink-300 font-mono"
+  }, "нет истории"))), /*#__PURE__*/React.createElement("div", {
     className: "text-[10.5px] text-ink-400 font-mono leading-snug mb-4"
   }, k.sub), /*#__PURE__*/React.createElement("div", {
     className: "mt-auto flex items-start gap-2.5 rounded-2xl bg-cream-50 border border-ink-900/5 px-3.5 py-3"
@@ -2594,7 +2673,7 @@ const MiniBar = ({
 }, /*#__PURE__*/React.createElement("div", {
   className: "rounded-full",
   style: {
-    width: `${Math.min(100, value / max * 100)}%`,
+    width: `${Math.max(0, Math.min(100, value / max * 100))}%`,
     height: '100%',
     background: color
   }
@@ -2642,27 +2721,29 @@ const Overview = () => {
     className: "rise",
     "data-screen-label": "01 Overview"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "flex items-start justify-between gap-8 flex-wrap mb-8"
+    className: "flex items-start justify-between gap-x-10 gap-y-6 flex-wrap mb-8"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "flex-1 min-w-[480px]"
+    className: "flex-1 min-w-[280px] max-w-[760px]"
   }, /*#__PURE__*/React.createElement("div", {
     className: "flex items-center gap-2 text-[11px] tracking-widest uppercase text-ink-500 font-mono mb-3"
   }, /*#__PURE__*/React.createElement("span", {
     className: "w-1.5 h-1.5 rounded-full bg-gold-400"
   }), "Portfolio Risk Report · Tier ", p.meta.tier), /*#__PURE__*/React.createElement("h1", {
-    className: "text-[54px] leading-[1.04] tracking-[-0.03em] font-light text-ink-900 max-w-[820px]"
+    className: "text-[clamp(32px,4.4vw,54px)] leading-[1.05] tracking-[-0.03em] font-light text-ink-900"
   }, v.headline, /*#__PURE__*/React.createElement("span", {
     className: "text-ink-400"
   }, ".")), /*#__PURE__*/React.createElement("p", {
-    className: "text-[18px] text-ink-500 mt-3 max-w-[620px] font-light"
+    className: "text-[17px] text-ink-500 mt-3 max-w-[620px] font-light"
   }, v.sub)), /*#__PURE__*/React.createElement("div", {
-    className: "flex items-end gap-2 pt-4 divide-x divide-ink-900/10"
+    className: "flex flex-col gap-4 w-full lg:w-auto lg:min-w-[380px] lg:max-w-[460px]"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-end justify-start lg:justify-end gap-1 divide-x divide-ink-900/10"
   }, p.heroStats.map((s, i) => {
     const IconC = {
       briefcase: Icons.Briefcase,
       wallet: Icons.Wallet,
       shield: Icons.Shield
-    }[s.icon];
+    }[s.icon] || Icons.Briefcase;
     return /*#__PURE__*/React.createElement(HeroStat, {
       key: i,
       value: s.value,
@@ -2670,18 +2751,16 @@ const Overview = () => {
       IconC: IconC,
       small: s.small
     });
-  }))), /*#__PURE__*/React.createElement("div", {
-    className: "grid grid-cols-12 gap-5 mb-5"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "col-span-12 lg:col-span-3"
-  }, /*#__PURE__*/React.createElement(GaugeCard, {
+  })), /*#__PURE__*/React.createElement(HeroGaugeCard, {
     v: v
-  })), /*#__PURE__*/React.createElement("div", {
-    className: "col-span-12 lg:col-span-5"
+  }))), /*#__PURE__*/React.createElement("div", {
+    className: "grid grid-cols-12 gap-5 mb-5 items-stretch"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "col-span-12 lg:col-span-7"
   }, /*#__PURE__*/React.createElement(VerdictCard, {
     v: v
   })), /*#__PURE__*/React.createElement("div", {
-    className: "col-span-12 lg:col-span-4"
+    className: "col-span-12 lg:col-span-5"
   }, /*#__PURE__*/React.createElement(MandateCard, {
     m: p.mandate
   }))), /*#__PURE__*/React.createElement("div", {
@@ -2747,7 +2826,7 @@ const HBar = ({
 }, /*#__PURE__*/React.createElement("div", {
   className: "rounded-full",
   style: {
-    width: `${Math.min(100, value / max * 100)}%`,
+    width: `${Math.max(0, Math.min(100, value / max * 100))}%`,
     height: '100%',
     background: color
   }
@@ -2755,11 +2834,13 @@ const HBar = ({
 const FundCell = ({
   label,
   value,
-  warn
+  warn,
+  hint
 }) => /*#__PURE__*/React.createElement("div", {
-  className: "rounded-2xl bg-cream-50 border border-ink-900/5 px-3 py-2.5"
+  className: "rounded-2xl bg-cream-50 border border-ink-900/5 px-3 py-2.5",
+  title: hint || undefined
 }, /*#__PURE__*/React.createElement("div", {
-  className: "text-[9.5px] uppercase tracking-wider text-ink-500 font-mono"
+  className: "text-[9.5px] uppercase tracking-wider text-ink-500 font-mono leading-tight"
 }, label), /*#__PURE__*/React.createElement("div", {
   className: `text-[14px] font-semibold num mt-0.5 ${warn ? 'text-rust-600' : 'text-ink-900'}`
 }, value));
@@ -2823,7 +2904,7 @@ const HoldingRow = ({
   }, /*#__PURE__*/React.createElement(Icons.Chevron, {
     size: 13
   }))), /*#__PURE__*/React.createElement("div", {
-    className: "overflow-hidden transition-[max-height,opacity] duration-500 ease-out",
+    className: "mob-detail overflow-hidden transition-[max-height,opacity] duration-500 ease-out",
     style: {
       maxHeight: open ? 640 : 0,
       opacity: open ? 1 : 0
@@ -2841,27 +2922,33 @@ const HoldingRow = ({
   }, h.name)), /*#__PURE__*/React.createElement("span", {
     className: "text-[10px] font-mono text-ink-400 tracking-wider px-2.5 py-1 rounded-full bg-cream-50 border border-ink-900/5"
   }, h.cls)), /*#__PURE__*/React.createElement("div", {
-    className: "grid grid-cols-2 md:grid-cols-6 gap-3"
+    className: "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3"
   }, /*#__PURE__*/React.createElement(FundCell, {
     label: "ROE",
-    value: h.fund.roe
+    value: h.fund.roe,
+    hint: "Рентабельность собственного капитала (чистая прибыль ÷ капитал)"
   }), /*#__PURE__*/React.createElement(FundCell, {
-    label: "Маржа",
-    value: h.fund.margin
+    label: "Опер. маржа",
+    value: h.fund.margin,
+    hint: "Операционная маржа — операционная прибыль ÷ выручка"
   }), /*#__PURE__*/React.createElement(FundCell, {
-    label: "Долг/А",
-    value: h.fund.debt
+    label: "Долг / Активы",
+    value: h.fund.debt,
+    hint: "Долговая нагрузка: суммарный долг ÷ активы. 0% = долг не найден в отчётности или его нет"
   }), /*#__PURE__*/React.createElement(FundCell, {
-    label: "Рост г/г",
-    value: h.fund.growth
+    label: "Рост выручки",
+    value: h.fund.growth,
+    hint: "Рост выручки год к году"
   }), /*#__PURE__*/React.createElement(FundCell, {
-    label: "ATR",
+    label: "ATR · день",
     value: h.fund.atr,
-    warn: atrWarn
+    warn: atrWarn,
+    hint: "Average True Range — средний дневной диапазон цены, % (волатильность бумаги)"
   }), /*#__PURE__*/React.createElement(FundCell, {
     label: "Altman-Z",
-    value: h.fund.z
-  })), /*#__PURE__*/React.createElement("div", {
+    value: h.fund.z,
+    hint: "Z-score Альтмана (риск банкротства): > 3 — безопасно, 1.8–3 — серая зона, < 1.8 — риск"
+  })), (h.fundNote || h.note) && /*#__PURE__*/React.createElement("div", {
     className: "mt-4 flex items-start gap-3 text-[13px] text-ink-700 leading-relaxed"
   }, /*#__PURE__*/React.createElement(Icons.Sparkles, {
     size: 14,
@@ -2869,7 +2956,9 @@ const HoldingRow = ({
     stroke: 1.8
   }), /*#__PURE__*/React.createElement("p", {
     className: "font-light"
-  }, h.note, " ", /*#__PURE__*/React.createElement("span", {
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "text-ink-500 font-medium"
+  }, "Вывод: "), h.fundNote || h.note, " ", /*#__PURE__*/React.createElement("span", {
     className: "text-ink-400 font-mono text-[11px]"
   }, "[SEC EDGAR] [Quant Engine]")))))));
 };
@@ -2878,20 +2967,23 @@ const SectorMix = ({
   warns
 }) => {
   let acc = 0;
+  // Бейдж «Перевес» — только когда есть реальный warn-сектор или предупреждение
+  // движка (был хардкод «Перевес IT», рисовался всегда — template-literal).
+  const hasOverweight = (sectors || []).some(s => s.warn) || (warns || []).some(w => w && w !== '–');
   return /*#__PURE__*/React.createElement("div", {
     className: "glass-strong rounded-4xl p-6 shadow-card lift flex flex-col h-full"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "flex items-start justify-between mb-4"
+    className: "flex items-start justify-between mb-4 gap-2"
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "text-ink-500 text-[12px] font-medium"
   }, "Структура"), /*#__PURE__*/React.createElement("h3", {
     className: "text-xl font-semibold tracking-tight text-ink-900 leading-tight"
-  }, "По секторам")), /*#__PURE__*/React.createElement("span", {
-    className: "px-2.5 py-1 rounded-full bg-rust-500/12 text-rust-600 text-[10px] font-semibold tracking-wider uppercase flex items-center gap-1"
+  }, "По секторам")), hasOverweight && /*#__PURE__*/React.createElement("span", {
+    className: "px-2.5 py-1 rounded-full bg-rust-500/12 text-rust-600 text-[10px] font-semibold tracking-wider uppercase flex items-center gap-1 flex-shrink-0"
   }, /*#__PURE__*/React.createElement(Icons.Warning, {
     size: 11,
     stroke: 2
-  }), " Перевес IT")), /*#__PURE__*/React.createElement("svg", {
+  }), " Перевес")), /*#__PURE__*/React.createElement("svg", {
     viewBox: "0 0 320 18",
     className: "w-full h-3.5 mb-4",
     preserveAspectRatio: "none"
@@ -2932,7 +3024,7 @@ const SectorMix = ({
     className: `text-[12px] font-semibold num ${s.warn ? 'text-gold-700' : 'text-ink-900'}`
   }, s.pct, "%")))), /*#__PURE__*/React.createElement("div", {
     className: "mt-4 space-y-2"
-  }, warns.map((w, i) => /*#__PURE__*/React.createElement("div", {
+  }, (warns || []).filter(w => w && w !== '–').map((w, i) => /*#__PURE__*/React.createElement("div", {
     key: i,
     className: "flex items-start gap-2 rounded-2xl bg-gold-400/12 border border-gold-400/35 px-3 py-2"
   }, /*#__PURE__*/React.createElement(Icons.Warning, {
@@ -2990,6 +3082,10 @@ const Holdings = () => {
   }, /*#__PURE__*/React.createElement("div", {
     className: "glass-strong rounded-4xl shadow-card overflow-hidden"
   }, /*#__PURE__*/React.createElement("div", {
+    className: "swipe-hint items-center gap-1 text-[10px] font-mono text-gold-700 bg-gold-400/15 rounded-full px-2.5 py-1 mb-2.5 w-max"
+  }, "↔ листайте таблицу"), /*#__PURE__*/React.createElement("div", {
+    className: "mob-scroll-x"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "grid grid-cols-[36px_minmax(0,1.9fr)_minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.1fr)_84px_36px] items-center gap-3 px-5 py-3 border-b border-ink-900/6 text-[9.5px] tracking-widest uppercase text-ink-500 font-mono"
   }, /*#__PURE__*/React.createElement("div", null), /*#__PURE__*/React.createElement("div", null, "Тикер · Имя"), /*#__PURE__*/React.createElement("div", null, "Класс"), /*#__PURE__*/React.createElement("div", null, "Вес"), /*#__PURE__*/React.createElement("div", null, "Риск"), /*#__PURE__*/React.createElement("div", null, "P/L"), /*#__PURE__*/React.createElement("div", {
     className: "text-right"
@@ -3002,7 +3098,7 @@ const Holdings = () => {
     onToggle: () => setOpenIdx(openIdx === i ? -1 : i)
   })), rows.length === 0 && /*#__PURE__*/React.createElement("div", {
     className: "px-6 py-12 text-center text-ink-500 text-[14px]"
-  }, "Ничего не подходит под фильтр «", filter, "».")))), /*#__PURE__*/React.createElement("div", {
+  }, "Ничего не подходит под фильтр «", filter, "».")))))), /*#__PURE__*/React.createElement("div", {
     className: "col-span-12 lg:col-span-4"
   }, /*#__PURE__*/React.createElement(SectorMix, {
     sectors: p.sectors,
@@ -3026,7 +3122,8 @@ Object.assign(window, {
 /* DEEP Factors — β-radar + 4-pillar scoring */
 
 const FactorTable = ({
-  factors
+  factors,
+  benchmarkName
 }) => /*#__PURE__*/React.createElement("table", {
   className: "w-full"
 }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", {
@@ -3036,9 +3133,11 @@ const FactorTable = ({
 }, "Фактор"), /*#__PURE__*/React.createElement("th", {
   className: "text-right font-medium py-2"
 }, "β портф."), /*#__PURE__*/React.createElement("th", {
-  className: "text-right font-medium py-2"
-}, "Рынок"), /*#__PURE__*/React.createElement("th", {
-  className: "text-right font-medium py-2"
+  className: "text-right font-medium py-2",
+  title: `${benchmarkName} — факторные беты вашего бенчмарка (его тоже разложили по этим осям)`
+}, benchmarkName), /*#__PURE__*/React.createElement("th", {
+  className: "text-right font-medium py-2",
+  title: "Активный наклон портфеля относительно бенчмарка"
 }, "Наклон Δ"))), /*#__PURE__*/React.createElement("tbody", null, factors.map((f, i) => {
   const d = f.port - f.mkt;
   const tone = d > 0 ? 'text-gold-700' : d < 0 ? 'text-sage-600' : 'text-ink-400';
@@ -3055,6 +3154,152 @@ const FactorTable = ({
     className: `text-right py-2 text-[12px] num font-semibold ${tone}`
   }, d > 0 ? '+' : '', d.toFixed(2)));
 })));
+
+// Источники риска — факторная декомпозиция дисперсии (additive layer,
+// finance/factor_decomposition → payload.factor_variance → factorVariance).
+// Отвечает «откуда берётся риск ПО ИСТОЧНИКАМ» (Euler по факторам), дополняя
+// TRC-разложение по активам.  Отрицательная доля = фактор-хедж.  Блок целиком
+// скрыт, когда движок пропустил декомпозицию (factorVariance == null).
+// Один ряд-«метр»: источник риска, дорожка-бар, доля дисперсии.  Верстается
+// адаптивно — на мобильном лейбл+% в строке, бар во всю ширину под ними;
+// на sm+ единый выровненный ряд «лейбл · бар · %».  Драйверы и чип «хедж»
+// живут в подписи под баром с выравниванием по колонке лейбла.
+const VarianceRow = ({
+  r,
+  maxAbs
+}) => {
+  const neg = r.pct < 0;
+  const w = Math.max(Math.min(Math.abs(r.pct) / maxAbs * 100, 100), 1.5);
+  const fill = neg ? '#7a9a78' : '#caa01a';
+  const pctCls = neg ? 'text-sage-600' : 'text-ink-900';
+  return /*#__PURE__*/React.createElement("div", {
+    className: "py-2.5"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-3"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-baseline justify-between gap-2 sm:block sm:w-[35%] sm:shrink-0 min-w-0"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "text-[11.5px] text-ink-800 font-medium leading-tight truncate"
+  }, r.source), /*#__PURE__*/React.createElement("span", {
+    className: `sm:hidden text-[12px] num font-semibold tabular-nums shrink-0 ${pctCls}`
+  }, r.pct, "%")), /*#__PURE__*/React.createElement("div", {
+    className: "flex-1 min-w-0 h-2 rounded-full bg-ink-900/5 relative overflow-hidden"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "absolute inset-y-0 left-0 rounded-full",
+    style: {
+      width: `${w}%`,
+      background: fill
+    }
+  })), /*#__PURE__*/React.createElement("span", {
+    className: `hidden sm:block sm:w-[52px] text-right text-[12px] num font-semibold tabular-nums shrink-0 ${pctCls}`
+  }, r.pct, "%")), (r.drivers || neg) && /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center gap-1.5 mt-1 sm:pl-[calc(35%+0.75rem)] min-w-0"
+  }, neg && /*#__PURE__*/React.createElement("span", {
+    className: "text-[8.5px] font-mono uppercase tracking-wider text-sage-600 bg-sage-500/15 rounded px-1 py-px shrink-0"
+  }, "хедж"), r.drivers && /*#__PURE__*/React.createElement("span", {
+    className: "text-[10px] font-mono text-ink-400 truncate"
+  }, r.drivers)));
+};
+const FactorVariance = ({
+  fv
+}) => {
+  if (!fv || !fv.rows || !fv.rows.length) return null;
+  const maxAbs = Math.max(...fv.rows.map(r => Math.abs(r.pct)), 1);
+  return /*#__PURE__*/React.createElement("div", {
+    className: "mt-5 rounded-3xl bg-cream-50 border border-ink-900/5 p-4 sm:p-5"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-start justify-between gap-3 flex-wrap mb-3"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "text-[13px] font-semibold text-ink-900 leading-tight"
+  }, "Откуда берётся риск"), /*#__PURE__*/React.createElement("div", {
+    className: "text-[10.5px] text-ink-500 font-light mt-0.5"
+  }, "декомпозиция дисперсии по источникам · σ² = bᵀFb + wᵀDw")), /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center gap-1.5 shrink-0"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "text-[10px] font-mono rounded-full bg-gold-500/20 text-gold-700 px-2 py-0.5"
+  }, "систематика ", fv.systematic, "%"), /*#__PURE__*/React.createElement("span", {
+    className: "text-[10px] font-mono rounded-full bg-sage-500/15 text-sage-600 px-2 py-0.5"
+  }, "специфика ", fv.idio, "%"))), /*#__PURE__*/React.createElement("div", {
+    className: "divide-y divide-ink-900/5"
+  }, fv.rows.map((r, i) => /*#__PURE__*/React.createElement(VarianceRow, {
+    key: i,
+    r: r,
+    maxAbs: maxAbs
+  }))), fv.twins && fv.twins.length > 0 && /*#__PURE__*/React.createElement("div", {
+    className: "mt-3.5 pt-3 border-t border-ink-900/8"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "text-[11px] text-ink-800 font-medium mb-2"
+  }, "Факторные двойники ", /*#__PURE__*/React.createElement("span", {
+    className: "font-light text-ink-500"
+  }, "— одна ставка куплена дважды (systematic corr ≥ 0.90)")), /*#__PURE__*/React.createElement("div", {
+    className: "flex flex-wrap gap-1.5"
+  }, fv.twins.map((t, i) => /*#__PURE__*/React.createElement("span", {
+    key: i,
+    className: "inline-flex items-center gap-1.5 text-[10px] font-mono rounded-full bg-white/70 border border-ink-900/8 px-2.5 py-1"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "text-ink-800 font-semibold whitespace-nowrap"
+  }, t.pair), /*#__PURE__*/React.createElement("span", {
+    className: "text-ink-400"
+  }, "corr ", t.corr), /*#__PURE__*/React.createElement("span", {
+    className: "text-ink-300"
+  }, "·"), /*#__PURE__*/React.createElement("span", {
+    className: "text-ink-400"
+  }, "вес ", t.w, "%"))))));
+};
+
+// 4-Pillar legend — spells out the F·V·T·C abbreviations AND the concrete
+// metrics each pillar scores (user request «раскрыть какие показатели и
+// аббревиатуры»).  Inputs mirror src/finance/scoring.py.
+const PILLARS = [{
+  k: 'F',
+  name: 'Fundamentals',
+  ru: 'Фундамент',
+  metrics: 'ROE · опер. маржа · рост выручки · долг/активы · FCF-маржа',
+  color: '#5d7c5c'
+}, {
+  k: 'V',
+  name: 'Valuation',
+  ru: 'Оценка',
+  metrics: 'P/E и P/S относительно сектора и собственной истории',
+  color: '#caa01a'
+}, {
+  k: 'T',
+  name: 'Technical',
+  ru: 'Техника',
+  metrics: 'тренд SMA50/200 · RSI(14) · MACD(12,26,9)',
+  color: '#9a7a10'
+},
+// Credit is intentionally ASYMMETRIC (−2…+1): weak credit can drag the score
+// hard, but strong credit only earns a modest upside — it never rescues a
+// poor F/V/T on its own.
+{
+  k: 'C',
+  name: 'Credit',
+  ru: 'Кредит',
+  metrics: 'Altman-Z · покрытие процентов · долг (диапазон −2…+1, асимметрично)',
+  color: '#c47358'
+}];
+const PillarLegend = () => /*#__PURE__*/React.createElement("div", {
+  className: "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-5"
+}, PILLARS.map(pl => /*#__PURE__*/React.createElement("div", {
+  key: pl.k,
+  className: "rounded-2xl bg-cream-50 border border-ink-900/5 p-3.5"
+}, /*#__PURE__*/React.createElement("div", {
+  className: "flex items-center gap-2.5 mb-1.5"
+}, /*#__PURE__*/React.createElement("span", {
+  className: "w-7 h-7 rounded-lg flex items-center justify-center text-[12px] font-bold num text-white flex-shrink-0",
+  style: {
+    background: pl.color
+  }
+}, pl.k), /*#__PURE__*/React.createElement("div", {
+  className: "min-w-0"
+}, /*#__PURE__*/React.createElement("div", {
+  className: "text-[12.5px] font-semibold text-ink-900 leading-none truncate"
+}, pl.name), /*#__PURE__*/React.createElement("div", {
+  className: "text-[10px] text-ink-500 leading-none mt-1"
+}, pl.ru))), /*#__PURE__*/React.createElement("div", {
+  className: "text-[10.5px] text-ink-600 leading-snug"
+}, pl.metrics))));
 const pillarTone = v => v == null ? 'text-ink-300' : v > 0 ? 'text-sage-600' : v < 0 ? 'text-rust-600' : 'text-ink-400';
 const ScoreCard = ({
   s
@@ -3109,6 +3354,10 @@ const ScoreCard = ({
 };
 const Factors = () => {
   const p = window.DEEP;
+  // B1 (2026-07-17): динамический бенчмарк секции — столбец, легенда и плашка
+  // следуют за мандатным бенчмарком клиента (payload.benchmarkName); фолбэк
+  // «S&P 500» сохраняет прежний вид для легаси-данных и S&P-константы.
+  const benchName = p.benchmarkName || 'S&P 500';
   return /*#__PURE__*/React.createElement("section", {
     id: "factors",
     className: "rise",
@@ -3143,7 +3392,7 @@ const Factors = () => {
     className: "flex items-center gap-2"
   }, /*#__PURE__*/React.createElement("span", {
     className: "w-4 h-0 border-t-2 border-dashed border-ink-700"
-  }), " Рынок (S&P 500)"))), /*#__PURE__*/React.createElement("div", {
+  }), " ", `Бенчмарк (${benchName})`))), /*#__PURE__*/React.createElement("div", {
     className: "grid grid-cols-12 gap-7 items-center"
   }, /*#__PURE__*/React.createElement("div", {
     className: "col-span-12 lg:col-span-5 flex justify-center"
@@ -3153,12 +3402,21 @@ const Factors = () => {
   })), /*#__PURE__*/React.createElement("div", {
     className: "col-span-12 lg:col-span-7"
   }, /*#__PURE__*/React.createElement(FactorTable, {
-    factors: p.factors
+    factors: p.factors,
+    benchmarkName: benchName
   }), /*#__PURE__*/React.createElement("p", {
     className: "text-[11px] text-ink-500 leading-relaxed font-light mt-4"
   }, /*#__PURE__*/React.createElement("span", {
     className: "text-ink-800 font-medium"
-  }, "Что показывает радар:"), " насколько портфель завязан на глобальные факторы. Большая площадь — больше зависимости от рынка; совпадение направлений по нескольким факторам — скрытая общая ставка."))), /*#__PURE__*/React.createElement("div", {
+  }, "Что показывает радар:"), " насколько портфель завязан на глобальные факторы. Большая площадь — больше зависимости от рынка; совпадение направлений по нескольким факторам — скрытая общая ставка."), /*#__PURE__*/React.createElement("p", {
+    className: "text-[11px] text-ink-500 leading-relaxed font-light mt-2 rounded-2xl bg-cream-50 border border-ink-900/5 px-3.5 py-2.5"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "text-ink-800 font-medium"
+  }, `Столбец «${benchName}»`), " — факторные беты самого бенчмарка (его тоже разложили по этим осям). ", /*#__PURE__*/React.createElement("span", {
+    className: "font-medium"
+  }, "Наклон Δ = β портфеля − β бенчмарка"), " — ваш активный перекос относительно бенчмарка: именно он и есть полезный сигнал. Если ваш бенчмарк — широкий рынок (S&P 500), у него β_Market ≈ 1, а стили ≈ 0; у стилевых и секторных бенчмарков (напр. Nasdaq 100) появляются собственные наклоны — это нормально."))), /*#__PURE__*/React.createElement(FactorVariance, {
+    fv: p.factorVariance
+  }), /*#__PURE__*/React.createElement("div", {
     className: "mt-5 rounded-2xl bg-cream-50 border border-ink-900/5 px-4 py-3.5 flex items-start gap-3"
   }, /*#__PURE__*/React.createElement(Icons.Sparkles, {
     size: 14,
@@ -3174,22 +3432,22 @@ const Factors = () => {
     className: "text-2xl font-semibold tracking-tight text-ink-900"
   }, "4-Pillar Scoring"), /*#__PURE__*/React.createElement("p", {
     className: "text-[12px] text-ink-500 mt-1 font-light"
-  }, /*#__PURE__*/React.createElement("b", {
+  }, "Каждая бумага оценивается по четырём столпам — ", /*#__PURE__*/React.createElement("b", {
     className: "text-ink-800"
-  }, "F"), " Фундамент · ", /*#__PURE__*/React.createElement("b", {
+  }, "F"), "undamentals · ", /*#__PURE__*/React.createElement("b", {
     className: "text-ink-800"
-  }, "V"), " Оценка · ", /*#__PURE__*/React.createElement("b", {
+  }, "V"), "aluation · ", /*#__PURE__*/React.createElement("b", {
     className: "text-ink-800"
-  }, "T"), " Техника · ", /*#__PURE__*/React.createElement("b", {
+  }, "T"), "echnical · ", /*#__PURE__*/React.createElement("b", {
     className: "text-ink-800"
-  }, "C"), " Кредит — каждый столп −2…+2, итог ∈ [−6, +6]")), /*#__PURE__*/React.createElement("span", {
+  }, "C"), "redit — каждый −2…+2, итог ∈ [−6, +6].")), /*#__PURE__*/React.createElement("span", {
     className: "text-[10px] font-mono text-ink-400 tracking-wider px-2.5 py-1 rounded-full bg-cream-50 border border-ink-900/5"
-  }, "Quant Engine + SEC EDGAR")), /*#__PURE__*/React.createElement("div", {
+  }, "Quant Engine + SEC EDGAR")), /*#__PURE__*/React.createElement(PillarLegend, null), /*#__PURE__*/React.createElement("div", {
     className: "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"
   }, p.scores.map(s => /*#__PURE__*/React.createElement(ScoreCard, {
     key: s.t,
     s: s
-  }))), /*#__PURE__*/React.createElement("div", {
+  }))), p.scoresNote && /*#__PURE__*/React.createElement("div", {
     className: "text-[10.5px] text-ink-400 font-mono mt-4"
   }, p.scoresNote), /*#__PURE__*/React.createElement("div", {
     className: "mt-4 rounded-2xl bg-cream-50 border border-ink-900/5 px-4 py-3.5 flex items-start gap-3"
@@ -3219,6 +3477,10 @@ const StressTable = ({
 }, "Параметрические шоки факторов (ΔPnL = w′·B·shock) · горизонт 1 квартал")), /*#__PURE__*/React.createElement("span", {
   className: "text-[10px] font-mono text-ink-400 tracking-wider px-2.5 py-1 rounded-full bg-cream-50 border border-ink-900/5"
 }, "7 сценариев · не прогноз")), /*#__PURE__*/React.createElement("div", {
+  className: "swipe-hint items-center gap-1 text-[10px] font-mono text-gold-700 bg-gold-400/15 rounded-full px-2.5 py-1 mb-2.5 w-max"
+}, "↔ листайте таблицу"), /*#__PURE__*/React.createElement("div", {
+  className: "mob-scroll-x"
+}, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
   className: "grid grid-cols-[minmax(0,2.1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.4fr)_minmax(0,0.9fr)_minmax(0,1fr)] gap-3 px-1 pb-2.5 text-[9.5px] tracking-widest uppercase text-ink-400 font-mono border-b border-ink-900/8"
 }, /*#__PURE__*/React.createElement("div", null, "Сценарий"), /*#__PURE__*/React.createElement("div", {
   className: "text-right"
@@ -3248,7 +3510,7 @@ const StressTable = ({
   }, r.dd == null ? '—' : `${r.dd.toFixed(1)}%`), /*#__PURE__*/React.createElement("div", {
     className: "text-right text-[11.5px] num text-ink-500"
   }, r.rec));
-})), /*#__PURE__*/React.createElement("div", {
+})))), /*#__PURE__*/React.createElement("div", {
   className: "mt-4 rounded-2xl bg-cream-50 border border-ink-900/5 px-4 py-3.5 flex items-start gap-3"
 }, /*#__PURE__*/React.createElement(Icons.Sparkles, {
   size: 14,
@@ -3257,122 +3519,190 @@ const StressTable = ({
 }), /*#__PURE__*/React.createElement("p", {
   className: "text-[12.5px] text-ink-700 leading-relaxed font-light"
 }, window.DEEP.stressAI)));
+
+/* Audit 2026-07-05 (R-2/R-3/R-4/R-6/R-8): the regime block used to hardcode a
+   design-mock as_of date, a green «Рост» chip, «+»-prefixed sage values with
+   «здоровый рост» captions regardless of the data, a green «ИИ подтверждает»
+   header even on stance=diverges, and «RAG ·» chips that showed ETF momentum.
+   Everything below is data-driven now. */
+const _phaseChip = name => ({
+  Expansion: {
+    t: 'Рост',
+    cls: 'bg-sage-500/12 text-sage-600'
+  },
+  Recovery: {
+    t: 'Восстановление',
+    cls: 'bg-sage-500/12 text-sage-600'
+  },
+  Slowdown: {
+    t: 'Замедление',
+    cls: 'bg-gold-400/18 text-gold-700'
+  },
+  Recession: {
+    t: 'Спад',
+    cls: 'bg-rust-500/12 text-rust-600'
+  }
+})[name] || {
+  t: name,
+  cls: 'bg-cream-50 text-ink-600'
+};
+const _axisCard = (label, v, posCaption, negCaption) => /*#__PURE__*/React.createElement("div", {
+  className: "rounded-2xl bg-cream-50 border border-ink-900/5 px-4 py-3"
+}, /*#__PURE__*/React.createElement("div", {
+  className: "text-[10px] uppercase tracking-wider text-ink-500 font-mono"
+}, label), /*#__PURE__*/React.createElement("div", {
+  className: `text-[20px] num font-semibold mt-0.5 ${v >= 0 ? 'text-sage-600' : 'text-rust-600'}`
+}, (v >= 0 ? '+' : '') + v.toFixed(2)), /*#__PURE__*/React.createElement("div", {
+  className: "text-[10px] text-ink-400"
+}, v >= 0 ? posCaption : negCaption));
+const _stanceHeader = stance => ({
+  confirms: {
+    t: 'ИИ подтверждает режим',
+    cls: 'text-sage-600',
+    warn: false
+  },
+  partial: {
+    t: 'Частичное подтверждение ИИ',
+    cls: 'text-gold-700',
+    warn: true
+  },
+  diverges: {
+    t: 'ИИ расходится с моделью',
+    cls: 'text-rust-600',
+    warn: true
+  }
+})[stance] || {
+  t: 'ИИ-сверка режима',
+  cls: 'text-ink-600',
+  warn: false
+};
 const RegimeBlock = ({
   r
-}) => /*#__PURE__*/React.createElement("div", {
-  className: "grid grid-cols-12 gap-5"
-}, /*#__PURE__*/React.createElement("div", {
-  className: "col-span-12 lg:col-span-5"
-}, /*#__PURE__*/React.createElement("div", {
-  className: "glass-strong rounded-4xl p-6 shadow-card lift h-full flex flex-col"
-}, /*#__PURE__*/React.createElement("div", {
-  className: "flex items-start justify-between mb-2"
-}, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-  className: "text-ink-500 text-[12px] font-medium"
-}, "Growth × Cycle"), /*#__PURE__*/React.createElement("h3", {
-  className: "text-xl font-semibold tracking-tight text-ink-900"
-}, "Координаты режима")), /*#__PURE__*/React.createElement("span", {
-  className: "text-[10px] font-mono text-ink-400 tracking-wider px-2.5 py-1 rounded-full bg-cream-50 border border-ink-900/5"
-}, "60-day")), /*#__PURE__*/React.createElement("div", {
-  className: "flex-1 flex items-center justify-center py-2"
-}, /*#__PURE__*/React.createElement(RegimeQuadrant, {
-  dot: r.dot,
-  size: 300
-})))), /*#__PURE__*/React.createElement("div", {
-  className: "col-span-12 lg:col-span-7"
-}, /*#__PURE__*/React.createElement("div", {
-  className: "glass-strong rounded-4xl p-6 shadow-card lift h-full flex flex-col"
-}, /*#__PURE__*/React.createElement("div", {
-  className: "flex items-start justify-between mb-4"
-}, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-  className: "text-[10px] tracking-widest uppercase text-ink-500 font-mono mb-1"
-}, "Текущий режим"), /*#__PURE__*/React.createElement("div", {
-  className: "flex items-baseline gap-3"
-}, /*#__PURE__*/React.createElement("span", {
-  className: "text-[32px] font-light tracking-tight text-ink-900"
-}, r.name), /*#__PURE__*/React.createElement("span", {
-  className: "text-[14px] text-ink-500 font-light"
-}, "· ", r.nameRu)), /*#__PURE__*/React.createElement("div", {
-  className: "text-[11.5px] text-ink-500 font-mono mt-1"
-}, "Уверенность модели ", /*#__PURE__*/React.createElement("b", {
-  className: "text-gold-700"
-}, r.confidence, "%"), " · ", r.confirms, " подтверждающих сигнала")), /*#__PURE__*/React.createElement("div", {
-  className: "flex items-center gap-2 px-3 py-1.5 rounded-full bg-sage-500/12 text-sage-600 text-[11px] font-semibold"
-}, /*#__PURE__*/React.createElement(Icons.Check, {
-  size: 13,
-  stroke: 2.2
-}), " Рост")), /*#__PURE__*/React.createElement("div", {
-  className: "grid grid-cols-2 gap-3 mb-4"
-}, /*#__PURE__*/React.createElement("div", {
-  className: "rounded-2xl bg-cream-50 border border-ink-900/5 px-4 py-3"
-}, /*#__PURE__*/React.createElement("div", {
-  className: "text-[10px] uppercase tracking-wider text-ink-500 font-mono"
-}, "Growth-фактор"), /*#__PURE__*/React.createElement("div", {
-  className: "text-[20px] num font-semibold text-sage-600 mt-0.5"
-}, "+", r.growth.toFixed(2)), /*#__PURE__*/React.createElement("div", {
-  className: "text-[10px] text-ink-400"
-}, "здоровый рост")), /*#__PURE__*/React.createElement("div", {
-  className: "rounded-2xl bg-cream-50 border border-ink-900/5 px-4 py-3"
-}, /*#__PURE__*/React.createElement("div", {
-  className: "text-[10px] uppercase tracking-wider text-ink-500 font-mono"
-}, "Cycle-фактор"), /*#__PURE__*/React.createElement("div", {
-  className: "text-[20px] num font-semibold text-sage-600 mt-0.5"
-}, "+", r.cycle.toFixed(2)), /*#__PURE__*/React.createElement("div", {
-  className: "text-[10px] text-ink-400"
-}, "цикл. экспансия"))), /*#__PURE__*/React.createElement("div", {
-  className: "text-[10px] tracking-widest uppercase text-ink-400 font-mono mb-2"
-}, "Сигналы-драйверы · as_of 2026-06-22"), /*#__PURE__*/React.createElement("div", {
-  className: "space-y-1.5 flex-1"
-}, r.drivers.map((d, i) => /*#__PURE__*/React.createElement("div", {
-  key: i,
-  className: "grid grid-cols-[1fr_auto_auto_auto] items-center gap-3 py-1.5 border-b border-ink-900/5 last:border-0"
-}, /*#__PURE__*/React.createElement("span", {
-  className: "text-[11.5px] text-ink-700 truncate"
-}, d.name), /*#__PURE__*/React.createElement("span", {
-  className: `text-[11.5px] num font-semibold ${d.tone === 'warn' ? 'text-gold-700' : 'text-sage-600'}`
-}, d.val), /*#__PURE__*/React.createElement("span", {
-  className: "text-[9.5px] font-mono text-ink-400 whitespace-nowrap"
-}, d.trend), /*#__PURE__*/React.createElement("span", {
-  className: `text-[8.5px] font-mono font-bold tracking-wider px-1.5 py-0.5 rounded-full ${d.tone === 'warn' ? 'bg-gold-400/18 text-gold-700' : 'bg-sage-500/12 text-sage-600'}`
-}, d.state)))))), /*#__PURE__*/React.createElement("div", {
-  className: "col-span-12"
-}, /*#__PURE__*/React.createElement("div", {
-  className: "rounded-4xl p-6 shadow-card",
-  style: {
-    background: 'linear-gradient(120deg, #f3f6f1 0%, #eef3ea 100%)'
-  }
-}, /*#__PURE__*/React.createElement("div", {
-  className: "flex items-center justify-between mb-3"
-}, /*#__PURE__*/React.createElement("div", {
-  className: "flex items-center gap-2 text-sage-600 text-[11px] font-semibold"
-}, /*#__PURE__*/React.createElement(Icons.Check, {
-  size: 14,
-  stroke: 2.2
-}), " ИИ подтверждает режим"), /*#__PURE__*/React.createElement("span", {
-  className: "text-[10px] font-mono text-ink-400"
-}, window.DEEP.meta.aiModel)), /*#__PURE__*/React.createElement("p", {
-  className: "text-[13.5px] text-ink-800 leading-relaxed font-light mb-4"
-}, r.confirm), /*#__PURE__*/React.createElement("div", {
-  className: "grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-2"
-}, r.confirmBullets.map((b, i) => /*#__PURE__*/React.createElement("div", {
-  key: i,
-  className: "flex items-start gap-2.5"
-}, b.ok ? /*#__PURE__*/React.createElement(Icons.Check, {
-  size: 13,
-  className: "text-sage-600 mt-0.5 flex-shrink-0",
-  stroke: 2.4
-}) : /*#__PURE__*/React.createElement(Icons.Warning, {
-  size: 13,
-  className: "text-gold-700 mt-0.5 flex-shrink-0",
-  stroke: 2
-}), /*#__PURE__*/React.createElement("span", {
-  className: "text-[11.5px] text-ink-700 leading-snug"
-}, b.t)))), /*#__PURE__*/React.createElement("div", {
-  className: "mt-4 pt-3 border-t border-ink-900/8 flex flex-wrap gap-2"
-}, r.ragSignals.map((s, i) => /*#__PURE__*/React.createElement("span", {
-  key: i,
-  className: "text-[10.5px] text-ink-600 bg-white/60 border border-ink-900/6 rounded-full px-3 py-1 font-mono"
-}, "RAG · ", s))))));
+}) => {
+  const phase = _phaseChip(r.name);
+  const head = _stanceHeader(r.confirmStance);
+  return /*#__PURE__*/React.createElement("div", {
+    className: "grid grid-cols-12 gap-5"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "col-span-12 lg:col-span-5"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "glass-strong rounded-4xl p-6 shadow-card lift h-full flex flex-col"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-start justify-between mb-2"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "text-ink-500 text-[12px] font-medium"
+  }, "Growth × Cycle"), /*#__PURE__*/React.createElement("h3", {
+    className: "text-xl font-semibold tracking-tight text-ink-900"
+  }, "Координаты режима")), /*#__PURE__*/React.createElement("span", {
+    className: "text-[10px] font-mono text-ink-400 tracking-wider px-2.5 py-1 rounded-full bg-cream-50 border border-ink-900/5"
+  }, "60-day")), /*#__PURE__*/React.createElement("div", {
+    className: "flex-1 flex items-center justify-center py-2"
+  }, /*#__PURE__*/React.createElement(RegimeQuadrant, {
+    dot: r.dot,
+    size: 300
+  })))), /*#__PURE__*/React.createElement("div", {
+    className: "col-span-12 lg:col-span-7"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "glass-strong rounded-4xl p-6 shadow-card lift h-full flex flex-col"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-start justify-between mb-4"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "text-[10px] tracking-widest uppercase text-ink-500 font-mono mb-1"
+  }, "Текущий режим"), /*#__PURE__*/React.createElement("div", {
+    className: "flex items-baseline gap-3"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "text-[32px] font-light tracking-tight text-ink-900"
+  }, r.name), r.nameRu && r.nameRu !== r.name && /*#__PURE__*/React.createElement("span", {
+    className: "text-[14px] text-ink-500 font-light"
+  }, "· ", r.nameRu)), /*#__PURE__*/React.createElement("div", {
+    className: "text-[11.5px] text-ink-500 font-mono mt-1"
+  }, "Уверенность модели ", /*#__PURE__*/React.createElement("b", {
+    className: "text-gold-700"
+  }, r.confidence, "%"), " · ", r.confirms, " подтверждающих сигнала")), /*#__PURE__*/React.createElement("div", {
+    className: `flex items-center gap-2 px-3 py-1.5 rounded-full text-[11px] font-semibold ${phase.cls}`
+  }, /*#__PURE__*/React.createElement(Icons.Check, {
+    size: 13,
+    stroke: 2.2
+  }), " ", phase.t)), /*#__PURE__*/React.createElement("div", {
+    className: "grid grid-cols-2 gap-3 mb-4"
+  }, _axisCard('Growth-фактор', r.growth, 'здоровый рост', 'рост под давлением'), _axisCard('Cycle-фактор', r.cycle, 'цикл. экспансия', 'цикл. сжатие')), /*#__PURE__*/React.createElement("div", {
+    className: "text-[10px] tracking-widest uppercase text-ink-400 font-mono mb-2"
+  }, "Сигналы-драйверы", r.driversAsOf ? ` · as_of ${r.driversAsOf}` : ''), /*#__PURE__*/React.createElement("div", {
+    className: "space-y-1.5 flex-1"
+  }, r.drivers.map((d, i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    className: "grid grid-cols-[1fr_auto_auto_auto] items-center gap-3 py-1.5 border-b border-ink-900/5 last:border-0"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "text-[11.5px] text-ink-700 truncate"
+  }, d.name), /*#__PURE__*/React.createElement("span", {
+    className: `text-[11.5px] num font-semibold ${d.tone === 'warn' ? 'text-gold-700' : 'text-sage-600'}`
+  }, d.val), /*#__PURE__*/React.createElement("span", {
+    className: "text-[9.5px] font-mono text-ink-400 whitespace-nowrap"
+  }, d.trend), /*#__PURE__*/React.createElement("span", {
+    className: `text-[8.5px] font-mono font-bold tracking-wider px-1.5 py-0.5 rounded-full ${d.tone === 'warn' ? 'bg-gold-400/18 text-gold-700' : 'bg-sage-500/12 text-sage-600'}`
+  }, d.state)))))), /*#__PURE__*/React.createElement("div", {
+    className: "col-span-12"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "rounded-4xl p-6 shadow-card",
+    style: {
+      background: 'linear-gradient(120deg, #f3f6f1 0%, #eef3ea 100%)'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between mb-3"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: `flex items-center gap-2 text-[11px] font-semibold ${head.cls}`
+  }, head.warn ? /*#__PURE__*/React.createElement(Icons.Warning, {
+    size: 14,
+    stroke: 2.2
+  }) : /*#__PURE__*/React.createElement(Icons.Check, {
+    size: 14,
+    stroke: 2.2
+  }), " ", head.t), /*#__PURE__*/React.createElement("span", {
+    className: "text-[10px] font-mono text-ink-400"
+  }, window.DEEP.meta.aiModel)), /*#__PURE__*/React.createElement("p", {
+    className: "text-[13.5px] text-ink-800 leading-relaxed font-light mb-4"
+  }, r.confirm), /*#__PURE__*/React.createElement("div", {
+    className: "grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-2"
+  }, r.confirmBullets.map((b, i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    className: "flex items-start gap-2.5"
+  }, b.ok ? /*#__PURE__*/React.createElement(Icons.Check, {
+    size: 13,
+    className: "text-sage-600 mt-0.5 flex-shrink-0",
+    stroke: 2.4
+  }) : /*#__PURE__*/React.createElement(Icons.Warning, {
+    size: 13,
+    className: "text-gold-700 mt-0.5 flex-shrink-0",
+    stroke: 2
+  }), /*#__PURE__*/React.createElement("span", {
+    className: "text-[11.5px] text-ink-700 leading-snug"
+  }, b.t)))), r.consistency && r.consistency.note ? /*#__PURE__*/React.createElement("div", {
+    className: `mt-3 text-[11px] leading-snug ${r.consistency.status === 'aligned' ? 'text-sage-600' : 'text-gold-700'}`
+  }, r.consistency.status === 'aligned' ? '✓ ' : '⚠ ', r.consistency.note) : null, /*#__PURE__*/React.createElement("div", {
+    className: "mt-4 pt-3 border-t border-ink-900/8"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "text-[10px] tracking-widest uppercase font-mono text-ink-400 mb-2"
+  }, r.ragBacked ? 'Из банковской аналитики · RAG' : 'Моментум-объяснители'), /*#__PURE__*/React.createElement("div", {
+    className: "space-y-1.5"
+  }, r.ragSignals.map((s, i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    className: "flex items-start gap-2"
+  }, s.ok ? /*#__PURE__*/React.createElement(Icons.Check, {
+    size: 12,
+    className: "text-sage-600 mt-0.5 flex-shrink-0",
+    stroke: 2.4
+  }) : /*#__PURE__*/React.createElement(Icons.Warning, {
+    size: 12,
+    className: "text-gold-700 mt-0.5 flex-shrink-0",
+    stroke: 2
+  }), s.bank ? /*#__PURE__*/React.createElement("span", {
+    className: "text-[10px] font-mono font-bold tracking-wider text-ink-900 bg-ink-900/6 rounded px-1.5 py-0.5 flex-shrink-0"
+  }, s.bank) : /*#__PURE__*/React.createElement("span", {
+    className: "text-[10px] font-mono font-semibold tracking-wider text-ink-400 flex-shrink-0"
+  }, r.ragBacked ? 'RAG' : 'Моментум'), /*#__PURE__*/React.createElement("span", {
+    className: "text-[11.5px] text-ink-700 leading-snug font-light"
+  }, s.text))))))));
+};
 const StressRegime = () => {
   const p = window.DEEP;
   return /*#__PURE__*/React.createElement("section", {
@@ -3421,6 +3751,86 @@ const actionChipCls = {
   TRIM: 'bg-gold-500/18 text-gold-700',
   SELL: 'bg-rust-500 text-white'
 };
+
+// «Применить идею» → Scenario deep-link (same behaviour as the BASE report).
+// Static page cannot charge a token; «Да» hands off to the Telegram bot, which
+// runs the Scenario-tier analysis and charges 1 token there.
+const scenarioDeepLink = (bot, n) => `https://t.me/${encodeURIComponent(String(bot || 'KEN_investment_bot').replace(/^@/, ''))}` + `?start=scn_${String(n).replace(/[^0-9A-Za-z_]/g, '')}`;
+const ApplyIdeaModal = ({
+  ideas,
+  botUsername,
+  onClose
+}) => {
+  const [sel, setSel] = React.useState(null);
+  const go = () => {
+    if (!sel) return;
+    window.open(scenarioDeepLink(botUsername, sel.n), '_blank', 'noopener,noreferrer');
+    onClose();
+  };
+  return /*#__PURE__*/React.createElement("div", {
+    className: "fixed inset-0 z-50 flex items-center justify-center p-4",
+    style: {
+      background: 'rgba(28,27,26,0.55)',
+      backdropFilter: 'blur(4px)'
+    },
+    onClick: onClose
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "w-full max-w-lg rounded-4xl bg-cream-50 shadow-card overflow-hidden",
+    onClick: e => e.stopPropagation()
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "px-6 pt-6 pb-4 border-b border-ink-900/8"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center gap-2 text-[11px] tracking-widest uppercase text-ink-500 font-mono"
+  }, /*#__PURE__*/React.createElement(Icons.Sparkles, {
+    size: 13,
+    stroke: 1.8,
+    className: "text-gold-600"
+  }), " Применить идею"), /*#__PURE__*/React.createElement("button", {
+    onClick: onClose,
+    "aria-label": "Закрыть",
+    className: "w-8 h-8 rounded-full bg-ink-900/5 text-ink-700 hover:bg-ink-900/10 flex items-center justify-center text-[13px]"
+  }, "✕")), /*#__PURE__*/React.createElement("h3", {
+    className: "text-[22px] font-light text-ink-900 mt-3 tracking-tight"
+  }, sel ? 'Подтвердите запуск' : 'Выберите идею для сценарного анализа')), !sel ? /*#__PURE__*/React.createElement("div", {
+    className: "p-4 space-y-2 max-h-[60vh] overflow-y-auto"
+  }, ideas.map(idea => /*#__PURE__*/React.createElement("button", {
+    key: idea.n,
+    onClick: () => setSel(idea),
+    className: "w-full text-left rounded-2xl px-4 py-3 bg-white/70 border border-ink-900/6 hover:border-ink-900/20 transition flex items-start gap-3"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "text-[11px] font-mono text-ink-400 mt-1"
+  }, idea.n), /*#__PURE__*/React.createElement("span", {
+    className: "min-w-0"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "block text-[10px] tracking-widest uppercase text-ink-400 font-mono"
+  }, idea.cat), /*#__PURE__*/React.createElement("span", {
+    className: "block text-[15px] text-ink-900 font-medium leading-tight mt-0.5"
+  }, idea.title))))) : /*#__PURE__*/React.createElement("div", {
+    className: "p-6"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "rounded-2xl p-4 bg-gold-400/15 border border-gold-400/40"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "text-[10px] tracking-widest uppercase font-mono text-gold-700 mb-1.5"
+  }, "Сценарный анализ"), /*#__PURE__*/React.createElement("p", {
+    className: "text-[14px] text-ink-900 leading-relaxed"
+  }, "Сделать ", /*#__PURE__*/React.createElement("span", {
+    className: "font-semibold"
+  }, "Scenario Analysis"), " для идеи «", sel.title, "» — с вас спишется ", /*#__PURE__*/React.createElement("span", {
+    className: "font-semibold"
+  }, "1 токен"), ".")), /*#__PURE__*/React.createElement("p", {
+    className: "text-[12px] text-ink-500 mt-3 leading-relaxed font-light"
+  }, "Откроется бот RAMP в Telegram и запустит сценарный анализ вашего портфеля. Токен списывается только после готового отчёта."), /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center gap-3 mt-5"
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: go,
+    className: "flex-1 px-4 py-2.5 rounded-full bg-ink-900 text-white text-[13px] font-semibold hover:bg-ink-800 transition"
+  }, "Да"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setSel(null),
+    className: "flex-1 px-4 py-2.5 rounded-full bg-white/70 border border-ink-900/10 text-ink-700 text-[13px] font-semibold hover:bg-white transition"
+  }, "Нет")))));
+};
 const ActionPlan = ({
   rows
 }) => /*#__PURE__*/React.createElement("div", {
@@ -3434,8 +3844,14 @@ const ActionPlan = ({
 }, "ATR (Wilder RMA) · SMA50/200 · RSI(14) · MACD(12,26,9) · без внешних таргет-прайсов")), /*#__PURE__*/React.createElement("span", {
   className: "text-[10px] font-mono text-ink-400 tracking-wider px-2.5 py-1 rounded-full bg-cream-50 border border-ink-900/5"
 }, "Quant Engine")), /*#__PURE__*/React.createElement("div", {
-  className: "grid grid-cols-[minmax(0,1fr)_72px_minmax(0,1fr)_minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1.6fr)] gap-3 px-1 pb-2.5 text-[9.5px] tracking-widest uppercase text-ink-400 font-mono border-b border-ink-900/8"
+  className: "swipe-hint items-center gap-1 text-[10px] font-mono text-gold-700 bg-gold-400/15 rounded-full px-2.5 py-1 mb-2.5 w-max"
+}, "↔ листайте таблицу"), /*#__PURE__*/React.createElement("div", {
+  className: "mob-scroll-x"
+}, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  className: "grid grid-cols-[minmax(0,1fr)_72px_minmax(0,1.25fr)_minmax(0,0.9fr)_minmax(0,1.3fr)_minmax(0,0.9fr)_minmax(0,1.45fr)] gap-3 px-1 pb-2.5 text-[9.5px] tracking-widest uppercase text-ink-400 font-mono border-b border-ink-900/8"
 }, /*#__PURE__*/React.createElement("div", null, "Тикер"), /*#__PURE__*/React.createElement("div", null, "Действие"), /*#__PURE__*/React.createElement("div", {
+  className: "text-right"
+}, "Количество"), /*#__PURE__*/React.createElement("div", {
   className: "text-right"
 }, "Цена"), /*#__PURE__*/React.createElement("div", {
   className: "text-right"
@@ -3443,25 +3859,44 @@ const ActionPlan = ({
   className: "text-right"
 }, "Stop"), /*#__PURE__*/React.createElement("div", null, "Причина")), /*#__PURE__*/React.createElement("div", {
   className: "divide-y divide-ink-900/5"
-}, rows.map((r, i) => /*#__PURE__*/React.createElement("div", {
-  key: i,
-  className: `grid grid-cols-[minmax(0,1fr)_72px_minmax(0,1fr)_minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1.6fr)] gap-3 items-center px-1 py-3 ${r.defer ? 'opacity-65' : ''}`
-}, /*#__PURE__*/React.createElement("div", {
-  className: "text-[13.5px] font-bold num text-ink-900 flex items-center gap-1.5"
-}, r.t, r.hot && /*#__PURE__*/React.createElement("span", {
-  className: "text-[10px]",
-  title: "Hotspot TRC > 20%"
-}, "🔥")), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
-  className: `px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wider ${actionChipCls[r.action]}`
-}, r.action)), /*#__PURE__*/React.createElement("div", {
-  className: "text-right text-[12px] num text-ink-700"
-}, r.price.toFixed(2)), /*#__PURE__*/React.createElement("div", {
-  className: "text-right text-[12px] num text-sage-600"
-}, r.target), /*#__PURE__*/React.createElement("div", {
-  className: "text-right text-[12px] num text-rust-600"
-}, r.stop), /*#__PURE__*/React.createElement("div", {
-  className: "text-[11px] text-ink-500 leading-tight"
-}, "Score ", r.score > 0 ? '+' : '', r.score.toFixed(1), r.hot && ' · Hotspot TRC>20%', r.defer && ' · отложено (turnover cap)')))), /*#__PURE__*/React.createElement("div", {
+}, rows.map((r, i) => {
+  const hasQty = r.qty != null && r.qty !== 0;
+  const sell = r.qty != null && r.qty < 0 || r.dw != null && r.dw < 0;
+  const qtyTone = !hasQty ? 'text-ink-400' : sell ? 'text-rust-600' : 'text-sage-600';
+  // §−14 A-2: qty/dw идут из Black-Litterman-оптимизатора, а чип действия —
+  // из 4-Pillar-скоринга; направления МОГУТ расходиться (честные данные двух
+  // движков).  При противоречии красим Δw нейтрально и помечаем источник BL,
+  // чтобы зелёный «+0.3 пп» не читался как ошибка под TRIM-чипом.
+  const dwPos = r.dw != null && r.dw > 0;
+  const contradicts = ['SELL', 'TRIM'].includes(r.action) && dwPos || ['BUY', 'STRONG'].includes(r.action) && r.dw != null && r.dw < 0;
+  const dwTone = contradicts ? 'text-ink-400' : sell ? 'text-rust-500' : 'text-sage-500';
+  return /*#__PURE__*/React.createElement("div", {
+    key: i,
+    className: `grid grid-cols-[minmax(0,1fr)_72px_minmax(0,1.25fr)_minmax(0,0.9fr)_minmax(0,1.3fr)_minmax(0,0.9fr)_minmax(0,1.45fr)] gap-3 items-center px-1 py-3 ${r.defer ? 'opacity-65' : ''}`
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "text-[13.5px] font-bold num text-ink-900 flex items-center gap-1.5"
+  }, r.t, r.hot && /*#__PURE__*/React.createElement("span", {
+    className: "text-[10px]",
+    title: "Hotspot TRC > 20%"
+  }, "🔥")), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+    className: `px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wider ${actionChipCls[r.action]}`
+  }, r.action)), /*#__PURE__*/React.createElement("div", {
+    className: "text-right leading-tight"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: `text-[12.5px] num font-semibold ${qtyTone}`
+  }, hasQty ? `${r.qty > 0 ? '+' : '−'}${Math.abs(r.qty).toLocaleString('ru-RU')} шт` : '—'), r.dw != null && Math.abs(r.dw) >= 0.05 && /*#__PURE__*/React.createElement("div", {
+    className: `text-[10px] num ${dwTone}`,
+    title: "Δ веса по Black-Litterman-оптимизатору (может расходиться с сигналом 4-Pillar)"
+  }, "BL ", r.dw > 0 ? '+' : '−', Math.abs(r.dw).toFixed(1), " пп")), /*#__PURE__*/React.createElement("div", {
+    className: "text-right text-[12px] num text-ink-700"
+  }, r.price.toFixed(2)), /*#__PURE__*/React.createElement("div", {
+    className: "text-right text-[12px] num text-sage-600"
+  }, r.target), /*#__PURE__*/React.createElement("div", {
+    className: "text-right text-[12px] num text-rust-600"
+  }, r.stop), /*#__PURE__*/React.createElement("div", {
+    className: "text-[11px] text-ink-500 leading-tight"
+  }, "Score ", r.score > 0 ? '+' : '', r.score.toFixed(1), r.hot && ' · Hotspot TRC>20%', r.defer && ' · отложено (turnover cap)'));
+})))), /*#__PURE__*/React.createElement("div", {
   className: "mt-4 rounded-2xl bg-cream-50 border border-ink-900/5 px-4 py-3.5 flex items-start gap-3"
 }, /*#__PURE__*/React.createElement(Icons.Sparkles, {
   size: 14,
@@ -3472,7 +3907,9 @@ const ActionPlan = ({
 }, window.DEEP.actionAI)));
 const EffectGrid = ({
   rows,
-  verdict
+  verdict,
+  scope,
+  scoped
 }) => /*#__PURE__*/React.createElement("div", {
   className: "glass-strong rounded-4xl p-7 shadow-card"
 }, /*#__PURE__*/React.createElement("div", {
@@ -3481,9 +3918,10 @@ const EffectGrid = ({
   className: "text-2xl font-semibold tracking-tight text-ink-900"
 }, "Ожидаемый эффект на риск"), /*#__PURE__*/React.createElement("p", {
   className: "text-[12px] text-ink-500 font-mono mt-1"
-}, "оценка «до / после» при исполнении Action Plan · горизонт 1 квартал")), /*#__PURE__*/React.createElement("span", {
-  className: "text-[10px] font-mono text-gold-700 tracking-wider px-2.5 py-1 rounded-full bg-gold-400/15"
-}, "Δ по идеям: MSFT · ORCL · SLV · SPCX · AAPL · GLD · NVDA")), /*#__PURE__*/React.createElement("div", {
+}, "оценка «до / после» при исполнении Action Plan · горизонт 1 квартал")), scoped && scope && scope.length > 0 && /*#__PURE__*/React.createElement("span", {
+  className: "text-[10px] font-mono text-gold-700 tracking-wider px-2.5 py-1 rounded-full bg-gold-400/15",
+  title: "Эти позиции меняет Action Plan — по ним и посчитан эффект «до/после»"
+}, "Меняем позиции: ", scope.join(' · '))), /*#__PURE__*/React.createElement("div", {
   className: "grid grid-cols-2 md:grid-cols-4 gap-3"
 }, rows.map((r, i) => {
   const tone = {
@@ -3561,7 +3999,7 @@ const PipeNode = ({
 }, label), /*#__PURE__*/React.createElement("div", {
   className: "text-[10.5px] text-ink-800 font-medium leading-tight"
 }, n)), !last && /*#__PURE__*/React.createElement("div", {
-  className: "flex items-center justify-center w-5 flex-shrink-0"
+  className: "hidden sm:flex items-center justify-center w-5 flex-shrink-0"
 }, /*#__PURE__*/React.createElement(Icons.ArrowR, {
   size: 12,
   className: "text-ink-300",
@@ -3633,7 +4071,7 @@ const IdeaCard = ({
   }, /*#__PURE__*/React.createElement("div", {
     className: `text-[10px] tracking-widest uppercase font-mono mb-2.5 ${highlight ? 'text-white/40' : 'text-ink-400'}`
   }, "Конвейер · Factor → Regime → Stress → RAG"), /*#__PURE__*/React.createElement("div", {
-    className: `flex items-stretch ${highlight ? '[&_div.rounded-xl]:!bg-white/8 [&_div.rounded-xl]:!border-white/10 [&_.text-ink-800]:!text-white [&_.text-ink-400]:!text-white/40 [&_svg]:!text-white/40' : ''}`
+    className: `flex flex-col sm:flex-row sm:items-stretch gap-1.5 sm:gap-0 ${highlight ? '[&_div.rounded-xl]:!bg-white/8 [&_div.rounded-xl]:!border-white/10 [&_.text-ink-800]:!text-white [&_.text-ink-400]:!text-white/40 [&_svg]:!text-white/40' : ''}`
   }, idea.pipeline.map((s, i) => /*#__PURE__*/React.createElement(PipeNode, {
     key: i,
     n: s,
@@ -3667,6 +4105,7 @@ const Plan = () => {
     ...o,
     [n]: !o[n]
   }));
+  const [applyOpen, setApplyOpen] = React.useState(false);
   return /*#__PURE__*/React.createElement("section", {
     id: "plan",
     className: "rise",
@@ -3683,13 +4122,19 @@ const Plan = () => {
     className: "text-ink-400"
   }, ".")), /*#__PURE__*/React.createElement("p", {
     className: "text-[15px] text-ink-500 mt-2 font-light max-w-[680px]"
-  }, "Конкретные уровни Buy / Sell / Stop, оценка эффекта до/после и стратегические идеи с кандидатами.")), /*#__PURE__*/React.createElement("div", {
+  }, "Конкретные уровни Buy / Sell / Stop, оценка эффекта до/после и стратегические идеи с кандидатами.")), applyOpen && /*#__PURE__*/React.createElement(ApplyIdeaModal, {
+    ideas: p.ideas,
+    botUsername: (p.meta || {}).botUsername,
+    onClose: () => setApplyOpen(false)
+  }), /*#__PURE__*/React.createElement("div", {
     className: "space-y-5"
   }, /*#__PURE__*/React.createElement(ActionPlan, {
     rows: p.actionPlan
   }), /*#__PURE__*/React.createElement(EffectGrid, {
     rows: p.effect,
-    verdict: p.effectVerdict
+    verdict: p.effectVerdict,
+    scope: p.effectScope,
+    scoped: p.effectScoped
   }), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "rounded-4xl p-6 mb-5 relative overflow-hidden",
     style: {
@@ -3701,7 +4146,9 @@ const Plan = () => {
       background: 'radial-gradient(circle, #caa01a, transparent 65%)'
     }
   }), /*#__PURE__*/React.createElement("div", {
-    className: "relative flex items-start gap-4"
+    className: "relative flex items-start justify-between gap-4 flex-wrap"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-start gap-4"
   }, /*#__PURE__*/React.createElement("div", {
     className: "w-11 h-11 rounded-2xl bg-ink-900 text-gold-400 flex items-center justify-center flex-shrink-0"
   }, /*#__PURE__*/React.createElement(Icons.Sparkles, {
@@ -3713,7 +4160,13 @@ const Plan = () => {
     className: "text-[14.5px] text-ink-900 leading-relaxed font-light"
   }, "Тикеры-кандидаты ", /*#__PURE__*/React.createElement("span", {
     className: "font-medium"
-  }, "не из вашего портфеля"), " — рассмотрите как замену или дополнение. Раскройте карточку, чтобы увидеть конвейер отбора и обоснование по каждому кандидату.")))), /*#__PURE__*/React.createElement("div", {
+  }, "не из вашего портфеля"), " — рассмотрите как замену или дополнение. Раскройте карточку, чтобы увидеть конвейер отбора и обоснование по каждому кандидату."))), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setApplyOpen(true),
+    className: "flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-ink-900 text-white text-[12px] font-medium hover:bg-ink-800 transition flex-shrink-0"
+  }, /*#__PURE__*/React.createElement(Icons.Sparkles, {
+    size: 13,
+    stroke: 1.8
+  }), " Применить идею"))), /*#__PURE__*/React.createElement("div", {
     className: "grid grid-cols-1 lg:grid-cols-2 gap-5"
   }, p.ideas.map((idea, i) => /*#__PURE__*/React.createElement(IdeaCard, {
     key: idea.n,
@@ -3924,6 +4377,11 @@ const TopBar = ({
 };
 const Footer = () => {
   const p = window.DEEP;
+  // §−14 C-6: ChromaDB (банковский RAG) в списке источников — только когда RAG
+  // реально консультировался (quality несёт «✓ … RAG …»); при выключенном/пустом
+  // RAG источник не заявляется (футер был статичным — вводил в заблуждение).
+  const ragOn = (p.quality || []).some(q => typeof q === 'string' && q.includes('✓') && /rag/i.test(q));
+  const sources = ['Tradernet', 'SEC EDGAR', 'FRED', 'Quant Engine MAC3'].concat(ragOn ? ['ChromaDB (GS / MS / JPM)'] : []).concat([p.meta.aiModel]).join(' · ');
   return /*#__PURE__*/React.createElement("footer", {
     className: "mt-16 mb-8"
   }, /*#__PURE__*/React.createElement("div", {
@@ -3936,12 +4394,23 @@ const Footer = () => {
     className: "text-[10px] tracking-widest uppercase text-ink-400 font-mono mb-3"
   }, "Контроль качества данных"), /*#__PURE__*/React.createElement("div", {
     className: "flex flex-wrap gap-2"
-  }, p.quality.map((q, i) => /*#__PURE__*/React.createElement("span", {
-    key: i,
-    className: "flex items-center gap-1.5 text-[10px] font-mono text-ink-600 bg-cream-50 border border-ink-900/6 rounded-full px-2.5 py-1"
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "text-sage-600 font-bold"
-  }, "✓"), " ", q)))), /*#__PURE__*/React.createElement("div", {
+  }, p.quality.map((q, i) => {
+    // Audit 2026-07-04: each quality string already carries its OWN
+    // status symbol («✓ …» / «✗ …» / «⚠ …» / «— …»).  The footer used
+    // to HARDCODE a green ✓ in front, so an «✗ RAG» pill rendered as
+    // «✓ ✗ RAG» (double symbol, green on a failure).  Colour the
+    // string's own leading symbol instead — honest for every state.
+    const s = String(q).trim();
+    const sym = s.charAt(0);
+    const rest = s.slice(1).trim();
+    const cls = sym === '✗' ? 'text-rust-600' : sym === '⚠' ? 'text-gold-700' : sym === '—' ? 'text-ink-400' : 'text-sage-600';
+    return /*#__PURE__*/React.createElement("span", {
+      key: i,
+      className: "flex items-center gap-1.5 text-[10px] font-mono text-ink-600 bg-cream-50 border border-ink-900/6 rounded-full px-2.5 py-1"
+    }, /*#__PURE__*/React.createElement("span", {
+      className: `${cls} font-bold`
+    }, sym), " ", rest);
+  }))), /*#__PURE__*/React.createElement("div", {
     className: "flex items-center gap-2 flex-wrap"
   }, /*#__PURE__*/React.createElement("button", {
     className: "flex items-center gap-1.5 px-4 py-2 rounded-full bg-white border border-ink-900/8 text-ink-700 text-[12px] font-medium hover:bg-cream-50 transition"
@@ -3968,7 +4437,7 @@ const Footer = () => {
     className: "text-[12px] text-ink-500 leading-relaxed font-light"
   }, /*#__PURE__*/React.createElement("span", {
     className: "text-ink-700 font-medium"
-  }, "Это аналитический материал, а не индивидуальная инвестиционная рекомендация."), " Расчёты основаны на исторических данных и публичной отчётности; они не учитывают вашу налоговую ситуацию, горизонт и цели. Источники: Tradernet · SEC EDGAR · FRED · Quant Engine MAC3 · ChromaDB (GS / MS / JPM) · ", p.meta.aiModel, "."))), /*#__PURE__*/React.createElement("div", {
+  }, "Это аналитический материал, а не индивидуальная инвестиционная рекомендация."), " Расчёты основаны на исторических данных и публичной отчётности; они не учитывают вашу налоговую ситуацию, горизонт и цели. Источники: ", sources, "."))), /*#__PURE__*/React.createElement("div", {
     className: "text-center text-[10px] tracking-widest uppercase text-ink-400 font-mono mt-6"
   }, "Portfolio Risk Report · DEEP Tier · ", p.meta.id, " · v2026.6"));
 };

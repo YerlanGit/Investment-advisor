@@ -1391,6 +1391,63 @@ class MAC3RiskEngine:
 
         return cov_df, pd.DataFrame(exposures_report).T, portfolio_metrics
 
+    def fit_factor_betas(self, data, target_ticker: str) -> "dict[str, float] | None":
+        """
+        Факторные беты ПРОИЗВОЛЬНОГО тикера (B1 2026-07-17: мандатный бенчмарк
+        в секции «Факторное разложение»).
+
+        Прогоняет дневные лог-доходности `target_ticker` через ТОТ ЖЕ
+        Ridge-пайплайн, что и активы портфеля в `calculate_structural_risk`:
+        общая факторная панель `factor_tickers`, та же иерархическая
+        ортогонализация (BLOCK 3.5, gated `FACTOR_ORTHOGONALIZE`), тот же
+        guard на недоопределённую регрессию (≥ max(2K, 30) наблюдений) и тот
+        же `Ridge(alpha=0.001)` — иначе беты бенчмарка несопоставимы с бетами
+        активов в таблице.
+
+        Возвращает {factor_name: beta} или None (нет данных / короткое
+        перекрытие истории) — потребители обязаны переживать None (фолбэк на
+        S&P-константу в `tg_bot._build_factor_betas_table`).  Чистая
+        read-only функция: модель Σ = B·F·Bᵀ + D и её downstream-потребители
+        (стресс, BL, Euler, κ) НЕ затрагиваются (ADR Вариант A).
+        """
+        try:
+            if data is None or getattr(data, "empty", True):
+                return None
+            if target_ticker not in data.columns:
+                return None
+            factor_cols = [v for v in self.factor_tickers.values()
+                           if v in data.columns]
+            if not factor_cols:
+                return None
+            cols = list(dict.fromkeys([*factor_cols, target_ticker]))
+            sub = data[cols].dropna(axis=1, how="all")
+            if target_ticker not in sub.columns:
+                return None
+            returns = np.log(sub / sub.shift(1)).dropna()
+            present = {k: v for k, v in self.factor_tickers.items()
+                       if v in returns.columns}
+            if not present or target_ticker not in returns.columns:
+                return None
+            f_data = returns[list(present.values())].copy()
+            f_data.columns = list(present.keys())
+            if factor_orthogonalize_enabled():
+                f_data = orthogonalize_factors_hierarchical(f_data)
+            min_obs = max(2 * len(present), 30)
+            if len(returns) < min_obs:
+                logger.info(
+                    "Беты бенчмарка %s пропущены: %d наблюдений < %d "
+                    "(короткое перекрытие истории).",
+                    target_ticker, len(returns), min_obs)
+                return None
+            y = returns[target_ticker]
+            model = Ridge(alpha=0.001, fit_intercept=True).fit(f_data, y)
+            return {str(k): float(b)
+                    for k, b in zip(f_data.columns, model.coef_)}
+        except Exception as exc:                      # noqa: BLE001
+            logger.warning("fit_factor_betas(%s) failed: %s",
+                           target_ticker, exc)
+            return None
+
     def calculate_atr(self, data, tickers, ohlc_data=None, period=14):
         """
         True ATR (Wilder’s Average True Range) with OHLC when available.
@@ -1917,6 +1974,31 @@ class UniversalPortfolioManager:
                 if len(bm_prices) >= 2:
                     bm_logs[bm_name] = np.log(bm_prices / bm_prices.shift(1)).dropna()
 
+        # ═══════════════ BENCHMARK FACTOR PROFILE (B1 2026-07-17) ═══════════════
+        # Реальные факторные беты выбранного бенчмарка (тот же Ridge-пайплайн,
+        # что и активы) — столбец «бенчмарк» в секции «Факторное разложение»
+        # больше не константа (Market=1, rest=0)=S&P 500.  Для SPY.US беты
+        # ≈ (Market≈1, стили≈0) → отчёт обратносовместим по построению.
+        # None (нет бенчмарка / нет истории) — потребители обязаны переживать.
+        benchmark_factor_profile: dict | None = None
+        if profile_benchmark:
+            _bm_betas = self.engine.fit_factor_betas(all_data, profile_benchmark)
+            if _bm_betas:
+                try:
+                    from profile_manager import BENCHMARK_LIST as _BM_NAMES
+                except Exception:                     # pragma: no cover
+                    _BM_NAMES = {}
+                benchmark_factor_profile = {
+                    "ticker": profile_benchmark,
+                    "name":   _BM_NAMES.get(profile_benchmark, profile_benchmark),
+                    "betas":  _bm_betas,
+                }
+            else:
+                logger.info(
+                    "Benchmark factor profile: беты для %s недоступны — секция "
+                    "факторов использует S&P-константу (graceful fallback).",
+                    profile_benchmark)
+
         # ═══════════════ BENCHMARK COMPARISON ═══════════════
         # TE / IR / annualised excess are computed per benchmark on a PAIR
         # inner-join (compute_benchmark_stats) — a benchmark's own short
@@ -2339,6 +2421,9 @@ class UniversalPortfolioManager:
             # of defaulting to the first concrete benchmark.  None → no profile
             # benchmark selected.
             "profile_benchmark_ticker": profile_benchmark,
+            # B1 (2026-07-17): факторные беты мандатного бенчмарка для секции
+            # «Факторное разложение» — {ticker, name, betas} или None.
+            "benchmark_factor_profile": benchmark_factor_profile,
             "period_returns_table": period_returns_table,
             "return_series_coverage": return_coverage,
             "stress_scenarios": stress_scenarios,

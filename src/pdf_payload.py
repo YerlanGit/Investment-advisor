@@ -1372,6 +1372,21 @@ def build_payload(results: dict, tier: str,
                 if row.get("name") == "Профильный бенчмарк":
                     row["name"] = f"Профильный бенчмарк · {bm_disp}"
 
+    # ── Benchmark identity for the DEEP factor section (B1 2026-07-17) ──────
+    # The factor table's comparison column now carries the REAL factor betas of
+    # the user's mandate benchmark (results["benchmark_factor_profile"]).  The
+    # display name/ticker MUST follow that same source: when the profile is
+    # unavailable the column falls back to the S&P 500 constant, so the label
+    # stays "S&P 500" too — a "Nasdaq 100" label above S&P numbers would lie
+    # (rejected ADR Variant C).  Defaults preserve the legacy report exactly.
+    _bfp = results.get("benchmark_factor_profile") or {}
+    if isinstance(_bfp, dict) and _bfp.get("betas"):
+        payload["benchmark_name"]   = str(_bfp.get("name") or "S&P 500")
+        payload["benchmark_ticker"] = str(_bfp.get("ticker") or "SPY.US")
+    else:
+        payload["benchmark_name"]   = "S&P 500"
+        payload["benchmark_ticker"] = "SPY.US"
+
     # ── Deep-tier additions ────────────────────────────────────────────────
     if tier == TIER_DEEP:
 

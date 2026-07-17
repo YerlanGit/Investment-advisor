@@ -459,6 +459,10 @@ def _summarise_for_prompt(results: dict) -> dict:
         "sectors":         _sector_shares_long_book(results),
         "sector_complex":  _sector_complex_figure(results),
         "benchmarks":   bm,
+        # B1 (2026-07-17): мандатный бенчмарк клиента по ИМЕНИ + его факторные
+        # беты (если движок их посчитал) — ИИ говорит «перекос относительно
+        # Nasdaq 100», а не абстрактно «относительно рынка».
+        "benchmark_profile": _benchmark_profile_for_prompt(results),
         "holdings":     perf_rows,
         "action_plan":  (results.get("action_plan") or [])[:8],
         "asset_scores": {t: s for t, s in
@@ -512,6 +516,34 @@ def _summarise_for_prompt(results: dict) -> dict:
         # догадок по одной лишь Beta_Market.
         "factor_decomposition": _factor_decomposition_for_prompt(results),
     }
+
+
+def _benchmark_profile_for_prompt(results: dict) -> Optional[dict]:
+    """
+    Compact view of the user's mandate benchmark for the prompt (B1 2026-07-17).
+
+    Keys: ticker, name, betas ({axis: β} — None when the engine couldn't fit
+    them; the factor section then falls back to the S&P 500 constant and the
+    prompt's benchmark rule says so).  None when no mandate benchmark is set.
+    """
+    bfp = results.get("benchmark_factor_profile") or {}
+    if isinstance(bfp, dict) and bfp.get("betas"):
+        return {
+            "ticker": _safe_ticker(bfp.get("ticker")),
+            "name":   _safe_text(bfp.get("name"), 44),
+            "betas":  {_safe_text(k, 20): _safe_round(v, 2)
+                       for k, v in (bfp.get("betas") or {}).items()},
+        }
+    tk = results.get("profile_benchmark_ticker")
+    if not tk:
+        return None
+    try:
+        from profile_manager import BENCHMARK_LIST as _BML
+        name = _BML.get(str(tk), str(tk))
+    except Exception:                                 # pragma: no cover
+        name = str(tk)
+    return {"ticker": _safe_ticker(tk), "name": _safe_text(name, 44),
+            "betas": None}
 
 
 def _factor_decomposition_for_prompt(results: dict) -> dict:
@@ -711,10 +743,59 @@ def _repair_truncated_json(raw: str) -> str:
 
 def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
                  user_profile: str = "Moderate",
-                 regime_rag_confirm: list[str] | None = None) -> str:
+                 regime_rag_confirm: list[str] | None = None,
+                 user_mandate: dict | None = None) -> str:
     regime = (summary.get("regime") or {})
     regime_label = regime.get("regime", "unknown")
     regime_ru    = _regime_ru(regime_label)   # Sprint-5.3: plain-Russian phrase
+
+    # B1 (2026-07-17): бенчмарк клиента по ИМЕНИ — комментарии секций обязаны
+    # сравнивать с ним, а не с абстрактным «рынком».
+    _bench_prof  = summary.get("benchmark_profile") or {}
+    bench_label  = str(_bench_prof.get("name") or "S&P 500")
+    benchmark_rule = ""
+    if _bench_prof:
+        benchmark_rule = (
+            f"БЕНЧМАРК КЛИЕНТА — {bench_label}: в ai_benchmark_comment и "
+            "ai_factor_comment называй бенчмарк ПО ИМЕНИ, а не абстрактно "
+            "«рынок». "
+            + ("Факторные беты бенчмарка — summary.benchmark_profile.betas; "
+               "«Наклон Δ» в отчёте = β портфеля − β бенчмарка.\n"
+               if _bench_prof.get("betas") else
+               "Беты выбранного бенчмарка недоступны — факторное сравнение в "
+               "отчёте приведено к S&P 500 как общей оси; скажи об этом, если "
+               "комментируешь факторный перекос.\n")
+        )
+
+    # B1 (2026-07-17): мандатные лимиты клиента — идеи не должны противоречить
+    # мандату (класс с лимитом 0–0 запрещён; напр. Crypto у консервативного).
+    mandate_rule = ""
+    if user_mandate:
+        _limits = user_mandate.get("limits_dict") or {}
+        _banned: list[str] = []
+        for _k, _b in _limits.items():
+            try:
+                _lo, _hi = float(_b[0]), float(_b[1])
+            except (TypeError, ValueError, IndexError):
+                continue
+            if _lo == 0 and _hi == 0:
+                _banned.append(str(_k))
+        _pname = _safe_text(user_mandate.get("profile_name"), 40)
+        _lines = []
+        if _pname:
+            _lines.append(f"- Риск-профиль мандата: {_pname}.\n")
+        if _banned:
+            try:
+                from profile_manager import ASSET_DISPLAY as _AD
+            except Exception:                          # pragma: no cover
+                _AD = {}
+            _names = ", ".join(_AD.get(k, k) for k in _banned)
+            _lines.append(
+                f"- ЗАПРЕЩЁННЫЕ классы активов (лимит мандата 0–0%): {_names}. "
+                "НЕ предлагай инструменты этих классов ни в stock_picks, ни в "
+                "текстовых рекомендациях.\n")
+        if _lines:
+            mandate_rule = "МАНДАТ КЛИЕНТА — СТРОГО:\n" + "".join(_lines)
 
     # Sprint-5.3 (замечание 2) — shared hard rule banning jargon the retail
     # reader can't parse.  Injected into BOTH the base and deep prompts.
@@ -956,7 +1037,7 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
             'если отрицательный — значит портфель против стоимостных акций, что ПРОТИВОРЕЧИТ режиму '
             f'{regime_label} (→ Barclays/Goldman рекомендуют Value в Recovery). '
             '(2) Назови КОНКРЕТНЫЙ фактор для наращивания (напр. Value через JNJ/KO) и что продать",\n'
-            '  "ai_benchmark_comment": "≤160 знаков — опережает/отстаёт от рынка на X%. '
+            f'  "ai_benchmark_comment": "≤160 знаков — опережает/отстаёт от бенчмарка {bench_label} на X%. '
             'Причина (→ сектор/фактор). Стабильно ли это или зависит от одного ралли? [Quant Engine]",\n'
             '  "ai_performance_comment": "≤150 знаков — доходность за 1М/3М/12М: тренд роста/падения. '
             'Что было драйвером (→ конкретные тикеры из holdings). Устойчиво ли это [Quant Engine]",\n'
@@ -998,6 +1079,8 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
             "why — конкретные цифры (ROE, маржа, Бета) с тегом [Источник].\n"
             f"{plain_rule}"
             f"{currency_rule}"
+            f"{benchmark_rule}"
+            f"{mandate_rule}"
             f"{contradiction_rule}"
             f"{signal_sync_rule}"
             f"{held_rule}"
@@ -1060,8 +1143,8 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
         '  "ai_risk_comment": "≤220 знаков — потери в худший день из 20 (CVaR), нестабильность '
         '(Vol), макс. просадка и стабильность обгона рынка (Sharpe): взаимосвязь, $ потерь. '
         'Укажи какая позиция [см. ai_holdings_comment] вносит наибольший вклад [Quant Engine]",\n'
-        '  "ai_benchmark_comment": "≤200 знаков — стабильность обгона рынка (IR) vs бенчмарк: '
-        'причины отставания/опережения. Свяжи с нестабильностью портфеля из ai_risk_comment '
+        f'  "ai_benchmark_comment": "≤200 знаков — стабильность обгона (IR) vs бенчмарк {bench_label}: '
+        'причины отставания/опережения (бенчмарк называй по имени). Свяжи с нестабильностью портфеля из ai_risk_comment '
         'и секторными перекосами из ai_sector_comment [Quant Engine]",\n'
         '  "ai_performance_comment": "≤180 знаков — доходность 1М/3М/12М/YTD: тренды и причины. '
         'Укажи как макро-режим [см. ai_regime_comment] повлиял на динамику [Quant Engine]",\n'
@@ -1092,7 +1175,7 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
         'Назови субсектора (напр. внутри Tech: софт vs полупроводники). '
         'Укажи риск ротации при режиме [см. ai_regime_comment]",\n'
         '  "ai_factor_comment": "≤560 знаков — ЕДИНЫЙ вывод, связывающий ОБЕ иллюстрации секции: '
-        '(A) радар β (betas — наклоны портфеля к рынку) И (B) «Откуда берётся риск» '
+        f'(A) радар β (betas — наклоны портфеля; активный Наклон Δ считается против бенчмарка {bench_label}) И (B) «Откуда берётся риск» '
         '(var_shares — доли дисперсии, twins). СТРОГО по summary.factor_decomposition, числа verbatim. '
         '4 шага через «;», ЗАКОНЧИ мысль (НЕ обрывай на полуслове, уложись в лимит): '
         '(1) ИСТОЧНИК РИСКА [из B]: источник с макс. долей var_shares — «X% дисперсии — <источник> '
@@ -1169,6 +1252,8 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
         "- why: конкретные цифры (ROE, маржа, Beta, P/E, momentum) с тегом [источник].\n"
         f"{plain_rule}"
         f"{currency_rule}"
+        f"{benchmark_rule}"
+        f"{mandate_rule}"
         f"{contradiction_rule}"
         f"{signal_sync_rule}"
         f"{held_rule}"
@@ -1214,6 +1299,12 @@ def _fallback_factor_comment(results: dict) -> str:
     idio = fd.get("idio_pct")
     if idio is not None and idio > 15:
         parts.append(f"{idio}% риска — специфика отдельных бумаг, факторами не объясняется")
+    # B1 (2026-07-17): назвать бенчмарк по имени — «Наклон Δ» в таблице секции
+    # считается против него (fallback-путь должен совпадать с LLM-путём).
+    bfp = results.get("benchmark_factor_profile") or {}
+    if isinstance(bfp, dict) and bfp.get("name"):
+        parts.append(f"активный Наклон Δ в таблице — относительно бенчмарка "
+                     f"{bfp.get('name')}")
     return "; ".join(parts) + " [Quant Engine]."
 
 
@@ -1488,7 +1579,8 @@ def _fallback_stock_picks(regime_label: str, tier: str) -> dict:
 def generate_narrative(results: dict, tier: str = "base",
                        market_context: str = "",
                        user_risk_profile: str = "Moderate",
-                       regime_rag_confirm: list[str] | None = None) -> dict:
+                       regime_rag_confirm: list[str] | None = None,
+                       user_mandate: dict | None = None) -> dict:
     """
     Returns {verdict, plain_summary, bullets, stock_picks,
              action_plan_text, ai_action_impact, used_rag}.
@@ -1547,7 +1639,8 @@ def generate_narrative(results: dict, tier: str = "base",
                 "content": _user_prompt(summary, tier=tier,
                                         market_context=market_context,
                                         user_profile=user_risk_profile,
-                                        regime_rag_confirm=regime_rag_confirm),
+                                        regime_rag_confirm=regime_rag_confirm,
+                                        user_mandate=user_mandate),
             }],
             # Structured Outputs — force the report through a typed tool call so
             # the SDK returns a GUARANTEED dict.  No brace-finding, no
@@ -1603,6 +1696,10 @@ def generate_narrative(results: dict, tier: str = "base",
                          if isinstance(results.get("regime"), dict) else None) or "unknown"
         stock_picks = _backfill_empty_scenarios(stock_picks, _regime_label, tier,
                                                  market_context, results)
+        # B1 (2026-07-17): мандатный гард — детерминированно вычищаем идеи из
+        # классов активов с лимитом 0–0 (напр. Crypto у консервативного).
+        # Идёт ПОСЛЕ backfill, чтобы и фолбэк-идеи прошли через фильтр.
+        stock_picks = _remove_mandate_banned_picks(stock_picks, user_mandate)
         total_picks = sum(len(s.get("picks", [])) for s in stock_picks.values())
 
         logger.info("AI narrative: SUCCESS model=%s verdict=%d chars bullets=%d picks=%d",
@@ -1816,6 +1913,55 @@ def _check_pick_contradictions(stock_picks: dict, results: dict) -> dict:
                         removed, scenario_key)
         scenario["picks"] = filtered
 
+    return stock_picks
+
+
+def _remove_mandate_banned_picks(stock_picks: dict,
+                                 user_mandate: dict | None) -> dict:
+    """
+    B1 (2026-07-17): deterministic mandate guard for AI ideas.
+
+    An asset class with a 0–0 limit is EXCLUDED from the client's mandate
+    (e.g. Crypto for a conservative profile) — a pick from that class would
+    contradict the mandate panel one page above.  The prompt already carries
+    the rule; this post-filter GUARANTEES it even when the model (or the
+    rule-based backfill) slips.  Classification reuses the same
+    `_classify_to_asset_key` the Mandate-Compliance panel and Gatekeeper use,
+    so «запрещённый класс» means the same thing everywhere.  Pure/graceful:
+    no mandate / no banned classes / import failure → picks unchanged.
+    """
+    if not user_mandate or not stock_picks:
+        return stock_picks
+    limits = user_mandate.get("limits_dict") or {}
+    banned: set[str] = set()
+    for key, bounds in limits.items():
+        try:
+            lo, hi = float(bounds[0]), float(bounds[1])
+        except (TypeError, ValueError, IndexError):
+            continue
+        if lo == 0 and hi == 0:
+            banned.add(str(key))
+    if not banned:
+        return stock_picks
+    try:
+        from agent.gatekeeper import _classify_to_asset_key
+    except Exception:                                  # pragma: no cover
+        return stock_picks
+    for scenario_key, scenario in stock_picks.items():
+        if not isinstance(scenario, dict):
+            continue
+        original = scenario.get("picks", []) or []
+        filtered, removed = [], []
+        for p in original:
+            tkr = str((p or {}).get("ticker", "")).strip()
+            if tkr and _classify_to_asset_key(tkr) in banned:
+                removed.append(tkr)
+                continue
+            filtered.append(p)
+        if removed:
+            logger.info("Mandate guard: removed %s from %s (класс запрещён "
+                        "лимитом 0–0 мандата)", removed, scenario_key)
+        scenario["picks"] = filtered
     return stock_picks
 
 

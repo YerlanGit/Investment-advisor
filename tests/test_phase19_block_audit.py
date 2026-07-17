@@ -592,18 +592,22 @@ class Audit0623Test(unittest.TestCase):
 # Premium V2 data mapper (engine payload → strict design contract)
 # ─────────────────────────────────────────────────────────────────────────────
 class PremiumMapperTest(unittest.TestCase):
-    def test_deep_contract_is_exactly_32_keys(self):
-        # 32 = 29 + `factorVariance` (факторная декомпозиция дисперсии, additive)
+    def test_deep_contract_is_exactly_34_keys(self):
+        # 34 = 29 + `factorVariance` (факторная декомпозиция дисперсии, additive)
         # + `effectScope`/`effectScoped` (R2#5: какие позиции меняет Action Plan —
-        # источник «до/после», вместо захардкоженной «Δ по идеям»).
+        # источник «до/после», вместо захардкоженной «Δ по идеям»)
+        # + `benchmarkName`/`benchmarkTicker` (B1 2026-07-17: динамический
+        # бенчмарк секции «Факторное разложение» — столбец/легенда/плашка).
         from premium_payload import build_design_data
         d = build_design_data({}, "deep")          # empty payload → no KeyError
-        self.assertEqual(len(d), 32)
+        self.assertEqual(len(d), 34)
         self.assertIn("factorVariance", d)
         self.assertIsNone(d["factorVariance"])
         self.assertIn("effectScope", d)
         self.assertEqual(d["effectScope"], [])     # empty payload → no scope
         self.assertIn("effectScoped", d)
+        self.assertEqual(d["benchmarkName"], "S&P 500")   # legacy default
+        self.assertEqual(d["benchmarkTicker"], "SPY.US")
 
     def test_base_contract_is_exactly_13_keys(self):
         # §−13: +`leverage` {on, marginPct} — маржа-индикатор, рендерится ТОЛЬКО

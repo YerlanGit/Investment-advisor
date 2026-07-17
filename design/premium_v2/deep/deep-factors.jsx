@@ -1,13 +1,13 @@
 /* DEEP Factors — β-radar + 4-pillar scoring */
 
-const FactorTable = ({ factors }) => (
+const FactorTable = ({ factors, benchmarkName }) => (
   <table className="w-full">
     <thead>
       <tr className="text-[9.5px] tracking-widest uppercase text-ink-400 font-mono border-b border-ink-900/8">
         <th className="text-left font-medium py-2">Фактор</th>
         <th className="text-right font-medium py-2">β портф.</th>
-        <th className="text-right font-medium py-2" title="S&P 500 = эталон «рынок»: β_Market = 1, прочие ≈ 0 по построению модели">S&amp;P 500</th>
-        <th className="text-right font-medium py-2" title="Активный наклон портфеля относительно рынка">Наклон Δ</th>
+        <th className="text-right font-medium py-2" title={`${benchmarkName} — факторные беты вашего бенчмарка (его тоже разложили по этим осям)`}>{benchmarkName}</th>
+        <th className="text-right font-medium py-2" title="Активный наклон портфеля относительно бенчмарка">Наклон Δ</th>
       </tr>
     </thead>
     <tbody>
@@ -175,6 +175,10 @@ const ScoreCard = ({ s }) => {
 
 const Factors = () => {
   const p = window.DEEP;
+  // B1 (2026-07-17): динамический бенчмарк секции — столбец, легенда и плашка
+  // следуют за мандатным бенчмарком клиента (payload.benchmarkName); фолбэк
+  // «S&P 500» сохраняет прежний вид для легаси-данных и S&P-константы.
+  const benchName = p.benchmarkName || 'S&P 500';
   return (
     <section id="factors" className="rise" data-screen-label="03 Factors">
       <div className="mb-6">
@@ -198,7 +202,7 @@ const Factors = () => {
           </div>
           <div className="flex items-center gap-4 text-[11px] text-ink-600">
             <span className="flex items-center gap-2"><span className="w-4 h-0 border-t-2 border-gold-600"/> Портфель</span>
-            <span className="flex items-center gap-2"><span className="w-4 h-0 border-t-2 border-dashed border-ink-700"/> Рынок (S&P 500)</span>
+            <span className="flex items-center gap-2"><span className="w-4 h-0 border-t-2 border-dashed border-ink-700"/> {`Бенчмарк (${benchName})`}</span>
           </div>
         </div>
         <div className="grid grid-cols-12 gap-7 items-center">
@@ -206,12 +210,12 @@ const Factors = () => {
             <FactorRadar factors={p.factors} size={320}/>
           </div>
           <div className="col-span-12 lg:col-span-7">
-            <FactorTable factors={p.factors}/>
+            <FactorTable factors={p.factors} benchmarkName={benchName}/>
             <p className="text-[11px] text-ink-500 leading-relaxed font-light mt-4">
               <span className="text-ink-800 font-medium">Что показывает радар:</span> насколько портфель завязан на глобальные факторы. Большая площадь — больше зависимости от рынка; совпадение направлений по нескольким факторам — скрытая общая ставка.
             </p>
             <p className="text-[11px] text-ink-500 leading-relaxed font-light mt-2 rounded-2xl bg-cream-50 border border-ink-900/5 px-3.5 py-2.5">
-              <span className="text-ink-800 font-medium">Почему у S&amp;P 500 ненулевая только Market?</span> В этой модели Market — это и есть S&amp;P 500, поэтому эталон по построению имеет β_Market = 1, а стилевые факторы ≈ 0 (их экспозиция уже «зашита» в рынок). Колонка <span className="font-medium">Наклон Δ</span> = активный перекос портфеля относительно рынка: именно он и есть полезный сигнал.
+              <span className="text-ink-800 font-medium">{`Столбец «${benchName}»`}</span> — факторные беты самого бенчмарка (его тоже разложили по этим осям). <span className="font-medium">Наклон Δ = β портфеля − β бенчмарка</span> — ваш активный перекос относительно бенчмарка: именно он и есть полезный сигнал. Если ваш бенчмарк — широкий рынок (S&amp;P 500), у него β_Market ≈ 1, а стили ≈ 0; у стилевых и секторных бенчмарков (напр. Nasdaq 100) появляются собственные наклоны — это нормально.
             </p>
           </div>
         </div>
