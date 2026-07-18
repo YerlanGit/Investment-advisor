@@ -216,6 +216,28 @@ def _it_share(tickers: list[str],
     return float(total)
 
 
+def _top_sector_share(tickers: list[str],
+                      weights: np.ndarray,
+                      sector_by_ticker: Optional[dict[str, str]] = None) -> float:
+    """Largest single-sector share of the LONG book (0..1) — the concentration
+    signal the composite-risk aggravator consumes (2026-07-18).  Uses the
+    explicit sector map; names without a sector are bucketed as «прочее» so a
+    missing label never inflates the top sector.  Returns 0.0 when empty."""
+    sector_by_ticker = sector_by_ticker or {}
+    by_sec: dict[str, float] = {}
+    long_sum = 0.0
+    for t, w in zip(tickers, weights):
+        wf = float(w)
+        if wf <= 0:
+            continue
+        sec = (sector_by_ticker.get(t) or "прочее").strip().lower() or "прочее"
+        by_sec[sec] = by_sec.get(sec, 0.0) + wf
+        long_sum += wf
+    if long_sum <= 0 or not by_sec:
+        return 0.0
+    return float(max(by_sec.values()) / long_sum)
+
+
 # ── BLOCK 2.3: high-priority target weights (Идеи → Action Plan → Эффект) ─────
 
 def high_priority_target_weights(
@@ -382,6 +404,8 @@ def simulate_after_plan(*,
                           risk_free_rate:  float,
                           target_weights:  dict[str, float],
                           sector_by_ticker: Optional[dict[str, str]] = None,
+                          mandate:         str = "MODERATE",
+                          leverage_ratio:  Optional[float] = None,
                           ) -> Optional[dict]:
     """
     Re-evaluate the cover-page metrics under `target_weights`.
@@ -493,14 +517,27 @@ def simulate_after_plan(*,
     _anchor("max_drawdown", "Max_Drawdown")
 
     # ── Composite risk index ───────────────────────────────────────────────
+    # 2026-07-18: mirror the VERDICT gauge's structural/tail aggravators so the
+    # «до/после» index stays consistent with the cover gauge — and so «после»
+    # genuinely reflects the plan cutting sector concentration + drawdown, not
+    # just vol/CVaR.  mandate + leverage come from analyze_all; MaxDD is the
+    # (anchored) sample value; sector-top is recomputed on each weight vector.
     cvar_b = sample_before["cvar_95"]
     cvar_a = sample_after["cvar_95"]
-    risk_index_before = _composite_risk_score(vol_before,
-                                                cvar_b if not math.isnan(cvar_b) else 0.0,
-                                                max_trc_before)
-    risk_index_after  = _composite_risk_score(vol_after,
-                                                cvar_a if not math.isnan(cvar_a) else 0.0,
-                                                max_trc_after)
+    _mdd_b = sample_before.get("max_drawdown")
+    _mdd_a = sample_after.get("max_drawdown")
+    _mdd_b = None if (_mdd_b is None or (isinstance(_mdd_b, float) and math.isnan(_mdd_b))) else _mdd_b
+    _mdd_a = None if (_mdd_a is None or (isinstance(_mdd_a, float) and math.isnan(_mdd_a))) else _mdd_a
+    _sec_top_b = _top_sector_share(struct_tickers, w_before, sector_by_ticker) * 100.0
+    _sec_top_a = _top_sector_share(struct_tickers, w_after,  sector_by_ticker) * 100.0
+    risk_index_before = _composite_risk_score(
+        vol_before, cvar_b if not math.isnan(cvar_b) else 0.0, max_trc_before,
+        mandate, max_drawdown=_mdd_b, leverage_ratio=leverage_ratio,
+        sector_top_pct=_sec_top_b)
+    risk_index_after  = _composite_risk_score(
+        vol_after, cvar_a if not math.isnan(cvar_a) else 0.0, max_trc_after,
+        mandate, max_drawdown=_mdd_a, leverage_ratio=leverage_ratio,
+        sector_top_pct=_sec_top_a)
 
     # ── Expected return: BL μ preferred, realised fallback ────────────────
     er_before = _expected_return_from_bl(cur_w_by_ticker, bl_records)

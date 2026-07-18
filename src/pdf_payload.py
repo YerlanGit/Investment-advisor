@@ -992,6 +992,35 @@ def build_payload(results: dict, tier: str,
 
     # ── Multi-period performance (1м / 3м / 6м / 12м / YTD) ────────────────
     period_returns_table = _adapt_period_returns(results.get("period_returns_table"))
+    # B1-perf (2026-07-18): the engine keys the user's chosen benchmark as the
+    # opaque slot «Профильный бенчмарк» (inserted FIRST).  Rename that key to
+    # the actual display name (e.g. «Nasdaq 100») so BOTH the Premium
+    # «Рост против рынка» card and the v3 fallback (which read the FIRST key /
+    # its name) label the curve with the benchmark the numbers actually belong
+    # to — the returns were already the profile benchmark's; only the LABEL was
+    # stuck on «S&P 500».  Renaming here (payload copy) never touches
+    # results['benchmark_comparison'] — the scenarios filter, Gatekeeper and
+    # the equity-curve builder all read THAT engine dict, not this one.
+    performance_benchmark_name = "S&P 500"
+    if period_returns_table:
+        _first_key = next(iter(period_returns_table))
+        if _first_key == "Профильный бенчмарк":
+            try:
+                from profile_manager import BENCHMARK_LIST as _BML
+                _disp = (_BML.get(user_bench_ticker)
+                         or _BM_TICKER_TO_NAME.get(user_bench_ticker)) if user_bench_ticker else None
+            except Exception:
+                _disp = _BM_TICKER_TO_NAME.get(user_bench_ticker) if user_bench_ticker else None
+            _disp = _disp or "S&P 500"
+            # Rebuild the dict preserving order, with the first key renamed.
+            period_returns_table = {
+                (_disp if k == "Профильный бенчмарк" else k): v
+                for k, v in period_returns_table.items()
+            }
+            performance_benchmark_name = _disp
+        else:
+            # No profile benchmark → the first concrete key IS the real name.
+            performance_benchmark_name = _first_key
 
     # ── Stress scenarios (parametric factor shocks, 7-row default catalog) ─
     stress_scenarios = results.get("stress_scenarios") or []
@@ -1241,6 +1270,10 @@ def build_payload(results: dict, tier: str,
         "factor_variance":      _build_factor_variance(results),
         # Multi-period performance table {bm_name: {periods: [...], window_*}}
         "period_returns_table": period_returns_table,
+        # B1-perf (2026-07-18): display name of the benchmark the «Рост против
+        # рынка» card compares against (mandate benchmark, S&P 500 default) —
+        # the Premium/v3 performance section labels the curve with THIS.
+        "performance_benchmark_name": performance_benchmark_name,
         # Stress scenarios (parametric factor shocks — list of dicts)
         "stress_scenarios":     stress_scenarios,
         # Expected effect — DEEP P4 8-card before/after panel

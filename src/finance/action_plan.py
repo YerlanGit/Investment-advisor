@@ -288,6 +288,22 @@ def build_action_plan(*,
             dollars = (delta_w_pp / 100.0) * portfolio_value
             qty_delta = int(round(dollars / price))
 
+        # 2026-07-18: reconcile the ACTION chip (4-Pillar score — the report's
+        # declared directional SSOT) with the QUANTITY (Black-Litterman Δw).
+        # The two engines can disagree: BL may want +Δw on a Sell-rated name
+        # (its diversification value offsets weak fundamentals), which rendered
+        # a nonsensical «+1 шт» under a SELL chip.  When the BL sign CONTRADICTS
+        # the action direction we drop the misleading quantity (→ «—») rather
+        # than fabricate a sell-quantity from a buy-signed Δw; the muted BL-Δw
+        # annotation still shows the optimiser's (divergent) view honestly, and
+        # the reason gets a «BL расходится» note.  Agreeing signs are untouched.
+        _sell_side = action in ("Trim", "Sell")
+        _buy_side  = action in ("Buy", "Strong Buy")
+        _bl_contradicts = ((_sell_side and delta_w_pp > 0.05) or
+                           (_buy_side  and delta_w_pp < -0.05))
+        if _bl_contradicts:
+            qty_delta = None
+
         # Reason: short, evidence-based.
         reason_bits = []
         if sc:
@@ -304,6 +320,11 @@ def build_action_plan(*,
         # say so instead of leaving an unexplained qty-less directional row.
         if uncovered and ticker in uncovered:
             reason_bits.append("вне модели: история < 60 торг. дней")
+        # 2026-07-18: flag the action↔BL divergence in plain words so the «—»
+        # quantity is explained (optimiser wants the opposite of the signal).
+        if _bl_contradicts:
+            reason_bits.append(
+                f"BL расходится с сигналом ({delta_w_pp:+.1f}пп)")
         reason = " · ".join(reason_bits) if reason_bits else action
 
         rows.append(AssetActionRow(

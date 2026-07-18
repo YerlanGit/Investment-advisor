@@ -1397,6 +1397,9 @@ const _perfOrder = (a, b) => {
 };
 const Performance = () => {
   const p = window.PORTFOLIO.performance;
+  // B1-perf (2026-07-18): benchmark = mandate benchmark (payload), not a
+  // hardcoded «S&P 500».  The period numbers already belong to this benchmark.
+  const bench = p.benchmarkName || 'S&P 500';
   // Periods sorted into a logical horizon order for BOTH the selector and table.
   const periods = [...(p.periods || [])].sort(_perfOrder);
   const labels = periods.map(x => x.label);
@@ -1487,7 +1490,7 @@ const Performance = () => {
     className: "text-ink-400"
   }, ".")), /*#__PURE__*/React.createElement("p", {
     className: "text-[15px] text-ink-500 mt-2 font-light"
-  }, "Накопленная доходность портфеля в сравнении с S&P 500.")), /*#__PURE__*/React.createElement("div", {
+  }, "Накопленная доходность портфеля в сравнении с ", bench, ".")), /*#__PURE__*/React.createElement("div", {
     className: "flex items-center gap-1 p-1 rounded-full bg-white/60 border border-ink-900/8 backdrop-blur-md flex-wrap"
   }, labels.map(pr => /*#__PURE__*/React.createElement("button", {
     key: pr,
@@ -1513,7 +1516,7 @@ const Performance = () => {
   }, /*#__PURE__*/React.createElement(Icons.TrendUp, {
     size: 11,
     stroke: 2.2
-  }), " ", fmt(s.exc), " пп vs S&P"))), /*#__PURE__*/React.createElement("div", {
+  }), " ", fmt(s.exc), " пп vs ", bench))), /*#__PURE__*/React.createElement("div", {
     className: "flex items-center gap-3"
   }, /*#__PURE__*/React.createElement("div", {
     className: "flex items-center gap-1.5 text-[11px] text-ink-700"
@@ -1527,7 +1530,7 @@ const Performance = () => {
       backgroundImage: 'linear-gradient(to right, #1c1b1a 50%, transparent 50%)',
       backgroundSize: '4px 2px'
     }
-  }), " S&P 500"))), /*#__PURE__*/React.createElement(PerfChart, {
+  }), " ", bench))), /*#__PURE__*/React.createElement(PerfChart, {
     labels: series.labels,
     port: series.port,
     spx: series.spx,
@@ -1554,7 +1557,7 @@ const Performance = () => {
     sub: "год.",
     accent: "light"
   }), /*#__PURE__*/React.createElement(PerfSummaryCard, {
-    label: "S&P 500",
+    label: bench,
     value: `${fmt(s.spx)}%`,
     sub: `за ${period}`,
     accent: "light"
@@ -1566,7 +1569,7 @@ const Performance = () => {
     className: "text-[13px] font-semibold text-ink-900"
   }, "Разбивка по периодам"), /*#__PURE__*/React.createElement("div", {
     className: "text-[11px] text-ink-500 font-mono"
-  }, "Портфель / S&P 500 / Опережение")), /*#__PURE__*/React.createElement("div", {
+  }, "Портфель / ", bench, " / Опережение")), /*#__PURE__*/React.createElement("div", {
     className: "space-y-1"
   }, periods.map(pr => /*#__PURE__*/React.createElement(PeriodRow, {
     key: pr.label,

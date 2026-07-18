@@ -56,6 +56,9 @@ const _perfOrder = (a, b) => {
 
 const Performance = () => {
   const p = window.PORTFOLIO.performance;
+  // B1-perf (2026-07-18): benchmark = mandate benchmark (payload), not a
+  // hardcoded «S&P 500».  The period numbers already belong to this benchmark.
+  const bench = p.benchmarkName || 'S&P 500';
   // Periods sorted into a logical horizon order for BOTH the selector and table.
   const periods = [...(p.periods || [])].sort(_perfOrder);
   const labels  = periods.map(x => x.label);
@@ -118,7 +121,7 @@ const Performance = () => {
           <h2 className="text-[clamp(28px,3.4vw,40px)] leading-[1.05] tracking-[-0.02em] font-light text-ink-900">
             Рост против рынка<span className="text-ink-400">.</span>
           </h2>
-          <p className="text-[15px] text-ink-500 mt-2 font-light">Накопленная доходность портфеля в сравнении с S&P 500.</p>
+          <p className="text-[15px] text-ink-500 mt-2 font-light">Накопленная доходность портфеля в сравнении с {bench}.</p>
         </div>
 
         <div className="flex items-center gap-1 p-1 rounded-full bg-white/60 border border-ink-900/8 backdrop-blur-md flex-wrap">
@@ -141,7 +144,7 @@ const Performance = () => {
               <div className="flex items-end gap-3 flex-wrap">
                 <span className="text-[48px] leading-none font-light num text-ink-900">{fmt(s.ret)}<span className="text-[28px] text-ink-500">%</span></span>
                 <span className={`px-2.5 py-1 rounded-full text-[11px] font-semibold mb-1.5 flex items-center gap-1 ${beats?'bg-sage-500/15 text-sage-600':'bg-rust-500/15 text-rust-600'}`}>
-                  <Icons.TrendUp size={11} stroke={2.2}/> {fmt(s.exc)} пп vs S&P
+                  <Icons.TrendUp size={11} stroke={2.2}/> {fmt(s.exc)} пп vs {bench}
                 </span>
               </div>
             </div>
@@ -150,7 +153,7 @@ const Performance = () => {
                 <span className="w-3 h-1 rounded-full bg-gold-400"/> Ваш портфель
               </div>
               <div className="flex items-center gap-1.5 text-[11px] text-ink-500">
-                <span className="w-3 h-[2px] bg-ink-900" style={{ backgroundImage:'linear-gradient(to right, #1c1b1a 50%, transparent 50%)', backgroundSize:'4px 2px' }}/> S&P 500
+                <span className="w-3 h-[2px] bg-ink-900" style={{ backgroundImage:'linear-gradient(to right, #1c1b1a 50%, transparent 50%)', backgroundSize:'4px 2px' }}/> {bench}
               </div>
             </div>
           </div>
@@ -163,7 +166,7 @@ const Performance = () => {
           <PerfSummaryCard label={beats?'Опережение':'Отставание'} value={`${fmt(s.exc)}пп`} sub={beats?'портфель быстрее рынка':'портфель медленнее рынка'} accent="dark" IconC={Icons.Bolt}/>
           <div className="col-span-2 lg:col-span-1 grid grid-cols-2 gap-3">
             <PerfSummaryCard label="Волатильность" value={volPort!=null ? `${volPort}%` : '—'} sub="год." accent="light"/>
-            <PerfSummaryCard label="S&P 500" value={`${fmt(s.spx)}%`} sub={`за ${period}`} accent="light"/>
+            <PerfSummaryCard label={bench} value={`${fmt(s.spx)}%`} sub={`за ${period}`} accent="light"/>
           </div>
         </div>
 
@@ -171,7 +174,7 @@ const Performance = () => {
         <div className="col-span-12 glass-strong rounded-4xl shadow-card p-6">
           <div className="flex items-center justify-between mb-3 px-2">
             <div className="text-[13px] font-semibold text-ink-900">Разбивка по периодам</div>
-            <div className="text-[11px] text-ink-500 font-mono">Портфель / S&P 500 / Опережение</div>
+            <div className="text-[11px] text-ink-500 font-mono">Портфель / {bench} / Опережение</div>
           </div>
           <div className="space-y-1">
             {periods.map(pr => <PeriodRow key={pr.label} p={pr} isMax={pr.label === period}/>)}

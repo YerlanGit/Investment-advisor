@@ -139,22 +139,51 @@ const ActionPlan = ({ rows }) => (
   </div>
 );
 
-const EffectGrid = ({ rows, verdict, scope, scoped }) => (
+const EffectGrid = ({ rows, verdict, scope, scoped, actions }) => {
+  // 2026-07-18: split the traded positions into explicit SELL / BUY lists so
+  // the panel says WHAT is sold and WHAT is bought — the before/after metric
+  // cards below are the RESULT of exactly these trades.  Falls back to the
+  // flat «Меняем позиции» chip when per-side actions aren't available.
+  const acts  = Array.isArray(actions) ? actions : [];
+  const sells = acts.filter(a => a.key === 'sell' || (a.side || '').toLowerCase().startsWith('прод'));
+  const buys  = acts.filter(a => a.key === 'buy'  || (a.side || '').toLowerCase().startsWith('куп'));
+  const fmtDw = (dw) => (dw != null && Math.abs(dw) >= 0.05) ? ` ${dw>0?'+':'−'}${Math.abs(dw).toFixed(1)}пп` : '';
+  const nameList = (arr) => arr.map(a => `${a.t}${fmtDw(a.dw)}`).join(', ');
+  return (
   <div className="glass-strong rounded-4xl p-7 shadow-card">
-    <div className="flex items-start justify-between gap-4 flex-wrap mb-5">
+    <div className="flex items-start justify-between gap-4 flex-wrap mb-4">
       <div>
         <h3 className="text-2xl font-semibold tracking-tight text-ink-900">Ожидаемый эффект на риск</h3>
         <p className="text-[12px] text-ink-500 font-mono mt-1">оценка «до / после» при исполнении Action Plan · горизонт 1 квартал</p>
       </div>
-      {/* R2#5: data-driven — какие ИМЕННО позиции меняет план (высокоприоритетные
-          строки Action Plan: Sell/Trim/Buy), т.е. по ним и считается «до/после». */}
-      {scoped && scope && scope.length > 0 && (
+      {scoped && scope && scope.length > 0 && acts.length === 0 && (
         <span className="text-[10px] font-mono text-gold-700 tracking-wider px-2.5 py-1 rounded-full bg-gold-400/15"
               title="Эти позиции меняет Action Plan — по ним и посчитан эффект «до/после»">
           Меняем позиции: {scope.join(' · ')}
         </span>
       )}
     </div>
+    {/* Explicit sell / buy breakdown — what the plan trades, per direction. */}
+    {acts.length > 0 && (
+      <div className="flex flex-col sm:flex-row gap-2.5 mb-5">
+        {sells.length > 0 && (
+          <div className="flex-1 rounded-2xl bg-rust-500/8 border border-rust-500/20 px-4 py-2.5">
+            <div className="text-[9.5px] uppercase tracking-wider text-rust-600 font-mono mb-1 flex items-center gap-1.5">
+              <Icons.ArrowR size={11} stroke={2.4} className="rotate-90"/> Продать / сократить
+            </div>
+            <div className="text-[12.5px] num text-ink-800 leading-snug">{nameList(sells)}</div>
+          </div>
+        )}
+        {buys.length > 0 && (
+          <div className="flex-1 rounded-2xl bg-sage-500/10 border border-sage-500/25 px-4 py-2.5">
+            <div className="text-[9.5px] uppercase tracking-wider text-sage-600 font-mono mb-1 flex items-center gap-1.5">
+              <Icons.ArrowR size={11} stroke={2.4} className="-rotate-90"/> Купить / нарастить
+            </div>
+            <div className="text-[12.5px] num text-ink-800 leading-snug">{nameList(buys)}</div>
+          </div>
+        )}
+      </div>
+    )}
     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
       {rows.map((r,i) => {
         const tone = { pos:'text-sage-600', neg:'text-rust-600', neut:'text-ink-500' }[r.tone];
@@ -180,7 +209,8 @@ const EffectGrid = ({ rows, verdict, scope, scoped }) => (
       <p className="text-[12.5px] text-ink-700 leading-relaxed font-light">{window.DEEP.effectAI}</p>
     </div>
   </div>
-);
+  );
+};
 
 const ideaTone = {
   grow:      { border:'#5d7c5c', chip:'bg-sage-500/15 text-sage-600', icon:Icons.TrendUp },
@@ -297,7 +327,7 @@ const Plan = () => {
 
       <div className="space-y-5">
         <ActionPlan rows={p.actionPlan}/>
-        <EffectGrid rows={p.effect} verdict={p.effectVerdict} scope={p.effectScope} scoped={p.effectScoped}/>
+        <EffectGrid rows={p.effect} verdict={p.effectVerdict} scope={p.effectScope} scoped={p.effectScoped} actions={p.effectActions}/>
 
         <div>
           <div className="rounded-4xl p-6 mb-5 relative overflow-hidden" style={{ background:'linear-gradient(120deg, #fbf3d9 0%, #f6ebc0 100%)' }}>

@@ -641,9 +641,14 @@ class MAC3RiskEngine:
     # MAC3RiskEngine._composite_risk_score keep working unchanged.
     @staticmethod
     def _composite_risk_score(volatility: float, cvar: float,
-                              max_erc_pct: float, mandate: str = "MODERATE") -> int:
+                              max_erc_pct: float, mandate: str = "MODERATE",
+                              *, max_drawdown: float | None = None,
+                              leverage_ratio: float | None = None,
+                              sector_top_pct: float | None = None) -> int:
         from finance.scoring import composite_risk_score as _crs
-        return _crs(volatility, cvar, max_erc_pct, mandate=mandate)
+        return _crs(volatility, cvar, max_erc_pct, mandate=mandate,
+                    max_drawdown=max_drawdown, leverage_ratio=leverage_ratio,
+                    sector_top_pct=sector_top_pct)
 
     def _get_tradernet_client(self) -> TradernetClient:
         """Lazy-init Tradernet client.  Reused across calls inside analyze_all."""
@@ -2076,6 +2081,52 @@ class UniversalPortfolioManager:
         # Sector exposure analysis
         sector_exposure = self.engine.get_sector_exposure(list(df.index), weights_dict)
 
+        # ── Composite-risk aggravators (2026-07-18) ────────────────────────────
+        # Re-score the composite gauge with the STRUCTURAL/TAIL signals the base
+        # three (vol/CVaR/single-name-ERC) miss — leverage, single-sector
+        # concentration and the realised max drawdown.  Live audit: a 73%-tech,
+        # margin-funded book with a −43.5% historical drawdown read «48 ·
+        # Умеренный».  The aggravators are bounded and can only RAISE the gauge;
+        # a clean, diversified, unlevered book is unchanged.  Computed HERE
+        # (sector_exposure + weights available) and passed to BOTH the verdict
+        # gauge and the effect simulator so «до/после» stays consistent.
+        _agg_lev_ratio = None
+        try:
+            _lw = sum(max(0.0, float(w)) for w in weights_dict.values())
+            _nw = sum(float(w) for w in weights_dict.values())
+            _agg_lev_ratio = round(_lw / _nw, 4) if _nw > 1e-9 else 1.0
+        except Exception:
+            _agg_lev_ratio = None
+        _agg_sector_top_pct = None
+        try:
+            _long_secs = [float(v) for v in (sector_exposure or {}).values()
+                          if float(v) > 0]
+            _ssum = sum(_long_secs)
+            if _ssum > 0:
+                _agg_sector_top_pct = round(max(_long_secs) / _ssum * 100.0, 2)
+        except Exception:
+            _agg_sector_top_pct = None
+        try:
+            _base_vol = float(port_metrics.get("Total_Volatility_Ann") or 0.0)
+            _base_cvar = float(port_metrics.get("CVaR_95_Daily") or 0.0)
+            _base_erc = float(port_metrics.get("Max_Euler_Risk_Pct") or 0.0)
+            _base_mdd = port_metrics.get("Max_Drawdown")
+            _mandate_str = str(getattr(self.engine, "risk_mandate", "MODERATE"))
+            port_metrics["Composite_Risk_Score"] = self.engine._composite_risk_score(
+                _base_vol, _base_cvar, _base_erc, _mandate_str,
+                max_drawdown=(float(_base_mdd) if _base_mdd is not None else None),
+                leverage_ratio=_agg_lev_ratio,
+                sector_top_pct=_agg_sector_top_pct)
+            # Surface the aggravators for the QC/AI layer (why the gauge is
+            # higher than the raw vol/CVaR would suggest).
+            port_metrics["composite_aggravators"] = {
+                "max_drawdown":   (float(_base_mdd) if _base_mdd is not None else None),
+                "leverage_ratio": _agg_lev_ratio,
+                "sector_top_pct": _agg_sector_top_pct,
+            }
+        except Exception as _exc:
+            logger.warning("composite aggravators skipped: %s", _exc)
+
         # ═══════════════ FACTOR SCORES GROUPING ═══════════════
         # Group A (Style Factors): MAC3-derived betas, alpha, volatility
         # Group B (Fundamental Factors): SEC EDGAR metrics
@@ -2368,6 +2419,11 @@ class UniversalPortfolioManager:
                 risk_free_rate    = self.engine.current_rfr_annual,
                 target_weights    = target_weights,
                 sector_by_ticker  = sector_map_for_sim,
+                # 2026-07-18: same mandate + leverage the verdict gauge uses so
+                # the effect «до/после» index mirrors the cover gauge (both now
+                # carry the structural/tail aggravators).
+                mandate           = str(getattr(self.engine, "risk_mandate", "MODERATE")),
+                leverage_ratio    = _agg_lev_ratio,
             )
             # Tag which tickers drove the panel so the UI can show the
             # before/after delta is scoped to the high-priority ideas.

@@ -200,6 +200,18 @@ def _map_deep(p: dict, meta: dict) -> dict:
     # «Δ по идеям» chip.  Empty list → the panel hides the chip.
     effect_scope = [str(t) for t in _list(ee, "high_priority_tickers") if str(t).strip()]
     effect_scoped = bool(_g(ee, "scoped_to_high_priority"))
+    # 2026-07-18: spell out WHAT the plan trades and in which DIRECTION so the
+    # Effect panel reads «Продать: ORCL, AAOI · Купить: …» instead of an opaque
+    # ticker chip — the before/after deltas above are the RESULT of exactly
+    # these trades.  Source: expected_effect.high_priority_actions (side already
+    # localised to Продать/Купить in pdf_payload).
+    effect_actions = [
+        {"t":    _txt(a, "ticker"),
+         "side": _txt(a, "side"),
+         "key":  _txt(a, "side_key"),
+         "dw":   _num(a, "delta_pp")}
+        for a in _list(ee, "high_priority_actions") if _g(a, "ticker")
+    ]
 
     # action plan — score + hotspot are NOT on the action_plan rows; they live in
     # score_breakdown (4-Pillar total) and assets (euler hotspot).  The mapper
@@ -363,6 +375,7 @@ def _map_deep(p: dict, meta: dict) -> dict:
         "stress": stress, "stressAI": _txt(p, "ai_stress_comment"),
         "effect": effect, "effectVerdict": _txt(ee, "verdict", "headline"), "effectAI": _txt(p, "ai_effect_comment"),
         "effectScope": effect_scope, "effectScoped": effect_scoped,
+        "effectActions": effect_actions,
         "actionPlan": plan, "actionAI": _txt(p, "ai_action_comment"),
         "ideas": ideas, "regime": regime, "cove": cove, "quality": quality or [DASH],
     }
@@ -784,7 +797,15 @@ def _map_performance(p: dict) -> dict:
         "exc":     _p12.get("d", round(_p12.get("p", 0.0) - _p12.get("s", 0.0), 1)),
         "volPort": _vol,
     }
-    return {"vol": {"port": _vol, "spx": 0}, "periods": periods, "summary": summary}
+    # B1-perf (2026-07-18): benchmark display name so the «Рост против рынка»
+    # card labels the curve with the mandate benchmark, not a hardcoded «S&P
+    # 500».  Prefer the explicit payload name; fall back to the first
+    # period_returns key (a real benchmark name); default «S&P 500».
+    bench_name = str(_g(p, "performance_benchmark_name")
+                     or (next(iter(prt), None) if isinstance(prt, dict) else None)
+                     or "S&P 500")
+    return {"vol": {"port": _vol, "spx": 0}, "periods": periods, "summary": summary,
+            "benchmarkName": bench_name}
 
 
 def _pipe_step(s: Any) -> str:

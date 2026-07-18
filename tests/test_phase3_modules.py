@@ -233,6 +233,44 @@ class ActionPlanBuilderTest(unittest.TestCase):
         executed = sum(abs(r.delta_w_pp) / 100.0 for r in rows if r.delta_w_pp != 0.0)
         self.assertLessEqual(executed, MAX_TRADE_BLOCK_PORTFOLIO_PCT + 1e-9)
 
+    def test_action_qty_reconciled_when_bl_contradicts(self) -> None:
+        """2026-07-18: SELL/TRIM with a POSITIVE BL Δw (and vice versa) must
+        NOT show a contradictory quantity — qty drops to None + reason note."""
+        from finance.action_plan import build_action_plan
+        perf = pd.DataFrame([
+            {"Ticker": "AAOI", "Current_Price": 100.0, "Quantity": 10, "ATR_Absolute": 3.0},
+            {"Ticker": "MSFT", "Current_Price": 400.0, "Quantity": 5,  "ATR_Absolute": 5.0},
+            {"Ticker": "ORCL", "Current_Price": 120.0, "Quantity": 8,  "ATR_Absolute": 4.0},
+        ])
+        scores = {
+            "AAOI": {"action": "Sell", "total": -2.5, "hotspot": False},
+            "MSFT": {"action": "Trim", "total": -1.4, "hotspot": False},
+            "ORCL": {"action": "Sell", "total": -5.2, "hotspot": True},
+        }
+        bl_records = [
+            # AAOI: Sell but BL wants +0.4pp → contradiction → qty None
+            {"ticker": "AAOI", "delta_w_pp": +0.4, "current_w": 0.10, "target_w": 0.104, "posterior_mu": 0.0},
+            # MSFT: Trim but BL wants +3.4pp → contradiction → qty None
+            {"ticker": "MSFT", "delta_w_pp": +3.4, "current_w": 0.20, "target_w": 0.234, "posterior_mu": 0.0},
+            # ORCL: Sell and BL agrees (−8.7pp) → qty kept (negative)
+            {"ticker": "ORCL", "delta_w_pp": -8.7, "current_w": 0.16, "target_w": 0.073, "posterior_mu": -0.05},
+        ]
+        rows = build_action_plan(
+            perf_table=perf, asset_scores=scores, technicals_map={},
+            bl_records=bl_records, portfolio_value=10_000.0,
+        )
+        by = {r.ticker: r for r in rows}
+        # Contradicting names: qty suppressed, divergence noted, Δw kept honest.
+        self.assertIsNone(by["AAOI"].qty_delta)
+        self.assertIn("BL расходится", by["AAOI"].reason)
+        self.assertEqual(by["AAOI"].delta_w_pp, 0.4)     # BL view preserved
+        self.assertIsNone(by["MSFT"].qty_delta)
+        self.assertIn("BL расходится", by["MSFT"].reason)
+        # Agreeing SELL keeps its (negative) quantity.
+        self.assertIsNotNone(by["ORCL"].qty_delta)
+        self.assertLess(by["ORCL"].qty_delta, 0)
+        self.assertNotIn("BL расходится", by["ORCL"].reason)
+
 
 if __name__ == "__main__":
     unittest.main()
