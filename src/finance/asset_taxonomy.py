@@ -120,9 +120,50 @@ def classify_display_from_freedom(*, ticker: str, t_field: Optional[int] = None,
         ticker=ticker, t_field=t_field, k_field=k_field, currency=currency))
 
 
+# ── Sector super-groups (SSOT for combined-sector concentration) ─────────────
+# The engine keeps Technology and Semiconductors as DISTINCT sectors (separate
+# SOXX factor), but the HEADLINE «tech concentration» must be ONE authoritative
+# number so the panel, the AI prose AND the composite-risk aggravator all quote
+# the same combined figure (the 59%-single vs 73%-complex mismatch otherwise
+# understates the true, CORRELATED concentration).  Kept here — dependency-light
+# and finance-level — so both pdf_payload (presentation) and investment_logic
+# (risk gauge) import the SAME map without a layering cycle.
+SECTOR_SUPERGROUPS: dict[str, tuple[str, ...]] = {
+    "Tech-комплекс (Technology+Semiconductors)": ("Technology", "Semiconductors"),
+}
+
+
+def top_sector_concentration_pct(sector_weights: dict) -> float:
+    """Largest concentration in the LONG book as a percent (0–100), taking the
+    MAX over single sectors AND super-groups (so a Technology+Semiconductors
+    book reads its true combined tech share, not just the biggest single
+    sector).  `sector_weights` is {sector: weight} on any basis; only positive
+    weights count and the result is share-of-long-book.  Returns 0.0 empty."""
+    longs = {str(s): float(w) for s, w in (sector_weights or {}).items()
+             if _is_pos(w)}
+    total = sum(longs.values())
+    if total <= 0 or not longs:
+        return 0.0
+    top = max(longs.values())
+    for members in SECTOR_SUPERGROUPS.values():
+        grp = sum(longs.get(m, 0.0) for m in members)
+        if grp > top:
+            top = grp
+    return round(top / total * 100.0, 2)
+
+
+def _is_pos(w) -> bool:
+    try:
+        return float(w) > 0
+    except (TypeError, ValueError):
+        return False
+
+
 __all__ = [
     "AssetClass",
     "from_freedom_metadata",
     "display_label",
     "classify_display_from_freedom",
+    "SECTOR_SUPERGROUPS",
+    "top_sector_concentration_pct",
 ]
