@@ -367,14 +367,29 @@ def normalize_risk_mandate(profile) -> str:
 
 
 def composite_risk_score(volatility: float, cvar: float,
-                         max_erc_pct: float, mandate: str = "MODERATE") -> int:
+                         max_erc_pct: float, mandate: str = "MODERATE",
+                         *,
+                         max_drawdown: float | None = None,
+                         leverage_ratio: float | None = None,
+                         sector_top_pct: float | None = None) -> int:
     """
     Blend three independent risk signals into a single 0..100 gauge,
     calibrated to the investor's risk mandate (see _RISK_MANDATE_MATRIX).
 
       • Vol     normalised by 0.40 (40% annual vol = 100)
       • |CVaR|  normalised by mandate cvar_base (0.03 / 0.065 / 0.08)
-      • maxERC  normalised by 50   (50% concentration = 100)
+      • maxERC  normalised by 50   (50% single-NAME concentration = 100)
+
+    2026-07-18 — bounded STRUCTURAL/TAIL aggravators (opt-in, keyword-only):
+    the base three signals miss risks a leveraged, single-sector book with a
+    deep historical drawdown obviously carries (live audit: 73%-tech, margin,
+    −43.5% MaxDD read «48 · Умеренный»).  When supplied, each aggravator adds a
+    BOUNDED, monotonic penalty that can only RAISE the gauge; each defaults to
+    None → contributes 0, so every existing caller/test is byte-identical:
+
+      • max_drawdown   (decimal, e.g. −0.435): |MaxDD| 20%→0 … 50%+→+15
+      • sector_top_pct (0–100, single-sector share): 50%→0 … 75%+→+10
+      • leverage_ratio (long/net, 1.0 = unlevered): 1.0→0 … 1.5+→+6
 
     Deterministic — identical inputs + mandate always produce the same
     score.  Unknown mandate falls back to MODERATE.
@@ -391,7 +406,22 @@ def composite_risk_score(volatility: float, cvar: float,
     s_vol  = _norm(_finite(volatility),       _VOL_BASE)
     s_cvar = _norm(abs(_finite(cvar)),        m["cvar_base"])
     s_conc = _norm(_finite(max_erc_pct),      _ERC_BASE)
-    return int(round(m["w_vol"] * s_vol + m["w_cvar"] * s_cvar + m["w_erc"] * s_conc))
+    base   = m["w_vol"] * s_vol + m["w_cvar"] * s_cvar + m["w_erc"] * s_conc
+
+    def _ramp(x: float, lo: float, hi: float, cap: float) -> float:
+        if hi <= lo:
+            return 0.0
+        return max(0.0, min(1.0, (x - lo) / (hi - lo))) * cap
+
+    aggr = 0.0
+    if max_drawdown is not None:
+        aggr += _ramp(abs(_finite(max_drawdown)), 0.20, 0.50, 15.0)
+    if sector_top_pct is not None:
+        aggr += _ramp(_finite(sector_top_pct), 50.0, 75.0, 10.0)
+    if leverage_ratio is not None:
+        aggr += _ramp(_finite(leverage_ratio), 1.0, 1.5, 6.0)
+
+    return int(round(min(100.0, base + aggr)))
 
 
 # ── Asset-class display label — SINGLE SOURCE OF TRUTH ───────────────────────
