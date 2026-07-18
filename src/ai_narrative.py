@@ -749,6 +749,29 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
     regime_label = regime.get("regime", "unknown")
     regime_ru    = _regime_ru(regime_label)   # Sprint-5.3: plain-Russian phrase
 
+    # 2026-07-18: при ОЧЕНЬ низкой уверенности классификатора режим статистически
+    # на грани шума (живой отчёт: «Expansion» при confidence 8%).  §6 системного
+    # промпта калибрует ТОН, но модель всё равно якорила идеи/тилты на режим.
+    # Здесь — жёсткое data-driven правило: ниже порога НЕ строить рекомендации на
+    # режиме, опираться на измеримое (риск, концентрация, мандат, бенчмарк).
+    # Фолбэк-нарратив ниже тоже гасит режим при низкой уверенности (симметрично).
+    try:
+        _conf_pct = int(regime.get("confidence_pct")) if regime.get("confidence_pct") is not None else None
+    except (TypeError, ValueError):
+        _conf_pct = None
+    _REGIME_CONF_FLOOR = 25   # ниже — режим не значим как основа рекомендаций
+    regime_confidence_rule = ""
+    if _conf_pct is not None and _conf_pct < _REGIME_CONF_FLOOR:
+        regime_confidence_rule = (
+            f"РЕЖИМ — СЛАБЫЙ СИГНАЛ (уверенность {_conf_pct}%): классификатор почти НЕ различает "
+            f"фазу цикла («{regime_label}» на грани шума). НЕ делай режим ОСНОВОЙ рекомендаций, "
+            "идей и секторных тилтов — он статистически не значим. Явно скажи, что макро-сигнал "
+            "слабый, и опирайся на ИЗМЕРИМОЕ: риск-метрики (CVaR/волатильность/просадка), "
+            "концентрацию, мандатные лимиты и бенчмарк. В ai_regime_comment начни с того, что "
+            f"сигнал режима слабый (увер. {_conf_pct}%) и на него НЕ опираемся; идеи выбирай по "
+            "качеству (4-Pillar), концентрации и мандату, НЕ по «благоприятным секторам режима».\n"
+        )
+
     # B1 (2026-07-17): бенчмарк клиента по ИМЕНИ — комментарии секций обязаны
     # сравнивать с ним, а не с абстрактным «рынком».
     _bench_prof  = summary.get("benchmark_profile") or {}
@@ -765,6 +788,14 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
                "Беты выбранного бенчмарка недоступны — факторное сравнение в "
                "отчёте приведено к S&P 500 как общей оси; скажи об этом, если "
                "комментируешь факторный перекос.\n")
+            + ("СЕКТОРНАЯ КОНЦЕНТРАЦИЯ в контексте бенчмарка: если бенчмарк сам "
+               "секторно-концентрирован (напр. Nasdaq 100 — техно-индекс), "
+               "часть перекоса портфеля в тот же сектор ОЖИДАЕМА и согласуется с "
+               "выбором клиента — отметь это. НО concentration-риск этим НЕ "
+               "отменяется: доля сектора ВЫШЕ, чем в самом бенчмарке (и «мягкий "
+               "лимит диверсификации» 40% — общая прудентная эвристика, не "
+               "мандат), — это по-прежнему уязвимость к секторному спаду; так и "
+               "формулируй, без ложного успокоения.\n")
         )
 
     # B1 (2026-07-17): мандатные лимиты клиента — идеи не должны противоречить
@@ -1107,6 +1138,7 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
             f"{currency_rule}"
             f"{benchmark_rule}"
             f"{mandate_rule}"
+            f"{regime_confidence_rule}"
             f"{contradiction_rule}"
             f"{signal_sync_rule}"
             f"{held_rule}"
@@ -1287,6 +1319,7 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
         f"{currency_rule}"
         f"{benchmark_rule}"
         f"{mandate_rule}"
+        f"{regime_confidence_rule}"
         f"{contradiction_rule}"
         f"{signal_sync_rule}"
         f"{held_rule}"
