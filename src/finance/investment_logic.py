@@ -2099,11 +2099,13 @@ class UniversalPortfolioManager:
             _agg_lev_ratio = None
         _agg_sector_top_pct = None
         try:
-            _long_secs = [float(v) for v in (sector_exposure or {}).values()
-                          if float(v) > 0]
-            _ssum = sum(_long_secs)
-            if _ssum > 0:
-                _agg_sector_top_pct = round(max(_long_secs) / _ssum * 100.0, 2)
+            # Use the SAME super-group concentration the report headlines
+            # («Tech-комплекс 73%»), not the biggest SINGLE sector (59%) — the
+            # correlated Technology+Semiconductors block is the real
+            # concentration the gauge must reflect (SSOT: asset_taxonomy).
+            from finance.asset_taxonomy import top_sector_concentration_pct
+            _top = top_sector_concentration_pct(sector_exposure or {})
+            _agg_sector_top_pct = _top if _top > 0 else None
         except Exception:
             _agg_sector_top_pct = None
         try:

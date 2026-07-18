@@ -219,10 +219,12 @@ def _it_share(tickers: list[str],
 def _top_sector_share(tickers: list[str],
                       weights: np.ndarray,
                       sector_by_ticker: Optional[dict[str, str]] = None) -> float:
-    """Largest single-sector share of the LONG book (0..1) — the concentration
-    signal the composite-risk aggravator consumes (2026-07-18).  Uses the
-    explicit sector map; names without a sector are bucketed as «прочее» so a
-    missing label never inflates the top sector.  Returns 0.0 when empty."""
+    """Largest concentration in the LONG book (0..1) — the signal the
+    composite-risk aggravator consumes (2026-07-18).  Takes the MAX over single
+    sectors AND super-groups (Technology+Semiconductors), matching the verdict
+    gauge's `asset_taxonomy.top_sector_concentration_pct`, so effect «до/после»
+    tracks the cover gauge.  Names without a sector bucket as «прочее» so a
+    missing label never inflates the top.  Returns 0.0 when empty."""
     sector_by_ticker = sector_by_ticker or {}
     by_sec: dict[str, float] = {}
     long_sum = 0.0
@@ -230,12 +232,21 @@ def _top_sector_share(tickers: list[str],
         wf = float(w)
         if wf <= 0:
             continue
-        sec = (sector_by_ticker.get(t) or "прочее").strip().lower() or "прочее"
+        sec = (sector_by_ticker.get(t) or "прочее").strip() or "прочее"
         by_sec[sec] = by_sec.get(sec, 0.0) + wf
         long_sum += wf
     if long_sum <= 0 or not by_sec:
         return 0.0
-    return float(max(by_sec.values()) / long_sum)
+    # Same SSOT super-group grouping the verdict gauge uses (case-insensitive
+    # member match so «technology» from Fundamental_Sector still groups).
+    from finance.asset_taxonomy import SECTOR_SUPERGROUPS
+    _lower = {k.lower(): v for k, v in by_sec.items()}
+    top = max(by_sec.values())
+    for members in SECTOR_SUPERGROUPS.values():
+        grp = sum(_lower.get(m.lower(), 0.0) for m in members)
+        if grp > top:
+            top = grp
+    return float(top / long_sum)
 
 
 # ── BLOCK 2.3: high-priority target weights (Идеи → Action Plan → Эффект) ─────
@@ -282,15 +293,35 @@ def high_priority_target_weights(
                 continue
             dpp = float(r.get("delta_w_pp") or 0.0)
             cur = float(base.get(t, 0.0))
-            target[t] = cur + dpp / 100.0
+            # 2026-07-18: DIRECTION comes from the 4-Pillar ACTION (the report's
+            # declared directional SSOT), NOT the Black-Litterman Δw sign.  The
+            # two engines can disagree — BL may want +Δw on a Sell/Trim-rated
+            # name (its diversification value offsets weak fundamentals).  The
+            # old code took side=sign(Δw), so a TRIM/SELL name with +Δw was
+            # shown (and SIMULATED) as a BUY — contradicting the Action Plan
+            # chip AND the AI comment («продать AAOI» while the panel bought it).
+            # We keep the OPTIMISER'S MAGNITUDE |Δw| but force the ACTION'S sign,
+            # so the effect simulates executing the plan the report actually
+            # recommends and the buy/sell breakdown matches the Action Plan.
+            _act = str(r.get("action") or "")
+            _is_sell = _act in ("Sell", "Trim")
+            _is_buy  = _act in ("Buy", "Strong Buy")
+            _mag = abs(dpp)
+            if _is_sell:
+                signed = -_mag
+            elif _is_buy:
+                signed = _mag
+            else:                        # unknown action → fall back to BL sign
+                signed = dpp
+            target[t] = cur + signed / 100.0
             hp_tickers.append(str(t)); acted.add(str(t))
-            if dpp < 0:
-                sell_proceeds += -dpp / 100.0
+            if signed < 0:
+                sell_proceeds += -signed / 100.0
             actions.append({
                 "ticker":   str(t),
-                "action":   str(r.get("action") or ""),
-                "side":     "buy" if dpp > 0 else "sell",
-                "delta_pp": round(dpp, 2),
+                "action":   _act,
+                "side":     "sell" if signed < 0 else "buy",
+                "delta_pp": round(signed, 2),
             })
 
         # User #1 (06-25) — make the idea a COMPLETE rebalance: show what we BUY,

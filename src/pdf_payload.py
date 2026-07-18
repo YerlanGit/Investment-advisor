@@ -1579,9 +1579,10 @@ SECTOR_CAP_PCT      = 40.0           # warn when single sector > this share of p
 # This map is imported by ai_narrative so the AI prose and the structured
 # panel quote the exact same combined figure.  Keep it here as the canonical
 # presentation grouping.
-SECTOR_SUPERGROUPS: dict[str, tuple[str, ...]] = {
-    "Tech-комплекс (Technology+Semiconductors)": ("Technology", "Semiconductors"),
-}
+# SSOT moved to finance.asset_taxonomy (2026-07-18) so the composite-risk
+# aggravator in investment_logic quotes the SAME combined-tech figure without
+# a layering cycle.  Re-exported here under the historical name.
+from finance.asset_taxonomy import SECTOR_SUPERGROUPS  # noqa: E402,F401
 
 
 def build_sector_groups(weight_pairs: list[tuple[str, float]]) -> list[dict]:
