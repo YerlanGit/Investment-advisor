@@ -2389,8 +2389,16 @@ class UniversalPortfolioManager:
             # and Hold rows leave their weight unchanged; falls back to the BL
             # target when there are no actionable rows.
             from finance.simulate import high_priority_target_weights
+            sector_map_for_sim = {t: self.engine.get_ticker_sector(t)
+                                   for t in df.index}
+            # 2026-07-18: pass the sector map so the reinvest de-CONCENTRATES —
+            # freed weight from selling the over-weight tech must NOT be poured
+            # back into more tech (the old reinvest bought the highest-BL held
+            # names, which ARE the concentrated mega-caps → IT share and risk
+            # went UP, contradicting the mandate).  Diversifiers first, else cash.
             target_weights, hp_tickers, hp_actions = high_priority_target_weights(
-                weights_dict, action_plan_rows, bl_records)
+                weights_dict, action_plan_rows, bl_records,
+                sector_by_ticker=sector_map_for_sim)
 
             # Build daily log-returns matrix for assets the cov matrix knows
             # about.  Reuses all_data (already loaded) so no extra fetch.
@@ -2408,9 +2416,6 @@ class UniversalPortfolioManager:
                                    if res in avail_cols}
                         log_df = log_df.rename(columns=col_map)
                         sim_daily_log = log_df
-
-            sector_map_for_sim = {t: self.engine.get_ticker_sector(t)
-                                   for t in df.index}
 
             expected_effect = _simulate_after_plan(
                 perf_df           = df.reset_index(),
