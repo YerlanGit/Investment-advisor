@@ -781,14 +781,35 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
             if _lo == 0 and _hi == 0:
                 _banned.append(str(_k))
         _pname = _safe_text(user_mandate.get("profile_name"), 40)
+        try:
+            from profile_manager import ASSET_DISPLAY as _AD
+        except Exception:                              # pragma: no cover
+            _AD = {}
         _lines = []
         if _pname:
-            _lines.append(f"- Риск-профиль мандата: {_pname}.\n")
-        if _banned:
+            _tv = user_mandate.get("target_volatility")
+            _tvs = (f" · целевая волатильность ≈{float(_tv) * 100:.0f}%"
+                    if isinstance(_tv, (int, float)) else "")
+            _lines.append(f"- Риск-профиль мандата: {_pname}{_tvs}.\n")
+        # Class limits (skip 0–0 banned; they get their own harder rule) so the
+        # AI can NAME an over-limit class as a mandate breach and steer the plan
+        # back inside the bands — «Акции США 84% превышает лимит 30–60%».
+        _limit_bits = []
+        for _k, _b in _limits.items():
             try:
-                from profile_manager import ASSET_DISPLAY as _AD
-            except Exception:                          # pragma: no cover
-                _AD = {}
+                _lo, _hi = float(_b[0]), float(_b[1])
+            except (TypeError, ValueError, IndexError):
+                continue
+            if _lo == 0 and _hi == 0:
+                continue
+            _limit_bits.append(f"{_AD.get(_k, _k)} {int(_lo)}–{int(_hi)}%")
+        if _limit_bits:
+            _lines.append(
+                "- Лимиты классов активов мандата: " + ", ".join(_limit_bits) +
+                ". Если фактическая доля класса ВЫШЕ верхней границы — это "
+                "нарушение мандата: назови его в нарративе и в Action Plan веди "
+                "долю ОБРАТНО в лимит.\n")
+        if _banned:
             _names = ", ".join(_AD.get(k, k) for k in _banned)
             _lines.append(
                 f"- ЗАПРЕЩЁННЫЕ классы активов (лимит мандата 0–0%): {_names}. "
@@ -1013,7 +1034,12 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
             "  Риск (CVaR/Vol) объясняется → конкретными позициями (holdings) →\n"
             "  которые создают → секторную концентрацию → которая даёт → факторный перекос →\n"
             "  который противоречит/поддерживает → текущий режим рынка →\n"
-            "  что подтверждается/опровергается → аналитикой инвестбанков → итог: Action Plan.\n\n"
+            "  что подтверждается/опровергается → аналитикой инвестбанков → итог: Action Plan.\n"
+            f"  СКВОЗЬ ВСЮ ЦЕПОЧКУ держи в поле зрения БЕНЧМАРК ({bench_label}) и МАНДАТ клиента: "
+            "факторный перекос считай ОТНОСИТЕЛЬНО бенчмарка (не абстрактного «рынка»); "
+            "секторную/классовую концентрацию сверяй с ЛИМИТАМИ мандата (нарушение лимита — "
+            "это риск, а не нейтральный факт); Action Plan и идеи ОБЯЗАНЫ возвращать портфель "
+            "В рамки мандата (к целевой волатильности/лимитам классов), а не просто снижать риск абстрактно.\n\n"
             '{\n'
             '  "verdict": "ОДНО короткое предложение ≤110 знаков — главный риск простыми словами + что делать. БЕЗ терминов, аббревиатур и нагромождения чисел",\n'
             '  "plain_summary": "МАКСИМУМ 2 коротких предложения ≤170 знаков — что не так и что делать, простым языком. Без перечисления метрик",\n'
@@ -1129,6 +1155,13 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
         "  Риск (CVaR/Vol) → Состав портфеля (hotspots, TRC) → Секторы (перекосы) →\n"
         "  Факторы (β-концентрации) → Режим (Recovery/Stagflation/...) →\n"
         "  Банки (Goldman/Barclays/JPM) → 4-Pillar (F+V+T+C) → Action Plan.\n"
+        f"  СКВОЗНАЯ ОСЬ ЦЕПОЧКИ — БЕНЧМАРК ({bench_label}) и МАНДАТ клиента: (1) факторы и «наклон Δ» "
+        "трактуй как активный перекос ОТНОСИТЕЛЬНО этого бенчмарка (summary.benchmark_profile), не "
+        "«рынка вообще»; (2) секторную/классовую концентрацию всегда сверяй с ЛИМИТАМИ мандата — "
+        "превышение лимита класса это НАРУШЕНИЕ мандата и самостоятельный риск; (3) режим и идеи "
+        "оценивай через призму мандатного риск-профиля (консерватору — хвост, агрессивному — рост); "
+        "(4) Action Plan/ai_action_comment ОБЯЗАН вести портфель В рамки мандата (целевая vol, лимиты "
+        "классов), а не просто «снизить риск» — назови, какой лимит/цель восстанавливается.\n"
         "Каждый комментарий должен явно указывать, откуда взяты данные И как это связано с соседними разделами.\n\n"
         '{\n'
         '  "verdict": "ОДНО короткое предложение ≤130 знаков — главный риск простыми словами + что делать. БЕЗ нагромождения терминов и чисел",\n'
