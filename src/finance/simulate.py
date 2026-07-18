@@ -255,6 +255,7 @@ def high_priority_target_weights(
         current_weights: dict[str, float],
         action_plan_rows: Optional[list[dict]],
         bl_records:       Optional[list[dict]] = None,
+        sector_by_ticker: Optional[dict[str, str]] = None,
 ) -> tuple[dict[str, float], list[str], list[dict]]:
     """
     Build the weight vector the Expected-Effect panel should simulate so the
@@ -324,22 +325,57 @@ def high_priority_target_weights(
                 "delta_pp": round(signed, 2),
             })
 
-        # User #1 (06-25) — make the idea a COMPLETE rebalance: show what we BUY,
-        # not just what we sell.  The turnover cap fills the budget with high-
-        # priority SELLS first, deferring buys to cash → a sells-only idea that
-        # (a) doesn't show a buy side and (b) concentrates the relative risk on
-        # the surviving names.  When the idea is sells-only, REINVEST the freed
-        # weight into the highest-conviction Black-Litterman BUY targets that are
-        # already HELD (so they sit in the covariance matrix and the simulated
-        # metrics genuinely reflect the buy).  Proportional to BL conviction,
-        # so "sell overvalued tech → buy the undervalued name" reads as one idea
-        # and concentration actually drops.
+        # Make the idea a COMPLETE rebalance: show what we BUY, not just sell.
+        # The turnover cap fills the budget with SELLS first → a sells-only idea
+        # leaves freed weight to reinvest.  2026-07-18 FIX: the old reinvest
+        # poured that weight into the highest-BL HELD names — which, for a
+        # sector-concentrated book, ARE the over-weight mega-caps (GOOGL/NVDA/
+        # META) → IT-share and risk went UP, contradicting the mandate («привести
+        # портфель к риск-профилю»).  Now the reinvest DE-concentrates: it buys
+        # ONLY held BL-conviction names OUTSIDE the over-concentrated top sector
+        # (genuine diversifiers), and whatever can't be reinvested that way STAYS
+        # AS CASH (honest de-risking — lower gross exposure, lower concentration).
+        # Buying more of the crowded sector to «show a buy side» is misleading.
         have_buy = any(a["side"] == "buy" for a in actions)
         if sell_proceeds > 1e-6 and not have_buy and bl_records:
+            # Identify the over-concentrated top sector of the CURRENT book so we
+            # never reinvest back into it (incl. the correlated tech super-group).
+            # ONLY engaged when we HAVE real sector data AND the top sector is
+            # genuinely over-concentrated (> the diversification cap); otherwise
+            # `_blocked` stays empty and the reinvest keeps its legacy behaviour
+            # (no sector data ⇒ can't tell what to de-concentrate).
+            _sbt = {str(k): str(v) for k, v in (sector_by_ticker or {}).items()
+                    if str(v).strip() and str(v).strip().lower() not in ("none", "nan", "прочее")}
+            _CONC_FLOOR = 0.40           # only de-concentrate a book past this top-sector share
+            _blocked: set[str] = set()
+            def _sec_of(tk: str) -> str:
+                return _sbt.get(str(tk), "").lower()
+            if _sbt:
+                _by_sec: dict[str, float] = {}
+                _long = 0.0
+                for _t, _w in base.items():
+                    if _w > 0 and _sec_of(_t):
+                        _by_sec[_sec_of(_t)] = _by_sec.get(_sec_of(_t), 0.0) + _w
+                        _long += _w
+                try:
+                    from finance.asset_taxonomy import SECTOR_SUPERGROUPS
+                    _grp_members = {m.lower() for ms in SECTOR_SUPERGROUPS.values() for m in ms}
+                except Exception:
+                    _grp_members = set()
+                # Combine super-group peers into one bucket to find the TRUE top.
+                _grp_share = sum(_by_sec.get(m, 0.0) for m in _grp_members)
+                _top_sec = max(_by_sec, key=_by_sec.get) if _by_sec else None
+                _top_share = max((_by_sec.get(_top_sec, 0.0)), _grp_share)
+                if _long > 0 and _top_sec and (_top_share / _long) > _CONC_FLOOR:
+                    _blocked.add(_top_sec)
+                    if _top_sec in _grp_members or _grp_share / _long > _CONC_FLOOR:
+                        _blocked |= _grp_members
+
             buys = [r for r in bl_records
                     if float(r.get("delta_w_pp") or 0.0) > 0.0
                     and str(r.get("ticker")) not in acted
-                    and str(r.get("ticker")) in base]        # held ⇒ in cov ⇒ simulated
+                    and str(r.get("ticker")) in base          # held ⇒ in cov ⇒ simulated
+                    and _sec_of(r.get("ticker")) not in _blocked]   # DIVERSIFIERS only
             buys.sort(key=lambda r: float(r.get("delta_w_pp") or 0.0), reverse=True)
             buys = buys[:3]
             conv = sum(float(b.get("delta_w_pp") or 0.0) for b in buys)
@@ -362,8 +398,20 @@ def high_priority_target_weights(
                     "side":     "buy",
                     "delta_pp": round(add * 100.0, 2),
                 })
-            # Any un-reinvested remainder stays as cash (de-risking) — honest:
-            # the panel shows it implicitly via the lower after-vol.
+            # Whatever can't be reinvested into a diversifier stays as CASH — the
+            # honest, mandate-consistent outcome for an over-concentrated book:
+            # the panel shows it via lower after-vol / lower IT-share / lower
+            # concentration (freed weight simply leaves the risky book).  We
+            # surface it as an explicit «cash» pseudo-move so the buy side isn't
+            # empty and the reader sees the de-risking is intentional.
+            if remaining > 1e-4:
+                actions.append({
+                    "ticker":   "Кэш",
+                    "action":   "Cash",
+                    "side":     "buy",
+                    "delta_pp": round(remaining * 100.0, 2),
+                    "is_cash":  True,
+                })
 
         # Largest moves first so the panel leads with the most impactful idea.
         actions.sort(key=lambda a: abs(a["delta_pp"]), reverse=True)
@@ -582,6 +630,35 @@ def simulate_after_plan(*,
             er_before = _realised_expected_return(dl_matrix, w_b_aligned)
             er_after  = _realised_expected_return(dl_matrix, w_a_aligned)
 
+    # ── Sharpe — FORWARD (ex-ante), not historical replay (2026-07-18) ──────
+    # The sample-replay Sharpe rewards the «after» weights for having HELD past
+    # winners / dropped past losers (look-ahead): the live report showed Sharpe
+    # 0.69→1.89 while risk ROSE — mathematically inconsistent.  Compute the
+    # Sharpe delta from the SAME forward inputs the panel already shows — BL
+    # expected return (er_before/er_after) over structural vol (vol_before/
+    # after) — and anchor it to the headline realised Sharpe so the DISPLAY base
+    # matches the KPI strip while the DELTA is a genuine ex-ante change.  Falls
+    # back to the (anchored) sample Sharpe only when er is unavailable.
+    def _fwd_sharpe(er, vol):
+        if er is None or vol is None or vol <= 1e-9:
+            return None
+        return (float(er) - float(risk_free_rate)) / float(vol)
+    _fs_b = _fwd_sharpe(er_before, vol_before)
+    _fs_a = _fwd_sharpe(er_after,  vol_after)
+    _headline_sharpe = current_metrics.get("Sharpe_Ratio")
+    if _fs_b is not None and _fs_a is not None and _headline_sharpe is not None \
+            and not (isinstance(_headline_sharpe, float) and math.isnan(_headline_sharpe)):
+        sharpe_before_disp = float(_headline_sharpe)
+        # Bound the ex-ante delta so BL-μ noise can't fabricate an implausible
+        # swing; a rebalance rarely moves a realised Sharpe by more than ~0.6.
+        _d = max(-0.6, min(0.6, _fs_a - _fs_b))
+        sharpe_after_disp = sharpe_before_disp + _d
+    else:
+        sharpe_before_disp = (None if math.isnan(sample_before["sharpe"])
+                              else sample_before["sharpe"])
+        sharpe_after_disp = (None if math.isnan(sample_after["sharpe"])
+                             else sample_after["sharpe"])
+
     # ── IT share ───────────────────────────────────────────────────────────
     it_before = _it_share(struct_tickers, w_before, sector_by_ticker)
     it_after  = _it_share(struct_tickers, w_after,  sector_by_ticker)
@@ -595,10 +672,8 @@ def simulate_after_plan(*,
                                 None if math.isnan(cvar_a) else cvar_a,
                                 "cvar_95_magnitude",       # lower |cvar| is better
                                 as_pp=True),
-        "sharpe":          _delta_row(
-                                None if math.isnan(sample_before["sharpe"]) else sample_before["sharpe"],
-                                None if math.isnan(sample_after["sharpe"])  else sample_after["sharpe"],
-                                "sharpe"),
+        "sharpe":          _delta_row(sharpe_before_disp, sharpe_after_disp,
+                                       "sharpe"),
         "max_drawdown":    _delta_row(
                                 None if math.isnan(sample_before["max_drawdown"]) else sample_before["max_drawdown"],
                                 None if math.isnan(sample_after["max_drawdown"])  else sample_after["max_drawdown"],

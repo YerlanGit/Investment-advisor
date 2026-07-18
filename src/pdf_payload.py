@@ -606,14 +606,25 @@ def _build_expected_effect(raw: Optional[dict]) -> dict:
     _SIDE_RU = {"sell": "Продать", "buy": "Купить"}
     acts = (raw or {}).get("high_priority_actions") or []
     if acts:   # only add the key when there's an idea to show (keeps {} for empty input)
-        out["high_priority_actions"] = [
-            {"ticker":   str(a.get("ticker", "")),
-             "side":     _SIDE_RU.get(str(a.get("side")), str(a.get("side") or "")),
-             "side_key": str(a.get("side") or ""),
-             "delta_pp": a.get("delta_pp"),
-             "action":   str(a.get("action", ""))}
-            for a in acts if isinstance(a, dict)
-        ]
+        _mapped = []
+        for a in acts:
+            if not isinstance(a, dict):
+                continue
+            _key = str(a.get("side") or "")
+            # 2026-07-18: freed weight parked as CASH (de-risking an
+            # over-concentrated book) — label it «В кэш», keep it on the buy
+            # side so it renders as the destination of the freed weight.
+            _side_ru = ("В кэш" if a.get("is_cash")
+                        else _SIDE_RU.get(_key, _key))
+            _mapped.append({
+                "ticker":   str(a.get("ticker", "")),
+                "side":     _side_ru,
+                "side_key": _key,
+                "delta_pp": a.get("delta_pp"),
+                "action":   str(a.get("action", "")),
+                "is_cash":  bool(a.get("is_cash")),
+            })
+        out["high_priority_actions"] = _mapped
     return out
 
 

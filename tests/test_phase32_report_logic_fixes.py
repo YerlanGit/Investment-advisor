@@ -161,6 +161,106 @@ class EffectSideFromActionTest(unittest.TestCase):
         self.assertGreater(by["GOOGL"]["delta_pp"], 0)
 
 
+class ReinvestDeconcentrationTest(unittest.TestCase):
+    """2026-07-18: freed weight from selling the over-weight tech must NOT be
+    poured back into more tech (old reinvest pushed IT-share and risk UP,
+    contradicting «привести портфель к мандату»).  De-concentrate: buy held
+    diversifiers OUTSIDE the top sector, else park as cash."""
+
+    def _book(self):
+        cur = {"ORCL": 0.16, "MSFT": 0.20, "AAOI": 0.12, "NVDA": 0.15,
+               "GOOGL": 0.08, "META": 0.06, "AAPL": 0.11, "GLD": 0.06,
+               "SLV": 0.05, "MRK": 0.01}
+        sector = {"ORCL": "Technology", "MSFT": "Technology", "AAOI": "Technology",
+                  "NVDA": "Semiconductors", "GOOGL": "Technology", "META": "Technology",
+                  "AAPL": "Technology", "GLD": "Commodities", "SLV": "Commodities",
+                  "MRK": "Health Care"}
+        rows = [{"ticker": "ORCL", "action": "Sell", "delta_w_pp": -8.65},
+                {"ticker": "AAPL", "action": "Trim", "delta_w_pp": -1.95}]
+        bl = [{"ticker": "GOOGL", "action": "Buy", "delta_w_pp": 7.65},
+              {"ticker": "NVDA",  "action": "Buy", "delta_w_pp": 7.62},
+              {"ticker": "MRK",   "action": "Buy", "delta_w_pp": 2.0}]
+        return cur, sector, rows, bl
+
+    def _it(self, w, sector):
+        return sum(v for t, v in w.items()
+                   if sector.get(t) in ("Technology", "Semiconductors"))
+
+    def test_reinvest_avoids_top_sector_when_over_concentrated(self):
+        from finance.simulate import high_priority_target_weights
+        cur, sector, rows, bl = self._book()
+        target, _tk, actions = high_priority_target_weights(
+            cur, rows, bl, sector_by_ticker=sector)
+        buys = {a["ticker"] for a in actions if a["side"] == "buy"}
+        # No tech / semiconductor reinvest — only diversifier (MRK) and/or cash.
+        self.assertFalse({"GOOGL", "NVDA", "META"} & buys)
+        # IT share must DROP toward the mandate, not rise.
+        self.assertLess(self._it(target, sector), self._it(cur, sector))
+
+    def test_cash_pseudo_move_when_no_diversifier(self):
+        from finance.simulate import high_priority_target_weights
+        # All held names are tech → nothing to reinvest into → freed weight cash.
+        cur = {"ORCL": 0.3, "MSFT": 0.3, "NVDA": 0.4}
+        sector = {"ORCL": "Technology", "MSFT": "Technology", "NVDA": "Semiconductors"}
+        rows = [{"ticker": "ORCL", "action": "Sell", "delta_w_pp": -8.0}]
+        bl = [{"ticker": "MSFT", "action": "Buy", "delta_w_pp": 5.0}]  # tech → blocked
+        _t, _tk, actions = high_priority_target_weights(
+            cur, rows, bl, sector_by_ticker=sector)
+        cash = [a for a in actions if a.get("is_cash")]
+        self.assertTrue(cash, "freed weight should park as cash, not buy tech")
+        self.assertNotIn("MSFT", {a["ticker"] for a in actions if a["side"] == "buy"
+                                  and not a.get("is_cash")})
+
+    def test_no_sector_data_keeps_legacy_reinvest(self):
+        """Without sector data we can't de-concentrate → legacy behaviour."""
+        from finance.simulate import high_priority_target_weights
+        cur = {"ORCL": 0.2, "NVDA": 0.2}
+        rows = [{"ticker": "ORCL", "action": "Sell", "delta_w_pp": -6.0}]
+        bl = [{"ticker": "NVDA", "action": "Buy", "delta_w_pp": 5.0}]
+        _t, _tk, actions = high_priority_target_weights(cur, rows, bl)  # no sector map
+        self.assertIn("NVDA", {a["ticker"] for a in actions if a["side"] == "buy"})
+
+
+class ForwardSharpeTest(unittest.TestCase):
+    """2026-07-18: the Effect Sharpe is FORWARD (er/vol), not historical replay,
+    so it can't triple while risk rises (look-ahead)."""
+
+    def _sim(self, target_weights, er_map, headline_sharpe=0.69):
+        import numpy as np
+        import pandas as pd
+        from finance.simulate import simulate_after_plan
+        tickers = ["A", "B", "C"]
+        idx = pd.date_range("2024-01-01", periods=300, freq="B")
+        rng = np.random.default_rng(3)
+        rets = pd.DataFrame({t: rng.normal(0.0004, 0.012, 300) for t in tickers}, index=idx)
+        cov = (rets.cov() * 252)
+        perf = pd.DataFrame({"Ticker": tickers, "Current_Value": [500, 300, 200],
+                             "Fundamental_Sector": ["Technology", "Health Care", "Energy"]})
+        bl = [{"ticker": t, "delta_w_pp": 0.0, "posterior_mu": er_map[t],
+               "n_views": 1, "current_w": w, "target_w": w}
+              for t, w in [("A", 0.5), ("B", 0.3), ("C", 0.2)]]
+        return simulate_after_plan(
+            perf_df=perf, risk_matrix=cov, daily_log_returns=rets, bl_records=bl,
+            current_metrics={"Sharpe_Ratio": headline_sharpe, "CVaR_95_Daily": -0.03,
+                             "Max_Drawdown": -0.2},
+            risk_free_rate=0.045, target_weights=target_weights,
+            sector_by_ticker={"A": "Technology", "B": "Health Care", "C": "Energy"})
+
+    def test_sharpe_delta_is_bounded_and_anchored(self):
+        # Even with a wildly optimistic BL μ on the target, the displayed Sharpe
+        # must stay anchored to the headline and the delta bounded (no ×3 jump).
+        res = self._sim({"A": 0.2, "B": 0.5, "C": 0.3},
+                        er_map={"A": 0.05, "B": 0.9, "C": 0.06})
+        self.assertIsNotNone(res)
+        sh = res["metrics"]["sharpe"]
+        self.assertAlmostEqual(sh["before"], 0.69, delta=0.01)   # anchored to headline
+        self.assertLessEqual(abs(sh["after"] - sh["before"]), 0.6 + 1e-6)  # bounded delta
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
 class EngineAggravatorWiringTest(unittest.TestCase):
     """MAC3RiskEngine._composite_risk_score forwards the aggravators."""
 
@@ -246,21 +346,23 @@ class RegimeConfidenceSofteningTest(unittest.TestCase):
 
     def test_low_confidence_injects_softening_rule(self):
         p = self._prompt(8)
-        self.assertIn("СЛАБЫЙ СИГНАЛ", p)
+        self.assertIn("СЛАБЫЙ АГРЕГАТНЫЙ ЯРЛЫК", p)
         self.assertIn("8%", p)
-        self.assertIn("НЕ делай режим ОСНОВОЙ", p)
+        # Honest, confident read of the ACTUAL signals — not «ignore the regime».
+        self.assertIn("читай их УВЕРЕННО", p)
+        self.assertIn("НЕ в самих сигналах", p)
 
     def test_high_confidence_no_softening_rule(self):
         p = self._prompt(74)
-        self.assertNotIn("СЛАБЫЙ СИГНАЛ", p)
+        self.assertNotIn("СЛАБЫЙ АГРЕГАТНЫЙ ЯРЛЫК", p)
 
     def test_threshold_boundary(self):
-        self.assertNotIn("СЛАБЫЙ СИГНАЛ", self._prompt(25))   # 25 = floor, not < 25
-        self.assertIn("СЛАБЫЙ СИГНАЛ", self._prompt(24))
+        self.assertNotIn("СЛАБЫЙ АГРЕГАТНЫЙ ЯРЛЫК", self._prompt(25))   # 25 = floor, not < 25
+        self.assertIn("СЛАБЫЙ АГРЕГАТНЫЙ ЯРЛЫК", self._prompt(24))
         # Missing confidence → no crash, no rule.
         from ai_narrative import _user_prompt
         p = _user_prompt({"regime": {"regime": "Expansion"}}, tier="deep")
-        self.assertNotIn("СЛАБЫЙ СИГНАЛ", p)
+        self.assertNotIn("СЛАБЫЙ АГРЕГАТНЫЙ ЯРЛЫК", p)
 
 
 if __name__ == "__main__":
