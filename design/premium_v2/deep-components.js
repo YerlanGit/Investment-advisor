@@ -2594,63 +2594,97 @@ const EffectGrid = ({
   rows,
   verdict,
   scope,
-  scoped
-}) => /*#__PURE__*/React.createElement("div", {
-  className: "glass-strong rounded-4xl p-7 shadow-card"
-}, /*#__PURE__*/React.createElement("div", {
-  className: "flex items-start justify-between gap-4 flex-wrap mb-5"
-}, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h3", {
-  className: "text-2xl font-semibold tracking-tight text-ink-900"
-}, "Ожидаемый эффект на риск"), /*#__PURE__*/React.createElement("p", {
-  className: "text-[12px] text-ink-500 font-mono mt-1"
-}, "оценка «до / после» при исполнении Action Plan · горизонт 1 квартал")), scoped && scope && scope.length > 0 && /*#__PURE__*/React.createElement("span", {
-  className: "text-[10px] font-mono text-gold-700 tracking-wider px-2.5 py-1 rounded-full bg-gold-400/15",
-  title: "Эти позиции меняет Action Plan — по ним и посчитан эффект «до/после»"
-}, "Меняем позиции: ", scope.join(' · '))), /*#__PURE__*/React.createElement("div", {
-  className: "grid grid-cols-2 md:grid-cols-4 gap-3"
-}, rows.map((r, i) => {
-  const tone = {
-    pos: 'text-sage-600',
-    neg: 'text-rust-600',
-    neut: 'text-ink-500'
-  }[r.tone];
+  scoped,
+  actions
+}) => {
+  // 2026-07-18: split the traded positions into explicit SELL / BUY lists so
+  // the panel says WHAT is sold and WHAT is bought — the before/after metric
+  // cards below are the RESULT of exactly these trades.  Falls back to the
+  // flat «Меняем позиции» chip when per-side actions aren't available.
+  const acts = Array.isArray(actions) ? actions : [];
+  const sells = acts.filter(a => a.key === 'sell' || (a.side || '').toLowerCase().startsWith('прод'));
+  const buys = acts.filter(a => a.key === 'buy' || (a.side || '').toLowerCase().startsWith('куп'));
+  const fmtDw = dw => dw != null && Math.abs(dw) >= 0.05 ? ` ${dw > 0 ? '+' : '−'}${Math.abs(dw).toFixed(1)}пп` : '';
+  const nameList = arr => arr.map(a => `${a.t}${fmtDw(a.dw)}`).join(', ');
   return /*#__PURE__*/React.createElement("div", {
-    key: i,
-    className: "rounded-2xl bg-white/70 border border-ink-900/6 px-4 py-3.5"
+    className: "glass-strong rounded-4xl p-7 shadow-card"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "text-[9.5px] uppercase tracking-wider text-ink-500 font-mono mb-2"
-  }, r.name), /*#__PURE__*/React.createElement("div", {
-    className: "flex items-baseline gap-1.5 num"
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "text-[14px] text-ink-400"
-  }, r.before), /*#__PURE__*/React.createElement(Icons.ArrowR, {
+    className: "flex items-start justify-between gap-4 flex-wrap mb-4"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h3", {
+    className: "text-2xl font-semibold tracking-tight text-ink-900"
+  }, "Ожидаемый эффект на риск"), /*#__PURE__*/React.createElement("p", {
+    className: "text-[12px] text-ink-500 font-mono mt-1"
+  }, "оценка «до / после» при исполнении Action Plan · горизонт 1 квартал")), scoped && scope && scope.length > 0 && acts.length === 0 && /*#__PURE__*/React.createElement("span", {
+    className: "text-[10px] font-mono text-gold-700 tracking-wider px-2.5 py-1 rounded-full bg-gold-400/15",
+    title: "Эти позиции меняет Action Plan — по ним и посчитан эффект «до/после»"
+  }, "Меняем позиции: ", scope.join(' · '))), acts.length > 0 && /*#__PURE__*/React.createElement("div", {
+    className: "flex flex-col sm:flex-row gap-2.5 mb-5"
+  }, sells.length > 0 && /*#__PURE__*/React.createElement("div", {
+    className: "flex-1 rounded-2xl bg-rust-500/8 border border-rust-500/20 px-4 py-2.5"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "text-[9.5px] uppercase tracking-wider text-rust-600 font-mono mb-1 flex items-center gap-1.5"
+  }, /*#__PURE__*/React.createElement(Icons.ArrowR, {
     size: 11,
-    className: "text-gold-600",
-    stroke: 2.4
-  }), /*#__PURE__*/React.createElement("span", {
-    className: "text-[16px] font-semibold text-ink-900"
-  }, r.after)), /*#__PURE__*/React.createElement("div", {
-    className: `text-[11px] num font-semibold mt-1.5 ${tone}`
-  }, r.delta));
-})), /*#__PURE__*/React.createElement("div", {
-  className: "mt-4 flex items-start gap-3 rounded-2xl bg-gold-400/12 border border-gold-400/35 px-4 py-3"
-}, /*#__PURE__*/React.createElement(Icons.Scale, {
-  size: 15,
-  className: "text-gold-700 mt-0.5 flex-shrink-0",
-  stroke: 1.8
-}), /*#__PURE__*/React.createElement("p", {
-  className: "text-[12px] text-ink-800 leading-relaxed font-light"
-}, /*#__PURE__*/React.createElement("span", {
-  className: "font-semibold text-gold-700"
-}, "Сводный вердикт по плану:"), " ", verdict)), /*#__PURE__*/React.createElement("div", {
-  className: "mt-3 rounded-2xl bg-cream-50 border border-ink-900/5 px-4 py-3.5 flex items-start gap-3"
-}, /*#__PURE__*/React.createElement(Icons.Sparkles, {
-  size: 14,
-  className: "text-gold-600 mt-0.5 flex-shrink-0",
-  stroke: 1.8
-}), /*#__PURE__*/React.createElement("p", {
-  className: "text-[12.5px] text-ink-700 leading-relaxed font-light"
-}, window.DEEP.effectAI)));
+    stroke: 2.4,
+    className: "rotate-90"
+  }), " Продать / сократить"), /*#__PURE__*/React.createElement("div", {
+    className: "text-[12.5px] num text-ink-800 leading-snug"
+  }, nameList(sells))), buys.length > 0 && /*#__PURE__*/React.createElement("div", {
+    className: "flex-1 rounded-2xl bg-sage-500/10 border border-sage-500/25 px-4 py-2.5"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "text-[9.5px] uppercase tracking-wider text-sage-600 font-mono mb-1 flex items-center gap-1.5"
+  }, /*#__PURE__*/React.createElement(Icons.ArrowR, {
+    size: 11,
+    stroke: 2.4,
+    className: "-rotate-90"
+  }), " Купить / нарастить"), /*#__PURE__*/React.createElement("div", {
+    className: "text-[12.5px] num text-ink-800 leading-snug"
+  }, nameList(buys)))), /*#__PURE__*/React.createElement("div", {
+    className: "grid grid-cols-2 md:grid-cols-4 gap-3"
+  }, rows.map((r, i) => {
+    const tone = {
+      pos: 'text-sage-600',
+      neg: 'text-rust-600',
+      neut: 'text-ink-500'
+    }[r.tone];
+    return /*#__PURE__*/React.createElement("div", {
+      key: i,
+      className: "rounded-2xl bg-white/70 border border-ink-900/6 px-4 py-3.5"
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "text-[9.5px] uppercase tracking-wider text-ink-500 font-mono mb-2"
+    }, r.name), /*#__PURE__*/React.createElement("div", {
+      className: "flex items-baseline gap-1.5 num"
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "text-[14px] text-ink-400"
+    }, r.before), /*#__PURE__*/React.createElement(Icons.ArrowR, {
+      size: 11,
+      className: "text-gold-600",
+      stroke: 2.4
+    }), /*#__PURE__*/React.createElement("span", {
+      className: "text-[16px] font-semibold text-ink-900"
+    }, r.after)), /*#__PURE__*/React.createElement("div", {
+      className: `text-[11px] num font-semibold mt-1.5 ${tone}`
+    }, r.delta));
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "mt-4 flex items-start gap-3 rounded-2xl bg-gold-400/12 border border-gold-400/35 px-4 py-3"
+  }, /*#__PURE__*/React.createElement(Icons.Scale, {
+    size: 15,
+    className: "text-gold-700 mt-0.5 flex-shrink-0",
+    stroke: 1.8
+  }), /*#__PURE__*/React.createElement("p", {
+    className: "text-[12px] text-ink-800 leading-relaxed font-light"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "font-semibold text-gold-700"
+  }, "Сводный вердикт по плану:"), " ", verdict)), /*#__PURE__*/React.createElement("div", {
+    className: "mt-3 rounded-2xl bg-cream-50 border border-ink-900/5 px-4 py-3.5 flex items-start gap-3"
+  }, /*#__PURE__*/React.createElement(Icons.Sparkles, {
+    size: 14,
+    className: "text-gold-600 mt-0.5 flex-shrink-0",
+    stroke: 1.8
+  }), /*#__PURE__*/React.createElement("p", {
+    className: "text-[12.5px] text-ink-700 leading-relaxed font-light"
+  }, window.DEEP.effectAI)));
+};
 const ideaTone = {
   grow: {
     border: '#5d7c5c',
@@ -2819,7 +2853,8 @@ const Plan = () => {
     rows: p.effect,
     verdict: p.effectVerdict,
     scope: p.effectScope,
-    scoped: p.effectScoped
+    scoped: p.effectScoped,
+    actions: p.effectActions
   }), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "rounded-4xl p-6 mb-5 relative overflow-hidden",
     style: {
