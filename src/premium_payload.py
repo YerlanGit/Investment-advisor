@@ -784,7 +784,15 @@ def _map_performance(p: dict) -> dict:
         "exc":     _p12.get("d", round(_p12.get("p", 0.0) - _p12.get("s", 0.0), 1)),
         "volPort": _vol,
     }
-    return {"vol": {"port": _vol, "spx": 0}, "periods": periods, "summary": summary}
+    # B1-perf (2026-07-18): benchmark display name so the «Рост против рынка»
+    # card labels the curve with the mandate benchmark, not a hardcoded «S&P
+    # 500».  Prefer the explicit payload name; fall back to the first
+    # period_returns key (a real benchmark name); default «S&P 500».
+    bench_name = str(_g(p, "performance_benchmark_name")
+                     or (next(iter(prt), None) if isinstance(prt, dict) else None)
+                     or "S&P 500")
+    return {"vol": {"port": _vol, "spx": 0}, "periods": periods, "summary": summary,
+            "benchmarkName": bench_name}
 
 
 def _pipe_step(s: Any) -> str:

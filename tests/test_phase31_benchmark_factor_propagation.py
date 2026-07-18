@@ -250,6 +250,76 @@ class PayloadBenchmarkIdentityTest(unittest.TestCase):
         self.assertEqual(data["benchmarkTicker"], "SPY.US")
 
 
+class BasePerformanceBenchmarkTest(unittest.TestCase):
+    """B1-perf (2026-07-18): «Рост против рынка» (BASE) следует мандатному
+    бенчмарку — метка НЕ захардкожена на S&P 500 (данные и так были профильного
+    бенчмарка, врала только подпись)."""
+
+    def _period_block(self, port, bench):
+        per = [{"period": lab, "port_pct": p / 100, "bm_pct": b / 100,
+                "excess_pp": (p - b) / 100}
+               for lab, p, b in zip(["1m", "3m", "6m", "12m", "YTD"], port, bench)]
+        return {"periods": per, "window_start": "2025-07-01",
+                "window_end": "2026-07-18"}
+
+    def _results(self, ticker):
+        r = _minimal_results()
+        r["profile_benchmark_ticker"] = ticker
+        r["period_returns_table"] = {
+            # engine keys the chosen benchmark as «Профильный бенчмарк», FIRST
+            "Профильный бенчмарк": self._period_block(
+                [-7.7, -6.7, 0.7, 10.5, 0.6], [-5.1, 11.0, 15.5, 29.0, 16.2]),
+            "S&P 500": self._period_block(
+                [-7.7, -6.7, 0.7, 10.5, 0.6], [-4.6, 9.2, 13.1, 25.7, 13.9]),
+        }
+        return r
+
+    def _base_perf(self, ticker):
+        from pdf_payload import build_payload
+        from premium_payload import build_design_data
+        pay = build_payload(self._results(ticker), tier="base", ai_summary={
+            "verdict": "v", "plain_summary": "s", "bullets": ["b"],
+            "stock_picks": {}, "used_rag": False, "model_used": "t"},
+            user_bench_ticker=ticker)
+        return pay, build_design_data(pay, tier="base", user_id=1)["performance"]
+
+    def test_nasdaq_profile_labels_and_data_are_nasdaq(self):
+        pay, perf = self._base_perf("QQQ.US")
+        self.assertEqual(pay["performance_benchmark_name"], "Nasdaq 100")
+        self.assertEqual(perf["benchmarkName"], "Nasdaq 100")
+        # 12М benchmark value = QQQ's 29.0, NOT S&P's 25.7 → data follows mandate
+        self.assertAlmostEqual(perf["summary"]["spx"], 29.0, places=1)
+        # the profile key was renamed to the display name in the payload table
+        self.assertIn("Nasdaq 100", pay["period_returns_table"])
+        self.assertNotIn("Профильный бенчмарк", pay["period_returns_table"])
+
+    def test_sp500_profile_backward_compat(self):
+        pay, perf = self._base_perf("SPY.US")
+        self.assertEqual(perf["benchmarkName"], "S&P 500")
+
+    def test_no_profile_defaults_to_first_concrete_key(self):
+        from pdf_payload import build_payload
+        from premium_payload import build_design_data
+        r = _minimal_results()
+        r["period_returns_table"] = {"S&P 500": self._period_block(
+            [1, 2, 3, 4, 5], [1, 2, 3, 4, 5])}
+        pay = build_payload(r, tier="base", ai_summary={
+            "verdict": "v", "plain_summary": "s", "bullets": ["b"],
+            "stock_picks": {}, "used_rag": False, "model_used": "t"})
+        perf = build_design_data(pay, tier="base", user_id=1)["performance"]
+        self.assertEqual(perf["benchmarkName"], "S&P 500")
+
+    def test_base_component_has_no_hardcoded_sp_label(self):
+        """portfolio-performance.jsx рендерит {bench}, не литерал «S&P 500»."""
+        bundle = (ROOT / "src" / "premium_assets" /
+                  "base-components.js").read_text(encoding="utf-8")
+        # Отрендеренные подписи больше не содержат литерала (только комментарий
+        # и фолбэк-дефолт `|| 'S&P 500'` допустимы).
+        self.assertIn("p.benchmarkName", bundle)
+        self.assertNotIn('в сравнении с S&P 500', bundle)
+        self.assertNotIn('пп vs S&P', bundle)
+
+
 # ── Слой A — скомпилированные ассеты и шаблоны ───────────────────────────────
 
 class CompiledAssetsTest(unittest.TestCase):
