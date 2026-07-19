@@ -1724,7 +1724,11 @@ const Holdings = () => {
   const [openIdx, setOpenIdx] = React.useState(0);
   const [filter, setFilter] = React.useState('Все');
   const p = window.DEEP;
-  const filters = ['Все', 'HOTSPOT', 'Акции США', 'Защитные', 'В минусе', 'SELL · TRIM'];
+  // L-15 (2026-07-19): показываем чип «HOTSPOT» только когда hotspot-позиции
+  // реально есть (TRC > 20% ⇒ euler_extreme) — пустой фильтр с «Ничего не
+  // подходит» сбивает читателя с толку на здоровой книге.
+  const hasHot = p.holdings.some(h => h.status === 'HOTSPOT');
+  const filters = ['Все', ...(hasHot ? ['HOTSPOT'] : []), 'Акции США', 'Защитные', 'В минусе', 'SELL · TRIM'];
   const rows = p.holdings.filter(h => {
     if (filter === 'Все') return true;
     if (filter === 'HOTSPOT') return h.status === 'HOTSPOT';

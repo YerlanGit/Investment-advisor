@@ -78,10 +78,38 @@ _CLASS_ETF = {
 }
 
 
-def _classify_to_asset_key(ticker: str) -> str:
-    """Classify a ticker into the asset-class keys used by limits_dict."""
+# Underlyings whose leveraged/inverse wrappers are ECONOMICALLY crypto
+# exposure (L-14, 2026-07-19): CONL is a 2× Coinbase daily-reset ETP — the
+# live mandate panel showed «Крипто 0.0%» while ~1% of NAV was a leveraged
+# crypto-proxy bet, invisible to the Crypto limit.  Wrappers are classified
+# by their UNDERLYING via the finance.leveraged registry (SSOT for L and
+# underlying), so the mandate limits see the real economic exposure.
+_CRYPTO_UNDERLYINGS = {"COIN", "MSTR", "BTC", "ETH", "MARA", "RIOT"}
+
+
+def _classify_to_asset_key(ticker: str, _depth: int = 0) -> str:
+    """Classify a ticker into the asset-class keys used by limits_dict.
+
+    Leveraged/inverse ETPs are classified by their UNDERLYING (registry
+    finance/leveraged.py) — a 2× Coinbase wrapper is Crypto exposure for the
+    mandate limits, a 3× QQQ wrapper is what QQQ is.  Recursion is depth-
+    capped; unknown underlyings fall through to the ticker's own heuristics.
+    """
     t = ticker.split(".")[0].upper() if "." in ticker else ticker.upper()
     suffix = ticker.upper().rsplit(".", 1)[-1] if "." in ticker else ""
+
+    if _depth < 2:
+        try:
+            from finance.leveraged import etp_info
+            info = etp_info(t)
+            if info is not None and info.underlying:
+                u = str(info.underlying).upper()
+                if u in _CRYPTO_UNDERLYINGS:
+                    return "Crypto"
+                if u != t:
+                    return _classify_to_asset_key(u, _depth + 1)
+        except Exception:
+            pass
 
     if t in _CLASS_CRYPTO or "-USD" in ticker.upper():
         return "Crypto"
