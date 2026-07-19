@@ -2609,7 +2609,9 @@ const EffectGrid = ({
   const sells = acts.filter(a => a.key === 'sell' || (a.side || '').toLowerCase().startsWith('прод'));
   const buys = acts.filter(a => a.key === 'buy' || (a.side || '').toLowerCase().startsWith('куп'));
   const fmtDw = dw => dw != null && Math.abs(dw) >= 0.05 ? ` ${dw > 0 ? '+' : '−'}${Math.abs(dw).toFixed(1)}пп` : '';
-  const nameList = arr => arr.map(a => `${a.t}${fmtDw(a.dw)}`).join(', ');
+  // L-18: внешний ETF-диверсификатор подписываем по имени — «IEF (гособлигации
+  // США 7–10 лет) +8.0пп», а не голый тикер, которого нет в holdings.
+  const nameList = arr => arr.map(a => `${a.t}${a.name ? ` (${a.name})` : ''}${fmtDw(a.dw)}`).join(', ');
   return /*#__PURE__*/React.createElement("div", {
     className: "glass-strong rounded-4xl p-7 shadow-card"
   }, /*#__PURE__*/React.createElement("div", {

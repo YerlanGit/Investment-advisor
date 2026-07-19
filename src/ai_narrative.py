@@ -502,6 +502,15 @@ def _summarise_for_prompt(results: dict) -> dict:
         # this verdict in `ai_effect_comment` instead of inventing its own.
         "rebalance_verdict": ((results.get("expected_effect") or {}).get("verdict")
                               if isinstance(results.get("expected_effect"), dict) else None),
+        # L-18/L-19: сами сделки ребаланса (Продать/Купить/В кэш, Δпп, имена
+        # внешних ETF) — чтобы ai_effect_comment называл направления по имени,
+        # а не пересказывал одни метрики.
+        "rebalance_actions": ([
+            {"ticker": a.get("ticker"), "side": a.get("side"),
+             "delta_pp": a.get("delta_pp"), "name": (a.get("name") or None),
+             "external": bool(a.get("is_external")), "cash": bool(a.get("is_cash"))}
+            for a in ((results.get("expected_effect") or {}).get("high_priority_actions") or [])[:12]
+        ] if isinstance(results.get("expected_effect"), dict) else []),
         # H4: investor risk mandate so the LLM tailors tone/recommendations
         # (a conservative investor needs tail-risk framing; an aggressive one
         # growth framing).  Composite-risk score is already calibrated for it.
@@ -869,7 +878,7 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
         "голые термины. Пиши простыми словами:\n"
         "  trailing / trailing 12M → «за последние 12 месяцев»\n"
         "  ДИ / доверительный интервал → «разброс оценки» или просто диапазон без аббревиатуры\n"
-        "  CVaR → «потери в худший день из 20»\n"
+        "  CVaR → «средний убыток в редкий плохой день (такие дни случаются примерно раз в месяц)»\n"
         "  Sharpe → «отдача на единицу риска» (можно «коэффициент Шарпа X» в скобках ОДИН раз)\n"
         "  TRC / доля в риске → «сколько процентов риска даёт эта позиция»\n"
         "  Beta → «во сколько раз сильнее рынка двигается»\n"
@@ -886,7 +895,7 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
     style_rule = (
         "СТИЛЬ — БЕЗ ПОВТОРОВ И ЖАРГОНА:\n"
         "- Глоссарий замен — это СЛОВАРЬ, а не готовые фразы: НЕ вставляй одну "
-        "и ту же формулировку (напр. «потери в худший день из 20») дословно в "
+        "и ту же формулировку (напр. расшифровку CVaR) дословно в "
         "несколько секций. Развёрнутое объяснение термина — ОДИН раз за отчёт "
         "(при первом упоминании); дальше — короткая форма или просто число. "
         "Синонимичные формулировки приветствуются.\n"
@@ -895,6 +904,22 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
         "- ЗАПРЕЩЕНО в тексте для читателя: слово «счёт» как сокращение оценки "
         "(пиши «сводная оценка 4-Pillar −5.2 — продавать»), слово «ярлык» "
         "(пиши «оценка фазы цикла»).\n"
+        "- СТРУКТУРА комментария (для полей длиннее 200 знаков): 2–3 ПОЛНЫХ "
+        "предложения — (1) факт с числом из данных движка, (2) что это значит "
+        "для владельца портфеля, (3) действие или связь с мандатом/бенчмарком/"
+        "банковской аналитикой. Не обрывай мысль и не пиши телеграфные обрывки.\n"
+    )
+
+    # L-19 (2026-07-19): анти-фабрикация чисел — владелец потребовал «пусть не
+    # придумывает ложные цифры и округления»: каждое число в тексте обязано
+    # существовать в данных промпта; пере-округления запрещены.
+    numbers_rule = (
+        "ЧИСЛА — СТРОГО ИЗ ДАННЫХ:\n"
+        "- Используй ТОЛЬКО числа, которые есть в данных выше. Не выдумывай доли, "
+        "суммы, даты и «примерные» оценки, которых в данных нет.\n"
+        "- Не пере-округляй: цифру приводи как в данных (допустимо сократить до "
+        "одного знака после запятой, не более).\n"
+        "- Нет данных для утверждения — напиши «данных недостаточно», а не сочиняй.\n"
     )
 
     # Валютное правило (замечание 2026-07-09): модель писала «8 из каждых 10
@@ -1149,7 +1174,7 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
             "ПРАВИЛА:\n"
             "- Русский язык. Без «RAMP».\n"
             "- ПРОСТОЙ ЯЗЫК — глоссарий замен:\n"
-            "  CVaR → 'потери в худший день из 20'\n"
+            "  CVaR → 'средний убыток в редкий плохой день (примерно раз в месяц)'\n"
             "  волатильность → 'нестабильность' или 'насколько прыгает портфель'\n"
             "  Бета → 'чувствительность к рынку (Beta 2 = двигается вдвое сильнее рынка)'\n"
             "  IR → 'стабильность обгона рынка'\n"
@@ -1164,6 +1189,7 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
             "why — конкретные цифры (ROE, маржа, Бета) с тегом [Источник].\n"
             f"{plain_rule}"
             f"{style_rule}"
+            f"{numbers_rule}"
             f"{currency_rule}"
             f"{benchmark_rule}"
             f"{mandate_rule}"
@@ -1228,15 +1254,16 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
         '  "verdict": "ОДНО короткое предложение ≤130 знаков — главный риск простыми словами + что делать. БЕЗ нагромождения терминов и чисел",\n'
         '  "plain_summary": "МАКСИМУМ 2 коротких предложения ≤200 знаков — позиция + главный риск + что делать, простым языком",\n'
         '  "bullets": ["5–7 пунктов ≤200 знаков каждый с [Источник] — цепочка: риск → состав → секторы → факторы → действие"],\n'
-        '  "ai_cvar_note": "≤120 знаков — простыми словами: примерно сколько денег теряется '
-        'в худший день из 20, нормально ли это для данного профиля риска [Quant Engine].",\n'
+        '  "ai_cvar_note": "≤120 знаков — простыми словами: сколько в среднем теряется в редкий '
+        'плохой день (примерно раз в месяц), нормально ли это для профиля риска [Quant Engine].",\n'
         '  "ai_sharpe_note": "≤120 знаков — простыми словами: окупается ли риск доходностью, '
         'лучше или хуже рынка [Quant Engine].",\n'
         '  "ai_mdd_note": "≤120 знаков — простыми словами: насколько глубоко портфель падал '
         'исторически и что это значит для владельца [Quant Engine].",\n'
-        '  "ai_risk_comment": "≤220 знаков — потери в худший день из 20 (CVaR), нестабильность '
-        '(Vol), макс. просадка и стабильность обгона рынка (Sharpe): взаимосвязь, $ потерь. '
-        'Укажи какая позиция [см. ai_holdings_comment] вносит наибольший вклад [Quant Engine]",\n'
+        '  "ai_risk_comment": "260–380 знаков, 2–3 ПОЛНЫХ предложения — (1) средний убыток в редкий '
+        'плохой день (CVaR) и нестабильность (Vol) с цифрами и $ потерь, (2) какая позиция вносит '
+        'наибольший вклад [см. ai_holdings_comment], (3) как это соотносится с целевой волатильностью '
+        'мандата и что сделать в первую очередь [Quant Engine]",\n'
         f'  "ai_benchmark_comment": "≤200 знаков — стабильность обгона (IR) vs бенчмарк {bench_label}: '
         'причины отставания/опережения (бенчмарк называй по имени). Свяжи с нестабильностью портфеля из ai_risk_comment '
         'и секторными перекосами из ai_sector_comment [Quant Engine]",\n'
@@ -1293,11 +1320,12 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
         '(из ai_holdings_comment) → затем Buy (из ai_factor_comment и ai_4pillar_comment). '
         'Ожидаемый эффект на долю в риске (TRC) позиций [Quant Engine]",\n'
         '  "ai_effect_comment": "≤220 знаков — чего ожидать после ребалансировки: '
-        'потери в худший день из 20 (CVaR) до→после, нестабильность (Vol), Sharpe. '
+        'средний убыток в редкий плохой день (CVaR) до→после, нестабильность (Vol), Sharpe. '
         'ОБЯЗАТЕЛЬНО согласуй с rebalance_verdict из данных: если kind=tradeoff/degradation — '
         'ЯВНО назови ухудшившуюся метрику (напр. рост концентрации Max TRC при урезании топ-позиции) '
-        'и НЕ заявляй об одностороннем снижении риска. Причинно-следственная связь с конкретными '
-        'изменениями позиций [Quant Engine]",\n'
+        'и НЕ заявляй об одностороннем снижении риска. Назови, КУДА уходит высвобожденный вес '
+        '(из rebalance_actions: конкретные ETF с названиями и/или Кэш) и почему это соответствует '
+        'мандату (например закрывает нижнюю границу класса GlobalETFs) [Quant Engine]",\n'
         f'{picks_spec},\n'
         '  "action_plan_text": "≤800 знаков — приоритетные действия: Trim/Sell сначала, '
         'конкретные уровни, cumulative |Δw| ≤ 25% NAV",\n'
@@ -1306,7 +1334,7 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
         "ПРАВИЛА:\n"
         "- ВСЕ тексты на РУССКОМ. Без «RAMP».\n"
         "- ПРОСТОЙ ЯЗЫК — глоссарий замен:\n"
-        "  CVaR → 'потери в худший день из 20'\n"
+        "  CVaR → 'средний убыток в редкий плохой день (примерно раз в месяц)'\n"
         "  волатильность → 'нестабильность' или 'насколько прыгает портфель'\n"
         "  Бета → 'чувствительность к рынку (Beta 2 = двигается вдвое сильнее рынка)'\n"
         "  IR → 'стабильность обгона рынка'\n"
@@ -1346,6 +1374,7 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
         "- why: конкретные цифры (ROE, маржа, Beta, P/E, momentum) с тегом [источник].\n"
         f"{plain_rule}"
         f"{style_rule}"
+        f"{numbers_rule}"
         f"{currency_rule}"
         f"{benchmark_rule}"
         f"{mandate_rule}"
@@ -1870,7 +1899,7 @@ def generate_narrative(results: dict, tier: str = "base",
             "ai_cvar_note":             _comment("ai_cvar_note", 160),
             "ai_sharpe_note":           _comment("ai_sharpe_note", 160),
             "ai_mdd_note":              _comment("ai_mdd_note", 160),
-            "ai_risk_comment":          _comment("ai_risk_comment"),
+            "ai_risk_comment":          _comment("ai_risk_comment", 420 if tier == "deep" else 250),
             "ai_benchmark_comment":     _comment("ai_benchmark_comment"),
             "ai_performance_comment":   _comment("ai_performance_comment"),
             # Audit 2026-07-04: the DEEP regime/factor comments were truncated
@@ -1879,7 +1908,7 @@ def generate_narrative(results: dict, tier: str = "base",
             # sat just above it.  Ceilings raised (400/900) so the closing
             # sentence completes; the boxes are auto-height so no layout risk.
             "ai_regime_comment":        _regime_cmt,
-            "ai_holdings_comment":      _comment("ai_holdings_comment"),
+            "ai_holdings_comment":      _comment("ai_holdings_comment", 400 if tier == "deep" else 250),
             "ai_sector_comment":        _comment("ai_sector_comment", 200),
             # DEEP factor comment ties BOTH illustrations together (β-radar +
             # variance decomposition) via the 4-step institutional recipe —
@@ -1888,7 +1917,7 @@ def generate_narrative(results: dict, tier: str = "base",
             "ai_factor_comment":        _factor_cmt,
             "ai_4pillar_comment":       _comment("ai_4pillar_comment"),
             "ai_stress_comment":        validate_stress_comment(_comment("ai_stress_comment")),
-            "ai_action_comment":        _comment("ai_action_comment"),
+            "ai_action_comment":        _comment("ai_action_comment", 400 if tier == "deep" else 250),
             "ai_effect_comment":        _effect_cmt,
             # Sprint-5 margin/leverage trigger output — only the AI fills this
             # (empty when the book is unlevered; the template hides it then).

@@ -2388,7 +2388,8 @@ class UniversalPortfolioManager:
             # survived the turnover cap (Buy/Sell/Trim with |Δw|>0).  Deferred
             # and Hold rows leave their weight unchanged; falls back to the BL
             # target when there are no actionable rows.
-            from finance.simulate import high_priority_target_weights
+            from finance.simulate import (high_priority_target_weights,
+                                          external_diversifier_candidates)
             sector_map_for_sim = {t: self.engine.get_ticker_sector(t)
                                    for t in df.index}
             # L-13 (2026-07-19): reinvest-eligibility blocklist — the names the
@@ -2409,10 +2410,23 @@ class UniversalPortfolioManager:
             # back into more tech (the old reinvest bought the highest-BL held
             # names, which ARE the concentrated mega-caps → IT share and risk
             # went UP, contradicting the mandate).  Diversifiers first, else cash.
+            # L-18 (2026-07-19): external global-ETF sleeve — кандидаты только
+            # из ФАКТОРНОЙ панели (история уже скачана этим же прогоном),
+            # с реальным покрытием ≥60 торговых дней и НЕ из держимых имён.
+            # Порядок кандидатов задаёт мандат (см. simulate.EXTERNAL_DIVERSIFIERS).
+            _held_names = {str(t) for t in df.index}
+            _ext_cands = [
+                c for c in external_diversifier_candidates(
+                    str(getattr(self.engine, "risk_mandate", "MODERATE")))
+                if c.get("panel") in all_data.columns
+                and int(all_data[c["panel"]].notna().sum()) >= 60
+                and str(c.get("ticker")) not in _held_names
+            ]
             target_weights, hp_tickers, hp_actions = high_priority_target_weights(
                 weights_dict, action_plan_rows, bl_records,
                 sector_by_ticker=sector_map_for_sim,
-                reinvest_blocklist=_reinvest_block)
+                reinvest_blocklist=_reinvest_block,
+                external_candidates=_ext_cands)
 
             # Build daily log-returns matrix for assets the cov matrix knows
             # about.  Reuses all_data (already loaded) so no extra fetch.
@@ -2430,6 +2444,26 @@ class UniversalPortfolioManager:
                                    if res in avail_cols}
                         log_df = log_df.rename(columns=col_map)
                         sim_daily_log = log_df
+
+            # L-18: колонки внешних ETF-покупок — в sim-панель (под display-
+            # тикером), чтобы simulate_after_plan расширил ковариацию и
+            # sample-метрики реальными данными, а не считал покупку кэшем.
+            _ext_bought = [a for a in hp_actions
+                           if a.get("is_external") and a.get("ticker")]
+            if _ext_bought:
+                _panel_by_tkr = {str(c["ticker"]): c["panel"] for c in _ext_cands}
+                _ext_cols = {}
+                for a in _ext_bought:
+                    _t = str(a["ticker"])
+                    _pcol = _panel_by_tkr.get(_t)
+                    if _pcol and _pcol in all_data.columns:
+                        _ser = all_data[_pcol].dropna()
+                        if len(_ser) >= 2:
+                            _ext_cols[_t] = np.log(_ser / _ser.shift(1)).dropna()
+                if _ext_cols:
+                    _ext_df = pd.DataFrame(_ext_cols)
+                    sim_daily_log = (_ext_df if sim_daily_log is None
+                                     else sim_daily_log.join(_ext_df, how="left"))
 
             expected_effect = _simulate_after_plan(
                 perf_df           = df.reset_index(),
