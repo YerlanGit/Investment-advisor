@@ -221,6 +221,87 @@ class ReinvestDeconcentrationTest(unittest.TestCase):
         self.assertIn("NVDA", {a["ticker"] for a in actions if a["side"] == "buy"})
 
 
+class ReinvestEligibilityTest(unittest.TestCase):
+    """L-13 (2026-07-19): реинвест не должен «покупать» имена, которые модель
+    честно не симулирует (blocklist: sparse/broker-priced прокси, напр. AIX-нота
+    FFSPC — стала Max-TRC 36.3% в live) или которые добавляют плечо (реестровые
+    ETP: XNDU, CONL)."""
+
+    def _base(self):
+        cur = {"ORCL": 0.20, "FFSPC6.1028.AIX": 0.02, "XNDU": 0.02,
+               "MRK": 0.05, "GLD": 0.10}
+        sector = {"ORCL": "Technology", "FFSPC6.1028.AIX": "Other",
+                  "XNDU": "Other", "MRK": "Health Care", "GLD": "Commodities"}
+        rows = [{"ticker": "ORCL", "action": "Sell", "delta_w_pp": -8.0}]
+        bl = [{"ticker": "FFSPC6.1028.AIX", "action": "Buy", "delta_w_pp": 9.0},
+              {"ticker": "XNDU", "action": "Buy", "delta_w_pp": 8.0},
+              {"ticker": "MRK",  "action": "Buy", "delta_w_pp": 2.0}]
+        return cur, sector, rows, bl
+
+    def test_blocklist_and_leveraged_excluded(self):
+        from finance.simulate import high_priority_target_weights
+        cur, sector, rows, bl = self._base()
+        _t, _tk, actions = high_priority_target_weights(
+            cur, rows, bl, sector_by_ticker=sector,
+            reinvest_blocklist={"FFSPC6.1028.AIX"})
+        buys = {a["ticker"] for a in actions
+                if a["side"] == "buy" and not a.get("is_cash")}
+        self.assertNotIn("FFSPC6.1028.AIX", buys)   # blocklist (вне модели)
+        self.assertNotIn("XNDU", buys)              # leveraged registry
+        self.assertIn("MRK", buys)                  # честный диверсификатор
+
+    def test_all_ineligible_goes_to_cash(self):
+        from finance.simulate import high_priority_target_weights
+        cur, sector, rows, bl = self._base()
+        bl2 = [b for b in bl if b["ticker"] != "MRK"]   # остались только непригодные
+        _t, _tk, actions = high_priority_target_weights(
+            cur, rows, bl2, sector_by_ticker=sector,
+            reinvest_blocklist={"FFSPC6.1028.AIX"})
+        self.assertTrue(any(a.get("is_cash") for a in actions))
+        self.assertFalse({"FFSPC6.1028.AIX", "XNDU"} &
+                         {a["ticker"] for a in actions if a["side"] == "buy"
+                          and not a.get("is_cash")})
+
+
+class UnderlyingClassificationTest(unittest.TestCase):
+    """L-14 (2026-07-19): плечевые ETP классифицируются по UNDERLYING —
+    CONL (2× Coinbase) = крипто-экспозиция для мандат-панели."""
+
+    def test_conl_is_crypto(self):
+        from agent.gatekeeper import _classify_to_asset_key
+        self.assertEqual(_classify_to_asset_key("CONL"), "Crypto")
+        self.assertEqual(_classify_to_asset_key("CONL.US"), "Crypto")
+
+    def test_plain_names_unchanged(self):
+        from agent.gatekeeper import _classify_to_asset_key
+        self.assertEqual(_classify_to_asset_key("AAPL"), "Stocks_US")
+        self.assertEqual(_classify_to_asset_key("GLD"), "Commodities")
+        self.assertEqual(_classify_to_asset_key("TLT"), "Bonds")
+        self.assertEqual(_classify_to_asset_key("KSPI.KZ"), "Stocks_KZ")
+        self.assertEqual(_classify_to_asset_key("USD"), "Cash")
+
+    def test_mandate_guard_blocks_conl_for_conservative(self):
+        """Мандатный гард идей теперь ловит и плечевые крипто-обёртки."""
+        from ai_narrative import _remove_mandate_banned_picks
+        picks = {"boost_alpha": {"picks": [{"ticker": "CONL"}, {"ticker": "NVDA"}]}}
+        out = _remove_mandate_banned_picks(
+            picks, {"limits_dict": {"Crypto": [0, 0]}})
+        self.assertEqual([p["ticker"] for p in out["boost_alpha"]["picks"]],
+                         ["NVDA"])
+
+
+class AiStyleRuleTest(unittest.TestCase):
+    """L-16 (2026-07-19): анти-шаблон и запрет «счёт»/«ярлык» в обоих промптах."""
+
+    def test_style_rule_in_both_tiers(self):
+        from ai_narrative import _user_prompt
+        for tier in ("base", "deep"):
+            p = _user_prompt({}, tier=tier)
+            self.assertIn("БЕЗ ПОВТОРОВ И ЖАРГОНА", p)
+            self.assertIn("сводная оценка 4-Pillar", p)
+            self.assertIn("оценка фазы цикла", p)
+
+
 class ForwardSharpeTest(unittest.TestCase):
     """2026-07-18: the Effect Sharpe is FORWARD (er/vol), not historical replay,
     so it can't triple while risk rises (look-ahead)."""

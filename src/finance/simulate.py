@@ -256,6 +256,7 @@ def high_priority_target_weights(
         action_plan_rows: Optional[list[dict]],
         bl_records:       Optional[list[dict]] = None,
         sector_by_ticker: Optional[dict[str, str]] = None,
+        reinvest_blocklist: Optional[set] = None,
 ) -> tuple[dict[str, float], list[str], list[dict]]:
     """
     Build the weight vector the Expected-Effect panel should simulate so the
@@ -371,10 +372,25 @@ def high_priority_target_weights(
                     if _top_sec in _grp_members or _grp_share / _long > _CONC_FLOOR:
                         _blocked |= _grp_members
 
+            # L-13 (2026-07-19): eligibility gate for reinvest candidates.  The
+            # live report reinvested +12пп into FFSPC6.1028.AIX (an illiquid
+            # AIX structured note priced through a proxy — it became the new
+            # Max-TRC 36.3%!) and +4пп into XNDU (a leveraged ETP).  A
+            # rebalance idea must not «buy» names the model can't честно
+            # simulate or that add leverage: exclude (a) the caller's
+            # blocklist (uncovered / sparse-history / broker-priced-only
+            # names from analyze_all) and (b) registry leveraged/inverse ETPs.
+            _block = {str(t) for t in (reinvest_blocklist or set())}
+            try:
+                from finance.leveraged import is_leveraged_etp as _is_letp
+            except Exception:                              # pragma: no cover
+                _is_letp = lambda _t: False                # noqa: E731
             buys = [r for r in bl_records
                     if float(r.get("delta_w_pp") or 0.0) > 0.0
                     and str(r.get("ticker")) not in acted
                     and str(r.get("ticker")) in base          # held ⇒ in cov ⇒ simulated
+                    and str(r.get("ticker")) not in _block    # модель их честно не симулирует
+                    and not _is_letp(str(r.get("ticker")))    # не наращивать плечо
                     and _sec_of(r.get("ticker")) not in _blocked]   # DIVERSIFIERS only
             buys.sort(key=lambda r: float(r.get("delta_w_pp") or 0.0), reverse=True)
             buys = buys[:3]

@@ -2391,6 +2391,19 @@ class UniversalPortfolioManager:
             from finance.simulate import high_priority_target_weights
             sector_map_for_sim = {t: self.engine.get_ticker_sector(t)
                                    for t in df.index}
+            # L-13 (2026-07-19): reinvest-eligibility blocklist — the names the
+            # structural model can't честно simulate (sparse-history exclusions
+            # + broker-priced-only proxies, e.g. the FFSPC AIX note that the
+            # live report «bought» +12пп into becoming the new Max-TRC 36%).
+            # Leveraged ETPs are filtered inside simulate via the registry.
+            _reinvest_block: set = set(broker_priced_only)
+            _sparse_res = set(getattr(self.engine, "_last_sparse_dropped", []) or [])
+            if _sparse_res:
+                _sparse_bases = {str(s).split(".")[0] for s in _sparse_res}
+                _reinvest_block |= {
+                    orig for orig, res in zip(actual_risky, port_resolved)
+                    if res in _sparse_res
+                    or str(res).split(".")[0] in _sparse_bases}
             # 2026-07-18: pass the sector map so the reinvest de-CONCENTRATES —
             # freed weight from selling the over-weight tech must NOT be poured
             # back into more tech (the old reinvest bought the highest-BL held
@@ -2398,7 +2411,8 @@ class UniversalPortfolioManager:
             # went UP, contradicting the mandate).  Diversifiers first, else cash.
             target_weights, hp_tickers, hp_actions = high_priority_target_weights(
                 weights_dict, action_plan_rows, bl_records,
-                sector_by_ticker=sector_map_for_sim)
+                sector_by_ticker=sector_map_for_sim,
+                reinvest_blocklist=_reinvest_block)
 
             # Build daily log-returns matrix for assets the cov matrix knows
             # about.  Reuses all_data (already loaded) so no extra fetch.

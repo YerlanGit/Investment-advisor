@@ -1266,7 +1266,9 @@ const Holdings = () => {
   const [openIdx, setOpenIdx] = React.useState(0);
   const [filter, setFilter] = React.useState('Все');
   const all = window.PORTFOLIO.holdings;
-  const filters = ['Все', 'HOTSPOT', 'Технологии', 'Защитные', 'Доходные', 'В минусе'];
+  // L-15 (2026-07-19): «HOTSPOT» — только когда такие позиции есть.
+  const hasHot = all.some(h => h.status === 'HOTSPOT');
+  const filters = ['Все', ...(hasHot ? ['HOTSPOT'] : []), 'Технологии', 'Защитные', 'Доходные', 'В минусе'];
   const rows = all.filter(h => {
     if (filter === 'Все') return true;
     if (filter === 'HOTSPOT') return h.status === 'HOTSPOT';
