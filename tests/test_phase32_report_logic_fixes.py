@@ -132,9 +132,11 @@ class EffectSideFromActionTest(unittest.TestCase):
     def test_side_and_move_follow_action_not_bl_sign(self):
         from finance.simulate import high_priority_target_weights
         cur = {"ORCL": 0.16, "MSFT": 0.20, "AAOI": 0.12, "NVDA": 0.15}
-        # A held BL buy NOT in the plan → eligible for reinvest of freed weight.
+        # L-17: реинвест-кандидат обязан иметь рейтинг Buy в ПЛАНЕ (здесь —
+        # отложенный турновер-капом ряд, Δw=0) + положительный BL Δw.
+        rows = self._rows() + [{"ticker": "NVDA", "action": "Buy", "delta_w_pp": 0.0}]
         bl = [{"ticker": "NVDA", "action": "Buy", "delta_w_pp": +5.0}]
-        target, tickers, actions = high_priority_target_weights(cur, self._rows(), bl)
+        target, tickers, actions = high_priority_target_weights(cur, rows, bl)
         by = {a["ticker"]: a for a in actions}
         # All three plan names are SELL/TRIM → side sell, delta negative, and the
         # simulated target weight goes DOWN (not up, as BL sign would have done).
@@ -215,7 +217,10 @@ class ReinvestDeconcentrationTest(unittest.TestCase):
         """Without sector data we can't de-concentrate → legacy behaviour."""
         from finance.simulate import high_priority_target_weights
         cur = {"ORCL": 0.2, "NVDA": 0.2}
-        rows = [{"ticker": "ORCL", "action": "Sell", "delta_w_pp": -6.0}]
+        rows = [{"ticker": "ORCL", "action": "Sell", "delta_w_pp": -6.0},
+                # L-17: план рейтит NVDA Buy (отложен турновер-капом) —
+                # только такой кандидат остаётся легитимным реинвестом.
+                {"ticker": "NVDA", "action": "Buy", "delta_w_pp": 0.0}]
         bl = [{"ticker": "NVDA", "action": "Buy", "delta_w_pp": 5.0}]
         _t, _tk, actions = high_priority_target_weights(cur, rows, bl)  # no sector map
         self.assertIn("NVDA", {a["ticker"] for a in actions if a["side"] == "buy"})
@@ -232,7 +237,13 @@ class ReinvestEligibilityTest(unittest.TestCase):
                "MRK": 0.05, "GLD": 0.10}
         sector = {"ORCL": "Technology", "FFSPC6.1028.AIX": "Other",
                   "XNDU": "Other", "MRK": "Health Care", "GLD": "Commodities"}
-        rows = [{"ticker": "ORCL", "action": "Sell", "delta_w_pp": -8.0}]
+        rows = [{"ticker": "ORCL", "action": "Sell", "delta_w_pp": -8.0},
+                # L-17: у легитимного кандидата (MRK) есть план-рейтинг Buy
+                # (отложен турновер-капом); FFSPC/XNDU план рейтит HOLD —
+                # они отваливаются и по conviction-гейту, и по блок-листам.
+                {"ticker": "MRK",  "action": "Buy",  "delta_w_pp": 0.0},
+                {"ticker": "FFSPC6.1028.AIX", "action": "Hold", "delta_w_pp": 0.0},
+                {"ticker": "XNDU", "action": "Hold", "delta_w_pp": 0.0}]
         bl = [{"ticker": "FFSPC6.1028.AIX", "action": "Buy", "delta_w_pp": 9.0},
               {"ticker": "XNDU", "action": "Buy", "delta_w_pp": 8.0},
               {"ticker": "MRK",  "action": "Buy", "delta_w_pp": 2.0}]

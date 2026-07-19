@@ -68,6 +68,45 @@ import pandas as pd
 from finance.scoring import composite_risk_score as _composite_risk_score  # noqa: E402,F401
 
 
+# ── L-18 (2026-07-19): external global-ETF diversifier sleeve ────────────────
+# When the freed weight of a sells-only rebalance has NO eligible held
+# diversifier to go to (the live book's only non-tech BL-buys were an illiquid
+# AIX structured note and a leveraged ETP — see L-13/L-17), the reinvest may
+# propose LIQUID GLOBAL ETFs instead of dumping everything into cash.  Every
+# candidate here is deliberately one of the engine's FACTOR-PANEL ETFs
+# (investment_logic.factor_tickers) — their full 5-year history is fetched on
+# EVERY run, so the simulation prices them with real data at zero extra cost.
+# Ordering per mandate = allocation priority; `asset_key` matches
+# profile_manager limits (gatekeeper._classify_to_asset_key agrees: IEF/EMB →
+# Bonds, EEM → GlobalETFs), so the buys serve the mandate bands — e.g. the
+# MODERATE-AGGRESSIVE profile REQUIRES GlobalETFs 10–40%, and a US-tech-only
+# book sits at 0% (below the lower bound).
+EXTERNAL_DIVERSIFIERS: dict[str, list[dict]] = {
+    "CONSERVATIVE": [
+        {"ticker": "IEF", "panel": "IEF.US", "name": "гособлигации США 7–10 лет", "asset_key": "Bonds"},
+        {"ticker": "EMB", "panel": "EMB.US", "name": "облигации развивающихся рынков (USD)", "asset_key": "Bonds"},
+    ],
+    "MODERATE": [
+        {"ticker": "IEF", "panel": "IEF.US", "name": "гособлигации США 7–10 лет", "asset_key": "Bonds"},
+        {"ticker": "EEM", "panel": "EEM.US", "name": "акции развивающихся рынков", "asset_key": "GlobalETFs"},
+        {"ticker": "EMB", "panel": "EMB.US", "name": "облигации развивающихся рынков (USD)", "asset_key": "Bonds"},
+    ],
+    "AGGRESSIVE": [
+        {"ticker": "EEM", "panel": "EEM.US", "name": "акции развивающихся рынков", "asset_key": "GlobalETFs"},
+        {"ticker": "IEF", "panel": "IEF.US", "name": "гособлигации США 7–10 лет", "asset_key": "Bonds"},
+        {"ticker": "EMB", "panel": "EMB.US", "name": "облигации развивающихся рынков (USD)", "asset_key": "Bonds"},
+    ],
+}
+_EXTERNAL_PER_BUY_CAP = 0.08     # ≤+8пп на внешний ETF — рука диверсифицирует, не концентрирует
+_EXTERNAL_MAX_NAMES   = 3
+
+
+def external_diversifier_candidates(mandate: str) -> list[dict]:
+    """Mandate-ordered external ETF candidates (copies; safe to mutate)."""
+    key = str(mandate or "MODERATE").upper()
+    return [dict(c) for c in EXTERNAL_DIVERSIFIERS.get(key, EXTERNAL_DIVERSIFIERS["MODERATE"])]
+
+
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 def _safe_float(v, default: float = 0.0) -> float:
@@ -257,6 +296,7 @@ def high_priority_target_weights(
         bl_records:       Optional[list[dict]] = None,
         sector_by_ticker: Optional[dict[str, str]] = None,
         reinvest_blocklist: Optional[set] = None,
+        external_candidates: Optional[list[dict]] = None,
 ) -> tuple[dict[str, float], list[str], list[dict]]:
     """
     Build the weight vector the Expected-Effect panel should simulate so the
@@ -385,12 +425,24 @@ def high_priority_target_weights(
                 from finance.leveraged import is_leveraged_etp as _is_letp
             except Exception:                              # pragma: no cover
                 _is_letp = lambda _t: False                # noqa: E731
+            # L-17 (2026-07-19): CONVICTION GATE.  The Effect executes the
+            # PLAN — it must not invent buys the plan itself doesn't back.
+            # The live report reinvested +12пп into a held name whose
+            # 4-Pillar row said HOLD with ALL pillars at 0.0 (an illiquid AIX
+            # note the scorer has no data on; its smoothed price series makes
+            # the optimiser love it — classic appraisal-smoothing bias).  A
+            # held name is a reinvest candidate ONLY when the plan rates it
+            # Buy/Strong Buy — otherwise the freed weight goes to the
+            # external ETF sleeve below, or honestly stays cash.
+            _plan_act = {str(r.get("ticker")): str(r.get("action") or "")
+                         for r in (action_plan_rows or [])}
             buys = [r for r in bl_records
                     if float(r.get("delta_w_pp") or 0.0) > 0.0
                     and str(r.get("ticker")) not in acted
                     and str(r.get("ticker")) in base          # held ⇒ in cov ⇒ simulated
                     and str(r.get("ticker")) not in _block    # модель их честно не симулирует
                     and not _is_letp(str(r.get("ticker")))    # не наращивать плечо
+                    and _plan_act.get(str(r.get("ticker")), "") in ("Buy", "Strong Buy")
                     and _sec_of(r.get("ticker")) not in _blocked]   # DIVERSIFIERS only
             buys.sort(key=lambda r: float(r.get("delta_w_pp") or 0.0), reverse=True)
             buys = buys[:3]
@@ -414,6 +466,39 @@ def high_priority_target_weights(
                     "side":     "buy",
                     "delta_pp": round(add * 100.0, 2),
                 })
+            # L-18: EXTERNAL GLOBAL-ETF SLEEVE.  Freed weight that no held
+            # Buy-rated diversifier can absorb goes into liquid global ETFs
+            # (factor-panel names — real history, real covariance) instead of
+            # 100% cash.  Mandate-ordered candidates; ≤ _EXTERNAL_PER_BUY_CAP
+            # per name so the sleeve diversifies rather than concentrates.
+            # Каждая покупка помечена is_external, чтобы UI/ИИ могли назвать
+            # её по имени («IEF — гособлигации США 7–10 лет»).
+            if remaining > 1e-4 and external_candidates:
+                _ext = [c for c in external_candidates
+                        if str(c.get("ticker") or "").strip()
+                        and str(c.get("ticker")) not in base       # ещё не держим
+                        and str(c.get("ticker")) not in acted
+                        and not _is_letp(str(c.get("ticker")))]
+                for c in _ext[:_EXTERNAL_MAX_NAMES]:
+                    if remaining <= 1e-6:
+                        break
+                    t = str(c["ticker"])
+                    add = min(_EXTERNAL_PER_BUY_CAP, remaining)
+                    if add <= 1e-9:
+                        continue
+                    target[t] = float(base.get(t, 0.0)) + add
+                    remaining -= add
+                    hp_tickers.append(t)
+                    actions.append({
+                        "ticker":      t,
+                        "action":      "Buy",
+                        "side":        "buy",
+                        "delta_pp":    round(add * 100.0, 2),
+                        "is_external": True,
+                        "name":        str(c.get("name") or ""),
+                        "asset_key":   str(c.get("asset_key") or ""),
+                    })
+
             # Whatever can't be reinvested into a diversifier stays as CASH — the
             # honest, mandate-consistent outcome for an over-concentrated book:
             # the panel shows it via lower after-vol / lower IT-share / lower
@@ -556,6 +641,45 @@ def simulate_after_plan(*,
     else:
         struct_tickers = list(cur_w_by_ticker.keys())
         cov_ann        = np.zeros((len(struct_tickers), len(struct_tickers)))
+
+    # L-18 (2026-07-19): EXTEND the covariance with external-sleeve buys.
+    # Target names absent from the held cov but present in the daily panel
+    # (the factor-ETF candidates) get SAMPLE-covariance rows (annualised
+    # ×252 from the joint overlap window); the held×held block stays the
+    # STRUCTURAL matrix byte-for-byte, so every "before" metric (w=0 on the
+    # externals) is unchanged and still equals the cover-page headline.
+    # Without this the external weight would silently fall out of the
+    # weight vector and be simulated as cash — phantom de-risking.
+    _ext_names = [t for t in target_weights
+                  if t not in struct_tickers
+                  and daily_log_returns is not None
+                  and not daily_log_returns.empty
+                  and t in daily_log_returns.columns
+                  and _safe_float(target_weights.get(t), 0.0) > 0.0]
+    if _ext_names:
+        _joint_cols = [t for t in struct_tickers
+                       if t in daily_log_returns.columns] + _ext_names
+        _joint = daily_log_returns[_joint_cols].dropna()
+        # Guard: too short an overlap ⇒ a sample cov would be noise, and a
+        # zero block would simulate the ETF as risk-free (phantom
+        # de-risking).  In that case DON'T extend — the name falls out of
+        # the vectors, i.e. the buy is simulated as cash, never as free lunch.
+        if len(_joint) >= 60:
+            n, e = len(struct_tickers), len(_ext_names)
+            cov_ext = np.zeros((n + e, n + e))
+            cov_ext[:n, :n] = cov_ann
+            _sample = _joint.cov().values * 252.0
+            _idx = {c: i for i, c in enumerate(_joint_cols)}
+            for i_e, te in enumerate(_ext_names):
+                se = _idx[te]
+                for j, tj in enumerate(struct_tickers):
+                    sj = _idx.get(tj)
+                    if sj is not None:
+                        cov_ext[n + i_e, j] = cov_ext[j, n + i_e] = _sample[se, sj]
+                for j_e, tj in enumerate(_ext_names):
+                    cov_ext[n + i_e, n + j_e] = _sample[se, _idx[tj]]
+            struct_tickers = struct_tickers + _ext_names
+            cov_ann = cov_ext
 
     w_before = _weight_vector(struct_tickers, cur_w_by_ticker)
     w_after  = _weight_vector(struct_tickers, target_weights)

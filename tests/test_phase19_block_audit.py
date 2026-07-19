@@ -119,7 +119,10 @@ class HighPriorityTargetTest(unittest.TestCase):
         from finance.simulate import high_priority_target_weights
         cur = {"NVDA": 0.40, "ORCL": 0.30, "GOOGL": 0.20, "BND": 0.10}
         rows = [{"ticker": "NVDA", "action": "Trim", "delta_w_pp": -10.0},
-                {"ticker": "ORCL", "action": "Sell", "delta_w_pp": -10.0}]
+                {"ticker": "ORCL", "action": "Sell", "delta_w_pp": -10.0},
+                # L-17 (раунд 29): реинвест-кандидат обязан иметь план-рейтинг
+                # Buy (здесь — отложенный турновер-капом ряд, Δw=0).
+                {"ticker": "GOOGL", "action": "Buy", "delta_w_pp": 0.0}]
         bl = [{"ticker": "GOOGL", "delta_w_pp": 8.0, "action": "Buy"},   # held → reinvest
               {"ticker": "XYZ",   "delta_w_pp": 5.0, "action": "Buy"}]   # not held → skip
         target, hp, acts = high_priority_target_weights(cur, rows, bl_records=bl)
