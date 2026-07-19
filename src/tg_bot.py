@@ -2107,6 +2107,32 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
         await state.clear()
         return
 
+    # ── M-6 (2026-07-19): БРОКЕР УПАЛ ≠ «УСПЕШНО ПОЛУЧЕН» ────────────────
+    # При сбое Freedom API коннектор возвращает fallback-МОК (шаблонную книгу
+    # BTC-USD/AAPL/KSPI) с маркером _ramp_is_fallback.  Live-инцидент 19.07
+    # 20:27: превью показало этот мок под «✅ Портфель успешно получен» — юзер
+    # увидел ЧУЖИЕ (демо) позиции как свои, и только Шаг 1 упал честно.
+    # Останавливаемся ДО превью; движковый гейт (RealPortfolioRequired на
+    # _ramp_is_fallback в analyze_all) остаётся второй линией обороны.
+    _attrs = getattr(df, "attrs", {}) or {}
+    if _attrs.get("_ramp_is_fallback") or (
+            source != "demo" and _attrs.get("_ramp_is_mock")):
+        logger.error(
+            "PORTFOLIO SOURCE: fallback-mock  user=%s — Freedom API недоступен "
+            "(обрыв/сбой на стороне брокера); превью не показываем, отчёт не строим.",
+            user_id,
+        )
+        _release_user_slot(user_id)
+        await callback.message.answer(
+            "❌ *Freedom Broker сейчас недоступен.*\n\n"
+            "Брокерский API не вернул ваш портфель — обрыв соединения или сбой "
+            "на стороне брокера. Обычно это проходит за 5–15 минут.\n\n"
+            "✅ Токен *не списан*. Попробуйте ещё раз чуть позже.",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        await state.clear()
+        return
+
     # ── Шаг 2 — концьерж-уведомление + превью портфеля ──────────────────
     preview_md = _format_portfolio_preview(df)
     demo_line = ("📋 *Источник: ДЕМО-портфель (шаблон) — отчёт бесплатный.*\n\n"
@@ -2239,16 +2265,17 @@ async def _run_analysis_background(
                 chat_id,
                 "❌ *Шаг 1 — критично:* Freedom API не вернул ни одной серии цен.\n\n"
                 "*Возможные причины:*\n"
+                "• *Временный сбой Freedom API* — сервер обрывает соединения "
+                "(обычно проходит за 5–15 минут); это самая частая причина, "
+                "когда не грузятся даже базовые ETF\n"
                 "• Ваш API-ключ Freedom Broker не имеет доступа к Market Data "
-                "— это **отдельная подписка** на стороне брокера\n"
-                "• Сервер Freedom активно обрывает соединение (`SSL EOF` / "
-                "`RemoteDisconnected` в логах) — обычно так блокируется "
-                "доступ без подписки\n\n"
+                "— это **отдельная подписка** на стороне брокера\n\n"
                 "*Что делать:*\n"
-                "1. Зайдите в Личный кабинет Freedom Broker → API → Market Data\n"
-                "2. Активируйте подписку на исторические данные (если её нет)\n"
-                "3. Либо обратитесь в поддержку брокера: попросите включить "
-                "доступ к `getHloc` для вашего API-ключа",
+                "1. Подождите 5–15 минут и просто повторите запрос\n"
+                "2. Если повторяется: Личный кабинет Freedom Broker → API → "
+                "Market Data — активируйте подписку на исторические данные\n"
+                "3. Либо поддержка брокера: попросите включить доступ к "
+                "`getHloc` для вашего API-ключа",
                 parse_mode=ParseMode.MARKDOWN,
             )
             await refund("no_market_data")

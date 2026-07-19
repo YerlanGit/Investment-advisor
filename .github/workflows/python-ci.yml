@@ -1,4 +1,4 @@
-« name: Python CI
+name: Python CI
 
 # F-9: PR-merge gate.  Until this workflow existed the ONLY automated check
 # was the Cloud Build deploy-time test gate — a PR could merge to main with
@@ -64,5 +64,3 @@ jobs:
       - uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-»
-
