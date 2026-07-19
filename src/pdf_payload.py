@@ -623,6 +623,10 @@ def _build_expected_effect(raw: Optional[dict]) -> dict:
                 "delta_pp": a.get("delta_pp"),
                 "action":   str(a.get("action", "")),
                 "is_cash":  bool(a.get("is_cash")),
+                # L-18: внешний ETF-диверсификатор — читателю нужно имя
+                # («IEF — гособлигации США 7–10 лет»), не голый тикер.
+                "is_external": bool(a.get("is_external")),
+                "name":     str(a.get("name") or ""),
             })
         out["high_priority_actions"] = _mapped
     return out

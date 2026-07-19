@@ -209,7 +209,9 @@ def _map_deep(p: dict, meta: dict) -> dict:
         {"t":    _txt(a, "ticker"),
          "side": _txt(a, "side"),
          "key":  _txt(a, "side_key"),
-         "dw":   _num(a, "delta_pp")}
+         "dw":   _num(a, "delta_pp"),
+         # L-18: имя внешнего ETF-диверсификатора для подписи в EffectGrid
+         "name": _txt(a, "name")}
         for a in _list(ee, "high_priority_actions") if _g(a, "ticker")
     ]
 
