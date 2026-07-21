@@ -1,4 +1,5 @@
 # Секция «Режим» в отчёте DEEP — полный разбор: от математики до дизайна
+<!-- nav | area:report | code:src/finance/regime.py,src/pdf_payload.py | read-before:секция «Рыночный режим» в DEEP -->
 
 > **Дата:** 2026-07-03 · **Референс:** живой DEEP U148046720 от 03.07.2026 (после `bad30ad`,
 > извлечён `window.DEEP.regime`) + код на текущем `main`.

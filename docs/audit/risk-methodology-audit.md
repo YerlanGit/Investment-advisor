@@ -1,4 +1,5 @@
 # Аудит методологии риска и прибыльности: молодые листинги и leveraged ETP
+<!-- nav | area:audit | code:src/finance/leveraged.py,src/finance/inference.py | read-before:правка LETF-методологии / доверительных интервалов -->
 
 > **Дата:** 2026-07-13 · **Тип:** верификационный аудит (verify-first, без правок расчётных модулей)
 > **Эталонные кейсы:** `SPCX` (IPO 2026-06-12, ~20 торговых наблюдений) и `CONL` (2× COIN, daily reset, ER 1.04%)

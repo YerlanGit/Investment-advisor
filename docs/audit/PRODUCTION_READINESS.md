@@ -1,4 +1,5 @@
 # PRODUCTION_READINESS.md — готовность к выкатке пользователям Freedom Broker
+<!-- nav | area:audit | code:(инфра/биллинг/масштаб) | read-before:оценка готовности к запуску и next-steps -->
 
 > **Дата:** 2026-07-05 · **База оценки:** живые отчёты BASE/DEEP 07-04…07-05, AUDIT.md §−16…−0.5,
 > код на `main`+ветка (pytest 552+, Playwright-верификация), сканы `freedom_portfolio/`,

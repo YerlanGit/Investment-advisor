@@ -1,4 +1,5 @@
 # ROADMAP_IBKR_INTEGRATION.md — добавление Interactive Brokers по образцу Freedom API
+<!-- nav | area:roadmap | code:src/finance/broker_api.py | read-before:план второго брокера (BrokerConnector, IBKR) -->
 
 > **Статус:** стратегический анализ / план (не реализовано). **Дата:** 2026-07-16.
 > **Автор:** аудит-раунд по запросу владельца («рассмотри добавление Interactive

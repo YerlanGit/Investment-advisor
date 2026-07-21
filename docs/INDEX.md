@@ -1,4 +1,5 @@
 # INDEX.md — единая карта проекта RAMP (все файлы, функциональные слои, документация)
+<!-- nav | area:index | code:(навигатор репозитория) | read-before:начни ЗДЕСЬ — карта кода→док и структура -->
 
 > **Единственный навигатор репозитория** (2026-07-10: сюда влит корневой
 > `Project_MAP.md` — файл удалён, вся карта живёт здесь).
@@ -282,21 +283,57 @@ Telegram /start
 
 ---
 
-## 6. Быстрый справочник «где менять»
+## 6. Как ориентироваться перед правкой кода (для Claude Code)
+
+> **Рабочий цикл агента:** (1) определи, какой КОД правишь → (2) по таблице
+> ниже открой соответствующий ДОК и прочитай его перед изменением → (3) правь
+> код и `src/`+`tests/` вместе → (4) отметь крупное изменение в `audit/AUDIT.md`.
+
+**Быстрый способ найти нужный док из кода** — у каждого дока в строке 2 стоит
+машиночитаемый якорь:
+```
+<!-- nav | area:<папка> | code:<пути> | read-before:<когда читать> -->
+```
+Ищи по коду, который собрался править:
+```bash
+grep -rl "code:.*simulate.py" docs/      # → какие доки описывают этот файл
+grep -rn "read-before:" docs/            # → все триггеры «прочитай перед…»
+grep -rl "area:math" docs/               # → все доки одной подсистемы
+```
+
+### 6.1 Обратная карта: КОД → сначала прочитай ДОК
+
+| Правишь код… | Прочитай сначала |
+|---|---|
+| `src/finance/investment_logic.py` · `scoring.py` · `black_litterman.py` · `regime.py` · `stress.py` | **`math/MATH_ENGINE.md`** (SSOT формул) — обновлять ВМЕСТЕ с математикой |
+| `src/finance/leveraged.py` · `simulate.py` (плечо/молодые бумаги) | `math/METHODOLOGY_SPARSE_AND_LEVERAGED.md` + `audit/risk-methodology-audit.md` |
+| `src/finance/smart_money.py` | `math/SMART_MONEY.md` |
+| `src/finance/regime.py` (секция «Режим») | `report/REGIME_SECTION_DEEP.md` |
+| `src/pdf_payload.py` · `premium_payload.py` (данные секции) | **`report/REPORT_SECTIONS.md`** (ключ→builder→движок→шаблон) |
+| `design/premium_v2/*.jsx` (вид отчёта) | `report/PREMIUM_DESIGN.md` — после правки ОБЯЗАТЕЛЬНО `design/premium_v2/build.sh` |
+| `src/ai_narrative.py` · `SYSTEM_PROMPT.md` (ИИ-тексты) | `report/REPORT_SECTIONS.md §5` + `llm/LLM_STRATEGY_MULTILINGUAL.md` |
+| `src/tg_bot.py` · `entrypoint.py` (флоу бота) | `bot/TELEGRAM_BOT.md` |
+| `src/db_tokenomics.py` · цены токенов | `business/ECONOMICS.md` |
+| `src/agent/rag_engine.py` · `cloud_function/` · `scripts/ingest_bank_report.py` | `rag/RAG_INGESTION.md` (+ `rag/RAG_TROUBLESHOOTING.md` при пустой базе) |
+| `src/finance/scenario_engine.py` · `scenario_report.py` | `roadmap/ROADMAP_SCENARIO_TIER.md` |
+| `src/finance/broker_api.py` (второй брокер) | `roadmap/ROADMAP_IBKR_INTEGRATION.md` |
+| `cloud_function/` · инфра/сеть | `infra/INFRA_NETWORKING.md` |
+
+### 6.2 Обратно: где менять КОД для задачи
 
 | Хочу изменить… | Иду в… |
 |---|---|
-| Флоу бота / кнопки / тарифы | `src/tg_bot.py` (→ `docs/bot/TELEGRAM_BOT.md`) |
-| Формулу риска / фактор / CVaR | `src/finance/investment_logic.py` |
+| Флоу бота / кнопки / тарифы | `src/tg_bot.py` (→ `bot/TELEGRAM_BOT.md`) |
+| Формулу риска / фактор / CVaR | `src/finance/investment_logic.py` (→ `math/MATH_ENGINE.md`) |
 | Стресс-сценарии / шоки | `src/finance/stress.py` (F-1: raw-каталог residualize-ится автоматически) |
 | Скоринг 4-Pillar | `src/finance/scoring.py` |
-| Секцию отчёта (данные) | `src/pdf_payload.py` (карта: `docs/report/REPORT_SECTIONS.md`) |
+| Секцию отчёта (данные) | `src/pdf_payload.py` (карта: `report/REPORT_SECTIONS.md`) |
 | Вид отчёта (дизайн) | `design/premium_v2/*.jsx` → `build.sh` → `src/premium_assets/` (или `src/templates/*_v3.html`) |
 | Сценарный тир | `src/finance/scenario_report.py` + `templates/report_scenario_v3.html` |
 | ИИ-тексты / промпт | `src/ai_narrative.py` + `SYSTEM_PROMPT.md` |
-| Токеномику | `src/db_tokenomics.py` |
+| Токеномику | `src/db_tokenomics.py` (→ `business/ECONOMICS.md`) |
 | Валюты / FX / RFR | `src/finance/currency.py` + `src/services/fx_feed.py` |
-| Загрузку банковских PDF в RAG | `scripts/ingest_bank_report.py` (→ `docs/rag/RAG_INGESTION.md`) |
+| Загрузку банковских PDF в RAG | `scripts/ingest_bank_report.py` (→ `rag/RAG_INGESTION.md`) |
 | Lookback / окно истории | `HISTORY_LOOKBACK_DAYS` env (default 1825) → `investment_logic.get_market_data` |
 
 ---

@@ -1,4 +1,5 @@
 # MCP_STRATEGY.md — Стратегия перехода RAMP-бота на Model Context Protocol
+<!-- nav | area:llm | code:(стратегия) | read-before:направление MCP (потреблять data-MCP, экспонировать движок) -->
 
 > **Версия:** 2026-06-09 · Автор: Lead AI Architect
 > **Контекст:** дополняет `AUDIT.md`. Фокус сохранён на **рве проекта** — математическое ядро (Эйлер-декомпозиция, Black-Litterman, Bootstrap-CVaR, выпуклые стресс-тесты) и адаптация под **KASE / Freedom Broker (Tradernet)**.

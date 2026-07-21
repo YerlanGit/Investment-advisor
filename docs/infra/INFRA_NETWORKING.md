@@ -1,4 +1,5 @@
 # INFRA_NETWORKING.md — прод-инциденты Cloud Run: WAF-блок цен + segfault RAG-ингеста
+<!-- nav | area:infra | code:cloud_function/,src/entrypoint.py | read-before:прод-инциденты Cloud Run, сеть, egress -->
 
 > Диагностика и фиксы двух прод-ошибок (2026-07-08). Обе — инфраструктурные
 > (лимиты/сеть Cloud Run), а не баги логики; код-путь уже деградирует мягко.

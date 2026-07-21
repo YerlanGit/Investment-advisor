@@ -1,4 +1,5 @@
 # RAG_TROUBLESHOOTING.md — почему «Bank RAG» пуст, хотя PDF загружены в GCS
+<!-- nav | area:rag | code:src/entrypoint.py,src/agent/rag_engine.py | read-before:runbook «RAG пуст, хотя PDF загружены» -->
 
 Пошаговый runbook: PDF банков лежат в Google Cloud Storage, но отчёт всё равно показывает
 `✗ RAG: банк. отчёты` / `Bank RAG (выдержки) · база: 0 отчётов`. Ниже — как за 8 шагов найти

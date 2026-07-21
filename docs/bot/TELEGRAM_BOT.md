@@ -1,4 +1,5 @@
 # TELEGRAM_BOT.md — полный флоу телеграм-бота: от `/start` до отчёта
+<!-- nav | area:bot | code:src/tg_bot.py,src/entrypoint.py | read-before:онбординг, тиры, токеномика, колбэки, FSM, /mandate -->
 
 > Назначение: единая карта поведения бота (`src/tg_bot.py`, `src/entrypoint.py`) —
 > что происходит на каждом шаге, какие состояния FSM, какие колбэки, где списываются

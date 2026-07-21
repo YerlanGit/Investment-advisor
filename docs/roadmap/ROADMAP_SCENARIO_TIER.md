@@ -1,4 +1,5 @@
 # ROADMAP_SCENARIO_TIER.md — тир «Scenario Analysis»: Full Framework
+<!-- nav | area:roadmap | code:src/finance/scenario_engine.py,src/finance/scenario_report.py | read-before:сценарный тир (детерминированный, 0 LLM) -->
 
 > Фаза 4 · Блок 2 · v2.1 (2026-07-06): интегрирован полный пользовательский фреймворк
 > «Portfolio Scenario Analysis» (7 шагов + worked example BUY NVDA/TSM/XOM/GLD //

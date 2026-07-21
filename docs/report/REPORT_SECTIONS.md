@@ -1,4 +1,5 @@
 # REPORT_SECTIONS.md — карта секций отчётов BASE и DEEP
+<!-- nav | area:report | code:src/pdf_payload.py,src/premium_payload.py,design/premium_v2/ | read-before:ЛЮБАЯ секция отчёта — карта ключ→builder→движок→шаблон -->
 
 > Назначение: **изменить любую секцию отчёта за один заход** — найти секцию в этом файле,
 > открыть builder и шаблон/JSX, поправить, прогнать тест. Документ состоит из трёх слоёв:

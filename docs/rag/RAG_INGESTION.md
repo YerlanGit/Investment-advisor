@@ -1,4 +1,5 @@
 # RAG_INGESTION.md — загрузка аналитических отчётов банков в базу (ChromaDB)
+<!-- nav | area:rag | code:src/agent/rag_engine.py,cloud_function/,scripts/ingest_bank_report.py | read-before:загрузка банковских PDF в ChromaDB -->
 
 Пошаговая инструкция, как загрузить банковские аналитические записки (Goldman Sachs / Morgan
 Stanley / JPMorgan / Barclays / …) в RAG-базу так, чтобы бот их **читал, ранжировал по свежести и
