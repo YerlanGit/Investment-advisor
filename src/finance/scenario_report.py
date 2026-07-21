@@ -3,7 +3,7 @@
 Scenario-tier report builder — превращает уже посчитанный `results`
 (`analyze_all`) в самодостаточный payload для шаблона `report_scenario_v3.html`.
 
-Дизайн (docs/ROADMAP_SCENARIO_TIER.md):
+Дизайн (docs/roadmap/ROADMAP_SCENARIO_TIER.md):
   • Панель A — «Сценарная диагностика портфеля»: 5 core-метрик через движок
     (ковариационная σ_p, RFR-Sharpe, Σwβ), Euler-MCTR таблица вкладов в риск,
     выживаемость в 3 макро-режимах (группировка существующих 7 шоков),

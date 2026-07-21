@@ -4,7 +4,7 @@ Premium V2 data mapper (Adapter / anti-corruption layer).
 Translates the engine's "heavy" v3 report payload (≈86 keys produced by
 pdf_payload.build_payload) into the STRICT design-data contracts the Premium V2
 React components consume — 34 keys for DEEP (B1 2026-07-17:
-+benchmarkName/benchmarkTicker), 13 for BASE (see docs/PREMIUM_DESIGN.md
++benchmarkName/benchmarkTicker), 13 for BASE (see docs/report/PREMIUM_DESIGN.md
 §3-4 and design/premium_v2/*-data.sample.json).
 
 Strict isolation (Separation of Concerns):

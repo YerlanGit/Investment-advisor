@@ -3,7 +3,7 @@ Premium V2 report renderer — assembles a self-contained DEEP/BASE premium repo
 HTML from the pre-built static assets (compiled React + compiled JSX components +
 compiled Tailwind CSS) plus an injected data object.
 
-Design source: design/premium_v2/ (React + Tailwind, see docs/PREMIUM_DESIGN.md).
+Design source: design/premium_v2/ (React + Tailwind, see docs/report/PREMIUM_DESIGN.md).
 The component bundles are DATA-FREE; the engine's data object is injected at
 render time as `window.DEEP` / `window.PORTFOLIO`, so one static build serves
 every portfolio.  No CDN, no runtime Babel — only Google Fonts is external

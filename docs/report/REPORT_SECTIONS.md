@@ -250,7 +250,7 @@ analyze_all()                      движок · src/finance/investment_logic.
 
 > Здесь видно, **как менялся проект**: каждый раунд — живой прод-отчёт, найденные
 > дефекты логики (Было), фиксы (Стало) и тесты. Текущее состояние секций — в §1–§11;
-> этот журнал объясняет «почему так». Полные разборы: `docs/AUDIT.md` §−24…§−28.
+> этот журнал объясняет «почему так». Полные разборы: `docs/audit/AUDIT.md` §−24…§−28.
 
 ### B1 «Мандат → Отчёт» (2026-07-17) — AUDIT §−24
 
@@ -341,7 +341,7 @@ analyze_all()                      движок · src/finance/investment_logic.
 
 **Токеномика:** `tg_bot.TIER_COST` = base 1 · scenario 1 · deep 2; **1 токен = 2 500 ₸,
 пакет 10 = 25 000 ₸** (2026-07-17; SSOT — `TOKEN_PRICE_KZT`/`TOKEN_PACK_PRICE_KZT`,
-экономика — `docs/ECONOMICS.md`). Демо-отчёты бесплатны, в т.ч. scenario из демо-кэша
+экономика — `docs/business/ECONOMICS.md`). Демо-отчёты бесплатны, в т.ч. scenario из демо-кэша
 (маркер `_demo_portfolio`). Кнопка тира в `kb_analysis_choice` + inline-CTA
 `scenario:cached` под BASE/DEEP (кэш `results` per-user).
 **Как менять:** математика → `finance/scenario_engine.py`; сборка → `scenario_report.py`;

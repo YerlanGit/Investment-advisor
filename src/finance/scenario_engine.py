@@ -1,7 +1,7 @@
 """
 Scenario Analysis engine — Панель A (forward framework) + Панель B (backtest).
 
-Дизайн: docs/ROADMAP_SCENARIO_TIER.md (v2, 7-шаговый фреймворк владельца).
+Дизайн: docs/roadmap/ROADMAP_SCENARIO_TIER.md (v2, 7-шаговый фреймворк владельца).
 Принципы: детерминизм, ZERO LLM-API, переиспользование конвенций движка и
 Do-No-Harm — модуль АДДИТИВЕН: ничего в investment_logic / scoring_orchestrator
 не импортирует его, базовый отчёт считается байт-идентично прежнему.

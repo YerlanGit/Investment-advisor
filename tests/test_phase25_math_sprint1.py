@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Sprint-1 math-correctness fixes (audit docs/AUDIT_360_2026-07-10.md):
+Sprint-1 math-correctness fixes (audit docs/audit/AUDIT_360_2026-07-10.md):
 
   F-1  stress shocks are transformed into the RESIDUAL factor space when the
        engine orthogonalizes its factors — the stress table is INVARIANT to

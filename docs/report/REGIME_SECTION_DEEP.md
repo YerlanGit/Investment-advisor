@@ -33,7 +33,7 @@ ETF-моментум (§6).
 | Квадрант-чарт | `design/premium_v2/deep/deep-charts.jsx:302-344` | `RegimeQuadrant` SVG |
 | Классический v3 (fallback) | `src/templates/report_deep_v3.html:2940+` | лист 4, SVG-квадрант 625 px/unit |
 | CoVe-строка | `src/finance/data_lineage.py:291-307` | «Регим-классификатор · ok · {режим} · confidence N%» |
-| Документация | `docs/REPORT_PAGES_DEEP.md` §4.A–4.E | спецификация листа 4 |
+| Документация | `docs/report/REPORT_PAGES_DEEP.md` §4.A–4.E | спецификация листа 4 |
 
 Поток данных:
 
@@ -245,7 +245,7 @@ Live: `stance=diverges`, 6 сигналов (2 контр: «ВВП замедл
 
 `tg_bot._fetch_rag_context` делает отдельный запрос в ChromaDB
 (`Market regime {label} GDP growth recession…`) и берёт до 3 строк ≥30 символов. Сейчас
-**всегда пусто** — база RAG не наполнена (см. `docs/BANK_RAG_COVE_DIAGNOSIS.md`); кроме того,
+**всегда пусто** — база RAG не наполнена (см. `docs/rag/BANK_RAG_COVE_DIAGNOSIS.md`); кроме того,
 ключ payload'а нигде не рендерится (dead key, R-6 в §6).
 
 ---
