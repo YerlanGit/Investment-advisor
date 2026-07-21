@@ -1,4 +1,5 @@
 # SMART_MONEY.md — слой инсайдеров / Smart Money (SEC Form 4)
+<!-- nav | area:math | code:src/finance/smart_money.py | read-before:инсайдерский слой (SEC Form 4) -->
 
 > **Статус:** архитектура внедрена и **рендерится в DEEP-отчёте** (секция «Smart Money ·
 > Инсайдерские сделки»). Слой **gated**: без флага показывает состояние «источник не

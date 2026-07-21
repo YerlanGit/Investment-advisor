@@ -17,7 +17,7 @@ Economics: Batches run at 50% of standard token price and most finish well
 under the 1h target (24h max). Combined with prompt caching on the shared
 25 KB system prompt, a nightly run of N planned reports costs roughly
   N · (cached_system·0.1 + user_tokens) · 0.5
-vs the synchronous path's full price — see docs/MCP_STRATEGY.md §Economics.
+vs the synchronous path's full price — see docs/llm/MCP_STRATEGY.md §Economics.
 """
 from __future__ import annotations
 

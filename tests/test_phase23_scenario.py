@@ -1,5 +1,5 @@
 """
-Phase 23 — Scenario Analysis engine (Панели A/B, docs/ROADMAP_SCENARIO_TIER.md v2).
+Phase 23 — Scenario Analysis engine (Панели A/B, docs/roadmap/ROADMAP_SCENARIO_TIER.md v2).
 
 Hermetic: синтетические цены, ни сети, ни LLM.  Пины: ковариационная vol
 (строже gross), RFR-Sharpe, funding decision-tree, MCTR-sizing капы,

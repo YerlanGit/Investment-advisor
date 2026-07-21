@@ -1,4 +1,5 @@
 # Диагностика: «Bank RAG (выдержки)» без галочки + строки «!» в Chain-of-Verification
+<!-- nav | area:rag | code:src/finance/data_lineage.py,src/agent/rag_engine.py | read-before:диагностика Bank-RAG/CoVe (архив) -->
 
 > **Дата анализа:** 2026-07-03 · **Анализируемый отчёт:** DEEP U148046720 от 03.07.2026 15:20 UTC+5
 > (после коммита `bad30ad`, извлечён `window.DEEP` из живого HTML).

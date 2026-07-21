@@ -1,8 +1,9 @@
 # REPORT_PAGES_BASE.md — постраничный разбор BASE-отчёта
+<!-- nav | area:report | code:src/templates/,design/premium_v2/ | read-before:постраничный разбор BASE-отчёта -->
 
 > Справочник для инженера: **что показано на каждой странице BASE-отчёта, откуда берутся
 > числа, как считается математика и как читать результат.** Парный файл по DEEP-тиру —
-> `docs/REPORT_PAGES_DEEP.md`. Карта секций (секция → builder → движок) — `REPORT_SECTIONS.md`;
+> `docs/report/REPORT_PAGES_DEEP.md`. Карта секций (секция → builder → движок) — `REPORT_SECTIONS.md`;
 > посекционный аудит живых отчётов — `REPORT_SECTIONS_AUDIT.md`.
 
 ## Поток данных

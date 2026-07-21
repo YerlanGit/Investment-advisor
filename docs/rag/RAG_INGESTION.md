@@ -1,4 +1,5 @@
 # RAG_INGESTION.md — загрузка аналитических отчётов банков в базу (ChromaDB)
+<!-- nav | area:rag | code:src/agent/rag_engine.py,cloud_function/,scripts/ingest_bank_report.py | read-before:загрузка банковских PDF в ChromaDB -->
 
 Пошаговая инструкция, как загрузить банковские аналитические записки (Goldman Sachs / Morgan
 Stanley / JPMorgan / Barclays / …) в RAG-базу так, чтобы бот их **читал, ранжировал по свежести и
@@ -129,7 +130,7 @@ python scripts/ingest_bank_report.py --list
 
 ## 5. Частые проблемы
 
-> **PDF залиты, но отчёт всё равно пуст?** → полный runbook: **`docs/RAG_TROUBLESHOOTING.md`**.
+> **PDF залиты, но отчёт всё равно пуст?** → полный runbook: **`docs/rag/RAG_TROUBLESHOOTING.md`**.
 > **Самый надёжный путь (07-04):** просто положите PDF в INBOX и **перезапустите бот** — он сам
 > заингестит их в контейнере (`entrypoint._boot_ingest_from_inbox`, путь B), минуя Cloud
 > Function/Eventarc/регион. Выключатель `RAG_BOOT_INGEST=0`.
@@ -151,4 +152,4 @@ python scripts/ingest_bank_report.py --list
 
 **Файлы:** `src/agent/rag_engine.py` (движок RAG), `scripts/ingest_bank_report.py` (админ-CLI),
 `cloud_function/` (авто-ингест по GCS-триггеру), `src/entrypoint.py` (синк ChromaDB из GCS на буте),
-`docs/RAG_TROUBLESHOOTING.md` (диагностика пустой базы).
+`docs/rag/RAG_TROUBLESHOOTING.md` (диагностика пустой базы).

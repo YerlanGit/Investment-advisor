@@ -1,4 +1,5 @@
 # INDEX.md — единая карта проекта RAMP (все файлы, функциональные слои, документация)
+<!-- nav | area:index | code:(навигатор репозитория) | read-before:начни ЗДЕСЬ — карта кода→док и структура -->
 
 > **Единственный навигатор репозитория** (2026-07-10: сюда влит корневой
 > `Project_MAP.md` — файл удалён, вся карта живёт здесь).
@@ -63,7 +64,7 @@ Telegram /start
 ### 2.1 Бот / точка входа
 | Файл | Функция |
 |---|---|
-| `tg_bot.py` | **Весь Telegram-флоу**: онбординг-FSM, 3 тира, токеномика, колбэки, single-flight, фоновый анализ, SVG-чарты, admin `/grant`. Только UI/роутинг — серии считает движок. → `docs/TELEGRAM_BOT.md` |
+| `tg_bot.py` | **Весь Telegram-флоу**: онбординг-FSM, 3 тира, токеномика, колбэки, single-flight, фоновый анализ, SVG-чарты, admin `/grant`. Только UI/роутинг — серии считает движок. → `docs/bot/TELEGRAM_BOT.md` |
 | `entrypoint.py` | Boot Cloud Run: health-сервер + бот (long-polling) + синк ChromaDB из GCS + boot-ingest RAG (daemon-поток). |
 | `db_tokenomics.py` | Токеномика (async SQLite, gcsfuse-safe): `init_user` (+10 welcome, exactly-once), `deduct_tokens`/`credit_tokens` (BEGIN IMMEDIATE), профили, снапшоты отчётов (MoM-дельта), fail-fast проверка персистентности (M-9). |
 | `profile_manager.py` | Риск-профили онбординга, мандатные лимиты классов активов, список бенчмарков. |
@@ -95,7 +96,7 @@ Telegram /start
 |---|---|
 | `investment_logic.py` | **Ядро MAC3**: `analyze_all`, Ridge-беты, ковариация EWMA(63)⊕Ledoit-Wolf + PSD-проекция, иерархическая ортогонализация (F-1: экспорт β̂ child→parent), Euler-декомпозиция, bootstrap-CVaR (SHA-256 seed), Marginal VaR, sparse-guard окна (F-6), форвардная E[r] = β·μ без альфы + кламп [−50%,+100%] + гейт панели на окно ≥252 дней (F-14), загрузка цен (lookback 1825). |
 | `stress.py` | Параметрические стресс-сценарии: β×шок, convexity cap (20%→асимптота 35%), `residualize_shocks` (F-1 — маппинг raw-шоков в residual-пространство), path-dependent импакт реестровых LETF `(1+X_u)^L·exp(−½L(L−1)σ_u²·63)−1` (P-7). |
-| `leveraged.py` | **P-1 (2026-07-13)**: реестр daily-reset leveraged/inverse ETP {L, базовый актив, expense ratio} (CONL=2× COIN…), API `leverage_of`/`etp_info`/`is_leveraged_etp`, контрактный drag −½L(L−1)σ_u² и fee −ER/252 раздельно, path-формула для стресса; env `LEVERAGED_ETP_EXTRA`/`LEVERAGED_ETP_PARAMS`. Stdlib-only. → `docs/METHODOLOGY_SPARSE_AND_LEVERAGED.md §6` |
+| `leveraged.py` | **P-1 (2026-07-13)**: реестр daily-reset leveraged/inverse ETP {L, базовый актив, expense ratio} (CONL=2× COIN…), API `leverage_of`/`etp_info`/`is_leveraged_etp`, контрактный drag −½L(L−1)σ_u² и fee −ER/252 раздельно, path-формула для стресса; env `LEVERAGED_ETP_EXTRA`/`LEVERAGED_ETP_PARAMS`. Stdlib-only. → `docs/math/METHODOLOGY_SPARSE_AND_LEVERAGED.md §6` |
 | `inference.py` | **P-5 (2026-07-13)**: ДИ малых окон без scipy — χ²-ДИ волатильности (Wilson–Hilferty; T=20→×[0.76,1.46]) и Fisher z-ДИ корреляции (ρ̂=0.3, n=20→[−0.16,0.66]); питает `volatility_ci` и `max_corr_ci95`. Stdlib-only. |
 | `scoring.py` | 4-Pillar скоры F/V/T/C, robust-z (MAD), composite risk 0-100 (SSOT), классификатор классов активов, hotspot-порог. |
 | `scoring_orchestrator.py` | Оркестратор 4-Pillar: сектора, динамические SEC-когорты, действия Buy/Hold/Trim/Sell. |
@@ -195,79 +196,144 @@ Telegram /start
 
 ---
 
-## 5. Документация (`docs/`) — по темам и значимости
+## 5. Документация (`docs/`) — по функциональным папкам
+
+> **Структура (2026-07-19): документы разложены по подпапкам ПО ФУНКЦИОНАЛУ** —
+> чтобы при правке подсистемы открывать только её каталог. Раскладка на диске
+> совпадает с группировкой ниже. Статусы: **🟢 живой** · **📌 справочник** ·
+> **🗺 roadmap** · **🗄 снимок**.
+>
+> ```
+> docs/
+> ├── INDEX.md            ← этот файл (единый навигатор, остаётся в корне docs/)
+> ├── audit/              аудиты, готовность, посекционные снимки
+> ├── math/              квант-движок: формулы, методология, сигналы
+> ├── report/            отчёты: секции, страницы BASE/DEEP, дизайн Premium
+> ├── rag/               банковская аналитика в ChromaDB (ingest/troubleshoot)
+> ├── llm/               LLM/MCP-стратегия, кросс-язычность
+> ├── roadmap/           планы фич (scenario-тир, data-resilience, IBKR)
+> ├── bot/               Telegram-флоу
+> ├── infra/             инфраструктура Cloud Run, сеть, инциденты
+> └── business/          экономика и токеномика
+> ```
+> **Runtime-загружаемые доки НЕ в `docs/`** — `SYSTEM_PROMPT.md`, `README.md`,
+> `CLAUDE.md` остаются в корне репозитория (их читает код / Dockerfile).
 
 ### Tier-0 (начать отсюда)
 | Файл | Статус | Назначение |
 |---|---|---|
 | [`../README.md`](../README.md) | 📌 | Что такое RAMP, пайплайн Engine→Adapter→Template, запуск. |
 | [`../CLAUDE.md`](../CLAUDE.md) | 🟢 | Инструкции для агентов: стек, верификация, форма репозитория. |
-| [`TELEGRAM_BOT.md`](TELEGRAM_BOT.md) | 🟢 | **Полный флоу бота `/start`→отчёт**: онбординг, 3 тира, токеномика, колбэки, FSM. |
-| [`REPORT_SECTIONS.md`](REPORT_SECTIONS.md) | 🟢 | **Карта секций отчётов** BASE/DEEP/Scenario: ключ→builder→движок→шаблон. |
-| [`MATH_ENGINE.md`](MATH_ENGINE.md) | 📌 | **Все формулы квант-движка** (2026-07-14): факторная модель, риск/ДИ, форвард+LETF-drag, стресс, скоринг, BL, режим, сценарный тир — что считает, зачем, взаимосвязи, guards; сверено с кодом по `модуль::функция`. |
+| [`bot/TELEGRAM_BOT.md`](bot/TELEGRAM_BOT.md) | 🟢 | **Полный флоу бота `/start`→отчёт**: онбординг, 3 тира, токеномика, колбэки, FSM. |
+| [`report/REPORT_SECTIONS.md`](report/REPORT_SECTIONS.md) | 🟢 | **Карта секций отчётов** BASE/DEEP/Scenario: ключ→builder→движок→шаблон. |
+| [`math/MATH_ENGINE.md`](math/MATH_ENGINE.md) | 📌 | **Все формулы квант-движка**: факторная модель, риск/ДИ, форвард+LETF-drag, стресс, скоринг, BL, режим, сценарный тир — что считает, зачем, guards; сверено с кодом по `модуль::функция`. |
 
-### Отчёты: дизайн и содержание
+### `audit/` — аудиты и готовность
 | Файл | Статус | Назначение |
 |---|---|---|
-| [`PREMIUM_DESIGN.md`](PREMIUM_DESIGN.md) | 📌 | Дизайн-система Premium V2 (cream/gold/ink), контракты данных, сборка бандлов. |
-| [`REPORT_PAGES_BASE.md`](REPORT_PAGES_BASE.md) | 📌 | Постраничный разбор BASE-отчёта. |
-| [`REPORT_PAGES_DEEP.md`](REPORT_PAGES_DEEP.md) | 📌 | Постраничный разбор DEEP-отчёта (факторы, 4-Pillar, стресс, режим, CoVe). |
-| [`REGIME_SECTION_DEEP.md`](REGIME_SECTION_DEEP.md) | 📌 | Глубокий разбор секции «Рыночный режим». |
-| [`REPORT_SECTIONS_AUDIT.md`](REPORT_SECTIONS_AUDIT.md) | 🗄 | Посекционный аудит живых отчётов (снимок 06-14). |
+| [`audit/AUDIT.md`](audit/AUDIT.md) | 🟢 | Живой институциональный аудит: находки, Было/Стало, дашборд (§−1…§−30). |
+| [`audit/PRODUCTION_READINESS.md`](audit/PRODUCTION_READINESS.md) | 🟢 | Пер-подсистемные оценки готовности + GA-блокеры. |
+| [`audit/risk-methodology-audit.md`](audit/risk-methodology-audit.md) | 🗄 | Аудит риск-методологии (2026-07-13, P-1…P-8). |
+| [`audit/AUDIT_360_2026-07-10.md`](audit/AUDIT_360_2026-07-10.md) | 🗄 | 360°-аудит на c20ef1c: дашборд оценок, инвентаризация формул, F-1…F-13. |
+| [`audit/REPORT_SECTIONS_AUDIT.md`](audit/REPORT_SECTIONS_AUDIT.md) | 🗄 | Посекционный аудит живых отчётов (снимок 06-14). |
 
-### RAG (банковская аналитика в ChromaDB)
+### `math/` — квант-движок и методология
 | Файл | Статус | Назначение |
 |---|---|---|
-| [`RAG_INGESTION.md`](RAG_INGESTION.md) | 📌 | Как загрузить банковские PDF в RAG-базу (пошагово). |
-| [`RAG_TROUBLESHOOTING.md`](RAG_TROUBLESHOOTING.md) | 📌 | Runbook «RAG пуст, хотя PDF загружены» — 8 шагов + boot-ingest. |
-| [`BANK_RAG_COVE_DIAGNOSIS.md`](BANK_RAG_COVE_DIAGNOSIS.md) | 🗄 | Диагностика Bank-RAG/CoVe (07-03, рекомендации реализованы). |
+| [`math/MATH_ENGINE.md`](math/MATH_ENGINE.md) | 📌 | Полный справочник формул движка (см. Tier-0). |
+| [`math/METHODOLOGY_SPARSE_AND_LEVERAGED.md`](math/METHODOLOGY_SPARSE_AND_LEVERAGED.md) | 📌 | Молодые бумаги (SPCX) и плечевые ETP (CONL) в риск-метриках: композитная конвенция, drag, roadmap пер-активных окон/Vasicek. |
+| [`math/SMART_MONEY.md`](math/SMART_MONEY.md) | 📌 | Архитектура Smart-Money / инсайдеры (SEC Form 4). |
 
-### LLM / стратегия
+### `report/` — отчёты: дизайн и содержание
 | Файл | Статус | Назначение |
 |---|---|---|
-| [`MCP_STRATEGY.md`](MCP_STRATEGY.md) | 🗺 | MCP/LLM-стратегия: потреблять data-MCP, экспонировать риск-движок. |
-| [`LLM_STRATEGY_MULTILINGUAL.md`](LLM_STRATEGY_MULTILINGUAL.md) | 🗺 | Экономика DEEP-вызова, prompt-caching, кросс-язычный RAG. |
-| [`../SYSTEM_PROMPT.md`](../SYSTEM_PROMPT.md) | 📌 | Системный промпт AI-нарратива (в корне — рантайм-загрузка). |
+| [`report/REPORT_SECTIONS.md`](report/REPORT_SECTIONS.md) | 🟢 | Карта секций отчётов (см. Tier-0). |
+| [`report/PREMIUM_DESIGN.md`](report/PREMIUM_DESIGN.md) | 📌 | Дизайн-система Premium V2 (cream/gold/ink), контракты данных, сборка бандлов. |
+| [`report/REPORT_PAGES_BASE.md`](report/REPORT_PAGES_BASE.md) | 📌 | Постраничный разбор BASE-отчёта. |
+| [`report/REPORT_PAGES_DEEP.md`](report/REPORT_PAGES_DEEP.md) | 📌 | Постраничный разбор DEEP-отчёта (факторы, 4-Pillar, стресс, режим, CoVe). |
+| [`report/REGIME_SECTION_DEEP.md`](report/REGIME_SECTION_DEEP.md) | 📌 | Глубокий разбор секции «Рыночный режим». |
 
-### Roadmaps
+### `rag/` — банковская аналитика (ChromaDB)
 | Файл | Статус | Назначение |
 |---|---|---|
-| [`ROADMAP_SCENARIO_TIER.md`](ROADMAP_SCENARIO_TIER.md) | 🗺 | Тир Scenario Analysis. **Ядро + UI/тир реализованы (2026-07-07).** |
-| [`ROADMAP_DATA_RESILIENCE.md`](ROADMAP_DATA_RESILIENCE.md) | 🗺 | Устойчивость данных. **§4-б lookback 730→1825 ВКЛЮЧЁН (2026-07-07).** |
-| [`ROADMAP_IBKR_INTEGRATION.md`](ROADMAP_IBKR_INTEGRATION.md) | 🗺 | Второй брокер Interactive Brokers по образцу Freedom. Абстракция `BrokerConnector`, read-only, OAuth Web API. **Спроектирован, не начат (2026-07-16).** |
+| [`rag/RAG_INGESTION.md`](rag/RAG_INGESTION.md) | 📌 | Как загрузить банковские PDF в RAG-базу (пошагово). |
+| [`rag/RAG_TROUBLESHOOTING.md`](rag/RAG_TROUBLESHOOTING.md) | 📌 | Runbook «RAG пуст, хотя PDF загружены» — 8 шагов + boot-ingest. |
+| [`rag/BANK_RAG_COVE_DIAGNOSIS.md`](rag/BANK_RAG_COVE_DIAGNOSIS.md) | 🗄 | Диагностика Bank-RAG/CoVe (07-03, рекомендации реализованы). |
 
-### Домены / подсистемы
+### `llm/` — LLM / MCP-стратегия
 | Файл | Статус | Назначение |
 |---|---|---|
-| [`METHODOLOGY_SPARSE_AND_LEVERAGED.md`](METHODOLOGY_SPARSE_AND_LEVERAGED.md) | 📌 | Молодые бумаги (SPCX) и плечевые ETP (CONL) в риск-метриках: композитная конвенция, drag, roadmap пер-активных окон/Vasicek. |
-| [`SMART_MONEY.md`](SMART_MONEY.md) | 📌 | Архитектура Smart-Money / инсайдеры (SEC Form 4). |
-| [`PRODUCTION_READINESS.md`](PRODUCTION_READINESS.md) | 🟢 | Пер-подсистемные оценки готовности + GA-блокеры. |
-| [`INFRA_NETWORKING.md`](INFRA_NETWORKING.md) | 🟢 | Прод-инциденты Cloud Run: WAF-блок цен (статический egress) + segfault RAG-ингеста. Команды фикса. |
+| [`llm/MCP_STRATEGY.md`](llm/MCP_STRATEGY.md) | 🗺 | MCP/LLM-стратегия: потреблять data-MCP, экспонировать риск-движок. |
+| [`llm/LLM_STRATEGY_MULTILINGUAL.md`](llm/LLM_STRATEGY_MULTILINGUAL.md) | 🗺 | Экономика DEEP-вызова, prompt-caching, кросс-язычный RAG. |
+| [`../SYSTEM_PROMPT.md`](../SYSTEM_PROMPT.md) | 📌 | Системный промпт AI-нарратива (**в корне** — рантайм-загрузка). |
 
-### Аудит и экономика
+### `roadmap/` — планы фич
 | Файл | Статус | Назначение |
 |---|---|---|
-| [`AUDIT.md`](AUDIT.md) | 🟢 | Живой институциональный аудит: находки, Было/Стало, дашборд. |
-| [`AUDIT_360_2026-07-10.md`](AUDIT_360_2026-07-10.md) | 🗄 | 360°-аудит на c20ef1c: дашборд оценок, инвентаризация всех формул движка, находки F-1…F-13, Action Plan. |
-| [`ECONOMICS.md`](ECONOMICS.md) | 🟢 | Экономика: себестоимость генерации по тирам, все затраты, безубыточность, смета масштабирования, рыночные аналоги. |
+| [`roadmap/ROADMAP_SCENARIO_TIER.md`](roadmap/ROADMAP_SCENARIO_TIER.md) | 🗺 | Тир Scenario Analysis. **Ядро + UI/тир реализованы (2026-07-07).** |
+| [`roadmap/ROADMAP_DATA_RESILIENCE.md`](roadmap/ROADMAP_DATA_RESILIENCE.md) | 🗺 | Устойчивость данных. **§4-б lookback 730→1825 ВКЛЮЧЁН (2026-07-07).** |
+| [`roadmap/ROADMAP_IBKR_INTEGRATION.md`](roadmap/ROADMAP_IBKR_INTEGRATION.md) | 🗺 | Второй брокер Interactive Brokers. Абстракция `BrokerConnector`, read-only, OAuth. **Спроектирован, не начат (2026-07-16).** |
+
+### `bot/` · `infra/` · `business/`
+| Файл | Статус | Назначение |
+|---|---|---|
+| [`bot/TELEGRAM_BOT.md`](bot/TELEGRAM_BOT.md) | 🟢 | Полный флоу бота (см. Tier-0). |
+| [`infra/INFRA_NETWORKING.md`](infra/INFRA_NETWORKING.md) | 🟢 | Прод-инциденты Cloud Run: WAF-блок цен (статический egress) + segfault RAG-ингеста. Команды фикса. |
+| [`business/ECONOMICS.md`](business/ECONOMICS.md) | 🟢 | Экономика: себестоимость генерации по тирам, все затраты, безубыточность, смета масштабирования, рыночные аналоги. |
 
 ---
 
-## 6. Быстрый справочник «где менять»
+## 6. Как ориентироваться перед правкой кода (для Claude Code)
+
+> **Рабочий цикл агента:** (1) определи, какой КОД правишь → (2) по таблице
+> ниже открой соответствующий ДОК и прочитай его перед изменением → (3) правь
+> код и `src/`+`tests/` вместе → (4) отметь крупное изменение в `audit/AUDIT.md`.
+
+**Быстрый способ найти нужный док из кода** — у каждого дока в строке 2 стоит
+машиночитаемый якорь:
+```
+<!-- nav | area:<папка> | code:<пути> | read-before:<когда читать> -->
+```
+Ищи по коду, который собрался править:
+```bash
+grep -rl "code:.*simulate.py" docs/      # → какие доки описывают этот файл
+grep -rn "read-before:" docs/            # → все триггеры «прочитай перед…»
+grep -rl "area:math" docs/               # → все доки одной подсистемы
+```
+
+### 6.1 Обратная карта: КОД → сначала прочитай ДОК
+
+| Правишь код… | Прочитай сначала |
+|---|---|
+| `src/finance/investment_logic.py` · `scoring.py` · `black_litterman.py` · `regime.py` · `stress.py` | **`math/MATH_ENGINE.md`** (SSOT формул) — обновлять ВМЕСТЕ с математикой |
+| `src/finance/leveraged.py` · `simulate.py` (плечо/молодые бумаги) | `math/METHODOLOGY_SPARSE_AND_LEVERAGED.md` + `audit/risk-methodology-audit.md` |
+| `src/finance/smart_money.py` | `math/SMART_MONEY.md` |
+| `src/finance/regime.py` (секция «Режим») | `report/REGIME_SECTION_DEEP.md` |
+| `src/pdf_payload.py` · `premium_payload.py` (данные секции) | **`report/REPORT_SECTIONS.md`** (ключ→builder→движок→шаблон) |
+| `design/premium_v2/*.jsx` (вид отчёта) | `report/PREMIUM_DESIGN.md` — после правки ОБЯЗАТЕЛЬНО `design/premium_v2/build.sh` |
+| `src/ai_narrative.py` · `SYSTEM_PROMPT.md` (ИИ-тексты) | `report/REPORT_SECTIONS.md §5` + `llm/LLM_STRATEGY_MULTILINGUAL.md` |
+| `src/tg_bot.py` · `entrypoint.py` (флоу бота) | `bot/TELEGRAM_BOT.md` |
+| `src/db_tokenomics.py` · цены токенов | `business/ECONOMICS.md` |
+| `src/agent/rag_engine.py` · `cloud_function/` · `scripts/ingest_bank_report.py` | `rag/RAG_INGESTION.md` (+ `rag/RAG_TROUBLESHOOTING.md` при пустой базе) |
+| `src/finance/scenario_engine.py` · `scenario_report.py` | `roadmap/ROADMAP_SCENARIO_TIER.md` |
+| `src/finance/broker_api.py` (второй брокер) | `roadmap/ROADMAP_IBKR_INTEGRATION.md` |
+| `cloud_function/` · инфра/сеть | `infra/INFRA_NETWORKING.md` |
+
+### 6.2 Обратно: где менять КОД для задачи
 
 | Хочу изменить… | Иду в… |
 |---|---|
-| Флоу бота / кнопки / тарифы | `src/tg_bot.py` (→ `docs/TELEGRAM_BOT.md`) |
-| Формулу риска / фактор / CVaR | `src/finance/investment_logic.py` |
+| Флоу бота / кнопки / тарифы | `src/tg_bot.py` (→ `bot/TELEGRAM_BOT.md`) |
+| Формулу риска / фактор / CVaR | `src/finance/investment_logic.py` (→ `math/MATH_ENGINE.md`) |
 | Стресс-сценарии / шоки | `src/finance/stress.py` (F-1: raw-каталог residualize-ится автоматически) |
 | Скоринг 4-Pillar | `src/finance/scoring.py` |
-| Секцию отчёта (данные) | `src/pdf_payload.py` (карта: `docs/REPORT_SECTIONS.md`) |
+| Секцию отчёта (данные) | `src/pdf_payload.py` (карта: `report/REPORT_SECTIONS.md`) |
 | Вид отчёта (дизайн) | `design/premium_v2/*.jsx` → `build.sh` → `src/premium_assets/` (или `src/templates/*_v3.html`) |
 | Сценарный тир | `src/finance/scenario_report.py` + `templates/report_scenario_v3.html` |
 | ИИ-тексты / промпт | `src/ai_narrative.py` + `SYSTEM_PROMPT.md` |
-| Токеномику | `src/db_tokenomics.py` |
+| Токеномику | `src/db_tokenomics.py` (→ `business/ECONOMICS.md`) |
 | Валюты / FX / RFR | `src/finance/currency.py` + `src/services/fx_feed.py` |
-| Загрузку банковских PDF в RAG | `scripts/ingest_bank_report.py` (→ `docs/RAG_INGESTION.md`) |
+| Загрузку банковских PDF в RAG | `scripts/ingest_bank_report.py` (→ `rag/RAG_INGESTION.md`) |
 | Lookback / окно истории | `HISTORY_LOOKBACK_DAYS` env (default 1825) → `investment_logic.get_market_data` |
 
 ---

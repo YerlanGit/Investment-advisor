@@ -1,8 +1,9 @@
 # REPORT_PAGES_DEEP.md — постраничный разбор DEEP-отчёта
+<!-- nav | area:report | code:src/templates/,design/premium_v2/deep/ | read-before:постраничный разбор DEEP-отчёта -->
 
 > Справочник для инженера: **что показано на каждой странице DEEP-отчёта, откуда берутся
 > числа, как считается математика и как читать результат.** Парный файл по BASE-тиру —
-> `docs/REPORT_PAGES_BASE.md`. Карта секций — `REPORT_SECTIONS.md`; аудит живых отчётов —
+> `docs/report/REPORT_PAGES_BASE.md`. Карта секций — `REPORT_SECTIONS.md`; аудит живых отчётов —
 > `REPORT_SECTIONS_AUDIT.md`.
 
 ## Поток данных
@@ -48,7 +49,7 @@ DEEP-отчёт — **6 «листов»** (`<div class="sheet">`):
 
 Лист 1 идентичен BASE (один движок, паритет чисел); лист 2 наследует BASE-состав плюс
 DEEP-эксклюзивный блок Smart Money (SEC Form 4). Их детальный разбор по holdings см. в
-`docs/REPORT_PAGES_BASE.md` (§1.x, §2.x). Здесь они даны кратко; основной фокус — DEEP-эксклюзив
+`docs/report/REPORT_PAGES_BASE.md` (§1.x, §2.x). Здесь они даны кратко; основной фокус — DEEP-эксклюзив
 (блок Smart Money на листе 2 + листы 3–6).
 
 ---
@@ -97,7 +98,7 @@ DEEP-эксклюзивный блок Smart Money (SEC Form 4). Их детал
   `diversified=√(w'Σw)`, `benefit=Σstandalone−diversified`.
 - **Integrity** — `data.integrity_checks[]`, builder `_build_integrity_checks`.
 
-Полные формулы и нюансы — `docs/REPORT_PAGES_BASE.md` §1.1–1.8.
+Полные формулы и нюансы — `docs/report/REPORT_PAGES_BASE.md` §1.1–1.8.
 
 ---
 
@@ -123,7 +124,7 @@ Smart Money внизу листа** (B2.4). Кратко:
   таблица (Тикер · Нетто-поток $ · Покупки/Продажи · Кластер · Score); при выключенном слое —
   нейтральная плашка «источник Form-4 не активирован» (`status='disabled'`).
 
-Детали по holdings — `docs/REPORT_PAGES_BASE.md` §2.1–2.3.
+Детали по holdings — `docs/report/REPORT_PAGES_BASE.md` §2.1–2.3.
 
 ---
 

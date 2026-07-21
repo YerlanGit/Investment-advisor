@@ -1,4 +1,5 @@
 # PREMIUM_DESIGN.md — Premium V2 report design (Portfolio Premium DEEP/BASE)
+<!-- nav | area:report | code:design/premium_v2/,src/premium_renderer.py,src/premium_payload.py | read-before:дизайн Premium V2, контракты данных, сборка бандлов (build.sh) -->
 
 > Источник дизайна: `analytics.zip` → `design/premium_v2/` (React + Tailwind).
 > Рендер: `src/premium_renderer.py`. Сборка статики: `design/premium_v2/build.sh`.
