@@ -118,6 +118,13 @@ B-1 и B-2 частично дублируют `math_firewall` (`investment_logi
 | C-12 | Кэш исключён из рисковых расчётов, но учтён в знаменателе долей | BLOCK | BLOCK |
 | C-13 | Наблюдений хватает для Bootstrap-CVaR | DEGRADE при <500 | то же |
 
+**C-1 в `STRICT` после решения 2026-07-27 — реальный, а не теоретический риск.**
+Раньше непрошедший C-1 означал «доберём фактор у другого провайдера». Теперь у `manual`
+резерва нет (инвариант I-12), поэтому отсутствующий у Stooq факторный ETF означает,
+что ручной отчёт не строится **никогда**, а не «иногда». Отсюда — проверка покрытия
+вынесена вперёд, в Фазу 8 §2.5, и является гейтом запуска: чекер здесь только исполняет
+решение, принятое по её результатам.
+
 **Почему C-1 в `STRICT` не блокирует на бенчмарках.** `QQQ/AGG/URTH` объявлены
 в `BENCHMARK_EXTRA` (`investment_logic.py:441-444`) и прямо помечены комментарием
 «NOT used as regression factors — only for benchmark_comparison + TE». Потеря `URTH`
@@ -186,7 +193,7 @@ if report.blocked:
 
 ## 6. Гейт выхода
 
-- [ ] `python -m pytest tests/ -q` → **801 + 34 = 835 passed, 1 xfailed**
+- [ ] `python -m pytest tests/ -q` → **805 + 34 = 839 passed, 1 xfailed**
 - [ ] `test_legacy_profile_never_blocks_current_reports` зелёный
 - [ ] `git diff --stat` по восьми модулям I-2 = 0
 - [ ] `src/finance/data_checks.py` не импортирует `tg_bot`

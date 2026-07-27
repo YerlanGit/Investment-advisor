@@ -142,7 +142,7 @@ CSV/XLSX → нормализация заголовков → список ко
 
 ## 6. Гейт выхода
 
-- [ ] `python -m pytest tests/ -q` → **913 + 24 = 937 passed, 1 xfailed**
+- [ ] `python -m pytest tests/ -q` → **919 + 24 = 943 passed, 1 xfailed**
 - [ ] `test_csv_and_text_give_same_frame` зелёный
 - [ ] `requirements.lock` регенерирован на linux/py3.11 и закоммичен
 - [ ] Ни один лимит не проверяется после чтения содержимого

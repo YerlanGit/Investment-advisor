@@ -117,15 +117,18 @@ class TradernetProvider:
 
 ---
 
-## 4. Правка `investment_logic.py` (единственная в файле — I-2b)
+## 4. Правка `investment_logic.py` (I-2b)
 
-Диапазон правки — строки 653–772, то есть `_get_tradernet_client` + `get_market_data`.
+Правка затрагивает **четыре поимённо названные функции** — список в `PHASE_00 §2, I-2b`.
+Прежняя редакция ограничивала правку строками 653–772; отброшена, потому что номера строк
+едут от первой же вставки, а проброс источника (§4.1) до них не дотягивается.
 
 ```python
 def _get_price_provider(self):
+    """Провайдер выбирается ПО ИСТОЧНИКУ портфеля (I-12, юридическая граница)."""
     if self._price_provider is None:
-        from finance.price_providers import TradernetProvider
-        self._price_provider = TradernetProvider(self._get_tradernet_client())
+        from finance.price_providers import provider_for_source
+        self._price_provider = provider_for_source(self.price_source)
     return self._price_provider
 
 def get_market_data(self, tickers, period_days=None):
@@ -139,6 +142,48 @@ def get_market_data(self, tickers, period_days=None):
 Всё, что ниже (`math_firewall`, `_apply_fx_conversion`, возврат кортежа) — без изменений.
 Имя переменной `history_result` в вызывающем коде сохраняется, чтобы диффы
 `tg_bot.py`/`data_lineage.py` остались нулевыми.
+
+### 4.1 Проброс источника до движка
+
+Провайдер выбирается по источнику портфеля (I-12), поэтому источник должен доехать
+до `MAC3RiskEngine`. Путь — через конструкторы, по образцу уже существующих
+`reporting_currency` и `risk_mandate` (`investment_logic.py:446-448`):
+
+```
+tg_bot.cb_confirm (source известен: freedom|manual|demo)
+  → UniversalPortfolioManager(price_source=source)
+  → MAC3RiskEngine(price_source=source)        # дефолт "freedom" — обратная совместимость
+  → _get_price_provider() → provider_for_source(...)
+```
+
+**Дефолт `price_source="freedom"` обязателен**: все существующие вызовы
+`UniversalPortfolioManager()` (в тестах и в `batch_reports.py`) остаются валидными
+без правок — тот же механизм, которым держится I-5.
+
+Читать источник из `df.attrs['_ramp_source']` **нельзя**: `prefetch_market_data`
+вызывается на Шаге 1 (`tg_bot.py:2236`) от списка тикеров, DataFrame туда не передаётся.
+
+### 4.2 `provider_for_source` — единственная точка выбора
+
+```python
+_MANUAL_FORBIDDEN = ("tradernet",)      # I-12: юридическая граница, не техническая
+
+def provider_for_source(source: str) -> PriceProvider:
+    if source == "manual":
+        chain = _build_chain(os.getenv("PRICE_PROVIDER_MANUAL", "stooq"))
+        assert not any(p.name in _MANUAL_FORBIDDEN for p in chain.providers), \
+            "I-12: данные Tradernet недопустимы в ручном портфеле"
+        return chain
+    return _build_chain(os.getenv("PRICE_PROVIDER_FREEDOM", "tradernet"))
+```
+
+Проверка в рантайме, а не только в тесте: env-переменную можно выставить в проде,
+и `PRICE_PROVIDER_MANUAL=tradernet` должен приводить к отказу сборки отчёта,
+а не к тихому нарушению. Отказ — на старте, до сетевых вызовов и до списания токена.
+
+**До Фазы 9 `StooqProvider` не существует**, поэтому в этой фазе `provider_for_source`
+для `manual` поднимает `ProviderUnavailable` («ручной ввод ещё не запущен») —
+и это ровно то поведение, которое требуется: `MANUAL_PORTFOLIO_ENABLED` в проде выключен.
 
 ---
 
@@ -156,6 +201,10 @@ def get_market_data(self, tickers, period_days=None):
 | `test_consumers_accept_provider_result` | `data_lineage.build_lineage`, `portfolio_series`, `scenario_report` работают на `ProviderResult` так же, как на `HistoryResult` |
 | **`test_snapshot_numbers_unchanged`** | **Гейт фазы.** Фикстура портфеля + записанная ценовая матрица → `analyze_all` до и после ветки даёт побитово равные Risk Index, CVaR 95, Sharpe, топ-3 TRC, факторные беты (I-5) |
 | `test_mixed_convention_rejected` | Матрица из тикеров с разными `convention` → отказ (I-7). Заготовка, полностью включается в Фазе 9 |
+| `test_default_source_is_freedom_tradernet` | `UniversalPortfolioManager()` без аргументов → Tradernet (обратная совместимость, §4.1) |
+| **`test_manual_chain_has_no_tradernet`** | **I-12.** `provider_for_source("manual")` не содержит `TradernetProvider` ни в одном звене цепочки |
+| `test_manual_forbidden_provider_raises` | `PRICE_PROVIDER_MANUAL=tradernet` → отказ на старте, до сетевых вызовов (§4.2) |
+| `test_no_tradernet_client_constructed_for_manual` | За сборку ручного отчёта `TradernetClient.__init__` не вызывается ни разу (I-12, проверка на уровне поведения, а не конфигурации) |
 
 Снапшот хранится как JSON-фикстура в `tests/fixtures/phase35_snapshot_freedom.json`;
 сравнение — точное (`==` по float), а не по допуску: провайдер обязан быть 1:1.
@@ -164,10 +213,12 @@ def get_market_data(self, tickers, period_days=None):
 
 ## 6. Гейт выхода
 
-- [ ] `python -m pytest tests/ -q` → **793 + 8 = 801 passed, 1 xfailed**
+- [ ] `python -m pytest tests/ -q` → **793 + 12 = 805 passed, 1 xfailed**
 - [ ] `test_snapshot_numbers_unchanged` зелёный на **точном** равенстве
+- [ ] `test_manual_chain_has_no_tradernet` зелёный (I-12)
 - [ ] `git diff --stat` по восьми модулям I-2 = 0
-- [ ] `git diff src/finance/investment_logic.py` не выходит за строки 653–772 (I-2b)
+- [ ] `git diff src/finance/investment_logic.py` затрагивает только четыре функции
+      из списка I-2b — проверяется ревью диффа, не номерами строк
 - [ ] `grep -rn "import tg_bot\|from tg_bot" src/finance/` → пусто
 
 ---
