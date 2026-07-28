@@ -358,11 +358,16 @@ class FreedomConnector:
 
     @staticmethod
     def _mock_portfolio() -> pd.DataFrame:
-        """Deterministic template portfolio for demo / offline mode."""
-        df = pd.DataFrame([
-            {"Ticker": "AAPL",    "Quantity": 10,  "Purchase_Price": 150.0},
-            {"Ticker": "KSPI",    "Quantity": 100, "Purchase_Price": 12.5},
-            {"Ticker": "BTC-USD", "Quantity": 0.5, "Purchase_Price": 45_000.0},
-        ])
-        df.attrs["_ramp_is_mock"] = True
-        return df
+        """Детерминированный портфель-витрина для демо / офлайн-режима.
+
+        2026-07-28: состав вынесен в ``finance.demo_portfolio`` и расширен —
+        витрина обязана задействовать максимум секций отчёта (несколько
+        секторов, облигации, золото, EM-бумага, крипто, кэш), иначе половина
+        панелей на ней пустует.  Прежние три позиции без кэша этого не давали.
+
+        Тот же фрейм используется как fallback-мок при сбое брокера; он
+        помечен ``_ramp_is_fallback`` на стороне вызывающего и до пользователя
+        не доходит (гейт в ``tg_bot.cb_confirm`` + ``analyze_all``).
+        """
+        from finance.demo_portfolio import build_demo_portfolio
+        return build_demo_portfolio()

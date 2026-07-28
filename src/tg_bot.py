@@ -2155,6 +2155,7 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
         cost      = cost,
         df        = df,
         bench_tick= bench_tick,
+        source    = source,
     ))
     await state.clear()
 
@@ -2168,6 +2169,7 @@ async def _run_analysis_background(
     cost: int,
     df,
     bench_tick: str | None,
+    source: str = "freedom",
 ) -> None:
     """
     Фоновая задача с поэтапными уведомлениями в Telegram.
@@ -2221,7 +2223,10 @@ async def _run_analysis_background(
         # ── Step 1: load market history ──────────────────────────────────
         await step("⏳", "*Шаг 1/4:* Интеграция рыночных данных и FX-трансформация цен…")
 
-        manager = UniversalPortfolioManager()
+        # Источник ЦЕН: демо считается на локальной детерминированной витрине
+        # (одинаково у всех, всегда, без сети); остальные — на живом фиде.
+        manager = UniversalPortfolioManager(
+            price_source="demo" if source == "demo" else "freedom")
 
         # Wrap the heavy parts to detect WHERE we fail.
         def _stage_market_data():

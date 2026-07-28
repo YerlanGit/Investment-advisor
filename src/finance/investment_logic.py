@@ -9,6 +9,7 @@ from sklearn.covariance import LedoitWolf
 
 from finance.broker_api import RealPortfolioRequired
 from freedom_portfolio import TradernetClient, get_history_frame
+from freedom_portfolio.history import HistoryResult
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
@@ -445,8 +446,13 @@ class MAC3RiskEngine:
 
     def __init__(self, trading_days=252, ewma_halflife=63,
                  reporting_currency: ReportingCurrency | str | None = None,
-                 fx_provider=None, risk_mandate: str = "MODERATE"):
+                 fx_provider=None, risk_mandate: str = "MODERATE",
+                 price_source: str = "freedom"):
         self.trading_days = trading_days
+        # Источник ЦЕН (не портфеля): 'freedom' — живой Tradernet, 'demo' —
+        # локальная детерминированная витрина (finance/demo_portfolio.py).
+        # Дефолт сохраняет поведение всех существующих вызовов.
+        self.price_source = str(price_source or "freedom").lower()
         # halflife=63 торговых дня (~3 мес) ⇒ дневной decay λ = 0.5^(1/63) ≈ 0.989.
         # Это СОЗНАТЕЛЬНО плавнее RiskMetrics λ=0.94 (что соответствовало бы
         # halflife ≈ 11 дн): факторная ковариация стабильнее, меньше шумовых
@@ -703,6 +709,19 @@ class MAC3RiskEngine:
 
             # 5. Крипто (Tradernet их не торгует напрямую — оставляем *-USD формат
             #    как маркер; отсутствующие колонки пропускаются без падения)
+            #
+            # 2026-07-28: ветка ловила ТОЛЬКО голый символ, поэтому уже
+            # канонический `BTC-USD` (именно в таком виде он лежит в демо-
+            # портфеле и приходит из ручного ввода) проваливался в ветку 7 и
+            # получал суффикс: `BTC-USD` → `BTC-USD.US`.  Такого инструмента нет
+            # ни у одного провайдера → цена не находилась → строка молча
+            # удалялась `dropna(subset=['Current_Price'])` в analyze_all, и
+            # демо-витрина из 3 позиций показывала 2.  Суффикс `-USD` — тот же
+            # маркер крипто, что использует `broker_api._classify_instrument`
+            # (`t.endswith("-USD")` → «Крипто»), поэтому проверки согласованы.
+            if t_str.endswith('-USD'):
+                resolved.append(t_str)          # уже канонический вид
+                continue
             if t_str in ('BTC', 'ETH', 'SOL', 'BNB'):
                 resolved.append(f"{t_str}-USD")
                 continue
@@ -755,6 +774,26 @@ class MAC3RiskEngine:
         all_req = list(dict.fromkeys(
             valid_tickers + list(self.factor_tickers.values()) + self.BENCHMARK_EXTRA
         ))
+
+        # ── Витрина: локальные детерминированные цены, БЕЗ сети ──────────────
+        # Демо обязано рендериться всегда и одинаково у всех (см. модуль
+        # finance/demo_portfolio.py).  Живой фид этого не даёт: он меняется
+        # ежедневно, зависит от квоты ключа и — отдельно — распространяет
+        # биржевые данные на не-клиентов брокера.
+        if self.price_source == "demo":
+            from finance.demo_portfolio import demo_price_matrix
+            demo_df = demo_price_matrix(all_req, days=period_days)
+            missing = [t for t in all_req if t not in demo_df.columns]
+            if missing:
+                logger.info("Витрина не содержит %d тикер(ов): %s",
+                            len(missing), ", ".join(missing))
+            history_result = HistoryResult(
+                data=demo_df, loaded=list(demo_df.columns),
+                failed={t: "нет в витрине" for t in missing}, retried=[],
+            )
+            logger.info("Демо-витрина: %d рядов × %d дней (локально, без сети)",
+                        len(demo_df.columns), len(demo_df))
+            return self._apply_fx_conversion(self.math_firewall(demo_df)), history_result
 
         logger.info("Загрузка цен через Tradernet для %d инструментов: %s",
                     len(all_req), ", ".join(all_req))
@@ -1531,8 +1570,10 @@ class UniversalPortfolioManager:
         'Purchase_Price': ['Buy_Price', 'Price_Buy', 'Entry_Price', 'Цена_Покупки', 'Avg_Price']
     }
 
-    def __init__(self):
-        self.engine = MAC3RiskEngine()
+    def __init__(self, price_source: str = "freedom"):
+        # price_source прокидывается в движок и решает, откуда берутся ЦЕНЫ.
+        # Дефолт 'freedom' сохраняет поведение всех существующих вызовов.
+        self.engine = MAC3RiskEngine(price_source=price_source)
 
     def prefetch_market_data(self, candidate_tickers) -> "MarketDataPreview":
         """Public facade for the bot's Step-1 progress panel (H-3).
