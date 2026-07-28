@@ -135,7 +135,7 @@ source = "Tradernet (Freedom Broker)",     # строки 104 и 117
 
 ## 6. Гейт выхода
 
-- [ ] `python -m pytest tests/ -q` → **903 + 16 = 919 passed, 1 xfailed**
+- [ ] `python -m pytest tests/ -q` → **907 + 16 = 923 passed, 1 xfailed**
 - [ ] I-1, I-3, I-4, I-12 подтверждены тестами
 - [ ] 🔴 `MANUAL_PORTFOLIO_ENABLED=on` выставляется **только** после гейта Фазы 9
 - [ ] Токен не списывается ни на одном пути отказа — перебрать поимённо
