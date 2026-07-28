@@ -1,11 +1,21 @@
 # ROADMAP_DATA_RESILIENCE.md — устойчивость слоя данных (Фаза 4 · Блок 3)
-<!-- nav | area:roadmap | code:src/finance/history.py | read-before:план устойчивости слоя данных (lookback, второй источник) -->
+<!-- nav | area:roadmap | code:src/freedom_portfolio/history.py,src/finance/price_providers.py | read-before:план устойчивости слоя данных (lookback, второй источник) -->
 
 > Статус: план внедрения. Порядок пунктов = порядок исполнения. Каждый пункт — отдельный PR
 > с полным прогоном suite (Do-No-Harm: математика ядра не меняется ни в одном шаге, кроме
 > явно помеченного §4-б).
+>
+> **Путь файла в nav-якоре исправлен 2026-07-27:** `history.py` лежит
+> в `src/freedom_portfolio/`, а не в `src/finance/` — прежний якорь не находился по grep.
 
 ## 1. SPOF: fallback-провайдер цен (Tradernet ↓ → yfinance)
+
+> **Детализировано 2026-07-27 → [`manual_portfolio/`](manual_portfolio/README.md).**
+> Архитектура `PriceProvider` / `TradernetProvider` / `ChainProvider` ниже осталась в силе;
+> исполняется Фазами 1–2 и 8–9 того плана. Отличие: резервным источником выбран **Stooq**,
+> а не yfinance (у yfinance дефолт `auto_adjust` менялся `False`→`True` — апгрейд зависимости
+> молча меняет конвенцию доходностей). Добавлено то, чего здесь не было: изоляция кэша
+> по провайдеру, чекеры качества данных и явное объявление `PriceConvention`.
 
 **Факт:** цены берутся ТОЛЬКО из Tradernet (`freedom_portfolio/history.py`); yfinance был
 намеренно удалён 2026-04. При сбое брокера продукт слепнет целиком.

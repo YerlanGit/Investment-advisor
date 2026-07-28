@@ -273,6 +273,7 @@ Telegram /start
 | [`roadmap/ROADMAP_SCENARIO_TIER.md`](roadmap/ROADMAP_SCENARIO_TIER.md) | 🗺 | Тир Scenario Analysis. **Ядро + UI/тир реализованы (2026-07-07).** |
 | [`roadmap/ROADMAP_DATA_RESILIENCE.md`](roadmap/ROADMAP_DATA_RESILIENCE.md) | 🗺 | Устойчивость данных. **§4-б lookback 730→1825 ВКЛЮЧЁН (2026-07-07).** |
 | [`roadmap/ROADMAP_IBKR_INTEGRATION.md`](roadmap/ROADMAP_IBKR_INTEGRATION.md) | 🗺 | Второй брокер Interactive Brokers. Абстракция `BrokerConnector`, read-only, OAuth. **Спроектирован, не начат (2026-07-16).** |
+| [`roadmap/manual_portfolio/`](roadmap/manual_portfolio/README.md) | 🗺 | **Ручной ввод портфеля + смена источника цен (2026-07-27).** Разбор задания против кода (6 фактических ошибок, 5 внутренних противоречий, 6 находок сверх задания) + 11 фаз, по md-файлу на фазу. Начинать с `README.md`, затем `PHASE_00_CONTRACT.md` — он снимает противоречия до первой строки кода. **Юридический инвариант I-12: данные Tradernet не-клиентам запрещены → `manual` работает ТОЛЬКО на Stooq, без резерва; ключ Stooq добывается в день 1 (капча), Фазы 8–9 на критическом пути запуска.** Спроектирован, не начат. |
 
 ### `bot/` · `infra/` · `business/`
 | Файл | Статус | Назначение |
@@ -317,6 +318,7 @@ grep -rl "area:math" docs/               # → все доки одной под
 | `src/agent/rag_engine.py` · `cloud_function/` · `scripts/ingest_bank_report.py` | `rag/RAG_INGESTION.md` (+ `rag/RAG_TROUBLESHOOTING.md` при пустой базе) |
 | `src/finance/scenario_engine.py` · `scenario_report.py` | `roadmap/ROADMAP_SCENARIO_TIER.md` |
 | `src/finance/broker_api.py` (второй брокер) | `roadmap/ROADMAP_IBKR_INTEGRATION.md` |
+| `src/freedom_portfolio/history.py` (кэш, сплиты) · `src/finance/price_providers.py` · `data_checks.py` · `manual_portfolio.py` | `roadmap/manual_portfolio/README.md` (+ соответствующий `PHASE_*.md`) |
 | `cloud_function/` · инфра/сеть | `infra/INFRA_NETWORKING.md` |
 
 ### 6.2 Обратно: где менять КОД для задачи
@@ -335,6 +337,7 @@ grep -rl "area:math" docs/               # → все доки одной под
 | Валюты / FX / RFR | `src/finance/currency.py` + `src/services/fx_feed.py` |
 | Загрузку банковских PDF в RAG | `scripts/ingest_bank_report.py` (→ `rag/RAG_INGESTION.md`) |
 | Lookback / окно истории | `HISTORY_LOOKBACK_DAYS` env (default 1825) → `investment_logic.get_market_data` |
+| Источник цен / ручной ввод портфеля | `src/finance/price_providers.py` + `manual_portfolio.py` (→ `roadmap/manual_portfolio/`) |
 
 ---
 
