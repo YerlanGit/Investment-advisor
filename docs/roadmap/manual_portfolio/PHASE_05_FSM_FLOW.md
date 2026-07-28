@@ -211,7 +211,7 @@ async def user_slot(user_id: int):
 
 ## 8. Гейт выхода
 
-- [ ] `python -m pytest tests/ -q` → **881 + 22 = 903 passed, 1 xfailed**
+- [ ] `python -m pytest tests/ -q` → **885 + 22 = 907 passed, 1 xfailed**
 - [ ] E2E: ручной ввод → подтверждение → отчёт; набор секций совпадает с `freedom` (I-1)
 - [ ] E2E: `MANUAL_PORTFOLIO_ENABLED=off` → бот ведёт себя как сегодня (I-9)
 - [ ] Слот освобождается во всех ветках ручного флоу

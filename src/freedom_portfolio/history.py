@@ -24,6 +24,8 @@ from __future__ import annotations
 import json
 import logging
 import math
+import os
+import threading
 import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -39,6 +41,17 @@ logger = logging.getLogger(__name__)
 
 _CACHE_DIR = Path("/tmp/freedom_history_cache")
 _CACHE_TTL_SECONDS = 3600  # 1 hour — covers a typical analysis session
+
+# Провайдер и конвенция входят в ключ кэша (Фаза 1 плана ручного портфеля).
+# Дефолты описывают ТЕКУЩИЙ источник, поэтому все существующие вызовы
+# продолжают работать без правок — этим и держится инвариант «freedom не
+# деградирует».
+DEFAULT_PROVIDER = "tradernet"
+DEFAULT_CONVENTION = "split_adjusted"
+
+# Вытеснение просроченных файлов: не чаще одного скана каталога в 10 минут.
+_CACHE_EVICT_INTERVAL = 600.0
+_last_evict_ts = 0.0
 
 
 # ── Authoritative split events (2y rolling window, refresh annually) ─────────
@@ -82,6 +95,8 @@ def get_candles(
     days: int = 1825,             # КАЛЕНДАРНЫХ дней ≈ 5 лет (≈1260 торговых)
     timeframe: str = "D",         # daily bars
     use_cache: bool = True,
+    provider: str = DEFAULT_PROVIDER,
+    convention: str = DEFAULT_CONVENTION,
 ) -> pd.Series:
     """
     Fetch daily close-price series for *ticker* from Tradernet.
@@ -95,7 +110,7 @@ def get_candles(
     """
     # 1. Cache lookup
     if use_cache:
-        cached = _read_cache(ticker, days)
+        cached = _read_cache(ticker, days, provider, convention)
         if cached is not None:
             return cached
 
@@ -115,7 +130,7 @@ def get_candles(
 
     # 5. Persist to cache
     if use_cache:
-        _write_cache(ticker, days, series)
+        _write_cache(ticker, days, series, provider, convention)
 
     return series
 
@@ -550,14 +565,35 @@ def _detect_and_adjust_splits(ticker: str, series: pd.Series) -> pd.Series:
 # ── Cache layer ──────────────────────────────────────────────────────────────
 
 
-def _cache_path(ticker: str, days: int) -> Path:
-    """Pickle-based cache (no extra deps; parquet would require pyarrow)."""
+def _cache_path(ticker: str, days: int,
+                provider: str = DEFAULT_PROVIDER,
+                convention: str = DEFAULT_CONVENTION) -> Path:
+    """Pickle-based cache (no extra deps; parquet would require pyarrow).
+
+    Provider и convention — ЧАСТЬ КЛЮЧА (Фаза 1 плана ручного портфеля).
+
+    Без них второй провайдер получает межпровайдерное отравление кэша: Tradernet
+    кладёт ``AAPL_US_1825d.pkl``, и в течение часового TTL другой провайдер читает
+    тот же файл, считая данные своими.  Симптом плавающий — воспроизводится только
+    внутри окна TTL и только если оба провайдера запрашивались в одном контейнере,
+    — а последствия серьёзные: неверный источник в CoVe и, что хуже, СМЕШАННЫЕ
+    конвенции корректировок в одной ковариационной матрице.
+
+    ``convention`` в ключе избыточен, пока провайдер её однозначно задаёт, но
+    нужен наперёд: EODHD отдаёт три разных ряда на один тикер с одного эндпоинта
+    (``close`` / ``adjusted_close`` / ``function=splitadjusted``), и без неё они
+    схлопнутся друг на друга — тот же дефект внутри одного провайдера.
+
+    Дефолты сохраняют поведение всех существующих вызовов.
+    """
     safe = ticker.replace("/", "_").replace(".", "_")
-    return _CACHE_DIR / f"{safe}_{days}d.pkl"
+    return _CACHE_DIR / f"{provider}__{convention}__{safe}_{days}d.pkl"
 
 
-def _read_cache(ticker: str, days: int) -> pd.Series | None:
-    path = _cache_path(ticker, days)
+def _read_cache(ticker: str, days: int,
+                provider: str = DEFAULT_PROVIDER,
+                convention: str = DEFAULT_CONVENTION) -> pd.Series | None:
+    path = _cache_path(ticker, days, provider, convention)
     if not path.exists():
         return None
     age = time.time() - path.stat().st_mtime
@@ -570,11 +606,68 @@ def _read_cache(ticker: str, days: int) -> pd.Series | None:
         return None
 
 
-def _write_cache(ticker: str, days: int, series: pd.Series) -> None:
+def _evict_stale_cache() -> None:
+    """Удалить записи старше ``2 × TTL``.
+
+    Вытеснения в модуле не было вообще: файлы копились до конца жизни контейнера.
+    На Cloud Run ``/tmp`` — это RAM при лимите 2 GiB, а со вторым провайдером
+    число файлов на тот же набор тикеров удваивается.
+
+    Запускается не чаще, чем раз в ``_CACHE_EVICT_INTERVAL``: скан каталога на
+    КАЖДУЮ запись давал бы O(n) на тикер при ~25 тикерах за отчёт.  Гонка двух
+    потоков на этом флаге безобидна — худший случай, уборка отработает дважды.
+    """
+    global _last_evict_ts
+    now = time.time()
+    if now - _last_evict_ts < _CACHE_EVICT_INTERVAL:
+        return
+    _last_evict_ts = now
+    cutoff = now - 2 * _CACHE_TTL_SECONDS
+    removed = 0
+    try:
+        # Только *.pkl: временные файлы чужих потоков трогать нельзя.
+        for path in _CACHE_DIR.glob("*.pkl"):
+            try:
+                if path.stat().st_mtime < cutoff:
+                    path.unlink(missing_ok=True)
+                    removed += 1
+            except OSError:
+                continue        # файл исчез между stat и unlink — не наша забота
+    except OSError as exc:
+        logger.debug("Cache eviction skipped: %s", exc)
+        return
+    if removed:
+        logger.info("Кэш цен: вытеснено %d просроченных файл(ов)", removed)
+
+
+def _write_cache(ticker: str, days: int, series: pd.Series,
+                 provider: str = DEFAULT_PROVIDER,
+                 convention: str = DEFAULT_CONVENTION) -> None:
     if series.empty:
         return
+    path = _cache_path(ticker, days, provider, convention)
+    # Запись АТОМАРНА: временный файл + os.replace.
+    #
+    # Прежняя прямая `series.to_pickle(path)` — гонка: отчёты разных
+    # пользователей идут параллельно (single-flight слот в боте блокирует только
+    # повторный запуск ОДНИМ пользователем), поэтому два потока могут писать один
+    # и тот же файл одновременно и оставить его частично записанным.  Сегодня это
+    # смягчено try/except на чтении (битый файл → повторная загрузка), но со
+    # вторым провайдером цена ошибки растёт.  os.replace на POSIX атомарен:
+    # читатель видит либо старое содержимое, либо новое, но никогда частичное.
+    #
+    # Имя временного файла уникально по (pid, thread) — иначе два потока
+    # столкнулись бы уже на нём.
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
     try:
         _CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        series.to_pickle(_cache_path(ticker, days))
+        series.to_pickle(tmp)
+        os.replace(tmp, path)          # атомарно в пределах одной ФС
     except Exception as exc:
         logger.debug("Cache write failed for %s: %s", ticker, exc)
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return
+    _evict_stale_cache()

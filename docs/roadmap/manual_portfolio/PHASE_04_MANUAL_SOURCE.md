@@ -279,7 +279,7 @@ CASH:KZT 2 500 000
 
 ## 7. Гейт выхода
 
-- [ ] `python -m pytest tests/ -q` → **839 + 42 = 881 passed, 1 xfailed**
+- [ ] `python -m pytest tests/ -q` → **843 + 42 = 885 passed, 1 xfailed**
 - [ ] `test_analyze_all_runs_on_manual_frame` зелёный **без единой правки** `investment_logic.py`
 - [ ] `test_manual_equals_freedom_same_positions` — точное равенство
 - [ ] `git diff --stat` по восьми модулям I-2 = 0
