@@ -110,6 +110,11 @@ def _map_deep(p: dict, meta: dict) -> dict:
             "cls": _txt(a, "asset_class"),
             "sector": _txt(a, "sector") if _g(a, "sector") else "",
             "w": _num(a, "weight_pct_num"), "risk": _num(a, "euler_risk_pct"),
+            # R-5 (аудит отчётов 2026-07-29): ИИ цитирует рыночную бету позиции
+            # («CRCL двигается в 2.74 раза сильнее рынка»), а в DEEP-payload её
+            # НЕ БЫЛО — читателю нечем было проверить утверждение.  BASE её несёт
+            # с самого начала; здесь добавлена симметрично, из того же источника.
+            "beta": _num(a, "beta_num", default=_num(a, "beta")),
             "pnlPct": _num(a, "pnl_pct_num", default=_pct(_g(a, "pnl_pct"))),
             "pnlUsd": _num(a, "pnl_abs_num", default=_pct(_g(a, "pnl_abs"))),
             "signal": _txt(a, "action").upper() if _g(a, "action") else DASH,

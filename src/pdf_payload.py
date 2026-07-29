@@ -843,6 +843,14 @@ def build_payload(results: dict, tier: str,
             asset_class = (row.get("Asset_Class_Label")
                            or _classify_asset(ticker))
             is_cash     = asset_class == "Ден. средства"
+            # R-4 (аудит отчётов 2026-07-29): ОТРИЦАТЕЛЬНЫЙ денежный остаток —
+            # это маржинальный ЗАЁМ, а не «кэш со знаком минус».  В отчёте он
+            # выглядел обычной денежной строкой с весом −7.45%, и ИИ на этом
+            # основании предложил «продать USD» — заём закрывают ПОКУПКОЙ.
+            # Называем вещь своим именем; тип актива остаётся денежным, поэтому
+            # ниже по конвейеру (score/action/hotspot) ничего не меняется.
+            if is_cash and _safe_float(row.get("Current_Value"), 0.0) < 0:
+                asset_class = "Маржинальный заём"
 
             # Cash is not a tradable risk asset — never carries a 4-pillar
             # score, an action recommendation or a hotspot flag.
