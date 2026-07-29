@@ -400,16 +400,31 @@ def _summarise_for_prompt(results: dict) -> dict:
     )
 
     def _macro_trend(row: dict):
-        """Windowed темп over ≥3 changes (shared series_trend) so the AI weighs
-        a sustained DIRECTION, not a single noisy print."""
+        """Темп ряда — ТЕМ ЖЕ окном, что показано пользователю в панели.
+
+        R-2/R-3 (аудит отчётов 2026-07-29): здесь был жёстко зашит ``lag=3``,
+        тогда как панель считает по частоте публикации (дневной ряд → 21
+        наблюдение, подпись «за 1м»).  Один индикатор получал две оценки:
+        пользователь видел «VIX ▲ +1.61 за 1м», модель — +1.79 и честно его
+        пересказывала.  На инфляционных ожиданиях окна разошлись по ЗНАКУ —
+        панель «▲ растут», текст «снижаются».  Модель ничего не выдумывала:
+        расходились два расчёта движка.
+
+        Теперь окно берётся из единого источника ``regime.macro_trend_lookback``,
+        и вместе с величиной модели передаётся ПОДПИСЬ окна, чтобы в тексте
+        можно было честно сказать «за 1м», а не безымянную дельту.
+        """
         hist = row.get("history_30d") or []
         vals = [h.get("value") for h in hist if isinstance(h, dict)]
         try:
-            from finance.regime import series_trend
-            total, _slope, _n = series_trend(vals, 3)
+            from finance.regime import macro_trend_lookback, series_trend
+            lag, window = macro_trend_lookback(row.get("publish_cadence"))
+            total, _slope, _n = series_trend(vals, lag)
         except Exception:
-            total = None
-        return None if total is None else _safe_round(total, 2)
+            total, window = None, ""
+        if total is None:
+            return None, ""
+        return _safe_round(total, 2), window
 
     macro_summary: dict = {}
     for src_key, label in _MACRO_KEYS:
@@ -428,9 +443,13 @@ def _summarise_for_prompt(results: dict) -> dict:
         }
         # F3 — include the rate-of-change (темп роста/падения).  A rising 4.1%
         # unemployment vs a falling 4.1% are OPPOSITE regime signals.
-        trend = _macro_trend(row)
+        trend, trend_window = _macro_trend(row)
         if trend is not None:
             entry["trend"] = trend
+            # Подпись окна («1м» / «3м» / «3кв») — чтобы модель писала «+1.61 за 1м»,
+            # а не безымянную дельту, и чтобы число совпадало с чипом панели.
+            if trend_window:
+                entry["trend_window"] = trend_window
         macro_summary[label] = entry
 
     return {
@@ -920,6 +939,21 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
         "- Не пере-округляй: цифру приводи как в данных (допустимо сократить до "
         "одного знака после запятой, не более).\n"
         "- Нет данных для утверждения — напиши «данных недостаточно», а не сочиняй.\n"
+        # R-2…R-5 (аудит живых отчётов 2026-07-29): в тексте появлялись величины,
+        # которых в данных не было (бета 3.59), и инструменты, которых не было
+        # в плане («продать KZT, USD» — при том что USD это маржинальный ЗАЁМ,
+        # закрываемый покупкой).  Правило ниже закрывает оба класса ошибок.
+        "- ТЫ НЕ СЧИТАЕШЬ — ТЫ ОПИСЫВАЕШЬ. Все величины уже вычислены движком. "
+        "Не складывай, не вычитай, не усредняй, не пересчитывай проценты в деньги "
+        "и обратно, не выводи «примерно столько же». Нужного числа нет в данных — "
+        "значит его нет в отчёте.\n"
+        "- ТЕМП (trend) цитируй ВЕРБАТИМ вместе с окном из trend_window: "
+        "«+1.61 за 1м». Не пересчитывай темп на другое окно и не меняй его знак: "
+        "если trend положительный — показатель РАСТЁТ, отрицательный — ПАДАЕТ, "
+        "как бы ни выглядел уровень.\n"
+        "- ДЕЙСТВИЯ называй ТОЛЬКО те, что есть в плане (action_plan). Не добавляй "
+        "в список продаж/покупок инструменты, которых там нет — в том числе "
+        "денежные строки: кэш и маржинальный заём не «продают».\n"
     )
 
     # Валютное правило (замечание 2026-07-09): модель писала «8 из каждых 10

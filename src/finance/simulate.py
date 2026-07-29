@@ -345,16 +345,14 @@ def high_priority_target_weights(
             # We keep the OPTIMISER'S MAGNITUDE |Δw| but force the ACTION'S sign,
             # so the effect simulates executing the plan the report actually
             # recommends and the buy/sell breakdown matches the Action Plan.
+            # SSOT знака — `action_plan._action_signed_delta` (единая функция для
+            # строки плана и этой панели, иначе они расходятся: дефект R-1).
+            # С 2026-07-29 строки плана приходят сюда УЖЕ выровненными, но вызов
+            # оставлен: функция идемпотентна, а панель не должна зависеть от того,
+            # кто её вызвал и в каком порядке.
+            from finance.action_plan import _action_signed_delta
             _act = str(r.get("action") or "")
-            _is_sell = _act in ("Sell", "Trim")
-            _is_buy  = _act in ("Buy", "Strong Buy")
-            _mag = abs(dpp)
-            if _is_sell:
-                signed = -_mag
-            elif _is_buy:
-                signed = _mag
-            else:                        # unknown action → fall back to BL sign
-                signed = dpp
+            signed = _action_signed_delta(_act, dpp)
             target[t] = cur + signed / 100.0
             hp_tickers.append(str(t)); acted.add(str(t))
             if signed < 0:

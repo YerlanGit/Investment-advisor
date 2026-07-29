@@ -105,6 +105,28 @@ def _usable_macro(series: object) -> Optional[float]:
     return None
 
 
+# Окно темпа по частоте публикации ряда — SSOT (R-2/R-3, аудит отчётов 2026-07-29).
+#
+# Было: панель отчёта считала темп по этой таблице (дневной ряд → 21 наблюдение,
+# подпись «за 1м»), а промпт ИИ пересчитывал ТОТ ЖЕ ряд с жёстко зашитым lag=3.
+# Два разных окна → два разных числа на один индикатор: пользователь видел
+# «VIX ▲ +1.61 за 1м», а модель получала +1.79 и добросовестно его пересказывала.
+# На инфляционных ожиданиях окна разошлись даже по ЗНАКУ («растут» в панели,
+# «снижаются» в тексте).  Это не выдумка модели, а две несогласованные оценки
+# движка; лечится единственным источником окна для обоих потребителей.
+MACRO_TREND_LOOKBACK: dict[str, tuple[int, str]] = {
+    "daily":     (21, "1м"),
+    "monthly":   (3,  "3м"),
+    "quarterly": (3,  "3кв"),
+}
+_MACRO_TREND_DEFAULT = (5, "")
+
+
+def macro_trend_lookback(cadence) -> tuple[int, str]:
+    """``(lag, подпись окна)`` для частоты публикации ряда."""
+    return MACRO_TREND_LOOKBACK.get(str(cadence or "daily"), _MACRO_TREND_DEFAULT)
+
+
 def series_trend(values, lag: int, *, min_points: int = _TREND_MIN_POINTS
                  ) -> tuple[Optional[float], Optional[float], int]:
     """
