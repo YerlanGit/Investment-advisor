@@ -258,3 +258,135 @@ class BackwardCompatibilityTest(_CacheDirMixin, unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ─── Фаза 2 — протокол провайдера ───────────────────────────────────────────
+
+
+class ProviderResultContractTest(unittest.TestCase):
+    """I-11: `ProviderResult` подставляется на место `HistoryResult`."""
+
+    def test_first_four_fields_match_history_result(self):
+        """Имена и ПОРЯДОК первых четырёх полей совпадают — иначе тихо ломаются
+        шесть модулей-потребителей, читающих объект атрибутами."""
+        from finance.price_providers import ProviderResult
+        self.assertEqual(ProviderResult._fields[:4], H.HistoryResult._fields)
+
+    def test_positional_construction_without_new_fields(self):
+        from finance.price_providers import ProviderResult
+        r = ProviderResult(pd.DataFrame(), ["A"], {"B": "нет"}, [])
+        self.assertEqual(r.loaded, ["A"])
+        self.assertEqual(r.convention, {})
+        self.assertEqual(r.source, {})
+
+    def test_single_source_and_convention_helpers(self):
+        from finance.price_providers import PriceConvention, ProviderResult
+        one = ProviderResult(pd.DataFrame(), ["A", "B"], {}, [],
+                             convention={"A": PriceConvention.RAW,
+                                         "B": PriceConvention.RAW},
+                             source={"A": "x", "B": "x"})
+        self.assertEqual(one.single_source(), "x")
+        self.assertEqual(one.single_convention(), PriceConvention.RAW)
+
+        mixed = ProviderResult(pd.DataFrame(), ["A", "B"], {}, [],
+                               convention={"A": PriceConvention.RAW,
+                                           "B": PriceConvention.TOTAL_RETURN},
+                               source={"A": "x", "B": "y"})
+        self.assertIsNone(mixed.single_source())      # I-13 нарушен → None
+        self.assertIsNone(mixed.single_convention())  # I-7 нарушен → None
+
+
+class ProviderMetadataTest(unittest.TestCase):
+    """Каждый провайдер объявляет конвенцию и параллелизм ЯВНО."""
+
+    def test_tradernet_declares_split_adjusted(self):
+        from finance.price_providers import PriceConvention, TradernetProvider
+        self.assertEqual(TradernetProvider.convention, PriceConvention.SPLIT_ADJUSTED)
+        self.assertEqual(TradernetProvider.max_parallelism, 6)
+
+    def test_demo_is_synthetic_not_a_market_convention(self):
+        """Витрина не притворяется рыночной конвенцией — иначе I-7 «разрешил» бы
+        смешать синтетику с реальными данными."""
+        from finance.price_providers import DemoProvider, PriceConvention
+        self.assertEqual(DemoProvider.convention, PriceConvention.SYNTHETIC)
+        self.assertNotIn(DemoProvider.convention,
+                         (PriceConvention.RAW, PriceConvention.SPLIT_ADJUSTED,
+                          PriceConvention.TOTAL_RETURN))
+
+    def test_demo_fetch_fills_source_and_convention(self):
+        from finance.price_providers import DemoProvider
+        res = DemoProvider().fetch(["AAPL.US", "НЕТ-ТАКОГО"], days=300)
+        self.assertIn("AAPL.US", res.loaded)
+        self.assertEqual(res.single_source(), "demo")
+        self.assertIsNotNone(res.single_convention())
+        self.assertIn("НЕТ-ТАКОГО", res.failed)   # пустой ответ ≠ исключение
+
+
+class ProviderSelectionTest(unittest.TestCase):
+    """`provider_for_source` — единственная точка выбора и юридический гард."""
+
+    def test_freedom_selects_tradernet(self):
+        from finance.price_providers import TradernetProvider, provider_for_source
+        self.assertIsInstance(provider_for_source("freedom", client=None),
+                              TradernetProvider)
+
+    def test_default_source_selects_tradernet(self):
+        """Пустой источник = живой фид (обратная совместимость, I-5)."""
+        from finance.price_providers import TradernetProvider, provider_for_source
+        self.assertIsInstance(provider_for_source("", client=None), TradernetProvider)
+
+    def test_demo_selects_demo_provider(self):
+        from finance.price_providers import DemoProvider, provider_for_source
+        self.assertIsInstance(provider_for_source("demo"), DemoProvider)
+
+    def test_manual_rejects_tradernet_at_runtime(self):
+        """I-12: гард срабатывает в РАНТАЙМЕ, а не только в тесте — env можно
+        выставить в проде, и тихое нарушение недопустимо."""
+        from finance.price_providers import ProviderUnavailable, provider_for_source
+        with patch.dict("os.environ", {"PRICE_PROVIDER_MANUAL": "tradernet"}):
+            with self.assertRaises(ProviderUnavailable) as ctx:
+                provider_for_source("manual", client=object())
+            self.assertIn("I-12", str(ctx.exception))
+
+    def test_manual_stooq_not_implemented_yet(self):
+        """До Фазы 9 ручной портфель честно отказывает, а не молча падает."""
+        from finance.price_providers import ProviderUnavailable, provider_for_source
+        with patch.dict("os.environ", {"PRICE_PROVIDER_MANUAL": "stooq"}):
+            with self.assertRaises(ProviderUnavailable):
+                provider_for_source("manual")
+
+    def test_manual_never_returns_tradernet(self):
+        """I-12 сквозной: ни при каком значении флага manual не получит брокера."""
+        from finance.price_providers import (ProviderUnavailable,
+                                             TradernetProvider, provider_for_source)
+        for flag in ("tradernet", "stooq", "eodhd", ""):
+            with patch.dict("os.environ", {"PRICE_PROVIDER_MANUAL": flag}):
+                try:
+                    got = provider_for_source("manual", client=object())
+                except ProviderUnavailable:
+                    continue
+                self.assertNotIsInstance(got, TradernetProvider)
+
+
+class EngineProviderWiringTest(unittest.TestCase):
+    """Движок ходит за ценами через провайдера."""
+
+    def test_engine_selects_by_price_source(self):
+        from finance.investment_logic import MAC3RiskEngine
+        self.assertEqual(MAC3RiskEngine(price_source="demo")._get_price_provider().name,
+                         "demo")
+        self.assertEqual(MAC3RiskEngine(price_source="freedom")._get_price_provider().name,
+                         "tradernet")
+
+    def test_demo_never_builds_tradernet_client(self):
+        """I-12 на уровне поведения: витрина не создаёт клиента вообще."""
+        from finance.investment_logic import MAC3RiskEngine
+        eng = MAC3RiskEngine(price_source="demo")
+        with patch.object(eng, "_get_tradernet_client") as factory:
+            eng._get_price_provider()
+            factory.assert_not_called()
+
+    def test_provider_is_cached_per_engine(self):
+        from finance.investment_logic import MAC3RiskEngine
+        eng = MAC3RiskEngine(price_source="demo")
+        self.assertIs(eng._get_price_provider(), eng._get_price_provider())
