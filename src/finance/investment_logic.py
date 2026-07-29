@@ -509,6 +509,8 @@ class MAC3RiskEngine:
         # Кешируемый клиент Tradernet — переиспользуется между запросами одного
         # вызова (внутри analyze_all). Keys читаются из env (Cloud Run secret).
         self._tradernet_client: TradernetClient | None = None
+        # Провайдер цен — ленивый, выбирается по self.price_source (Фаза 2).
+        self._price_provider = None
         # Audit trail filled by `_apply_fx_conversion` — surfaced into the
         # report's QC panel so the user can verify what was converted.
         self._last_fx_records: list = []
@@ -657,12 +659,31 @@ class MAC3RiskEngine:
                     sector_top_pct=sector_top_pct)
 
     def _get_tradernet_client(self) -> TradernetClient:
-        """Lazy-init Tradernet client.  Reused across calls inside analyze_all."""
+        """Lazy-init Tradernet client.  Reused across calls inside analyze_all.
+
+        Остаётся фабрикой клиента — её использует `TradernetProvider`.  Убирать
+        её при переходе на провайдеров нельзя: это единственная точка, где
+        читаются сервисные ключи.
+        """
         if self._tradernet_client is None:
             api_key    = (os.getenv("FREEDOM_API_KEY")    or "").strip()
             secret_key = (os.getenv("FREEDOM_API_SECRET") or "").strip()
             self._tradernet_client = TradernetClient(api_key, secret_key)
         return self._tradernet_client
+
+    def _get_price_provider(self):
+        """Провайдер цен для ЭТОГО отчёта — по источнику портфеля (Фаза 2).
+
+        Клиент создаётся ЛЕНИВО и только для брокерского провайдера: витрина
+        и ручной портфель не должны инстанцировать `TradernetClient` вовсе
+        (I-12 проверяется в том числе по факту его создания).
+        """
+        if self._price_provider is None:
+            from finance.price_providers import provider_for_source
+            src = self.price_source
+            client = self._get_tradernet_client() if src not in ("demo", "manual") else None
+            self._price_provider = provider_for_source(src, client=client)
+        return self._price_provider
 
     def resolve_tickers(self, tickers):
         """
@@ -775,31 +796,15 @@ class MAC3RiskEngine:
             valid_tickers + list(self.factor_tickers.values()) + self.BENCHMARK_EXTRA
         ))
 
-        # ── Витрина: локальные детерминированные цены, БЕЗ сети ──────────────
-        # Демо обязано рендериться всегда и одинаково у всех (см. модуль
-        # finance/demo_portfolio.py).  Живой фид этого не даёт: он меняется
-        # ежедневно, зависит от квоты ключа и — отдельно — распространяет
-        # биржевые данные на не-клиентов брокера.
-        if self.price_source == "demo":
-            from finance.demo_portfolio import demo_price_matrix
-            demo_df = demo_price_matrix(all_req, days=period_days)
-            missing = [t for t in all_req if t not in demo_df.columns]
-            if missing:
-                logger.info("Витрина не содержит %d тикер(ов): %s",
-                            len(missing), ", ".join(missing))
-            history_result = HistoryResult(
-                data=demo_df, loaded=list(demo_df.columns),
-                failed={t: "нет в витрине" for t in missing}, retried=[],
-            )
-            logger.info("Демо-витрина: %d рядов × %d дней (локально, без сети)",
-                        len(demo_df.columns), len(demo_df))
-            return self._apply_fx_conversion(self.math_firewall(demo_df)), history_result
-
-        logger.info("Загрузка цен через Tradernet для %d инструментов: %s",
-                    len(all_req), ", ".join(all_req))
-
-        client = self._get_tradernet_client()
-        history_result = get_history_frame(client, all_req, days=period_days)
+        # Загрузка идёт ЧЕРЕЗ ПРОВАЙДЕРА (Фаза 2): движок больше не знает, откуда
+        # берутся цены.  Провайдер выбирается по источнику портфеля — там же
+        # охраняется юридическая граница I-12 (данные брокера недопустимы для
+        # ручного портфеля).  `ProviderResult` duck-совместим с `HistoryResult`,
+        # поэтому шесть модулей-потребителей ниже не правились (I-11).
+        provider = self._get_price_provider()
+        logger.info("Загрузка цен через '%s' (%s) для %d инструментов",
+                    provider.name, provider.convention.value, len(all_req))
+        history_result = provider.fetch(all_req, days=period_days)
 
         if history_result.data.empty:
             logger.error("Tradernet вернул пустой набор цен — все тикеры провалились")

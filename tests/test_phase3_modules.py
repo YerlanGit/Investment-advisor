@@ -260,12 +260,24 @@ class ActionPlanBuilderTest(unittest.TestCase):
             bl_records=bl_records, portfolio_value=10_000.0,
         )
         by = {r.ticker: r for r in rows}
-        # Contradicting names: qty suppressed, divergence noted, Δw kept honest.
+        # Contradicting names: qty suppressed, divergence noted.
+        #
+        # 2026-07-29 (R-1): `delta_w_pp` теперь несёт знак 4-Pillar ACTION, а не
+        # знак Black-Litterman.  Прежняя редакция теста пиннила сырой BL-знак
+        # («BL view preserved»), и ровно это дало дефект в живом отчёте: план
+        # показывал «MSFT · Сократить · +3.0 пп» рядом с Effect-панелью того же
+        # отчёта, где та же бумага шла как «Продать −2.97 пп».
+        #
+        # Взгляд оптимизатора НЕ потерян — он остался там, где не конфликтует
+        # с чипом действия: в тексте пометки «BL расходится с сигналом (+0.4пп)».
         self.assertIsNone(by["AAOI"].qty_delta)
         self.assertIn("BL расходится", by["AAOI"].reason)
-        self.assertEqual(by["AAOI"].delta_w_pp, 0.4)     # BL view preserved
+        self.assertEqual(by["AAOI"].delta_w_pp, -0.4)    # знак — от ACTION (Sell)
+        self.assertIn("+0.4", by["AAOI"].reason)         # сырой BL — в пометке
         self.assertIsNone(by["MSFT"].qty_delta)
         self.assertIn("BL расходится", by["MSFT"].reason)
+        self.assertEqual(by["MSFT"].delta_w_pp, -3.4)    # Trim ⇒ отрицательная Δw
+        self.assertIn("+3.4", by["MSFT"].reason)
         # Agreeing SELL keeps its (negative) quantity.
         self.assertIsNotNone(by["ORCL"].qty_delta)
         self.assertLess(by["ORCL"].qty_delta, 0)

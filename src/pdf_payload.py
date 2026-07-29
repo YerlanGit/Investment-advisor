@@ -426,8 +426,10 @@ def _build_macro_drivers_panel(raw: Optional[dict]) -> dict:
 # Cadence → (lookback in observations, window label) for the rate-of-change.
 # Lookbacks give ≥3 consecutive changes (4 points) so the chip reads a TREND,
 # not a single noisy step (BLOCK 2.3 — «темпы минимум 3 изменений»).
-_MACRO_TREND_LOOKBACK = {"daily": (21, "1м"), "monthly": (3, "3м"),
-                         "quarterly": (3, "3кв")}
+# R-2/R-3 (2026-07-29): таблица окон переехала в `finance.regime` как SSOT —
+# промпт ИИ обязан считать темп ПО ТОМУ ЖЕ окну, что показано в панели, иначе
+# текст и чип расходятся в числе (а на инфляции расходились в знаке).
+from finance.regime import macro_trend_lookback as _macro_trend_lookback
 
 
 def _macro_series_trend(row: dict) -> Optional[dict]:
@@ -443,7 +445,7 @@ def _macro_series_trend(row: dict) -> Optional[dict]:
     hist = row.get("history_30d") or []
     vals = [h.get("value") for h in hist if isinstance(h, dict)]
     cadence = str(row.get("publish_cadence") or "daily")
-    lag, win = _MACRO_TREND_LOOKBACK.get(cadence, (5, ""))
+    lag, win = _macro_trend_lookback(cadence)
     # F3 / BLOCK 2.3 — multi-point темп over ≥3 changes (shared with the regime
     # engine via finance.regime.series_trend), NOT a single latest−prior delta.
     from finance.regime import series_trend

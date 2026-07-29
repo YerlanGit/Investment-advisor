@@ -189,6 +189,36 @@ def compute_levels(*,
 
 # ── Plan builder ─────────────────────────────────────────────────────────────
 
+# Направления, задаваемые 4-Pillar ACTION.  SSOT знака Δw во всём отчёте:
+# и строка плана (`build_action_plan`), и Effect-панель
+# (`simulate.high_priority_target_weights`) обязаны использовать ЭТУ функцию,
+# иначе панели одного отчёта расходятся по знаку (дефект R-1, аудит 2026-07-29).
+_SELL_ACTIONS = ("Trim", "Sell")
+_BUY_ACTIONS = ("Buy", "Strong Buy")
+
+
+def _action_signed_delta(action: str, delta_w_pp: float) -> float:
+    """Величина — от Black-Litterman, знак — от 4-Pillar ACTION.
+
+    Два движка могут расходиться: BL хочет +Δw на бумаге с рейтингом Sell
+    (её диверсифицирующая ценность перевешивает слабый фундаментал).
+    Направление сделки в отчёте объявлено производным от ACTION, поэтому знак
+    берём оттуда, а |Δw| оставляем оптимизаторским.
+
+    Идемпотентна: повторное применение к уже выровненному значению ничего
+    не меняет.  ``Hold`` и незнакомые действия проходят насквозь.
+    """
+    try:
+        value = float(delta_w_pp)
+    except (TypeError, ValueError):
+        return 0.0
+    if action in _SELL_ACTIONS:
+        return -abs(value)
+    if action in _BUY_ACTIONS:
+        return abs(value)
+    return value
+
+
 def build_action_plan(*,
                       perf_table,                   # pandas DataFrame
                       asset_scores: dict,           # {ticker: AssetScore-like}
@@ -323,9 +353,30 @@ def build_action_plan(*,
         # 2026-07-18: flag the action↔BL divergence in plain words so the «—»
         # quantity is explained (optimiser wants the opposite of the signal).
         if _bl_contradicts:
+            # ВАЖНО: в тексте пометки — СЫРОЙ знак BL.  Именно он и есть
+            # «расхождение», о котором сообщаем; подставлять сюда выровненное
+            # значение значило бы стереть сам факт разногласия.
             reason_bits.append(
                 f"BL расходится с сигналом ({delta_w_pp:+.1f}пп)")
         reason = " · ".join(reason_bits) if reason_bits else action
+
+        # R-1 (аудит отчётов 2026-07-29): направление Δw в строке плана —
+        # из 4-Pillar ACTION, а не из знака Black-Litterman.
+        #
+        # Инвариант «направление сделок — из ACTION, НЕ из знака BL Δw» был
+        # применён только к Effect-панели (`simulate.high_priority_target_weights`,
+        # раунд 26), а строка плана продолжала нести сырой BL-знак.  В живом
+        # отчёте 28.07 это дало прямое противоречие ВНУТРИ одного документа:
+        # Action Plan показывал «MSFT · Сократить · +3.0 пп», а Effect для той же
+        # бумаги — «Продать −2.97 пп» (та же величина, обратный знак; то же у
+        # GLD и META).  Пользователь видел «Сократить» рядом с положительной
+        # дельтой.
+        #
+        # Величина остаётся оптимизаторской (|Δw| от BL) — меняется только знак,
+        # поэтому ни одна сумма не «поехала».  Для `simulate` правка идемпотентна:
+        # `high_priority_target_weights` и так берёт abs() и форсирует знак сам,
+        # а отбор кандидатов на реинвест читает `bl_records`, а не эти строки.
+        delta_w_pp = _action_signed_delta(action, delta_w_pp)
 
         rows.append(AssetActionRow(
             ticker=ticker, action=action, delta_w_pp=delta_w_pp,
