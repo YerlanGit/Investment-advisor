@@ -1937,6 +1937,21 @@ def _build_integrity_checks(results: dict,
         checks.append({"status": "⚠", "label": "Серия доходностей",
                         "detail": "ряд не построен"})
 
+    # 2a. H-1 (2026-07-29): подмена неликвидных бумаг ликвидными прокси.
+    # Чип УСЛОВНЫЙ — только когда подмена была.  Он обязателен: без него «чужая»
+    # бета у структурной ноты выглядит ошибкой движка, а не заявленной
+    # конвенцией.  Разделение, которое надо донести: РИСК считается по прокси,
+    # СТОИМОСТЬ и P&L — по реальной бумаге.
+    _subs = results.get("proxy_substitutions") or {}
+    if _subs:
+        _pairs = " · ".join(f"{o} → {p}" for o, p in sorted(_subs.items()))
+        _at_cost = sorted(results.get("priced_at_cost") or [])
+        _detail = f"риск по ликвидному аналогу: {_pairs}; стоимость — по своей бумаге"
+        if _at_cost:
+            _detail += f" · по цене покупки (нет рыночной): {', '.join(_at_cost)}"
+        checks.append({"status": "⚠", "label": "Прокси неликвидных бумаг",
+                        "detail": _detail})
+
     # 3. Factor model coverage + collinearity.  Audit 06-25: a green "100%
     # покрытие" chip here contradicted the page-6 CoVe «факторная независимость»
     # warn (κ≈61).  Downgrade to ⚠ when the factors are near-collinear and the

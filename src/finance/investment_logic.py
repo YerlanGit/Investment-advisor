@@ -328,36 +328,77 @@ class MAC3RiskEngine:
     NON_RISK_ASSETS = ['USD', 'EUR', 'CASH', 'RUB', 'KZT']
 
     # Proxy-ETF для облигаций (формат Tradernet — все .US).
+    # Класс подбирается по КРЕДИТНОМУ РИСКУ эмитента, а не по слову «bond»:
+    # казахстанский долг живёт в EM-спреде, а не в кривой US Treasury/US IG.
     BOND_PROXIES = {
-        'RF': 'BIL.US',   # Risk Free (1-3 Month T-Bill ETF)
-        'IG': 'LQD.US',   # Investment Grade (Corporate Bond ETF)
-        'HY': 'HYG.US',   # High Yield (Junk Bond ETF)
+        'RF': 'BIL.US',    # Risk Free (1-3 Month T-Bill ETF)
+        'IG': 'LQD.US',    # Investment Grade (US Corporate Bond ETF)
+        'HY': 'HYG.US',    # High Yield (Junk Bond ETF)
+        'EM': 'VWOB.US',   # EM-долг (Vanguard EM Government Bond, USD)
     }
 
-    # Маппинг известных облигаций к категориям (для автоопределения)
+    # Маркеры казахстанского/EM-происхождения в свободно введённом тикере.
+    # Нужны ветке-эвристике: «BOND» в имени сам по себе не говорит, ЧЕЙ это долг,
+    # а для KZ-бумаги прокси на US IG занижает спред и волатильность.
+    # 'OVD' — облигации внутреннего долга (KZ), поэтому это тоже KZ-маркер.
+    _EM_BOND_MARKERS = frozenset({
+        'KZ', 'KAZ', 'AIX', 'OVD', 'KASE', 'KASPI', 'KSPI', 'HALYK', 'HSBK',
+        'FREEDOM', 'FFIN', 'TENGE', 'KZT',
+    })
+
+    # Маппинг известных облигаций к категориям (для автоопределения).
+    # KZ-суверен и KZ-корпорат — EM-класс: прежние 'RF' (BIL.US ≈ нулевой риск)
+    # и 'IG' (LQD.US, развитый рынок) занижали риск казахстанского долга.
     BOND_CLASSIFICATION_MAP = {
-        'KZ_GOV_BOND': 'RF',
+        'KZ_GOV_BOND': 'EM',
         'US_TREASURY': 'RF',
-        'KASPI_BOND':  'IG',
+        'KASPI_BOND':  'EM',
     }
 
     # Прокси для инструментов, у которых либо нет ценовой истории, либо
     # история слишком короткая/иллквидная для надёжного факторного анализа.
     # Применяется ТОЛЬКО к ковариации/корреляции — текущая цена и P&L
     # берутся из реального тикера (брокера).
-    #
     # Логика подбора прокси: похожая duration + кредит-рейтинг + валюта.
+    #
+    # Замысел слоя: у неликвидной бумаги нет пригодного ценового ряда (нет
+    # истории, либо цена «сглажена» редкими сделками — appraisal-smoothing), и
+    # оценивать по ней риск нельзя.  Вместо неё в ФАКТОРНУЮ МОДЕЛЬ подставляется
+    # ликвидный индекс с похожим профилем; цена и P&L при этом берутся из
+    # реального тикера (брокер), так что стоимость портфеля не искажается.
+    #
+    # Что изменено: AIX-ноты Freedom проксировались на LQD.US — американский
+    # investment-grade корпоративный кредит.  Это развитый рынок, и он занижает
+    # риск казахстанской структурной ноты: у EM-долга шире спред, выше
+    # волатильность и другая реакция на risk-off.  Прокси переведены на
+    # EM-инструменты, что честнее отражает природу бумаги.
+    #
+    # 🔴 ЖЁСТКОЕ ОГРАНИЧЕНИЕ: прокси НЕ ИМЕЕТ ПРАВА совпадать с факторным
+    # тикером.  `calculate_structural_risk` строит `needed_cols` как
+    # `[*factor_tickers, *resolved_assets]`; совпадение даёт ДУБЛИРОВАННУЮ
+    # колонку, и присвоение факторных имён падает с
+    # `ValueError: Length mismatch` — то есть отчёт не строится вообще.
+    # Поэтому взяты EM-ETF, которых нет в факторной панели: EMB/EEM
+    # зарезервированы под факторы EM_Bond/EM_Equity.  Инвариант закреплён
+    # тестом `ProxyNeverCollidesWithFactorTest`.
+    #
+    # Вторая причина не брать сам фактор: тогда бета ноты к нему была бы ровно
+    # 1.0 при нулевом остаточном риске — модель заявила бы, что у неликвидной
+    # структурной ноты НЕТ специфического риска, то есть прямо обратное правде.
     INSTRUMENT_PROXY_MAP = {
-        # Astana Exchange Special Purpose Companies (структурные ноты Freedom).
-        # Обычно — короткая duration USD/KZT corporate, аналог LQD.
-        'AIX_SPC':           'LQD.US',
-        # Любой ISIN-тикер с .AIX суффиксом (пример: FFSPC6.1028.AIX).
-        # Если префикс другой — fallback к консервативному T-Bill.
-        'AIX_DEFAULT':       'BIL.US',
+        # Структурные ноты Astana Exchange (Freedom SPC): USD-номинал, короткая
+        # duration, кредит квазисуверенного/корпоративного EM-эмитента.
+        # VWOB — Vanguard EM Government Bond (USD), не входит в факторную панель.
+        'AIX_SPC':           'VWOB.US',
+        # Любой .AIX-тикер с иным префиксом — тот же класс риска, а не T-Bill:
+        # прежний BIL.US (US T-Bills, риск ≈ 0) занижал риск неизвестной
+        # AIX-бумаги до нуля.
+        'AIX_DEFAULT':       'VWOB.US',
         # KZ корпоративные бонды без прямого Tradernet-маппинга.
-        'KZ_CORPORATE_BOND': 'LQD.US',
-        # Развивающиеся рынки — KAP.IL/HSBK.IL/KSPI.KZ если основная серия слишком короткая.
-        'EM_EQUITY_FALLBACK': 'EEM.US',
+        'KZ_CORPORATE_BOND': 'VWOB.US',
+        # Неликвидные EM-акции (KAP.IL/HSBK.IL/KSPI.KZ при слишком короткой
+        # серии).  VWO — Vanguard FTSE EM, вне факторной панели (там EEM).
+        'EM_EQUITY_FALLBACK': 'VWO.US',
     }
 
     # Sector ETF index map — used for sector exposure analysis in reports.
@@ -433,6 +474,11 @@ class MAC3RiskEngine:
         'EMB':   'Bonds',
         'SHY':   'Bonds',
         'VCIT':  'Bonds',
+        # EM-долг: используется прокси неликвидных AIX/KZ-бумаг, но может и
+        # держаться напрямую — тогда сектор нужен для секторной панели.
+        # (Прокси сам в sector_map НЕ попадает: он строится по ОРИГИНАЛЬНЫМ
+        # тикерам портфеля, поэтому сектор AIX-ноты остаётся EM_Kazakhstan.)
+        'VWOB':  'Bonds',
     }
 
     # Benchmark / catalogue ETFs fetched alongside factor ETFs.
@@ -685,41 +731,75 @@ class MAC3RiskEngine:
             self._price_provider = provider_for_source(src, client=client)
         return self._price_provider
 
+    @classmethod
+    def _looks_emerging_market(cls, ticker: str) -> bool:
+        """True, если в имени бумаги есть маркер KZ/EM-происхождения.
+
+        Вызывается ТОЛЬКО из облигационной ветки `resolve_tickers`, поэтому
+        подстрочный поиск безопасен: коллизия потребовала бы US-инструмента, в
+        имени которого одновременно есть и «BOND»/«OVD», и KZ-маркер.
+        """
+        t = str(ticker).upper()
+        return any(marker in t for marker in cls._EM_BOND_MARKERS)
+
+    @classmethod
+    def proxy_for(cls, ticker) -> str | None:
+        """SSOT: возвращает прокси-тикер, если бумага ПОДМЕНЯЕТСЯ, иначе None.
+
+        Отличает подмену инструмента от нормализации имени.  Это разные вещи, и
+        путать их нельзя:
+          • `AAPL` → `AAPL.US`, `KSPI` → `KSPI.KZ`, `BITCOIN` → `BTC-USD` —
+            ТА ЖЕ бумага, просто в формате провайдера.  Прокси НЕТ.
+          • `FFSPC6.1028.AIX` → `VWOB.US` — ДРУГАЯ бумага, взятая вместо
+            неликвидной для оценки риска.  Это прокси.
+
+        Три потребителя обязаны читать одну функцию, иначе слои разъедутся:
+          1. `resolve_tickers` — что скачивать и что класть в фактор-модель;
+          2. цена позиции (`analyze_all`) — прокси НЕ ИМЕЕТ ПРАВА давать цену;
+          3. раскрытие пользователю (`prefetch_market_data.proxy_map`, экран
+             подтверждения ручного ввода) — подмену обязаны показать.
+        """
+        t = str(ticker).upper().strip()
+        if t in cls.NON_RISK_ASSETS:
+            return None
+        # 1. Известные облигации → ETF-прокси по кредитному классу
+        if t in cls.BOND_CLASSIFICATION_MAP:
+            category = cls.BOND_CLASSIFICATION_MAP[t]
+            return cls.BOND_PROXIES.get(category, cls.BOND_PROXIES['RF'])
+        # 2. Эвристика по имени: слово «BOND» не говорит, ЧЕЙ это долг —
+        #    KZ-бумага должна проксироваться на EM-долг, а не на US IG.
+        if 'BOND' in t or 'OVD' in t:
+            return cls.BOND_PROXIES['EM' if cls._looks_emerging_market(t) else 'IG']
+        # 3. AIX (Astana International Exchange) — структурные ноты Freedom
+        if t.endswith('.AIX') or 'FFSPC' in t:
+            return cls.INSTRUMENT_PROXY_MAP.get(
+                'AIX_SPC', cls.INSTRUMENT_PROXY_MAP['AIX_DEFAULT'])
+        return None
+
     def resolve_tickers(self, tickers):
         """
         Преобразует пользовательский тикер в формат Tradernet ("SYMBOL.EXCHANGE").
 
         Спецслучаи:
           - cash currencies → пропускаются (NON_RISK_ASSETS)
-          - известные KZ облигации → ETF-прокси (BOND_PROXIES)
+          - неликвидные бумаги (KZ-облигации, AIX-ноты) → ликвидный прокси
+            (`proxy_for`): подмена ТОЛЬКО для фактор-модели, цена и P&L
+            остаются за реальным тикером
           - крипто → '*-USD' (исторический формат, для совместимости с
             форком CCXT/Yahoo, не Tradernet — но если тикер известен через
             Tradernet, его можно подменить позже)
-          - AIX-инструменты (FFSPC*.AIX) → INSTRUMENT_PROXY_MAP['AIX_SPC'] для
-            фактор-моделирования.  Ценообразование остаётся через брокера.
         """
         resolved = []
-        aix_found: list[str] = []
+        proxied: list[str] = []
         for t in tickers:
             t_str = str(t).upper().strip()
             if t_str in self.NON_RISK_ASSETS:
                 continue   # Cash отдельно
 
-            # 1. Известные облигации → ETF-прокси
-            if t_str in self.BOND_CLASSIFICATION_MAP:
-                category = self.BOND_CLASSIFICATION_MAP[t_str]
-                resolved.append(self.BOND_PROXIES.get(category, self.BOND_PROXIES['RF']))
-                continue
-            # 2. Эвристика по имени тикера
-            if 'BOND' in t_str or 'OVD' in t_str:
-                resolved.append(self.BOND_PROXIES['IG'])
-                continue
-
-            # 3. AIX (Astana International Exchange) — структурные ноты Freedom
-            if t_str.endswith('.AIX') or 'FFSPC' in t_str:
-                proxy = self.INSTRUMENT_PROXY_MAP.get('AIX_SPC',
-                          self.INSTRUMENT_PROXY_MAP['AIX_DEFAULT'])
-                aix_found.append(t_str)
+            # 1-3. Неликвидная бумага → прокси (единая точка решения)
+            proxy = self.proxy_for(t_str)
+            if proxy is not None:
+                proxied.append(f"{t_str}→{proxy}")
                 resolved.append(proxy)
                 continue
 
@@ -754,9 +834,9 @@ class MAC3RiskEngine:
 
             # 7. Голый US-тикер → добавить .US
             resolved.append(f"{t_str}.US")
-        if aix_found:
-            proxy = self.INSTRUMENT_PROXY_MAP.get('AIX_SPC', self.INSTRUMENT_PROXY_MAP['AIX_DEFAULT'])
-            logger.info("AIX instruments proxied to %s for factor model: %s", proxy, ", ".join(aix_found))
+        if proxied:
+            logger.info("Illiquid instruments proxied for factor model only "
+                        "(pricing stays on the real ticker): %s", ", ".join(proxied))
         return resolved
 
     def get_market_data(self, tickers, period_days: int | None = None):
@@ -906,8 +986,23 @@ class MAC3RiskEngine:
         # no Tradernet history (e.g. FFSPC6.1028.AIX on Astana exchange) leaves
         # an all-NaN column whose NaNs propagate through the row-level dropna
         # and erase every row — Ridge then gets shape (0, K) and raises.
+        # H-1 (2026-07-29): дедупликация ОБЯЗАТЕЛЬНА.  `data[available]` с
+        # повторяющимся именем даёт DataFrame с дублированными колонками, и
+        # дальше ломается всё: `data[c]` в sparse-гейте возвращает DataFrame
+        # (`TypeError: cannot convert the series to int`), а присвоение
+        # `f_data.columns = present_factors.keys()` падает с
+        # `ValueError: Length mismatch: Expected axis has 11 elements,
+        # new values have 10`.  Дубликат возникает в двух реальных случаях:
+        #   1. пользователь ДЕРЖИТ факторный ETF (SPY, IWM, EEM, IEF, DBC…) —
+        #      его resolved-тикер совпадает с факторной колонкой.  До этого
+        #      фикса портфель с SPY не строил отчёт ВООБЩЕ;
+        #   2. две неликвидные бумаги делят один прокси (AIX-нота +
+        #      KZ_GOV_BOND → VWOB.US).
+        # Дедуп только в ВЫБОРКЕ колонок; `valid_resolved` ниже дубликаты
+        # сохраняет намеренно — две проксированные бумаги должны получить
+        # одинаковые беты по общему прокси.
         needed_cols = [*self.factor_tickers.values(), *resolved_assets]
-        available = [c for c in needed_cols if c in data.columns]
+        available = list(dict.fromkeys(c for c in needed_cols if c in data.columns))
         data = data[available].dropna(axis=1, how='all')
 
         # F-6: sparse-history guard.  With leading NaNs no longer bfilled (the
@@ -1602,13 +1697,17 @@ class UniversalPortfolioManager:
             t for t in resolved_portfolio
             if t in data.columns and not data[t].isna().all()
         ])
-        # Proxy replacements (original → resolved) when the engine remapped a
-        # raw ticker to a tradable proxy.
+        # Подмена неликвидной бумаги на ликвидный прокси (original → proxy).
+        # Читаем SSOT `proxy_for`, а не сравниваем строки: прежняя эвристика
+        # («резолв ≠ TICKER.US и ≠ TICKER») считала прокси ЛЮБУЮ нормализацию
+        # формата, поэтому `KSPI`→`KSPI.KZ` и `BITCOIN`→`BTC-USD` попадали в
+        # список подмен — пользователю показали бы «ваш KSPI заменён», хотя это
+        # та же бумага.  H-1: раскрывать надо ровно реальные подмены.
         proxy_map: dict = {}
         for t in risky_tickers:
-            resolved = eng.resolve_tickers([t])
-            if resolved and resolved[0] != f"{str(t).upper()}.US" and resolved[0] != str(t).upper():
-                proxy_map[t] = resolved[0]
+            proxy = eng.proxy_for(t)
+            if proxy is not None:
+                proxy_map[t] = proxy
 
         return MarketDataPreview(
             data               = data,
@@ -1714,14 +1813,28 @@ class UniversalPortfolioManager:
         # Установка Current Price.
         # Приоритет:
         #   (1) NON_RISK_ASSETS (кэш) → 1.0
-        #   (2) Tradernet или proxy-ETF (для облигаций через BOND_PROXIES)
+        #   (2) своя ценовая история провайдера (НЕ прокси — см. ниже)
         #   (3) Цена брокера (Freedom API mkt_price) — fallback для КЗ облигаций без данных
-        #   (4) Purchase_Price — крайний fallback для облигаций с известным паттерном имени
+        #   (4) Purchase_Price — удержание по цене покупки, когда рыночной цены нет
+        #
+        # 🔴 ПРОКСИ НЕ ДАЁТ ЦЕНУ (2026-07-29, H-1).  Раньше ветка (2) брала
+        # `all_data[res]` для ЛЮБОГО резолвинга, включая подмену: AIX-нота
+        # получала последнюю цену прокси-ETF.  Нота, купленная по 100 и стоящая
+        # у брокера 103.5, оценивалась в 65 (цена VWOB) — стоимость портфеля
+        # падала на треть, а P&L показывал −35% убытка, которого не было
+        # (с прежним LQD.US ≈ 110 знак был обратный: фабриковалась +10% прибыль).
+        # Прокси существует ТОЛЬКО для ковариации; цена — всегда за реальным
+        # тикером, поэтому проксированные бумаги идут сразу в ветки (3)/(4).
+        #
+        # При этом проксированная бумага ОСТАЁТСЯ в фактор-модели (у неё есть
+        # ряд прокси), поэтому в `broker_priced_only` она НЕ попадает — иначе
+        # смысл слоя прокси исчез бы.
         #
         # ВАЖНО: resolve_tickers() пропускает NON_RISK_ASSETS → список короче df.index.
         # Используем per-ticker резолюцию вместо zip, чтобы избежать сдвига индексов.
         current_prices = {}
         broker_priced_only: set = set()  # тикеры, оцениваемые только через брокера (без фактор-модели)
+        priced_at_cost: set = set()      # проксированные бумаги без рыночной цены → по цене покупки
         for orig in df.index:
             orig_str = str(orig).upper().strip()
             if orig_str in self.engine.NON_RISK_ASSETS:
@@ -1729,22 +1842,27 @@ class UniversalPortfolioManager:
                 continue
             resolved_list = self.engine.resolve_tickers([orig])
             res = resolved_list[0] if resolved_list else orig_str
-            if res in all_data.columns:
-                # Включает облигации, разрешённые в proxy-ETF (BIL, LQD, HYG)
+            is_proxied = self.engine.proxy_for(orig_str) is not None
+            if not is_proxied and res in all_data.columns:
                 current_prices[orig] = all_data[res].iloc[-1]
             elif orig in broker_current_prices:
-                # KZ облигации с ISIN-тикером: используем mkt_price от Freedom API
+                # KZ облигации / AIX-ноты: используем mkt_price от Freedom API
                 current_prices[orig] = broker_current_prices[orig]
-                broker_priced_only.add(orig)
+                if not is_proxied:
+                    broker_priced_only.add(orig)
                 logger.info(
-                    "Используется цена брокера для %s = %.4f (нет данных Tradernet)",
+                    "Используется цена брокера для %s = %.4f (нет своей истории)",
                     orig, broker_current_prices[orig],
                 )
-            elif orig_str in self.engine.BOND_CLASSIFICATION_MAP or 'BOND' in orig_str or 'OVD' in orig_str:
-                # Облигация без брокерской цены — удержание до погашения по цене покупки
+            elif is_proxied:
+                # Неликвидная бумага без брокерской цены — удержание по цене
+                # покупки (P&L = 0 честнее сфабрикованного по чужому ETF).
                 p_price = df.loc[orig, 'Purchase_Price']
                 current_prices[orig] = p_price if pd.notna(p_price) else 100.0
-                broker_priced_only.add(orig)
+                priced_at_cost.add(orig)
+                logger.info(
+                    "%s оценена по цене покупки: нет ни своей истории, ни цены "
+                    "брокера (прокси %s используется только для риска)", orig, res)
 
         df['Current_Price'] = pd.Series(current_prices)
         df = df.dropna(subset=['Current_Price'])
@@ -2583,6 +2701,18 @@ class UniversalPortfolioManager:
             "benchmark_factor_profile": benchmark_factor_profile,
             "period_returns_table": period_returns_table,
             "return_series_coverage": return_coverage,
+            # H-1 (2026-07-29): раскрытие подмены неликвидных бумаг.
+            # `proxy_substitutions` — {оригинал: прокси}: риск и беты этих строк
+            # посчитаны по ликвидному индексу, а не по самой бумаге.
+            # `priced_at_cost` — у этих бумаг нет ни своей истории, ни цены
+            # брокера, поэтому они стоят по цене покупки (P&L = 0).
+            # Отчёт ОБЯЗАН показать оба списка: иначе пользователь не поймёт,
+            # почему у его структурной ноты «чужая» бета.
+            "proxy_substitutions": {
+                str(t): p for t in df.index
+                if (p := self.engine.proxy_for(t)) is not None
+            },
+            "priced_at_cost": sorted(str(t) for t in priced_at_cost),
             "stress_scenarios": stress_scenarios,
             "expected_effect": expected_effect,
             "cds_summary":     cds_summary,
