@@ -216,6 +216,46 @@ class ProxyIsDisclosedTest(unittest.TestCase):
         self.assertEqual(res["priced_at_cost"], ["FFSPC6.1028.AIX"])
 
 
+class ProxyDisclosureReachesTheReportTest(unittest.TestCase):
+    """Раскрытие обязано доехать до ЧИТАТЕЛЯ, а не остаться в results-словаре."""
+
+    _RESULTS = {
+        "proxy_substitutions": {"FFSPC6.1028.AIX": "VWOB.US"},
+        "priced_at_cost": ["FFSPC6.1028.AIX"],
+    }
+
+    def test_cove_row_appears_and_names_both_sides(self):
+        from finance.data_lineage import _proxy_status
+        row = _proxy_status(self._RESULTS)
+        self.assertIsNotNone(row)
+        self.assertIn("FFSPC6.1028.AIX → VWOB.US", row["method"])
+        self.assertIn("цене покупки", row["note"])
+
+    def test_cove_row_absent_without_substitutions(self):
+        """CoVe сжат до 16 строк — всегда-включённую строку добавлять нельзя."""
+        from finance.data_lineage import _proxy_status
+        self.assertIsNone(_proxy_status({}))
+        self.assertIsNone(_proxy_status({"proxy_substitutions": {}}))
+
+    def test_integrity_chip_discloses_the_substitution(self):
+        from pdf_payload import _build_integrity_checks
+        checks = _build_integrity_checks(self._RESULTS, {}, {}, {})
+        chip = next((c for c in checks if "Прокси" in c["label"]), None)
+        self.assertIsNotNone(chip, "чип подмены отсутствует в панели целостности")
+        self.assertEqual(chip["status"], "⚠")
+        self.assertIn("VWOB.US", chip["detail"])
+
+    def test_no_chip_when_nothing_was_substituted(self):
+        from pdf_payload import _build_integrity_checks
+        checks = _build_integrity_checks({}, {}, {}, {})
+        self.assertIsNone(next((c for c in checks if "Прокси" in c["label"]), None))
+
+    def test_premium_renders_the_row_amber_not_green(self):
+        """Premium — прод по умолчанию; строка обязана быть заметной (amber)."""
+        from premium_payload import _cove_st
+        self.assertEqual(_cove_st("degraded"), "warn")
+
+
 class ProxyNeverPricesThePositionTest(unittest.TestCase):
     """🔴 Прокси влияет ТОЛЬКО на риск-модель, не на стоимость портфеля."""
 

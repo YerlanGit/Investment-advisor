@@ -140,7 +140,10 @@ child_resid(t) = child(t) − Σ_p β̂_{child→p}·parent_p(t) + mean(child)
    факторами.
 
 Подмена раскрывается пользователю: `results["proxy_substitutions"]`
-(оригинал → прокси) и `results["priced_at_cost"]` (нет рыночной цены).
+(оригинал → прокси) и `results["priced_at_cost"]` (нет рыночной цены). Обе
+доезжают до отчёта двумя УСЛОВНЫМИ поверхностями — чип панели целостности
+(`pdf_payload._build_integrity_checks`) и строка CoVe
+(`data_lineage._proxy_status`, статус `degraded` → amber).
 
 **Дедупликация колонок (обязательна).** `needed_cols = [*факторы, *resolved]`
 пропускается через `dict.fromkeys`: повтор имени даёт DataFrame с дублированными

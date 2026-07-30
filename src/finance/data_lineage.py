@@ -123,6 +123,34 @@ def _tradernet_status(results: dict, today: date) -> dict:
     )
 
 
+def _proxy_status(results: dict) -> Optional[dict]:
+    """H-1: раскрытие подмены неликвидных бумаг ликвидными прокси.
+
+    Возвращает None, когда подмен не было — строка в CoVe не появляется.
+
+    Пользователь обязан понимать разделение: РИСК (бета, вклад в риск,
+    корреляции) посчитан по прокси-индексу, а СТОИМОСТЬ и P&L — по его реальной
+    бумаге.  Без этой строки «чужая» бета у структурной ноты выглядит как ошибка
+    движка.
+    """
+    subs = results.get("proxy_substitutions") or {}
+    if not subs:
+        return None
+    at_cost = list(results.get("priced_at_cost") or [])
+    pairs = ", ".join(f"{orig} → {proxy}" for orig, proxy in sorted(subs.items()))
+    note = ("риск по прокси; стоимость и P&L — по реальной бумаге"
+            if not at_cost else
+            "риск по прокси; без рыночной цены — по цене покупки: "
+            + ", ".join(sorted(at_cost)))
+    return _row(
+        name   = f"Прокси неликвидных бумаг ({len(subs)})",
+        source = "Quant Engine MAC3 · proxy_for",
+        method = f"Фактор-модель по ликвидному аналогу EM-профиля: {pairs}",
+        status = "degraded",
+        note   = note,
+    )
+
+
 def _sec_status(results: dict, today: date) -> list[dict]:
     """
     ONE merged row (2026-07-09) covering both fundamental Z-scores and
@@ -636,6 +664,15 @@ def build_lineage(results: dict,
 
     # Прайсы + ATR + benchmark frame.
     rows.append(_tradernet_status(results, today))
+
+    # H-1 (2026-07-29): подмена неликвидной бумаги на ликвидный прокси.  Строка
+    # УСЛОВНАЯ — появляется только когда подмена реально была (CoVe сознательно
+    # сжат до 16 строк, добавлять всегда-включённую строку нельзя).  Стоит сразу
+    # за источником цен: именно здесь читатель узнаёт, что бета его структурной
+    # ноты посчитана по чужому индексу.
+    _proxy_row = _proxy_status(results)
+    if _proxy_row is not None:
+        rows.append(_proxy_row)
 
     # Sprint-5.4: currency layer (FX conversion + risk-free rate) — sits right
     # after the price source it transforms.
