@@ -27,8 +27,8 @@
 | C-2: окно < 252 наблюдений | `min_obs = max(2·K, 30)` = 30 при 10 факторах (`931`); `MIN_OVERLAP_TDAYS = 60` (`period_returns.py:150`) | ×4…×8 |
 | C-6: матрица не PD | Движок делает PSD-проекцию и продолжает (`investment_logic.py:300-304`) | качественно строже |
 
-Поэтому строгие пороги применяются к `manual` (профиль `STRICT`), а `freedom`/`demo`
-получают `LEGACY` — ровно те пороги, которые движок реализует сейчас. Это и есть
+Поэтому строгие пороги применяются к `manual` (профиль `STRICT`), а `freedom`
+получает `LEGACY` — ровно те пороги, которые движок реализует сейчас. Это и есть
 механизм, которым держатся **I-5, I-9 и I-10**.
 
 ---
@@ -40,8 +40,9 @@ class CheckLevel(str, Enum):
     PASS = "pass"; DEGRADE = "degrade"; BLOCK = "block"
 
 class CheckProfile(str, Enum):
-    LEGACY = "legacy"    # freedom / demo — «не хуже, чем сегодня»
+    LEGACY = "legacy"    # freedom — «не хуже, чем сегодня»
     STRICT = "strict"    # manual
+    DEMO   = "demo"      # витрина — не блокирует (кроме C-10/C-12)
 
 @dataclass(frozen=True)
 class CheckFinding:
@@ -62,8 +63,8 @@ class DataQualityReport:
 ```
 
 **Чекеры — данные, а не разбросанные `if`** (гейт §10 задания): каждая проверка —
-запись реестра `CHECKS: list[CheckSpec]` с полями `id`, `block`, `applies_to`,
-`thresholds: dict[CheckProfile, float]`, `fn`. Добавление проверки = строка в реестре.
+запись реестра `CheckSpec(id, fn, levels: dict[CheckProfile, CheckLevel])`.
+Добавление проверки = строка в реестре (проверяется `RegistryShapeTest`).
 
 ---
 
@@ -94,7 +95,7 @@ class DataQualityReport:
 | B-4 | Свежесть: последняя дата не старше 5 торговых дней | >5 | DEGRADE |
 | B-5 | Нет разрыва длиннее 10 торговых дней внутри окна | >10 | DEGRADE |
 | B-6 | Доля дней с \|log-доходностью\| > 0.4 после слоёв коррекции | >0.1% | DEGRADE |
-| B-7 | Кросс-сверка расхождения последнего close между провайдерами | >2% | DEGRADE |
+| B-7 | Кросс-сверка расхождения последнего close между провайдерами | >2% | DEGRADE · **перенесена в Фазу 9**: сверять не с чем, пока провайдер один |
 
 B-1 и B-2 частично дублируют `math_firewall` (`investment_logic.py:511`, замена ±Inf → NaN
 и `ffill`) — но firewall **чинит молча**, а B-* обязан **сообщить**. Это разные функции,
@@ -273,13 +274,14 @@ if report.blocked:
 | `test_a1_apikey_page_body` | Тело со страницей про `apikey` → `failed` с внятной причиной |
 | `test_no_secret_in_findings` | Ни один `CheckFinding.message` не содержит значение `STOOQ_API_KEY` (I-8) |
 
-Ориентировочно 38 новых тестов (+4: профиль `DEMO` не блокирует, C-3 деградирует вместо блока, C-4 расхождение профилей, молодой листинг ≠ усечение).
+Реализовано 56 тестов (+4: профиль `DEMO` не блокирует, C-3 деградирует вместо блока, C-4 расхождение профилей, молодой листинг ≠ усечение).
 
 ---
 
 ## 6. Гейт выхода
 
-- [ ] `python -m pytest tests/ -q` → **805 + 38 = 843 passed, 1 xfailed**
+- [x] `python -m pytest tests/ -q` → **926 passed, 5 skipped, 1 xfailed**
+      (870 после Фазы 2 + 56 новых; базовая линия росла раундами 31–34)
 - [ ] `test_legacy_profile_never_blocks_current_reports` зелёный
 - [ ] `git diff --stat` по восьми модулям I-2 = 0
 - [ ] `src/finance/data_checks.py` не импортирует `tg_bot`

@@ -61,7 +61,7 @@ const HoldingRow = ({ h, open, onToggle }) => {
       </button>
 
       <div className="mob-detail overflow-hidden transition-[max-height,opacity] duration-500 ease-out"
-           style={{ maxHeight: open?640:0, opacity: open?1:0 }}>
+           style={{ maxHeight: open?820:0, opacity: open?1:0 }}>
         <div className="px-5 pb-5 pt-1">
           <div className="rounded-3xl p-5 bg-white/70 border border-ink-900/5">
             <div className="flex items-start justify-between gap-4 mb-4">
@@ -71,13 +71,30 @@ const HoldingRow = ({ h, open, onToggle }) => {
               </div>
               <span className="text-[10px] font-mono text-ink-400 tracking-wider px-2.5 py-1 rounded-full bg-cream-50 border border-ink-900/5">{h.cls}</span>
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
               <FundCell label="ROE"            value={h.fund.roe}    hint="Рентабельность собственного капитала (чистая прибыль ÷ капитал)"/>
               <FundCell label="Опер. маржа"    value={h.fund.margin} hint="Операционная маржа — операционная прибыль ÷ выручка"/>
               <FundCell label="Долг / Активы"  value={h.fund.debt}   hint="Долговая нагрузка: суммарный долг ÷ активы. 0% = долг не найден в отчётности или его нет"/>
               <FundCell label="Рост выручки"   value={h.fund.growth} hint="Рост выручки год к году"/>
-              <FundCell label="ATR · день"     value={h.fund.atr} warn={atrWarn} hint="Average True Range — средний дневной диапазон цены, % (волатильность бумаги)"/>
               <FundCell label="Altman-Z"       value={h.fund.z}      hint="Z-score Альтмана (риск банкротства): > 3 — безопасно, 1.8–3 — серая зона, < 1.8 — риск"/>
+            </div>
+
+            {/* Риск бумаги — считается движком по ценовому ряду, НЕ из отчётности.
+                Раньше ATR стоял под заголовком «SEC EDGAR», что неверно по
+                происхождению данных.  Бета добавлена 2026-07-29: ИИ на неё
+                ссылается в тексте («двигается в 2.74 раза сильнее рынка»), и
+                читателю нужно чем-то это проверить. */}
+            <div className="mt-3 pt-3 border-t border-ink-900/5">
+              <div className="text-[10.5px] tracking-widest uppercase text-ink-500 font-mono mb-2.5">Риск бумаги · Quant Engine</div>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                <FundCell label="Бета к рынку"  value={typeof h.beta === 'number' ? h.beta.toFixed(2) : '—'}
+                          warn={typeof h.beta === 'number' && Math.abs(h.beta) > 1.5}
+                          hint="Во сколько раз бумага двигается сильнее рынка (S&P 500). 1.0 — как рынок, выше 1.5 — заметно резче"/>
+                <FundCell label="ATR · день"    value={h.fund.atr} warn={atrWarn}
+                          hint="Average True Range — средний дневной диапазон цены, % (волатильность бумаги)"/>
+                <FundCell label="Вклад в риск"  value={`${h.risk.toFixed(1)}%`} warn={hot}
+                          hint="Доля позиции в общем риске портфеля (Euler / TRC). Может сильно отличаться от доли в деньгах"/>
+              </div>
             </div>
             {(h.fundNote || h.note) && (
               <div className="mt-4 flex items-start gap-3 text-[13px] text-ink-700 leading-relaxed">
