@@ -282,10 +282,65 @@ if report.blocked:
 
 - [x] `python -m pytest tests/ -q` → **926 passed, 5 skipped, 1 xfailed**
       (870 после Фазы 2 + 56 новых; базовая линия росла раундами 31–34)
-- [ ] `test_legacy_profile_never_blocks_current_reports` зелёный
-- [ ] `git diff --stat` по восьми модулям I-2 = 0
-- [ ] `src/finance/data_checks.py` не импортирует `tg_bot`
-- [ ] Каждый чекер представлен строкой реестра, а не отдельной веткой в вызывающем коде
+- [x] гейт «`LEGACY` не блокирует сегодняшние отчёты» — под именем
+      `test_legacy_does_not_block_live_book`
+- [x] `git diff --stat` по восьми модулям I-2 = 0
+- [x] `src/finance/data_checks.py` не импортирует `tg_bot`
+      (`test_module_does_not_import_tg_bot`)
+- [x] Каждый чекер представлен строкой реестра (`test_series_checks_are_a_registry`)
+- [ ] 🔴 **`run_checks` вызывается из прод-пути** — НЕ выполнено, см. §6a
+- [ ] 🔴 **Чекер `C-6` реализован** — НЕ выполнено, см. §6b
+
+---
+
+## 6a. 🔴 Фаза доставлена как библиотека без потребителя (аудит 2026-07-30)
+
+**`data_checks.py` не вызывается НИ ОТКУДА.** Поиск по всему `src/`:
+
+```
+grep -rn "data_checks|CheckProfile|profile_for_source|DataQualityReport" src/
+→ ничего, кроме самого модуля
+```
+
+Единственный импортёр — `tests/test_phase35_data_checks.py`. Точка вызова из §4
+(«между провайдером и `analyze_all`; `DataQualityBlocked` — той же веткой, что
+`RealPortfolioRequired`») **не реализована**. Следствия:
+
+- польза, заявленная в `AUDIT.md §−36` («потеря позиции весом 55% больше не
+  выглядит как 90% покрытия»), **в проде не наступила**;
+- `test_degrade_rows_reach_lineage` проверяет, что объект УМЕЕТ отдать строки
+  lineage, а не что DEGRADE доезжает до CoVe живого отчёта — не доезжает;
+- `test_block_means_token_not_charged` из §5 отсутствует и нереализуем, пока
+  ветка отказа не подключена.
+
+Модуль аккуратный и покрытый — проблема не в качестве кода, а в **незавершённой
+интеграции, зафиксированной как завершённая фаза**. Подключение стоит делать до
+Фазы 4: парсер ручного ввода должен опираться на эти чекеры, а не заводить свои.
+
+## 6b. 🔴 Чекер `C-6` не существует
+
+§3 и §5 объявляют **C-6 (вырожденная ковариационная матрица → BLOCK в `STRICT`)**
+обязательным. В реестре `check_portfolio_sufficiency` присутствуют C-1…C-5 и
+C-7…C-13 — **C-6 пропущен**; в тестах нет ни одного упоминания.
+
+## 6c. ⚠️ Имена тестов расходятся с §5
+
+9 из 10 тестов, названных в §5 обязательными, отсутствуют под указанными именами.
+Восемь реализованы под другими — соответствие ниже, чтобы гейт можно было
+проверять по документу:
+
+| §5 требует | Реально |
+|---|---|
+| `test_c8_by_value_not_by_count` | `test_c8_counts_value_not_tickers` |
+| `test_c5_underdetermined_blocks_strict` | `test_c5_underdetermined_blocks_strict_degrades_legacy` |
+| `test_c1_benchmark_loss_is_degrade` | `test_c1_benchmark_loss_only_degrades` |
+| `test_c1_market_factor_loss_blocks_legacy` | `test_c1_market_factor_loss_blocks_even_in_legacy` |
+| `test_legacy_profile_never_blocks_current_reports` | `test_legacy_does_not_block_live_book` |
+| `test_degrade_reaches_cove` | `test_degrade_rows_reach_lineage` (см. оговорку §6a) |
+| `test_a1_quota_body_is_failed_not_data` | `test_quota_message_blocks` |
+| `test_no_secret_in_findings` | `test_message_carries_no_secret` |
+| `test_c6_degenerate_matrix` | **отсутствует** (§6b) |
+| `test_block_means_token_not_charged` | **отсутствует** (§6a) |
 
 ---
 
