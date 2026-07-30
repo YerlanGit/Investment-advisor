@@ -19,10 +19,16 @@
 - Направление сделок в Effect/Action Plan — из 4-Pillar ACTION, НЕ из знака BL Δw.
 - `_last_sparse_dropped` / broker-priced-only исключаются из факторной модели, но
   их вес разбавляет риск (не роняй книгу целиком из-за одной неликвидной бумаги).
+- **Прокси (`proxy_for`) влияет ТОЛЬКО на риск.** Цена и P&L — всегда реальный
+  тикер (брокер, иначе цена покупки). Проксированная бумага при этом ОСТАЁТСЯ в
+  фактор-модели. Выборку колонок в `calculate_structural_risk` дедуплицировать
+  обязательно (`dict.fromkeys`) — иначе портфель, держащий факторный ETF, роняет
+  отчёт; в `valid_resolved` дубликаты, наоборот, сохранять. `MATH_ENGINE.md §2.3a`.
 - Ортогонализация (BLOCK 3.5) и её β̂ должны сбрасываться в начале `analyze_all`
   (F-1) — иначе стресс residualize-ится на устаревших бетах.
 
 ## Обязательный цикл
 1. Правь `src/finance/*` и `tests/test_phase*.py` вместе.
-2. `python -m pytest tests/ -q` (baseline: 787 passed, 1 xfailed).
+2. `PYTHONPATH=src python -m pytest tests/ -q` — префикс ОБЯЗАТЕЛЕН, без него
+   `import finance…` не находится (baseline: 957 passed, 5 skipped, 1 xfailed).
 3. Крупное изменение → строка Было/Стало в `docs/audit/AUDIT.md`.
