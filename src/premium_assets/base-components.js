@@ -1232,7 +1232,7 @@ const HoldingRow = ({
   }), /*#__PURE__*/React.createElement(FundCell, {
     label: "Beta",
     value: h.beta.toFixed(2)
-  })), /*#__PURE__*/React.createElement("div", {
+  })), (h.fundNote || h.note) && /*#__PURE__*/React.createElement("div", {
     className: "mt-4 flex items-start gap-3 text-[13px] text-ink-700 leading-relaxed"
   }, /*#__PURE__*/React.createElement(Icons.Sparkles, {
     size: 14,
@@ -1240,7 +1240,11 @@ const HoldingRow = ({
     stroke: 1.8
   }), /*#__PURE__*/React.createElement("p", {
     className: "font-light"
-  }, h.note))))));
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "text-ink-500 font-medium"
+  }, "Вывод: "), h.fundNote || h.note, /*#__PURE__*/React.createElement("span", {
+    className: "text-ink-400 font-mono text-[11px]"
+  }, " [SEC EDGAR]")))))));
 };
 const FundCell = ({
   label,
@@ -1321,7 +1325,18 @@ const Holdings = () => {
     onToggle: () => setOpenIdx(openIdx === i ? -1 : i)
   })), rows.length === 0 && /*#__PURE__*/React.createElement("div", {
     className: "px-6 py-12 text-center text-ink-500 text-[14px]"
-  }, "Ничего не подходит под фильтр «", filter, "»."))))));
+  }, "Ничего не подходит под фильтр «", filter, "»."))))), window.PORTFOLIO.holdingsAI && /*#__PURE__*/React.createElement("div", {
+    className: "mt-5 rounded-3xl p-5 glass-strong shadow-card flex items-start gap-4"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "w-10 h-10 rounded-2xl bg-ink-900 text-gold-400 flex items-center justify-center flex-shrink-0"
+  }, /*#__PURE__*/React.createElement(Icons.Sparkles, {
+    size: 17,
+    stroke: 1.7
+  })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "text-[10px] tracking-widest uppercase font-mono text-ink-500 mb-1"
+  }, "AI · сводка по составу"), /*#__PURE__*/React.createElement("p", {
+    className: "text-[14px] text-ink-800 leading-relaxed font-light"
+  }, window.PORTFOLIO.holdingsAI))));
 };
 Object.assign(window, {
   Holdings
