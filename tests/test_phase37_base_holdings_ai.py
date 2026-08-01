@@ -100,24 +100,41 @@ class BasePerHoldingVerdictTest(unittest.TestCase):
 
 
 class BaseJsxGuardsEmptyBlockTest(unittest.TestCase):
-    """🔴 Корень визуального дефекта: блок рендерился без условия."""
+    """🔴 Корень визуального дефекта: блок рендерился без условия.
+
+    Каталог `design/` НЕ попадает в деплой-образ (`Dockerfile` копирует только
+    `src/`, `tests/`, `SYSTEM_PROMPT.md`), поэтому проверки ИСХОДНИКА обязаны
+    пропускаться, когда его нет, — иначе deploy-gate падает с
+    `FileNotFoundError`, хотя GitHub CI зелёный (у него полный чекаут).
+    Конвенция уже принята в `test_phase31…::test_jsx_source_did_not_diverge…`.
+    Гарантию при этом не теряем: артефакт `src/premium_assets/base-components.js`
+    ОТГРУЖАЕТСЯ и пинится ниже безусловно.
+    """
+
+    def setUp(self):
+        if not _JSX.exists():
+            self.skipTest("design/ отсутствует (Docker deploy-gate) — "
+                          "пинятся только отгружаемые артефакты")
+        self.src = _JSX.read_text(encoding="utf-8")
 
     def test_jsx_guards_the_sparkle_block(self):
-        src = _JSX.read_text()
-        self.assertIn("(h.fundNote || h.note) &&", src,
+        self.assertIn("(h.fundNote || h.note) &&", self.src,
                       "блок ✨ обязан скрываться, когда текста нет")
 
     def test_jsx_prefers_fund_verdict(self):
-        self.assertIn("h.fundNote || h.note", _JSX.read_text())
+        self.assertIn("h.fundNote || h.note", self.src)
 
     def test_jsx_renders_section_summary(self):
-        src = _JSX.read_text()
-        self.assertIn("holdingsAI", src)
-        self.assertIn("AI · сводка по составу", src)
+        self.assertIn("holdingsAI", self.src)
+        self.assertIn("AI · сводка по составу", self.src)
+
+
+class BaseCompiledBundleTest(unittest.TestCase):
+    """Артефакт отгружается в образ — проверяется ВЕЗДЕ, включая deploy-gate."""
 
     def test_compiled_bundle_is_in_sync(self):
         """`build.sh` обязан быть прогнан — иначе прод отдаёт старый JSX."""
-        bundle = _BUNDLE.read_text()
+        bundle = _BUNDLE.read_text(encoding="utf-8")
         self.assertIn("holdingsAI", bundle,
                       "base-components.js устарел — запусти design/premium_v2/build.sh")
         self.assertIn("fundNote", bundle)
