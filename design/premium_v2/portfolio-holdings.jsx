@@ -91,10 +91,18 @@ const HoldingRow = ({ h, open, onToggle, idx }) => {
               <FundCell label="ATR"        value={h.fund.atr}/>
               <FundCell label="Beta"       value={h.beta.toFixed(2)}/>
             </div>
-            <div className="mt-4 flex items-start gap-3 text-[13px] text-ink-700 leading-relaxed">
-              <Icons.Sparkles size={14} className="text-gold-600 mt-1 flex-shrink-0" stroke={1.8}/>
-              <p className="font-light">{h.note}</p>
-            </div>
+            {/* R-18: блок появляется ТОЛЬКО при наличии текста — иначе на каждой
+                раскрытой карточке висела золотая ✨ с пустым абзацем.  Источник —
+                тот же, что в DEEP: вывод по фундаменталу, иначе заметка позиции. */}
+            {(h.fundNote || h.note) && (
+              <div className="mt-4 flex items-start gap-3 text-[13px] text-ink-700 leading-relaxed">
+                <Icons.Sparkles size={14} className="text-gold-600 mt-1 flex-shrink-0" stroke={1.8}/>
+                <p className="font-light">
+                  <span className="text-ink-500 font-medium">Вывод: </span>{h.fundNote || h.note}
+                  <span className="text-ink-400 font-mono text-[11px]"> [SEC EDGAR]</span>
+                </p>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -190,6 +198,20 @@ const Holdings = () => {
         </div>
         </div></div>
       </div>
+
+      {/* R-18: секционная сводка ИИ по составу — паритет с DEEP.  BASE-промпт
+          её запрашивает, экстрактор сохраняет; раньше терялась в маппере. */}
+      {window.PORTFOLIO.holdingsAI && (
+        <div className="mt-5 rounded-3xl p-5 glass-strong shadow-card flex items-start gap-4">
+          <div className="w-10 h-10 rounded-2xl bg-ink-900 text-gold-400 flex items-center justify-center flex-shrink-0">
+            <Icons.Sparkles size={17} stroke={1.7}/>
+          </div>
+          <div>
+            <div className="text-[10px] tracking-widest uppercase font-mono text-ink-500 mb-1">AI · сводка по составу</div>
+            <p className="text-[14px] text-ink-800 leading-relaxed font-light">{window.PORTFOLIO.holdingsAI}</p>
+          </div>
+        </div>
+      )}
     </section>
   );
 };

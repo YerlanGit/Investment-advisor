@@ -613,16 +613,22 @@ class PremiumMapperTest(unittest.TestCase):
         self.assertEqual(d["benchmarkName"], "S&P 500")   # legacy default
         self.assertEqual(d["benchmarkTicker"], "SPY.US")
 
-    def test_base_contract_is_exactly_13_keys(self):
+    def test_base_contract_is_exactly_14_keys(self):
         # §−13: +`leverage` {on, marginPct} — маржа-индикатор, рендерится ТОЛЬКО
         # на левереджёванном счёте (отрицательный кэш).
         # 2026-07-07: +`quality` (RAG-наблюдаемость, паритет с DEEP) → 13.
+        # 2026-08-01 (R-18): +`holdingsAI` — секционная сводка ИИ по составу.
+        # BASE-промпт её ЗАПРАШИВАЕТ и экстрактор сохраняет, но маппер терял,
+        # из-за чего в payload BASE не было НИ ОДНОГО ИИ-ключа (у DEEP их 7),
+        # а карточка позиции рендерила ✨ с пустым абзацем → 14.
         from premium_payload import build_design_data
         b = build_design_data({}, "base")
-        self.assertEqual(len(b), 13)
+        self.assertEqual(len(b), 14)
         self.assertIn("leverage", b)
         self.assertFalse(b["leverage"]["on"])   # пустой payload → плечо скрыто
         self.assertIn("quality", b)             # integrity/RAG strip surfaced in BASE
+        self.assertIn("holdingsAI", b)
+        self.assertEqual(b["holdingsAI"], "")   # пустой payload → блок скрыт
 
     def test_none_payload_defensive_dash(self):
         from premium_payload import build_design_data

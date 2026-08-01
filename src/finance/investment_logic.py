@@ -1721,6 +1721,106 @@ class UniversalPortfolioManager:
             proxy_map          = proxy_map,
         )
 
+    # Колонки, которые склейка дубликатов складывает как ВЕЛИЧИНЫ.
+    _MERGE_SUM_COLS = ("Quantity",)
+
+    def _normalize_positions(self, df):
+        """Приводит фрейм позиций к контракту движка ДО всей математики.
+
+        Делает ровно две вещи, обе — снятие дефектов сквозного аудита
+        (`AUDIT_360_2026-07-30.md §2.1/§2.2`), и обе требуются Фазой 4
+        (`PHASE_04 §3.2`: «дубликат тикера → суммирование, средневзвешенная цена»):
+
+        **A-1. Склейка дубликатов.** Одна бумага может прийти дважды: два лота,
+        два счёта, один ISIN на двух биржах. Раньше дубликат доезжал до
+        `a_data.columns = valid_originals`, давал две колонки с одним именем, и
+        Ridge падал с `DuplicateError` из недр sklearn — отчёт не строился
+        ВООБЩЕ. Количество складывается, цена покупки — средневзвешенная по
+        количеству (Σqty·price / Σqty): это и есть корректная база стоимости.
+
+        **A-2. Нечисловое количество.** `Quantity = NaN` не роняло отчёт — оно
+        протекало через `Current_Value` в веса и делало `NaN` ВСЕ головные
+        метрики (Vol/Return/Sharpe), при внешне нормальной стоимости портфеля.
+        Это хуже падения: читатель не узнаёт, что цифр нет. Такие строки
+        отбрасываются и РАСКРЫВАЮТСЯ (`results["dropped_rows"]`), как это давно
+        делает sparse-guard.
+
+        Возвращает `(df, merged, dropped)`, где `merged` = [(тикер, сколько
+        строк)], `dropped` = [(тикер, причина)].
+        """
+        merged: list[tuple[str, int]] = []
+        dropped: list[tuple[str, str]] = []
+        if df is None or df.empty or 'Ticker' not in df.columns:
+            return df, merged, dropped
+
+        df = df.copy()
+        df['Ticker'] = df['Ticker'].astype(str).str.strip()
+
+        # ── A-2: количество и цена обязаны быть числами ────────────────────
+        # `errors="coerce"` превращает мусор ('', 'н/д', None, текст) в NaN, а
+        # NaN здесь — единственный честный сигнал «строка непригодна».
+        for col in ('Quantity', 'Purchase_Price'):
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        if 'Quantity' in df.columns:
+            _bad = ~np.isfinite(df['Quantity'].to_numpy(dtype=float, na_value=np.nan))
+            if _bad.any():
+                for t in df.loc[_bad, 'Ticker']:
+                    dropped.append((str(t), "нечисловое количество"))
+                logger.warning(
+                    "MAC3 ENGINE ▸ отброшено %d строк(и) с нечисловым количеством: %s "
+                    "(иначе NaN обнулил бы Vol/Return/Sharpe всего портфеля)",
+                    int(_bad.sum()), ", ".join(t for t, _ in dropped))
+                df = df.loc[~_bad].copy()
+
+        if df.empty:
+            return df, merged, dropped
+
+        # ── A-1: склейка дубликатов ────────────────────────────────────────
+        dup_mask = df['Ticker'].duplicated(keep=False)
+        if not dup_mask.any():
+            return df, merged, dropped
+
+        has_price = 'Purchase_Price' in df.columns
+        has_qty   = 'Quantity' in df.columns
+        rows = []
+        for ticker, grp in df.groupby('Ticker', sort=False):
+            if len(grp) == 1:
+                rows.append(grp.iloc[0])
+                continue
+            merged.append((str(ticker), int(len(grp))))
+            row = grp.iloc[0].copy()
+            if has_qty:
+                qty_sum = float(grp['Quantity'].sum())
+                row['Quantity'] = qty_sum
+                if has_price:
+                    # Средневзвешенная цена покупки = Σ(qty·price)/Σqty.
+                    # Вырожденный случай Σqty ≈ 0 (лонг и шорт гасят друг друга)
+                    # оставляет простое среднее — делить на ноль нельзя, а
+                    # выбрасывать позицию значит потерять её экспозицию.
+                    if abs(qty_sum) > 1e-12:
+                        row['Purchase_Price'] = float(
+                            (grp['Quantity'] * grp['Purchase_Price']).sum()) / qty_sum
+                    else:
+                        row['Purchase_Price'] = float(grp['Purchase_Price'].mean())
+            elif has_price:
+                row['Purchase_Price'] = float(grp['Purchase_Price'].mean())
+            # Цена брокера у одной и той же бумаги одинакова в любой строке —
+            # берём первую непустую, чтобы склейка не теряла котировку.
+            if 'Broker_Current_Price' in grp.columns:
+                _bp = grp['Broker_Current_Price'].dropna()
+                if not _bp.empty:
+                    row['Broker_Current_Price'] = _bp.iloc[0]
+            rows.append(row)
+
+        logger.info(
+            "MAC3 ENGINE ▸ склеены дубликаты позиций: %s "
+            "(количество суммировано, цена покупки — средневзвешенная)",
+            ", ".join(f"{t}×{n}" for t, n in merged))
+        out = pd.DataFrame(rows).reset_index(drop=True)
+        out.attrs = dict(df.attrs)
+        return out, merged, dropped
+
     def _standardize_columns(self, df):
         for standard, aliases in self.COLUMN_ALIASES.items():
             actual_col = next((c for c in df.columns if c in aliases or c == standard), None)
@@ -1792,7 +1892,9 @@ class UniversalPortfolioManager:
             )
         # ─────────────────────────────────────────────────────────────────────
 
-        df = self._standardize_columns(raw_df).set_index('Ticker')
+        df = self._standardize_columns(raw_df)
+        df, _merged_rows, _dropped_rows = self._normalize_positions(df)
+        df = df.set_index('Ticker')
 
         # Extract broker-provided current prices before any further processing.
         # Used as fallback for instruments with no Tradernet history
@@ -2713,6 +2815,12 @@ class UniversalPortfolioManager:
                 if (p := self.engine.proxy_for(t)) is not None
             },
             "priced_at_cost": sorted(str(t) for t in priced_at_cost),
+            # A-1 / A-2 (2026-08-01): что движок сделал с входным фреймом ДО
+            # математики.  `PHASE_04 §3.2` требует показывать результат склейки
+            # пользователю, а отброшенная строка обязана быть названа — молча
+            # терять позицию нельзя.
+            "merged_positions": [{"ticker": t, "rows": n} for t, n in _merged_rows],
+            "dropped_rows":     [{"ticker": t, "reason": r} for t, r in _dropped_rows],
             "stress_scenarios": stress_scenarios,
             "expected_effect": expected_effect,
             "cds_summary":     cds_summary,

@@ -406,7 +406,14 @@ def _map_base(p: dict, meta: dict) -> dict:
         "pnlUsd": _num(a, "pnl_abs_num", default=_pct(_g(a, "pnl_abs"))),
         "status": "HOTSPOT" if _g(a, "euler_extreme") else "",
         "signal": _txt(a, "action").upper() if _g(a, "action") else DASH,
-        "fund": _fund_for(fmap, a), "note": _txt(a, "note") if _g(a, "note") else "",
+        "fund": _fund_for(fmap, a),
+        # R-18 (2026-08-01): BASE рендерил ✨ + ПУСТОЙ абзац на каждой раскрытой
+        # карточке — читал `note` (он `""` у всех позиций), тогда как связный
+        # вывод по фундаменталу лежит в `_fund_verdict(fund)` и отдавался
+        # ТОЛЬКО в DEEP.  Тот же ключ, тот же порядок фолбэка, что и в
+        # `_map_deep` — иначе два тира расходятся по смыслу одного блока.
+        "fundNote": _fund_verdict(_fund_for(fmap, a)) or (_txt(a, "note") if _g(a, "note") else ""),
+        "note": _txt(a, "note") if _g(a, "note") else "",
     } for a in assets]
 
     # Top risk hotspot = the asset with the largest Euler TRC.  The old mapper
@@ -465,6 +472,11 @@ def _map_base(p: dict, meta: dict) -> dict:
         ],
         "topHotspot": topHotspot,
         "sectors": sectors, "riskDecomp": riskDecomp, "holdings": holdings,
+        # R-18: секционный комментарий ИИ к составу.  BASE-промпт его ЗАПРАШИВАЕТ
+        # («≤170 знаков — hotspot-позиции с наибольшим вкладом в риск… через бету»)
+        # и экстрактор его сохраняет, но маппер BASE его не переносил — поэтому
+        # в payload BASE не было НИ ОДНОГО ИИ-ключа, тогда как в DEEP их семь.
+        "holdingsAI": _txt(p, "ai_holdings_comment") if _g(p, "ai_holdings_comment") else "",
         # Показывается ТОЛЬКО при leverage.on (отрицательный кэш) — правило §−13.
         "leverage": _leverage_info(p, assets),
         "performance": _map_performance(p),
