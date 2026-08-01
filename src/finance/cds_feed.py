@@ -188,12 +188,61 @@ _FRED_HY_SERIES = "BAMLH0A0HYM2"   # ICE BofA US HY OAS, percent
 _FRED_IG_SERIES = "BAMLC0A0CM"     # ICE BofA US Corp OAS, percent
 
 
+# ── Мемоизация FRED-серий (E-1, 2026-08-01) ─────────────────────────────────
+# `_fred_hy_provider` вызывается ПО КАЖДОМУ тикеру, но тянет ОДНУ И ТУ ЖЕ
+# рыночную серию (`BAMLH0A0HYM2`) — это macro-wide прокси качества «C»,
+# идентичный для всех бумаг ПО ПОСТРОЕНИЮ.  Портфель на 15 позиций делал 15
+# одинаковых HTTP-запросов; профилирование показало 77% времени счёта
+# `analyze_all` в этом слое.  24-часовой SQLite-кэш модуля ключуется ПО ТИКЕРУ
+# и потому здесь не помогает.
+#
+# Почему не голый `functools.lru_cache`: бот живёт долго, и вечный кэш заморозил
+# бы спред на значении, прочитанном при старте контейнера. Нужен TTL.
+#
+# Почему у провала СВОЙ короткий TTL: закэшировать пустой ответ на 12 часов
+# значит ослепить кредитный пиллар на полсуток из-за одной сетевой ошибки.
+# Короткий отрицательный TTL убирает 14 повторов ВНУТРИ одного отчёта, но
+# следующий отчёт снова пробует источник.
+_FRED_MEMO: dict[tuple[str, int], tuple[float, list[tuple[datetime, float]]]] = {}
+_FRED_MEMO_LOCK = threading.Lock()
+_FRED_MEMO_TTL_SEC      = 12 * 3600.0   # успех: серия дневная (EOD), как в macro_data
+_FRED_MEMO_FAIL_TTL_SEC = 60.0          # провал: не долбить источник в одном прогоне
+
+
+def _clear_fred_memo() -> None:
+    """Сброс мемо — для тестов и для ручного форс-обновления."""
+    with _FRED_MEMO_LOCK:
+        _FRED_MEMO.clear()
+
+
 def _fred_observations(series_id: str, *, days: int = 14) -> list[tuple[datetime, float]]:
+    """Мемоизированная обёртка над `_fred_observations_uncached` (см. E-1 выше).
+
+    Ключ — (серия, окно): разные серии и разные окна кэшируются раздельно.
+    """
+    key = (series_id, int(days))
+    now = time.time()
+    with _FRED_MEMO_LOCK:
+        hit = _FRED_MEMO.get(key)
+        if hit is not None:
+            ts, cached = hit
+            ttl = _FRED_MEMO_TTL_SEC if cached else _FRED_MEMO_FAIL_TTL_SEC
+            if now - ts < ttl:
+                return list(cached)     # копия: вызывающий не должен править кэш
+    fetched = _fred_observations_uncached(series_id, days=days)
+    with _FRED_MEMO_LOCK:
+        _FRED_MEMO[key] = (time.time(), list(fetched))
+    return fetched
+
+
+def _fred_observations_uncached(series_id: str, *, days: int = 14) -> list[tuple[datetime, float]]:
     """
     Pull the last `days` observations for a FRED series via the public CSV
     endpoint (no API key required for fred.stlouisfed.org/graph/fredgraph.csv).
 
     Returns [(ts_utc, percent_value)] sorted ascending; bps = percent * 100.
+
+    Сетевой слой БЕЗ кэша — мемоизация живёт в `_fred_observations`.
     """
     url = (
         "https://fred.stlouisfed.org/graph/fredgraph.csv?"
