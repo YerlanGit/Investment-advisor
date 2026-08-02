@@ -156,6 +156,17 @@ analyze_all()                      движок · src/finance/investment_logic.
 
 ## 5. AI Ideas + правила промптов ИИ (BASE + DEEP)
 
+> **Гарантия четырёх карточек (R-22, 2026-08-02).** Порядок фильтров ЗНАЧИМ:
+> `_normalise` → `_remove_held_picks` → `_check_pick_contradictions` →
+> **`_remove_mandate_banned_picks`** → **`_backfill_empty_scenarios`**.
+> Гард мандата обязан идти ПЕРЕД добивкой: раньше он шёл после и опустошал
+> корзину, которую добивка только что наполнила (живой отчёт 02.08 — три
+> карточки при подписи «4 идеи», у клиента `GlobalETFs` = 0–0, а «Защита
+> капитала» состоит из защитных сектор/фактор-ETF). Сам фолбэк-каталог тоже
+> мандат-осведомлён (`_fallback_stock_picks(user_mandate=…)` +
+> `_mandate_allows`), поэтому добивка не возвращает запрещённый класс.
+> Счётчик в заголовке считается по `p.ideas.length` — числом НЕ зашивать.
+
 | Элемент | Ключи | Builder | Источник |
 |---|---|---|---|
 | Карточки идей (4 сценария) | `ai_ideas{growth/diversification/hedge/rotation}`, `ideas_count` | `_build_ai_ideas` | `ai_summary.stock_picks` (`boost_alpha/rebalance/protect_capital/smart_money`); 4-я карточка — Smart Money, рендерится в bucket `rotation` |
@@ -211,6 +222,8 @@ analyze_all()                      движок · src/finance/investment_logic.
 | Таргет-веса высокоприоритетных строк | — | — | `simulate.high_priority_target_weights(current, action_plan, bl, sector_by_ticker, reinvest_blocklist)`: **сторона — из ДЕЙСТВИЯ 4-Pillar** (не знака BL, L-6), магнитуда — \|BL Δw\|, турновер-кап 0.25 |
 | Реинвест = деконцентрация (L-10) | — | — | высвобожденный вес идёт ТОЛЬКО в диверсификаторы вне перегруженного топ-сектора (супергруппа-aware, порог `_CONC_FLOOR=0.40`), остаток → **Кэш** (pseudo-move `is_cash`) — IT-доля/концентрация/риск падают, Effect ведёт К мандату |
 | Реинвест-eligibility (L-13) | — | — | кандидаты фильтруются: `reinvest_blocklist` (broker-priced-only активы + sparse-dropped, собирает `investment_logic`) + плечевые ETP (`finance/leveraged.is_leveraged_etp`) |
+| Sharpe: граница применимости (R-20) | `expected_effect_sharpe_note` (уровень payload) → premium `effect[].note` на карточке Sharpe | `pdf_payload` → `premium_payload._map_deep` | `simulate`: при `er < rf` премия за риск отрицательна и `∂S/∂σ > 0` — снижение волатильности МЕХАНИЧЕСКИ ухудшает Sharpe. Дельта гасится (`sharpe_delta_meaningful=False`, строка нейтральна), причина печатается. `MATH_ENGINE.md §4.3a` |
+| Вердикт компромисса (R-21) | `expected_effect.verdict.{kind,headline,worsened}` | `simulate` | Заголовок СОБИРАЕТСЯ из `worsened`, а не фиксирован: называется только то, что реально ухудшилось (концентрация и/или просадка) |
 | Conviction-гейт (L-17) | — | — | held-кандидат реинвеста обязан иметь **план-рейтинг Buy/Strong Buy** (типовой случай — Buy, отложенный турновер-капом, Δw=0). Имя с HOLD при пилларах 0.0 (нет данных → нет conviction, напр. неликвидная AIX-нота со сглаженной ценой) НЕ докупается — Effect исполняет план, а не спорит с ним |
 | Внешняя рука глобальных ETF (L-18) | `effectActions[].{is_external,name}` | `simulate.EXTERNAL_DIVERSIFIERS` + отбор в `investment_logic` | вес, который некуда деть внутри книги: IEF (гособлигации США 7–10 лет) / EEM (акции EM) / EMB (облигации EM) — порядок по мандату, ≤8пп/имя, ≤3 имён, остаток → Кэш. Кандидаты только из ФАКТОРНОЙ панели (история скачана каждым прогоном — ноль лишних запросов), классы согласованы с мандат-панелью (EEM→GlobalETFs — закрывает нижнюю границу 10% у профилей 9+). Ковариация симуляции расширяется sample-блоком (≥60 дней перекрытия) — ETF несёт реальный риск, «до» == обложка байт-в-байт |
 | Sharpe без look-ahead (L-11) | `expected_effect.sharpe` | — | **FORWARD Sharpe** = (er−rfr)/vol из BL-µ и структурной vol (ex-ante база), заякорен к headline-значению, дельта клэмп ±0.6 — реализованный Sharpe «после» не выдумывается |

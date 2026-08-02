@@ -2692,7 +2692,9 @@ const EffectGrid = ({
       className: "text-[16px] font-semibold text-ink-900"
     }, r.after)), /*#__PURE__*/React.createElement("div", {
       className: `text-[11px] num font-semibold mt-1.5 ${tone}`
-    }, r.delta));
+    }, r.delta), r.note && /*#__PURE__*/React.createElement("div", {
+      className: "text-[10px] text-ink-500 leading-snug mt-2 pt-2 border-t border-ink-900/6 font-light"
+    }, r.note));
   })), /*#__PURE__*/React.createElement("div", {
     className: "mt-4 flex items-start gap-3 rounded-2xl bg-gold-400/12 border border-gold-400/35 px-4 py-3"
   }, /*#__PURE__*/React.createElement(Icons.Scale, {
@@ -2853,6 +2855,9 @@ const Plan = () => {
     [n]: !o[n]
   }));
   const [applyOpen, setApplyOpen] = React.useState(false);
+  // R-22: подпись блока идей считается по факту, а не зашита числом.
+  const ideaCount = Array.isArray(p.ideas) ? p.ideas.length : 0;
+  const ideaWord = ideaCount % 10 === 1 && ideaCount % 100 !== 11 ? 'идея' : [2, 3, 4].includes(ideaCount % 10) && ![12, 13, 14].includes(ideaCount % 100) ? 'идеи' : 'идей';
   return /*#__PURE__*/React.createElement("section", {
     id: "plan",
     className: "rise",
@@ -2904,7 +2909,7 @@ const Plan = () => {
     stroke: 1.7
   })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "text-[10px] tracking-widest uppercase font-mono text-ink-700 mb-1"
-  }, "AI Ideas · 4 идеи · каждая прошла Factor → Regime → Stress → RAG"), /*#__PURE__*/React.createElement("p", {
+  }, "AI Ideas · ", ideaCount, " ", ideaWord, " · каждая прошла Factor → Regime → Stress → RAG"), /*#__PURE__*/React.createElement("p", {
     className: "text-[14.5px] text-ink-900 leading-relaxed font-light"
   }, "Тикеры-кандидаты ", /*#__PURE__*/React.createElement("span", {
     className: "font-medium"

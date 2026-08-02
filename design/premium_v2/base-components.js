@@ -1873,6 +1873,9 @@ const Ideas = () => {
     [n]: !open[n]
   });
   const [applyOpen, setApplyOpen] = React.useState(false);
+  // R-22: счётчик идей был ЗАШИТ («4 идеи») и врал при меньшем числе карточек.
+  const ideaCount = Array.isArray(ideas) ? ideas.length : 0;
+  const ideaWord = ideaCount % 10 === 1 && ideaCount % 100 !== 11 ? 'идея' : [2, 3, 4].includes(ideaCount % 10) && ![12, 13, 14].includes(ideaCount % 100) ? 'идеи' : 'идей';
   return /*#__PURE__*/React.createElement("section", {
     id: "ideas",
     className: "rise",
@@ -1883,7 +1886,7 @@ const Ideas = () => {
     className: "flex items-center gap-2 text-[11px] tracking-widest uppercase text-ink-500 font-mono mb-2"
   }, /*#__PURE__*/React.createElement("span", {
     className: "w-1.5 h-1.5 rounded-full bg-gold-400"
-  }), " AI Ideas · 4 идеи"), /*#__PURE__*/React.createElement("h2", {
+  }), " AI Ideas · ", ideaCount, " ", ideaWord), /*#__PURE__*/React.createElement("h2", {
     className: "text-[40px] leading-[1.05] tracking-[-0.02em] font-light text-ink-900"
   }, "Идеи на основе данных", /*#__PURE__*/React.createElement("span", {
     className: "text-ink-400"

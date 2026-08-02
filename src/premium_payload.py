@@ -210,11 +210,16 @@ def _map_deep(p: dict, meta: dict) -> dict:
         # delta as plain strings.  The v3 template formats via _ef_card at render,
         # but the premium mapper used _txt() → raw "0.18692…" leaked into the card.
         # Format per metric type so the cards read 18.7% / 0.34 / 49 like v3.
-        effect.append({"name": label,
-                       "before": _eff_fmt(key, _g(cell, "before")),
-                       "after":  _eff_fmt(key, _g(cell, "after")),
-                       "delta":  _eff_delta(key, _g(cell, "delta_pp")),
-                       "tone": "pos" if fav is True else ("neg" if fav is False else "flat")})
+        row = {"name": label,
+               "before": _eff_fmt(key, _g(cell, "before")),
+               "after":  _eff_fmt(key, _g(cell, "after")),
+               "delta":  _eff_delta(key, _g(cell, "delta_pp")),
+               "tone": "pos" if fav is True else ("neg" if fav is False else "flat")}
+        # R-20: причина погашенной дельты Sharpe (er < rf). Ключ появляется
+        # ТОЛЬКО когда причина есть — иначе карточка не меняется.
+        if key == "sharpe" and _g(p, "expected_effect_sharpe_note"):
+            row["note"] = _txt(p, "expected_effect_sharpe_note")
+        effect.append(row)
 
     # R2#5: the «до/после» simulation is scoped to the HIGH-PRIORITY Action-Plan
     # rows (the positions actually traded).  Surface that ticker set so the panel

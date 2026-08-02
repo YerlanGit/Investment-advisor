@@ -799,13 +799,39 @@ def simulate_after_plan(*,
     _fs_b = _fwd_sharpe(er_before, vol_before)
     _fs_a = _fwd_sharpe(er_after,  vol_after)
     _headline_sharpe = current_metrics.get("Sharpe_Ratio")
+
+    # ── R-20 (2026-08-02): ОТРИЦАТЕЛЬНАЯ ПРЕМИЯ ЗА РИСК ЛОМАЕТ ЗНАК ДЕЛЬТЫ ──
+    # S(σ) = (er − rf)/σ  ⇒  ∂S/∂σ = −(er − rf)/σ².
+    # При er < rf производная ПОЛОЖИТЕЛЬНА: снижение волатильности МЕХАНИЧЕСКИ
+    # опускает Sharpe.  Живой отчёт 02.08: er 2.8% против rf 4.5% (премия
+    # −1.7пп), vol 23.3% → 19.2%, и панель показала «Sharpe 0.49 → 0.47» —
+    # план наказан за то, что снизил риск, при том что ВСЕ остальные строки
+    # улучшились.  Проверено арифметикой: (0.028−0.045)/0.233 = −0.0730,
+    # (0.028−0.045)/0.192 = −0.0885, дельта −0.0156 → 0.49 − 0.016 ≈ 0.47.
+    #
+    # Это не погрешность оценки, а известная патология Sharpe при отрицательном
+    # избытке: коэффициент перестаёт упорядочивать портфели по качеству.
+    # Поэтому дельту НЕ показываем (иначе она читается как ухудшение), но и не
+    # прячем факт — отдаём причину наверх, отчёт обязан её назвать.
+    _excess_b = None if er_before is None else float(er_before) - float(risk_free_rate)
+    _excess_a = None if er_after  is None else float(er_after)  - float(risk_free_rate)
+    sharpe_delta_meaningful = not (
+        (_excess_b is not None and _excess_b < 0) or
+        (_excess_a is not None and _excess_a < 0)
+    )
+
     if _fs_b is not None and _fs_a is not None and _headline_sharpe is not None \
             and not (isinstance(_headline_sharpe, float) and math.isnan(_headline_sharpe)):
         sharpe_before_disp = float(_headline_sharpe)
-        # Bound the ex-ante delta so BL-μ noise can't fabricate an implausible
-        # swing; a rebalance rarely moves a realised Sharpe by more than ~0.6.
-        _d = max(-0.6, min(0.6, _fs_a - _fs_b))
-        sharpe_after_disp = sharpe_before_disp + _d
+        if not sharpe_delta_meaningful:
+            # Уровень остаётся (он реализованный и верный), дельта — ноль:
+            # `_delta_row` отдаст improved=None, строка нейтральна.
+            sharpe_after_disp = sharpe_before_disp
+        else:
+            # Bound the ex-ante delta so BL-μ noise can't fabricate an implausible
+            # swing; a rebalance rarely moves a realised Sharpe by more than ~0.6.
+            _d = max(-0.6, min(0.6, _fs_a - _fs_b))
+            sharpe_after_disp = sharpe_before_disp + _d
     else:
         sharpe_before_disp = (None if math.isnan(sample_before["sharpe"])
                               else sample_before["sharpe"])
@@ -871,13 +897,21 @@ def simulate_after_plan(*,
     dd_worsened    = _cell_worsened("max_drawdown")
 
     if vol_improved and (trc_worsened or dd_worsened):
-        worsened = []
-        if trc_worsened: worsened.append("max_trc")
-        if dd_worsened:  worsened.append("max_drawdown")
+        # R-21 (2026-08-02): заголовок был ФИКСИРОВАННЫМ и называл ОБА
+        # компромисса всегда.  Живой отчёт 02.08: ухудшилась только
+        # концентрация (Max TRC 27.2% → 33.2%), а просадка УЛУЧШИЛАСЬ
+        # (−41.2% → −38.7%) — и всё равно печаталось «за счёт роста
+        # концентрации/просадки».  `worsened` при этом был верным (`max_trc`):
+        # врала только фраза.  Теперь фраза собирается из него же.
+        worsened, _names = [], []
+        if trc_worsened:
+            worsened.append("max_trc");       _names.append("концентрации")
+        if dd_worsened:
+            worsened.append("max_drawdown");  _names.append("просадки")
         verdict = {
             "kind":     "tradeoff",
-            "headline": "Компромисс: снижение волатильности за счёт "
-                        "роста концентрации/просадки",
+            "headline": ("Компромисс: снижение волатильности за счёт роста "
+                         + "/".join(_names)),
             "worsened": worsened,
         }
     elif vol_improved:
@@ -895,11 +929,26 @@ def simulate_after_plan(*,
                    "headline": "Эффект ребалансировки маржинален",
                    "worsened": []}
 
+    # R-20: причина, по которой дельта Sharpe погашена — отчёт ОБЯЗАН её
+    # назвать, иначе плоская строка выглядит как «ничего не изменилось».
+    sharpe_note = ""
+    if not sharpe_delta_meaningful:
+        _ex = _excess_a if _excess_a is not None else _excess_b
+        sharpe_note = (
+            "Ожидаемая доходность ниже безрисковой ставки "
+            f"(премия {_ex * 100:+.1f} пп), поэтому Sharpe перестаёт "
+            "упорядочивать портфели: при отрицательном избытке снижение "
+            "волатильности механически ухудшает коэффициент. Дельта не "
+            "показана — смотрите на волатильность, CVaR и просадку."
+        ) if _ex is not None else ""
+
     return {
         "metrics":          metrics,
         "verdict":          verdict,
         "weight_changes":   weight_changes,
         "n_days_used":      sample_after.get("n_days", 0),
+        "sharpe_delta_meaningful": bool(sharpe_delta_meaningful),
+        "sharpe_note":      sharpe_note,
         "uses_bl_returns":  bl_records is not None and len(bl_records) > 0
                               and er_before is not None,
         "method":           ("vol/TRC via √(w'Σw) on structural cov · "
