@@ -203,6 +203,14 @@ const EffectGrid = ({ rows, verdict, scope, scoped, actions }) => {
               <span className="text-[16px] font-semibold text-ink-900">{r.after}</span>
             </div>
             <div className={`text-[11px] num font-semibold mt-1.5 ${tone}`}>{r.delta}</div>
+            {/* R-20: при отрицательной премии за риск дельта Sharpe погашена —
+                карточка обязана сказать ПОЧЕМУ, иначе «0.49 → 0.49» читается
+                как «план ничего не дал». Блок появляется только при наличии note. */}
+            {r.note && (
+              <div className="text-[10px] text-ink-500 leading-snug mt-2 pt-2 border-t border-ink-900/6 font-light">
+                {r.note}
+              </div>
+            )}
           </div>
         );
       })}
@@ -312,6 +320,11 @@ const Plan = () => {
   const [open, setOpen] = React.useState({ '01': true });
   const toggle = (n) => setOpen(o => ({ ...o, [n]: !o[n] }));
   const [applyOpen, setApplyOpen] = React.useState(false);
+  // R-22: подпись блока идей считается по факту, а не зашита числом.
+  const ideaCount = Array.isArray(p.ideas) ? p.ideas.length : 0;
+  const ideaWord  = (ideaCount % 10 === 1 && ideaCount % 100 !== 11) ? 'идея'
+                  : ([2,3,4].includes(ideaCount % 10) && ![12,13,14].includes(ideaCount % 100)) ? 'идеи'
+                  : 'идей';
   return (
     <section id="plan" className="rise" data-screen-label="05 Action Plan">
       <div className="mb-6">
@@ -343,7 +356,10 @@ const Plan = () => {
               <div className="flex items-start gap-4">
                 <div className="w-11 h-11 rounded-2xl bg-ink-900 text-gold-400 flex items-center justify-center flex-shrink-0"><Icons.Sparkles size={18} stroke={1.7}/></div>
                 <div>
-                  <div className="text-[10px] tracking-widest uppercase font-mono text-ink-700 mb-1">AI Ideas · 4 идеи · каждая прошла Factor → Regime → Stress → RAG</div>
+                  {/* R-22: счётчик был ЗАШИТ («4 идеи») и врал, когда карточек
+                      меньше — живой отчёт 02.08 показал 3 идеи под подписью «4».
+                      Считаем по фактическому списку. */}
+                  <div className="text-[10px] tracking-widest uppercase font-mono text-ink-700 mb-1">AI Ideas · {ideaCount} {ideaWord} · каждая прошла Factor → Regime → Stress → RAG</div>
                   <p className="text-[14.5px] text-ink-900 leading-relaxed font-light">
                     Тикеры-кандидаты <span className="font-medium">не из вашего портфеля</span> — рассмотрите как замену или дополнение. Раскройте карточку, чтобы увидеть конвейер отбора и обоснование по каждому кандидату.
                   </p>

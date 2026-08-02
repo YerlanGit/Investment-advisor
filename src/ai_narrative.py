@@ -854,7 +854,14 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
             "и их смысла для портфеля/мандата. Идеи выбирай по качеству (4-Pillar), концентрации и "
             "мандату, а не по «благоприятным секторам фазы». "
             "«Ярлык»/«агрегатный» — внутренние термины: читателю пиши «оценка "
-            "фазы цикла» (напр. «фаза цикла определена неуверенно — 8%»).\n"
+            f"фазы цикла» (напр. «фаза цикла определена неуверенно — {_conf_pct}%»).\n"
+            # R-19 (2026-08-02): здесь СТОЯЛ литерал «8%» — число из живого
+            # отчёта июля, оставленное как пример формулировки.  Модель взяла
+            # его как ДАННЫЕ: в отчёте 02.08 при реальной уверенности 1%
+            # напечаталось «определена крайне неуверенно (8%… фактически 1%)».
+            # Пример обязан нести ТЕКУЩЕЕ число, иначе он фабрикует факт.
+            f"ЕДИНСТВЕННОЕ допустимое число уверенности фазы — {_conf_pct}%. "
+            "Никакого другого процента уверенности в тексте быть не должно.\n"
         )
 
     # B1 (2026-07-17): бенчмарк клиента по ИМЕНИ — комментарии секций обязаны
@@ -1223,7 +1230,9 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
             'Связь: высокий риск → высокий CVaR (→ см. риск-блок) [Quant Engine]",\n'
             '  "ai_sector_comment": "≤140 знаков — используй ТОЛЬКО числа из раздела sectors; '
             'НЕ суммируй сектора сам. Для совокупной техно-экспозиции бери sector_complex.weight_pct '
-            'ВЕРБАТИМ (напр. \\"Tech-комплекс 80.8%\\"). Сектор с перекосом + % → ПОЧЕМУ это опасно в режиме '
+            # R-19: пример формата НЕ должен содержать готовое число — модель
+            # копирует его как факт (см. инцидент с «8%» уверенности режима).
+            'ВЕРБАТИМ (формат: \\"Tech-комплекс <weight_pct>%\\"). Сектор с перекосом + % → ПОЧЕМУ это опасно в режиме '
             f'{regime_label}. Назови сектор для докупки [Regime]",\n'
             '  "ai_factor_comment": "≤220 знаков — (1) Value-фактор портфеля [Quant Engine]: '
             'если отрицательный — значит портфель против стоимостных акций, что ПРОТИВОРЕЧИТ режиму '
@@ -1519,7 +1528,8 @@ def _fallback_factor_comment(results: dict) -> str:
     return "; ".join(parts) + " [Quant Engine]."
 
 
-def _fallback_narrative(results: dict, tier: str) -> dict:
+def _fallback_narrative(results: dict, tier: str,
+                       user_mandate: dict | None = None) -> dict:
     metrics = results.get("portfolio_metrics") or {}
     regime  = results.get("regime") or {}
     perf    = results.get("performance_table")
@@ -1569,7 +1579,11 @@ def _fallback_narrative(results: dict, tier: str) -> dict:
     )
 
     regime_label = regime.get("regime", "")
-    stock_picks  = _fallback_stock_picks(regime_label, tier)
+    # R-22: офлайн-каталог тоже обязан уважать мандат — иначе клиент
+    # без класса `Crypto`/`GlobalETFs` получал из него запрещённые идеи.
+    stock_picks  = _fallback_stock_picks(regime_label, tier,
+                                         user_mandate=user_mandate)
+    stock_picks  = _remove_mandate_banned_picks(stock_picks, user_mandate)
 
     # Sprint-5 — deterministic Margin-Call warning when the book is levered,
     # so even the no-API fallback path surfaces the leverage risk.
@@ -1629,8 +1643,15 @@ def _fallback_narrative(results: dict, tier: str) -> dict:
     }
 
 
-def _fallback_stock_picks(regime_label: str, tier: str) -> dict:
-    """Rule-based stock picks when Claude is unavailable — includes real stocks."""
+def _fallback_stock_picks(regime_label: str, tier: str,
+                          user_mandate: dict | None = None) -> dict:
+    """Rule-based stock picks when Claude is unavailable — includes real stocks.
+
+    R-22 (2026-08-02): выбор кандидата теперь УВАЖАЕТ мандат. Ротация по месяцу
+    сохранена (детерминизм внутри месяца), но если выпавший кандидат лежит в
+    классе с лимитом 0–0, берётся следующий разрешённый по кругу. Иначе
+    «Защита капитала» у клиента без `GlobalETFs` выпадала целиком.
+    """
     expansion = regime_label in ("Recovery", "Expansion", "")
 
     # Sprint-5.1 — the fallback used to be a FROZEN 1-candidate catalogue
@@ -1643,7 +1664,17 @@ def _fallback_stock_picks(regime_label: str, tier: str) -> dict:
     _rot = date.today().month
 
     def _pick(candidates: list[dict], offset: int = 0) -> dict:
-        return candidates[(_rot + offset) % len(candidates)]
+        """Ротация по месяцу, но НЕ в запрещённый мандатом класс (R-22)."""
+        n = len(candidates)
+        start = (_rot + offset) % n
+        for i in range(n):
+            cand = candidates[(start + i) % n]
+            if _mandate_allows(cand.get("ticker", ""), user_mandate):
+                return cand
+        # Все кандидаты слота запрещены мандатом — отдаём исходный; финальный
+        # гард `_remove_mandate_banned_picks` всё равно его вычистит, и слот
+        # честно останется пустым, а не покажет запрещённую бумагу.
+        return candidates[start]
 
     _BOOST_EXPANSION = [
         {"ticker": "PLTR", "name": "Palantir Technologies",
@@ -1811,7 +1842,7 @@ def generate_narrative(results: dict, tier: str = "base",
 
     if not api_key:
         logger.warning("ANTHROPIC_API_KEY отсутствует — используется fallback-нарратив.")
-        out = _fallback_narrative(results, tier)
+        out = _fallback_narrative(results, tier, user_mandate=user_mandate)
         out["used_rag"] = False
         out["model_used"] = "fallback"
         return out
@@ -1905,12 +1936,20 @@ def generate_narrative(results: dict, tier: str = "base",
         # pick is never one the user already owns.
         _regime_label = ((results.get("regime") or {}).get("regime")
                          if isinstance(results.get("regime"), dict) else None) or "unknown"
-        stock_picks = _backfill_empty_scenarios(stock_picks, _regime_label, tier,
-                                                 market_context, results)
         # B1 (2026-07-17): мандатный гард — детерминированно вычищаем идеи из
         # классов активов с лимитом 0–0 (напр. Crypto у консервативного).
-        # Идёт ПОСЛЕ backfill, чтобы и фолбэк-идеи прошли через фильтр.
+        #
+        # R-22 (2026-08-02): гард ПЕРЕЕХАЛ ВЫШЕ backfill. Раньше он шёл после —
+        # и опустошал корзину, которую backfill только что гарантированно
+        # наполнил, без второго шанса. Живой отчёт 02.08: три карточки при
+        # подписи «4 идеи» (у клиента `GlobalETFs`/`Stocks_KZ` = 0–0, а
+        # «Защита капитала» — защитные сектор/фактор-ETF). Прежняя мотивация
+        # «чтобы и фолбэк прошёл через фильтр» СОХРАНЕНА: теперь фолбэк сам
+        # фильтруется мандатом внутри `_backfill_empty_scenarios`.
         stock_picks = _remove_mandate_banned_picks(stock_picks, user_mandate)
+        stock_picks = _backfill_empty_scenarios(stock_picks, _regime_label, tier,
+                                                 market_context, results,
+                                                 user_mandate=user_mandate)
         total_picks = sum(len(s.get("picks", [])) for s in stock_picks.values())
 
         logger.info("AI narrative: SUCCESS model=%s verdict=%d chars bullets=%d picks=%d",
@@ -2025,7 +2064,7 @@ def generate_narrative(results: dict, tier: str = "base",
     except Exception as exc:
         logger.warning("AI narrative FAILED (%s) — используется fallback. Модель: %s",
                        exc, model, exc_info=True)
-        out = _fallback_narrative(results, tier)
+        out = _fallback_narrative(results, tier, user_mandate=user_mandate)
         out["used_rag"]   = False
         out["model_used"] = "fallback"
         return out
@@ -2176,8 +2215,35 @@ def _remove_mandate_banned_picks(stock_picks: dict,
     return stock_picks
 
 
+def _mandate_allows(ticker: str, user_mandate: dict | None) -> bool:
+    """True, если класс тикера НЕ закрыт лимитом 0–0 мандата (R-22).
+
+    Тот же классификатор, что у мандатной панели и у гарда идей, — «запрещённый
+    класс» обязан значить одно и то же во всех трёх местах.
+    """
+    if not user_mandate:
+        return True
+    limits = user_mandate.get("limits_dict") or {}
+    banned = set()
+    for key, bounds in limits.items():
+        try:
+            lo, hi = float(bounds[0]), float(bounds[1])
+        except (TypeError, ValueError, IndexError):
+            continue
+        if lo == 0 and hi == 0:
+            banned.add(str(key))
+    if not banned:
+        return True
+    try:
+        from agent.gatekeeper import _classify_to_asset_key
+    except Exception:                                  # pragma: no cover
+        return True
+    return _classify_to_asset_key(str(ticker or "").strip()) not in banned
+
+
 def _backfill_empty_scenarios(stock_picks: dict, regime_label: str, tier: str,
-                              market_context: str, results: dict) -> dict:
+                              market_context: str, results: dict,
+                              user_mandate: dict | None = None) -> dict:
     """
     Guarantee all four strategic scenarios carry at least one pick.
 
@@ -2186,10 +2252,22 @@ def _backfill_empty_scenarios(stock_picks: dict, regime_label: str, tier: str,
     drained) silently shrinks the idea menu from 4 cards to 3.  We backfill
     such gaps from the deterministic rule-based catalogue, then re-run the
     held-ticker filter so a backfilled idea is never one the user owns.
+
+    R-22 (2026-08-02) — МАНДАТ УЧИТЫВАЕТСЯ ЗДЕСЬ, а не только после.
+    Живой отчёт 02.08 пришёл с ТРЕМЯ карточками при подписи «4 идеи»: у клиента
+    классы `GlobalETFs` и `Stocks_KZ` закрыты лимитом 0–0 (мандатная панель их
+    поэтому и не показывает — `_build_mandate_compliance` скрывает строки 0–0),
+    а «Защита капитала» — это ровно защитные сектор/фактор-ETF. Гард
+    `_remove_mandate_banned_picks` работал ПОСЛЕ backfill и опустошал корзину
+    обратно, второго шанса не было. Теперь: (а) фолбэк берёт первого
+    РАЗРЕШЁННОГО мандатом кандидата вместо фиксированного по месяцу, (б) сам
+    гард вызывается до этой функции, и она добивает то, что он вычистил.
     """
-    fallback = _fallback_stock_picks(regime_label, tier)
+    fallback = _fallback_stock_picks(regime_label, tier,
+                                     user_mandate=user_mandate)
     fallback = _normalise_stock_picks(fallback, tier, market_context)
     fallback = _remove_held_picks(fallback, results)
+    fallback = _remove_mandate_banned_picks(fallback, user_mandate)
 
     for key in ("boost_alpha", "rebalance", "protect_capital", "smart_money"):
         scenario = stock_picks.get(key) or {}

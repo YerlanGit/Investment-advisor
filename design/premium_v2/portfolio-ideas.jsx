@@ -242,13 +242,18 @@ const Ideas = () => {
   const [open, setOpen] = React.useState({ '01': true });
   const toggle = (n) => setOpen({ ...open, [n]: !open[n] });
   const [applyOpen, setApplyOpen] = React.useState(false);
+  // R-22: счётчик идей был ЗАШИТ («4 идеи») и врал при меньшем числе карточек.
+  const ideaCount = Array.isArray(ideas) ? ideas.length : 0;
+  const ideaWord  = (ideaCount % 10 === 1 && ideaCount % 100 !== 11) ? 'идея'
+                  : ([2,3,4].includes(ideaCount % 10) && ![12,13,14].includes(ideaCount % 100)) ? 'идеи'
+                  : 'идей';
 
   return (
     <section id="ideas" className="rise" data-screen-label="04 Ideas">
       <div className="flex items-end justify-between gap-4 flex-wrap mb-6">
         <div>
           <div className="flex items-center gap-2 text-[11px] tracking-widest uppercase text-ink-500 font-mono mb-2">
-            <span className="w-1.5 h-1.5 rounded-full bg-gold-400"/> AI Ideas · 4 идеи
+            <span className="w-1.5 h-1.5 rounded-full bg-gold-400"/> AI Ideas · {ideaCount} {ideaWord}
           </div>
           <h2 className="text-[40px] leading-[1.05] tracking-[-0.02em] font-light text-ink-900">
             Идеи на основе данных<span className="text-ink-400">.</span>

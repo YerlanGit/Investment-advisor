@@ -1314,6 +1314,14 @@ def build_payload(results: dict, tier: str,
         # и обязан быть `{}` на пустом входе (контракт `test_phase4`).
         "expected_effect_uses_bl": bool(
             (results.get("expected_effect") or {}).get("uses_bl_returns")),
+        # R-20 (2026-08-02): при отрицательной премии за риск (er < rf) Sharpe
+        # перестаёт упорядочивать портфели — снижение волатильности МЕХАНИЧЕСКИ
+        # ухудшает коэффициент.  Движок в этом случае гасит дельту, а строку
+        # обязана сопровождать причина, иначе «0.49 → 0.49» читается как
+        # «план ничего не дал».  Лежит на уровне payload по той же причине,
+        # что и флаг выше — контракт `expected_effect` не трогаем.
+        "expected_effect_sharpe_note": str(
+            (results.get("expected_effect") or {}).get("sharpe_note") or ""),
         "expected_return_pct_num": exp_ret_num,          # numeric (chart-safe)
         "expected_sharpe":        exp_sharpe_str,
         "risk_pct":          composite,
