@@ -238,23 +238,32 @@ def _fetch_company_facts(ticker: str) -> dict:
 
 # ── Tickers to skip (no 10-K on SEC) ────────────────────────────────────────
 _SKIP_SUFFIXES = (".AIX", ".KZ", ".IL")
-_SKIP_ETFS = frozenset({
-    "GLD", "SPY", "IWM", "QQQ", "DBC", "IEF", "BIL", "LQD", "HYG",
-    "MTUM", "VLUE", "QUAL", "EEM", "BND", "AGG", "TLT", "SHY",
-    "XLF", "XLE", "XLV", "XLK", "SOXX", "XME", "XLP", "XLI",
-    "GDX", "SLV", "USO", "UNG", "PDBC",
-})
 
 
 def _should_skip(ticker: str) -> bool:
-    """Return True if this ticker has no SEC 10-K filing."""
+    """Return True if this ticker has no SEC 10-K filing.
+
+    A-5 (2026-08-02): перечень ETF переехал в SSOT `finance.asset_taxonomy`.
+    Прежний локальный список не знал `EMB`/`VWOB`/`VWO`/`SHV`/`VCIT`/`GOVT` —
+    и движок ходил в SEC за отчётностью ETF, которой не существует
+    (лишний сетевой вызов + пустой фундаментал в отчёте).
+    Решение остаётся здесь: «идти ли за 10-K» — вопрос ЭТОГО модуля.
+    """
+    from finance import asset_taxonomy as _tx
+
     t = ticker.upper().strip()
-    base = t.split(".")[0] if "." in t else t
     if any(t.endswith(sfx) for sfx in _SKIP_SUFFIXES):
         return True
-    if base in _SKIP_ETFS:
+    # У ETF-обёртки нет собственной отчётности эмитента-компании.
+    if _tx.is_etf(t):
         return True
-    if "FFSPC" in t or "BOND" in t or "OVD" in t:
+    # …как и у долговой бумаги / структурной ноты.
+    if _tx.is_bond_like(t):
+        return True
+    # Крипто, кэш и KZ-голубые фишки без суффикса тоже не подают 10-K.
+    # Замерено в демо-прогоне: движок ходил в SEC за `BTC-USD` и за бумагой
+    # `KSPI`, поданной без суффикса, — два гарантированно пустых запроса.
+    if _tx.is_crypto(t) or _tx.is_cash(t) or _tx.is_kz_listed(t):
         return True
     return False
 

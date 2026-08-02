@@ -117,6 +117,11 @@ def _classify_instrument(ticker: str, t_field: int | None = None) -> str:
 
     When ``t_field`` is missing or ambiguous, falls back to ticker heuristics.
     """
+    # A-5 (2026-08-02): перечни тикеров — из SSOT `finance.asset_taxonomy`.
+    # РЕШЕНИЕ остаётся здесь: у этой функции своя лексика («Структ.нота»,
+    # «Фьючерс»), и приоритет поля `t` брокера — тоже её собственное правило.
+    from finance import asset_taxonomy as _tx
+
     t = ticker.upper().strip()
 
     # 1. Trust the broker's classification when present.
@@ -128,36 +133,33 @@ def _classify_instrument(ticker: str, t_field: int | None = None) -> str:
         return "Опцион"
 
     # 2. Cash currencies first (always).
-    if t in ("USD", "EUR", "RUB", "RUR", "KZT", "GBP", "CHF", "CNY", "JPY", "CASH"):
+    if _tx.is_cash(t):
         return "Кэш"
 
     # 3. Crypto markers.
-    if t.endswith("-USD") or t in ("BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOT"):
+    if _tx.is_crypto(t):
         return "Крипто"
 
     # 4. AIX structured products (Freedom Securities Special Purpose Companies).
-    if t.endswith(".AIX") or "FFSPC" in t:
+    #    Проверяется ДО облигаций: экономически нота долговая (её так и видят
+    #    мандат и риск-прокси), но у ЭТОЙ колонки есть отдельное слово для неё.
+    if _tx.is_structured_note(t):
         return "Структ.нота"
 
-    # 5. Bond keywords.
-    if any(token in t for token in ("BOND", "OVD", "T-BILL", "TBILL", "TREASURY", "EUROBOND")):
-        return "Облигация"
+    # 5. Известные ETF-обёртки.  ПОРЯДОК ЗНАЧИМ и отличается от мандатной
+    #    классификации: `TLT` для лимитов — «Bonds» (экономическая экспозиция),
+    #    а для ЭТОЙ колонки — «ETF» (форма инструмента, историческое поведение).
+    #    Сопоставление по БАЗЕ, поэтому «LQD» и «LQD.US» дают один ответ.
+    if _tx.is_etf(t):
+        return "ETF"
 
-    # 6. ISIN-format ticker → almost always a bond (rare for stocks).
+    # 6. Настоящие облигации: слово в тикере, ISIN-префикс, ISIN-форма.
+    if _tx.is_bond_like(t):
+        return "Облигация"
     if _ISIN_PATTERN.match(t.replace(".KZ", "").replace(".US", "")):
         return "Облигация"
 
-    # 7. Known ETF tickers (broad heuristic — could be made exhaustive).
-    # Match against bare symbol AND .US-suffixed form because the broker may
-    # report either (e.g. "LQD" vs "LQD.US").
-    bare = t.split(".")[0]
-    if bare in {"SPY", "QQQ", "IWM", "DIA", "VOO", "VTI", "EEM", "EFA",
-                "GLD", "SLV", "DBC", "USO",
-                "TLT", "IEF", "BIL", "SHV", "LQD", "HYG", "AGG", "BND",
-                "MTUM", "VLUE", "QUAL", "SIZE", "USMV"}:
-        return "ETF"
-
-    # 8. Default — stock.
+    # 7. Default — stock.
     return "Акция"
 
 

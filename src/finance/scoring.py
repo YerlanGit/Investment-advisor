@@ -436,19 +436,14 @@ def composite_risk_score(volatility: float, cvar: float,
 #   • broker_api._classify_instrument    → instrument TYPE via Tradernet t_field
 # Those have different output contracts and purposes; merging them would
 # break the limits lookup / broker-metadata typing.
+#
+# A-5 (2026-08-02): РАЗДЕЛЕНИЕ СОХРАНЕНО — разошлись не решения, а ФАКТЫ.
+# Перечни тикеров («это облигационный ETF») теперь один на всех:
+# `finance.asset_taxonomy` (`BOND_ETFS`, `is_bond_like`, …).  Каждый из шести
+# классификаторов читает их и принимает СВОЁ решение своего типа.
 
-_CASH_BASES       = frozenset({"USD", "EUR", "RUB", "KZT", "CASH"})
-_CRYPTO_BASES     = frozenset({"BTC", "ETH", "SOL", "BNB", "DOGE"})
-_COMMODITY_BASES  = frozenset({"GLD", "SLV", "GDX", "USO", "DBC", "PDBC",
-                               "GOLD", "SILVER", "OIL"})
-_BOND_BASES       = frozenset({"TLT", "AGG", "BND", "LQD", "HYG", "IEF",
-                               "BIL", "EMB", "SHY"})
-# KZ blue chips that may arrive WITHOUT an exchange suffix (the tg_bot path
-# saw bare "KSPI"/"KAP"); classify them as KZ equities regardless.
-_KZ_BASES         = frozenset({"KAP", "KSPI", "HSBK", "KZTK", "KCEL",
-                               "BAST", "HRGL", "KZAP", "KZTO"})
-
-
+# A-5 (2026-08-02): перечни тикеров переехали в `finance.asset_taxonomy` —
+# SSOT фактов.  Здесь остаётся ТОЛЬКО решение «какую подпись показать».
 def classify_asset_class(ticker: str) -> str:
     """
     Asset-class label for user-facing tables/cards.
@@ -456,22 +451,26 @@ def classify_asset_class(ticker: str) -> str:
     Returns one of: 'Ден. средства' | 'Крипто' | 'Сырьё' | 'Облигации'
                     | 'Акции KZ' | 'Акции США' | 'Прочее'.
     Suffix-aware and exact-match based — no substring false positives.
-    """
-    t = (ticker or "").upper().strip()
-    base   = t.split(".")[0] if "." in t else t
-    suffix = t.rsplit(".", 1)[-1] if "." in t else ""
 
-    if base in _CASH_BASES:
+    Порядок проверок ЗНАЧИМ и совпадает с `asset_taxonomy.from_freedom_metadata`:
+    долговая проверка идёт ДО «KZ-бумага», поэтому AIX-нота печатается как
+    «Облигации» — так же, как её видят панель мандата и риск-прокси (§−38).
+    """
+    from finance import asset_taxonomy as _tx
+
+    t = (ticker or "").upper().strip()
+    base   = _tx.ticker_base(t)
+    suffix = _tx.ticker_suffix(t)
+
+    if _tx.is_cash(t):
         return "Ден. средства"
-    if base in _CRYPTO_BASES or t.endswith("-USD"):
+    if _tx.is_crypto(t):
         return "Крипто"
-    if base in _COMMODITY_BASES:
+    if _tx.is_commodity(t):
         return "Сырьё"
-    if base in _BOND_BASES or "BOND" in base or "OVD" in base \
-       or t.startswith(("KZ2P", "KZ1P", "XS", "US912")):
+    if _tx.is_bond_like(t):
         return "Облигации"
-    if suffix in {"KZ", "IL"} or t.endswith(".AIX") or "FFSPC" in base \
-       or base in _KZ_BASES:
+    if _tx.is_kz_listed(t):
         return "Акции KZ"
     if suffix == "US" or len(base) <= 5:
         return "Акции США"

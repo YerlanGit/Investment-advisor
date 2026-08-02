@@ -51,11 +51,154 @@ _DISPLAY_LABEL: dict[AssetClass, str] = {
     AssetClass.CASH:         "Ден. средства",
     AssetClass.CRYPTO:       "Крипто",
     AssetClass.COMMODITY:    "Сырьё",
-    AssetClass.STRUCTURED:   "Акции KZ",    # AIX SPC notes shown under KZ bucket
+    # A-5 (2026-08-02): было «Акции KZ» — и живой отчёт печатал ноту как
+    # долевую бумагу, тогда как панель мандата считала её «Облигации», а
+    # риск-модель проксировала на `VWOB.US` (EM govt bond, §−38).  Один
+    # инструмент — один ответ: нота долговая.  Структурная природа при этом
+    # НЕ теряется: `broker_api._classify_instrument` держит для неё
+    # отдельный `Asset_Type` = «Структ.нота» в своей колонке.
+    AssetClass.STRUCTURED:   "Облигации",
     AssetClass.UNKNOWN:      "Прочее",
 }
 
-_CASH_CCYS = frozenset({"USD", "EUR", "RUB", "RUR", "KZT", "GBP", "CHF", "CNY", "JPY"})
+# ═════════════════════════════════════════════════════════════════════════════
+# SSOT ФАКТОВ О ТИКЕРЕ (A-5, 2026-08-02)
+# ═════════════════════════════════════════════════════════════════════════════
+# До этого раздела в проекте жили ШЕСТЬ независимых копий «какой это
+# инструмент», и они разошлись.  Замерено: `VWOB`/`VWO`/`SHV`/`VCIT` не знал
+# НИКТО (хотя `VWOB`/`VWO` — прокси раунда §−38, они приходят в модель каждым
+# прогоном); `EMB` отсутствовал в SEC-skip и в credit-N/A; `GOVT` знал только
+# credit-N/A.  В живом отчёте AIX-нота была одновременно «Облигации» (панель
+# мандата) и «Акции KZ» (таблица позиций).
+#
+# ЧТО ЗДЕСЬ ЕСТЬ, А ЧЕГО НЕТ.  Здесь — только ФАКТЫ о тикере («это облигационный
+# ETF», «это кэш»).  РЕШЕНИЙ здесь нет: шесть потребителей отвечают на РАЗНЫЕ
+# вопросы разными типами ответа —
+#
+#   asset_taxonomy.from_freedom_metadata   → AssetClass (тип инструмента)
+#   scoring.classify_asset_class           → русская подпись для таблицы
+#   gatekeeper._classify_to_asset_key      → ключ ЛИМИТА мандата (Check 8)
+#   broker_api._classify_instrument        → Asset_Type строки портфеля
+#   sec_edgar._should_skip                 → ходить ли в SEC за 10-K
+#   scoring_orchestrator._is_credit_not_applicable → применим ли C-пиллар
+#
+# — поэтому один словарь «тикер → класс» их не заменяет и заменять НЕ должен.
+# Общий у них ровно один слой: перечни тикеров ниже.  Каждый потребитель
+# читает ЭТИ множества и принимает СВОЁ решение.
+#
+# Правило пополнения: новый тикер добавляется ЗДЕСЬ и нигде больше.
+# `tests/test_phase42_instrument_ssot.py` падает при появлении второй копии.
+
+CASH_CCYS = frozenset({"USD", "EUR", "RUB", "RUR", "KZT", "GBP", "CHF",
+                       "CNY", "JPY"})
+_CASH_CCYS = CASH_CCYS          # обратная совместимость с прежним именем
+
+CRYPTO_BASES = frozenset({"BTC", "ETH", "SOL", "BNB", "DOGE", "ADA", "DOT",
+                          "XRP"})
+
+COMMODITY_ETFS = frozenset({"GLD", "SLV", "GDX", "USO", "UNG", "DBC", "PDBC",
+                            "GOLD", "SILVER", "OIL"})
+
+# Облигационные ETF/индексы.  `TNX` — индекс доходности 10Y, не ETF; в
+# портфеле не встречается (это факторный тикер движка), оставлен, чтобы не
+# менять исторический ответ мандатной панели.
+BOND_ETFS = frozenset({
+    "TLT", "IEF", "SHY", "SHV", "AGG", "BND", "BNDX", "GOVT", "TIP",
+    "LQD", "VCIT", "HYG", "JNK", "EMB", "VWOB", "BIL", "TNX",
+})
+
+# Государственные/квази-государственные бумаги РАЗВИТЫХ рынков: у них нет
+# корпоративного кредитного риска, поэтому C-пиллар к ним неприменим.
+# EM-суверенный долг (`EMB`, `VWOB`) сюда НЕ входит намеренно — там кредитный
+# риск реален и пиллар обязан работать.
+SOVEREIGN_BOND_ETFS = frozenset({"TLT", "IEF", "SHY", "SHV", "AGG", "BND",
+                                 "BIL", "GOVT", "TIP"})
+
+BROAD_EQUITY_ETFS = frozenset({"SPY", "QQQ", "IWM", "EEM", "VWO", "URTH",
+                               "VTI", "VOO", "VEA", "EFA", "IEFA"})
+#: `SPLV` — факторный тикер движка (low-volatility); до A-5 его не знал никто,
+#: и портфель, ДЕРЖАЩИЙ его, уходил в SEC за несуществующим 10-K.
+FACTOR_ETFS = frozenset({"MTUM", "VLUE", "QUAL", "USMV", "SIZE", "SPLV"})
+SECTOR_ETFS = frozenset({"XLK", "XLF", "XLE", "XLV", "XLP", "XLI", "XLU",
+                         "XLY", "XLB", "XLC", "XLRE", "SOXX", "XME"})
+EQUITY_ETFS = BROAD_EQUITY_ETFS | FACTOR_ETFS | SECTOR_ETFS
+
+#: Все известные ETF-обёртки — «за ними нет отчётности эмитента-компании».
+ETF_BASES = EQUITY_ETFS | BOND_ETFS | COMMODITY_ETFS
+
+KZ_BLUE_CHIPS = frozenset({"KSPI", "HSBK", "KAP", "KZTK", "KCEL", "BAST",
+                           "HRGL", "KZAP", "KZTO"})
+KZ_SUFFIXES = frozenset({"KZ", "IL"})
+
+#: ISIN-подобные префиксы, за которыми практически всегда долговая бумага.
+BOND_ISIN_PREFIXES = ("KZ2P", "KZ1P", "XS", "US912")
+#: Слова в тикере, прямо называющие долговую бумагу.
+BOND_NAME_MARKERS = ("BOND", "OVD", "EUROBOND", "T-BILL", "TBILL", "TREASURY")
+#: Структурные ноты Freedom SPC (AIX).
+STRUCTURED_MARKERS = ("FFSPC",)
+
+
+def ticker_base(ticker: str) -> str:
+    """«KMGZ.KZ» → «KMGZ»; «AAPL» → «AAPL». Верхний регистр, без пробелов."""
+    t = (ticker or "").upper().strip()
+    return t.split(".")[0] if "." in t else t
+
+
+def ticker_suffix(ticker: str) -> str:
+    """«KMGZ.KZ» → «KZ»; «AAPL» → «»."""
+    t = (ticker or "").upper().strip()
+    return t.rsplit(".", 1)[-1] if "." in t else ""
+
+
+def is_cash(ticker: str) -> bool:
+    b = ticker_base(ticker)
+    return b in CASH_CCYS or b == "CASH"
+
+
+def is_crypto(ticker: str) -> bool:
+    t = (ticker or "").upper().strip()
+    return t.endswith("-USD") or ticker_base(t) in CRYPTO_BASES
+
+
+def is_commodity(ticker: str) -> bool:
+    return ticker_base(ticker) in COMMODITY_ETFS
+
+
+def is_structured_note(ticker: str) -> bool:
+    t = (ticker or "").upper().strip()
+    return t.endswith(".AIX") or any(m in t for m in STRUCTURED_MARKERS)
+
+
+def is_bond_like(ticker: str) -> bool:
+    """Долговая бумага в ЭКОНОМИЧЕСКОМ смысле.
+
+    Включает структурные ноты AIX: движок моделирует их прокси `VWOB.US`
+    (EM govt bond, `AUDIT §−38`), и мандатная панель считает их «Bonds» —
+    ответ обязан быть один во всех трёх местах.
+    """
+    t = (ticker or "").upper().strip()
+    b = ticker_base(t)
+    return (b in BOND_ETFS
+            or any(m in b for m in BOND_NAME_MARKERS)
+            or t.startswith(BOND_ISIN_PREFIXES)
+            or is_structured_note(t))
+
+
+def is_sovereign_bond(ticker: str) -> bool:
+    """Суверенный долг РАЗВИТОГО рынка — кредитный пиллар неприменим."""
+    return ticker_base(ticker) in SOVEREIGN_BOND_ETFS
+
+
+def is_etf(ticker: str) -> bool:
+    """Известная ETF-обёртка (у неё нет собственной отчётности эмитента)."""
+    return ticker_base(ticker) in ETF_BASES
+
+
+def is_kz_listed(ticker: str) -> bool:
+    t = (ticker or "").upper().strip()
+    return (ticker_suffix(t) in KZ_SUFFIXES
+            or t.endswith(".AIX")
+            or ticker_base(t) in KZ_BLUE_CHIPS)
 
 
 def from_freedom_metadata(*,
@@ -73,11 +216,11 @@ def from_freedom_metadata(*,
       3. UNKNOWN.
     """
     t = (ticker or "").upper().strip()
-    base   = t.split(".")[0] if "." in t else t
-    suffix = t.rsplit(".", 1)[-1] if "." in t else ""
+    base   = ticker_base(t)
+    suffix = ticker_suffix(t)
 
     # Cash currencies (a bare currency code as the "ticker", or a cash row).
-    if base in _CASH_CCYS or base == "CASH":
+    if is_cash(t):
         return AssetClass.CASH
 
     # 1. Trust the broker's security type when it's a clear stock/bond.
@@ -85,17 +228,16 @@ def from_freedom_metadata(*,
         return _T_FIELD_MAP[t_field]
 
     # 2. Ticker heuristics (fallback for demo / proxy / metadata-less rows).
-    if t.endswith("-USD") or base in {"BTC", "ETH", "SOL", "BNB", "DOGE"}:
+    #    Все перечни — из SSOT выше (A-5); собственных списков здесь нет.
+    if is_crypto(t):
         return AssetClass.CRYPTO
-    if t.endswith(".AIX") or "FFSPC" in base:
+    if is_structured_note(t):
         return AssetClass.STRUCTURED
-    if base in {"GLD", "SLV", "GDX", "USO", "DBC", "PDBC", "GOLD", "SILVER", "OIL"}:
+    if is_commodity(t):
         return AssetClass.COMMODITY
-    if base in {"TLT", "AGG", "BND", "LQD", "HYG", "IEF", "BIL", "EMB", "SHY"} \
-       or "BOND" in base or "OVD" in base \
-       or t.startswith(("KZ2P", "KZ1P", "XS", "US912")):
+    if is_bond_like(t):
         return AssetClass.FIXED_INCOME
-    if suffix in {"KZ", "IL"}:
+    if suffix in KZ_SUFFIXES:
         return AssetClass.EQUITY        # KZ-listed equity
     if suffix == "US" or len(base) <= 5:
         return AssetClass.EQUITY
@@ -166,4 +308,13 @@ __all__ = [
     "classify_display_from_freedom",
     "SECTOR_SUPERGROUPS",
     "top_sector_concentration_pct",
+    # SSOT фактов о тикере (A-5) — перечни
+    "CASH_CCYS", "CRYPTO_BASES", "COMMODITY_ETFS", "BOND_ETFS",
+    "SOVEREIGN_BOND_ETFS", "BROAD_EQUITY_ETFS", "FACTOR_ETFS", "SECTOR_ETFS",
+    "EQUITY_ETFS", "ETF_BASES", "KZ_BLUE_CHIPS", "KZ_SUFFIXES",
+    "BOND_ISIN_PREFIXES", "BOND_NAME_MARKERS", "STRUCTURED_MARKERS",
+    # …и предикаты
+    "ticker_base", "ticker_suffix", "is_cash", "is_crypto", "is_commodity",
+    "is_structured_note", "is_bond_like", "is_sovereign_bond", "is_etf",
+    "is_kz_listed",
 ]

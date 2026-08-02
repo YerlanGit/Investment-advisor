@@ -24,11 +24,16 @@
   фактор-модели. Выборку колонок в `calculate_structural_risk` дедуплицировать
   обязательно (`dict.fromkeys`) — иначе портфель, держащий факторный ETF, роняет
   отчёт; в `valid_resolved` дубликаты, наоборот, сохранять. `MATH_ENGINE.md §2.3a`.
+- **Классификация инструмента — `asset_taxonomy.py` (SSOT ФАКТОВ, A-5).** Перечни
+  тикеров (`BOND_ETFS`, `ETF_BASES`, `CASH_CCYS`, …) и предикаты (`is_bond_like`,
+  `is_etf`, …) живут ТОЛЬКО там; новый тикер добавляется туда и никуда больше.
+  РЕШЕНИЯ при этом у каждого потребителя свои и сливать их нельзя: `TLT` для
+  мандата — «Bonds» (экспозиция), для `Asset_Type` — «ETF» (форма). `AUDIT §−46`.
 - Ортогонализация (BLOCK 3.5) и её β̂ должны сбрасываться в начале `analyze_all`
   (F-1) — иначе стресс residualize-ится на устаревших бетах.
 
 ## Обязательный цикл
 1. Правь `src/finance/*` и `tests/test_phase*.py` вместе.
 2. `PYTHONPATH=src python -m pytest tests/ -q` — префикс ОБЯЗАТЕЛЕН, без него
-   `import finance…` не находится (baseline: 1068 passed, 5 skipped, 1 xfailed).
+   `import finance…` не находится (baseline: 1098 passed, 5 skipped, 1 xfailed).
 3. Крупное изменение → строка Было/Стало в `docs/audit/AUDIT.md`.

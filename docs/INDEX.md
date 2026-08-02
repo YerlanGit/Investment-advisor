@@ -115,7 +115,7 @@ Telegram /start
 | `smart_money.py` | Инсайдеры SEC Form-4 (gated-провайдер). |
 | `action_plan.py` | Buy/Sell/Stop уровни (ATR+SMA+52w, мандатные дистанции). |
 | `data_lineage.py` | CoVe data-lineage: провенанс каждого числа отчёта (16 строк). |
-| `asset_taxonomy.py` | Таксономия классов активов. |
+| `asset_taxonomy.py` | **SSOT ФАКТОВ о тикере (A-5, 2026-08-02)**: перечни (`BOND_ETFS`, `SOVEREIGN_BOND_ETFS`, `COMMODITY_ETFS`, `EQUITY_ETFS`→`ETF_BASES`, `CASH_CCYS`, `CRYPTO_BASES`, `KZ_BLUE_CHIPS`, ISIN-префиксы) + предикаты `is_bond_like`/`is_etf`/`is_cash`/`is_crypto`/`is_commodity`/`is_kz_listed`/`is_sovereign_bond`. **Новый тикер добавляется ТОЛЬКО сюда** — шесть классификаторов читают эти множества и принимают СВОИ решения (сливать их нельзя: `TLT` для мандата «Bonds», для `Asset_Type` «ETF»). Плюс `AssetClass`/`from_freedom_metadata`, супер-группы секторов и `top_sector_concentration_pct`. → `AUDIT.md §−46` |
 | `broker_api.py` | FreedomConnector: портфель брокера → DataFrame, mock/fallback-гейты. |
 | `security.py` | SecureVault: Fernet/MultiFernet-шифрование ключей брокера, ротация мастер-ключа. |
 | `setup_vault.py` | CLI первичной закладки ключей в vault. |
@@ -311,6 +311,7 @@ grep -rl "area:math" docs/               # → все доки одной под
 | `src/finance/investment_logic.py` · `scoring.py` · `black_litterman.py` · `regime.py` · `stress.py` | **`math/MATH_ENGINE.md`** (SSOT формул) — обновлять ВМЕСТЕ с математикой |
 | `src/finance/leveraged.py` · `simulate.py` (плечо/молодые бумаги) | `math/METHODOLOGY_SPARSE_AND_LEVERAGED.md` + `audit/risk-methodology-audit.md` |
 | `src/finance/smart_money.py` | `math/SMART_MONEY.md` |
+| `src/finance/asset_taxonomy.py` · любой классификатор инструмента (`scoring.classify_asset_class` · `gatekeeper._classify_to_asset_key` · `broker_api._classify_instrument` · `sec_edgar._should_skip` · `scoring_orchestrator._is_credit_not_applicable`) | **`audit/AUDIT.md §−46`** — новый тикер добавляется ТОЛЬКО в `asset_taxonomy`; решения у потребителей РАЗНЫЕ и сливать их нельзя |
 | `src/finance/regime.py` (секция «Режим») | `report/REGIME_SECTION_DEEP.md` |
 | `src/pdf_payload.py` · `premium_payload.py` (данные секции) | **`report/REPORT_SECTIONS.md`** (ключ→builder→движок→шаблон) |
 | `design/premium_v2/*.jsx` (вид отчёта) | `report/PREMIUM_DESIGN.md` — после правки ОБЯЗАТЕЛЬНО `design/premium_v2/build.sh` |
