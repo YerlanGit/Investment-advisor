@@ -181,9 +181,19 @@ def _map_deep(p: dict, meta: dict) -> dict:
 
     # expected effect → 8 cards
     ee = _g(p, "expected_effect", default={}) or {}
+    # R-3 (2026-08-02): «Ожид. доходность» существует в отчёте ДВАЖДЫ и это
+    # РАЗНЫЕ величины: на обложке — форвардная оценка факторной модели
+    # (Σwᵢ·E[rᵢ], ключ `expected_return_annual`), здесь — Σw·μ постериора
+    # Black-Litterman (`simulate._expected_return_from_bl`) либо реализованная
+    # оценка-фолбэк.  В живом отчёте 30.07 это дало 14.9% на обложке против
+    # 2.4% в панели под ОДНИМ ярлыком — разница в 6 раз без объяснения.
+    # Классический v3 подписывает «(год.)» и даёт сноску «из Black-Litterman»,
+    # Premium терял и то, и другое.  Ярлык теперь называет ИСТОЧНИК.
+    _er_label = ("Ожид. доходность (год., BL)" if _g(p, "expected_effect_uses_bl")
+                 else "Ожид. доходность (год., реализ.)")
     _ELABELS = [("risk_index", "Индекс риска"), ("vol", "Волатильность"), ("cvar_95", "CVaR 95%"),
                 ("max_drawdown", "Max Drawdown"), ("sharpe", "Sharpe"), ("max_erc_pct", "Max TRC"),
-                ("it_share", "Доля IT"), ("expected_return", "Ожид. доходность")]
+                ("it_share", "Доля IT"), ("expected_return", _er_label)]
     effect = []
     for key, label in _ELABELS:
         cell = _g(ee, key, default={}) or {}

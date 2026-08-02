@@ -1262,6 +1262,14 @@ def build_payload(results: dict, tier: str,
         "expected_return_annual": exp_ret_str,
         # R-8: годовая волатильность профильного бенчмарка (0 = «ряда нет»).
         "benchmark_vol_pct": round(benchmark_vol_pct, 1),
+        # R-3: источник «Ожид. доходности» ПАНЕЛИ — BL-постериор или
+        # реализованная оценка-фолбэк.  На обложке живёт ДРУГАЯ величина
+        # (форвард факторной модели), и без подписи 14.9% против 2.4%
+        # читаются как противоречие.  Флаг лежит на уровне payload, а НЕ
+        # внутри `expected_effect`: тот словарь несёт ровно 8 строк-метрик
+        # и обязан быть `{}` на пустом входе (контракт `test_phase4`).
+        "expected_effect_uses_bl": bool(
+            (results.get("expected_effect") or {}).get("uses_bl_returns")),
         "expected_return_pct_num": exp_ret_num,          # numeric (chart-safe)
         "expected_sharpe":        exp_sharpe_str,
         "risk_pct":          composite,
