@@ -2077,6 +2077,10 @@ class UniversalPortfolioManager:
         # знаменателе один).  Раскрытие — `results["fx_converted_rows"]`.
         _rep_ccy = self.engine.reporting_currency.value
         _fx_rows: list[dict] = []
+        # Ф-3: валюты, для которых курса НЕ нашлось. В −37 факт только
+        # логировался; теперь он доезжает до чекера C-11 и до CoVe — строка,
+        # оставшаяся в своей валюте, обязана быть названа, а не утонуть в логе.
+        _fx_unconvertible: list[str] = []
         if 'Currency' in df.columns:
             for _t in df.index:
                 _ccy = str(df.at[_t, 'Currency'] or "").upper().strip()
@@ -2087,6 +2091,8 @@ class UniversalPortfolioManager:
                     logger.warning(
                         "−37: нет курса %s→%s для %s — строка остаётся в своей "
                         "валюте (раскрывается в отчёте)", _ccy, _rep_ccy, _t)
+                    if _ccy not in _fx_unconvertible:
+                        _fx_unconvertible.append(_ccy)
                     continue
                 # Цена ПОКУПКИ всегда в валюте сделки → конвертируем всегда.
                 _pp = _safe_num(df.at[_t, 'Purchase_Price'])
@@ -2130,6 +2136,73 @@ class UniversalPortfolioManager:
                 "или откройте позиции — анализ невозможен на пустом счёте."
             )
         weights_dict = (df['Current_Value'] / total_portfolio_value).to_dict()
+
+        # ── Ф-3 (2026-08-02): ЧЕКЕРЫ КАЧЕСТВА ДАННЫХ, блоки B и C ───────────
+        # `data_checks.py` (526 строк, 56 тестов) полгода existed как библиотека
+        # без потребителя.  Точка вызова — ЗДЕСЬ, а не в слое бота, как
+        # предполагал `PHASE_03 §3a.1`: бот между Шагом 1 и Шагом 2 знает
+        # количество и цену покупки, но НЕ знает текущую стоимость и веса —
+        # без них C-8 выродился бы в подсчёт тикеров (ровно ловушка Т-6,
+        # ради которой блок C и написан).  Здесь оба есть, а дорогая часть
+        # (факторная модель, SEC, скоринг) ещё не запускалась.
+        #
+        # 🔴 МОСТ ПРОСТРАНСТВ ИМЁН — без него подключение блокировало БЫ ВСЕХ.
+        # Замерено на демо-портфеле: `values` идут ключами ПОРТФЕЛЯ (`AAPL`,
+        # `TLT`), а `data.columns` — РАЗРЕШЁННЫМИ (`AAPL.US`, `TLT.US`), и
+        # C-8 доложил «не загружены цены по 7 из 9 бумаг (70% стоимости)» на
+        # книге, которая строит нормальный отчёт.  Поэтому и веса, и стоимости
+        # переводятся в namespace матрицы через `resolve_tickers` — тот же
+        # SSOT, что решает, что скачивать и что класть в фактор-модель.
+        def _dq_requested_days() -> int:
+            """То же окно, что запросил `get_market_data` — C-4 отличает
+            УСЕЧЕНИЕ выгрузки от молодого листинга только по нему."""
+            try:
+                return max(90, min(3650, int(os.getenv("HISTORY_LOOKBACK_DAYS", "1825"))))
+            except (TypeError, ValueError):
+                return 1825
+
+        _dq_report = None
+        try:
+            from finance import data_checks as _dc
+            _profile = _dc.profile_for_source(self.engine.price_source)
+
+            def _res_key(_t):
+                _r = self.engine.resolve_tickers([_t])
+                return _r[0] if _r else str(_t)
+
+            # 🔴 При КОЛЛИЗИИ ключей веса и стоимости СУММИРУЮТСЯ, а не
+            # затираются: две неликвидные бумаги законно делят один прокси
+            # (§−38 намеренно сохраняет дубликаты в `valid_resolved`).
+            # Наивный dict-comprehension схлопывал их в одну запись, Σ весов
+            # переставала равняться 1.0, и C-10 объявлял «внутреннюю ошибку
+            # расчёта долей» на совершенно корректной книге — поймано
+            # регрессией (`test_two_illiquid_names_sharing_one_proxy`).
+            _dq_weights: dict[str, float] = {}
+            _dq_values: dict[str, float] = {}
+            for _t in df.index:
+                _k = _res_key(_t)
+                _dq_weights[_k] = _dq_weights.get(_k, 0.0) + \
+                    float(weights_dict.get(_t, 0.0) or 0.0)
+                _dq_values[_k] = _dq_values.get(_k, 0.0) + \
+                    float(df.at[_t, 'Current_Value'] or 0.0)
+            _dq_report = _dc.merge_reports(
+                _dc.check_price_matrix(all_data, profile=_profile),
+                _dc.check_portfolio_sufficiency(
+                    data=all_data, weights=_dq_weights, values=_dq_values,
+                    profile=_profile,
+                    requested_days=_dq_requested_days(),
+                    unconvertible_currencies=_fx_unconvertible,
+                ),
+            )
+            for _f in _dq_report.findings:
+                logger.info("Ф-3 %s [%s] %s", _f.id, _f.level.value, _f.message)
+            if _dq_report.blocked:
+                # Отказ БЕЗ списания токена: та же ветка, что `RealPortfolioRequired`
+                # (списание живёт после CHECKPOINT 3, поэтому исключение здесь
+                # гарантирует, что пользователь не заплатил).
+                raise _dc.DataQualityBlocked(_dq_report)
+        except ImportError:                            # pragma: no cover
+            logger.warning("Ф-3: data_checks недоступен — проверки пропущены")
 
         # MAC3 Structural Risk.
         # Исключены из факторной модели:
@@ -2969,6 +3042,16 @@ class UniversalPortfolioManager:
             # Отчёт ОБЯЗАН это показать: доходность таких позиций — в валюте
             # инструмента (единый курс сокращается), а не долларовая.
             "fx_converted_rows": _fx_rows,
+            # Ф-3: DEGRADE-находки чекеров. BLOCK сюда не попадает — он
+            # выбросил исключение выше и отчёта не будет вовсе.
+            "data_quality": {
+                "profile": _dq_report.profile.value if _dq_report else None,
+                "findings": [
+                    {"id": f.id, "level": f.level.value, "message": f.message,
+                     "ticker": f.ticker}
+                    for f in (_dq_report.findings if _dq_report else [])
+                ],
+            },
             "reporting_currency": _rep_ccy,
             "merged_positions": [{"ticker": t, "rows": n} for t, n in _merged_rows],
             "dropped_rows":     [{"ticker": t, "reason": r} for t, r in _dropped_rows],

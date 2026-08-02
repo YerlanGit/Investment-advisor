@@ -77,6 +77,7 @@ from finance.broker_api import (
     FreedomConnector,
     RealPortfolioRequired,
 )
+from finance.data_checks import DataQualityBlocked
 from finance.investment_logic import UniversalPortfolioManager
 from finance.security import SecureVault, MasterKeyRotatedError
 from agent.gatekeeper import run_gatekeeper
@@ -2467,6 +2468,21 @@ async def _run_analysis_background(
             parse_mode=ParseMode.MARKDOWN,
         )
         await refund("no_real_portfolio")
+    except DataQualityBlocked as exc:
+        # Ф-3 (2026-08-02): данные не годятся для честного расчёта. Та же ветка
+        # «отказ без списания», что у RealPortfolioRequired: списание живёт
+        # после CHECKPOINT 3, поэтому сюда мы попадаем с нетронутым балансом.
+        # Текст берём у отчёта чекеров — он человеческий по построению
+        # (`PHASE_03 §4.1`): без кодов проверок и без str(exc).
+        logger.warning("Ф-3: отчёт не построен для %s — %s", user_id,
+                       "; ".join(f"{f.id}:{f.message}" for f in exc.report.blocking))
+        await bot.send_message(
+            chat_id,
+            "⚠️ *Отчёт не построен — данные неполные.*\n\n"
+            f"{exc.report.user_message()}",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        await refund("data_quality_blocked")
     except RuntimeError as exc:
         if str(exc) == "market_data_subscription_required":
             # Already reported + refunded above.

@@ -340,10 +340,25 @@ class BlockCSufficiencyTest(unittest.TestCase):
         legacy = self._run(matrix, w, v)
         self.assertIn("C-5", self._ids(legacy, CheckLevel.DEGRADE))
 
-    def test_c7_single_risky_position_blocks(self):
+    def test_c7_single_risky_position_blocks_strict(self):
+        """Ф-3 (2026-08-02): уровень C-7 стал зависеть от профиля.
+
+        Раньше стоял безусловный BLOCK — и это противоречило принципу самого
+        профиля LEGACY («не хуже, чем сегодня»): движок СТРОИТ отчёт по книге
+        из одной рисковой позиции, а подключение чекеров не имеет права отнять
+        у живого пользователя вчерашний отчёт. В STRICT (ручной ввод) отказ
+        сохранён. Подробности — `AUDIT §−49`.
+        """
         tk = ["AAPL.US"]
-        r = self._run(self._full_matrix(tk), *self._book(tk))
-        self.assertIn("C-7", self._ids(r, CheckLevel.BLOCK))
+        strict = self._run(self._full_matrix(tk), *self._book(tk),
+                           profile=CheckProfile.STRICT)
+        self.assertIn("C-7", self._ids(strict, CheckLevel.BLOCK))
+
+    def test_c7_single_risky_position_degrades_legacy(self):
+        tk = ["AAPL.US"]
+        legacy = self._run(self._full_matrix(tk), *self._book(tk))
+        self.assertIn("C-7", self._ids(legacy, CheckLevel.DEGRADE))
+        self.assertFalse(legacy.blocked)
 
     # ── C-10 / C-12: внутренняя согласованность, блокируют ВСЕГДА ───────────
 
