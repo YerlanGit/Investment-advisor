@@ -530,6 +530,15 @@ def _summarise_for_prompt(results: dict) -> dict:
              "external": bool(a.get("is_external")), "cash": bool(a.get("is_cash"))}
             for a in ((results.get("expected_effect") or {}).get("high_priority_actions") or [])[:12]
         ] if isinstance(results.get("expected_effect"), dict) else []),
+        # R-5 (2026-08-02): ГОТОВАЯ строка адресата реинвеста.  Модель уже
+        # получала `rebalance_actions`, но в живом отчёте 30.07 всё равно
+        # написала «высвобожденный вес идёт в кэш и снижение маржинального
+        # долга», тогда как движок покупал IEF/EEM/EMB (+21.41 пп = −21.41 пп
+        # продаж).  Инструкция «назови из rebalance_actions … и/или Кэш»
+        # оставляла выбор формулировки модели.  Собираем фразу ДЕТЕРМИНИРОВАННО
+        # — модель её цитирует, а не сочиняет (то же правило, что numbers_rule:
+        # ИИ описывает то, что посчитал движок).
+        "reinvest_destination": _reinvest_destination(results),
         # H4: investor risk mandate so the LLM tailors tone/recommendations
         # (a conservative investor needs tail-risk framing; an aggressive one
         # growth framing).  Composite-risk score is already calibrated for it.
@@ -622,6 +631,45 @@ def _factor_decomposition_for_prompt(results: dict) -> dict:
             for u in unique[:3]
         ],
     }
+
+
+def _reinvest_destination(results: dict) -> str:
+    """R-5: куда движок ФАКТИЧЕСКИ отправляет высвобожденный вес.
+
+    Готовая русская фраза из buy-стороны `high_priority_actions` — модель её
+    цитирует дословно. Пустая строка = плана реинвеста нет, и тогда промпт
+    запрещает выдумывать адресат вообще.
+    """
+    ee = results.get("expected_effect")
+    if not isinstance(ee, dict):
+        return ""
+    def _pp(a) -> float:
+        try:
+            return float(a.get("delta_pp") or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    buys = [a for a in (ee.get("high_priority_actions") or [])
+            if isinstance(a, dict)
+            and str(a.get("side", "")).lower() == "buy"
+            and _pp(a) > 0]
+    if not buys:
+        return ""
+    buys.sort(key=lambda a: -_pp(a))
+    parts = []
+    for a in buys[:4]:
+        t = str(a.get("ticker") or "").strip()
+        if not t:
+            continue
+        nm = str(a.get("name") or "").strip()
+        dw = _pp(a)
+        if a.get("is_cash"):
+            parts.append(f"Кэш (+{dw:.1f} пп)")
+        elif nm:
+            parts.append(f"{t} — {nm} (+{dw:.1f} пп)")
+        else:
+            parts.append(f"{t} (+{dw:.1f} пп)")
+    return " · ".join(parts)
 
 
 def _leverage_for_prompt(lm: Optional[dict]) -> dict:
@@ -1357,9 +1405,13 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
         'средний убыток в редкий плохой день (CVaR) до→после, нестабильность (Vol), Sharpe. '
         'ОБЯЗАТЕЛЬНО согласуй с rebalance_verdict из данных: если kind=tradeoff/degradation — '
         'ЯВНО назови ухудшившуюся метрику (напр. рост концентрации Max TRC при урезании топ-позиции) '
-        'и НЕ заявляй об одностороннем снижении риска. Назови, КУДА уходит высвобожденный вес '
-        '(из rebalance_actions: конкретные ETF с названиями и/или Кэш) и почему это соответствует '
-        'мандату (например закрывает нижнюю границу класса GlobalETFs) [Quant Engine]",\n'
+        'и НЕ заявляй об одностороннем снижении риска. КУДА уходит высвобожденный вес — '
+        'бери ДОСЛОВНО из поля reinvest_destination (свод по rebalance_actions: уже '
+        'посчитанные движком тикеры, '
+        'имена и +пп). Если reinvest_destination пустое — НЕ называй адресат вообще. '
+        'ЗАПРЕЩЕНО писать «в кэш», «на снижение маржинального долга» или любой другой '
+        'адресат, которого нет в reinvest_destination: движок покупает конкретные '
+        'диверсификаторы, и подмена адресата — фактическая ошибка [Quant Engine]",\n'
         f'{picks_spec},\n'
         '  "action_plan_text": "≤800 знаков — приоритетные действия: Trim/Sell сначала, '
         'конкретные уровни, cumulative |Δw| ≤ 25% NAV",\n'

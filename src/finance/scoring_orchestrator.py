@@ -56,12 +56,22 @@ DEFAULT_HOTSPOT_TRC_PCT = HOTSPOT_TRC_PCT
 _CREDIT_NA_SECTORS: frozenset[str] = frozenset({
     "Commodities", "Gold", "Silver", "Oil", "Bonds",
 })
-_CREDIT_NA_TICKER_PREFIXES: tuple[str, ...] = (
-    # US Treasury / govt-bond ETFs
-    "TLT", "IEF", "SHY", "AGG", "BND", "BIL", "GOVT",
-    # Pure commodity ETFs
-    "GLD", "SLV", "GDX", "USO", "DBC", "UNG",
-)
+
+
+def _credit_na_prefixes() -> tuple[str, ...]:
+    """Тикеры, у которых НЕТ корпоративного кредитного риска (A-5).
+
+    Из SSOT `finance.asset_taxonomy`: суверенный долг РАЗВИТЫХ рынков +
+    сырьевые ETF.  Осознанно НЕ вся долговая корзина: у `LQD`/`HYG`/`EMB`/
+    `VWOB` кредитный риск реален и C-пиллар обязан работать — именно поэтому
+    один общий словарь «тикер → класс» шесть классификаторов не заменяет.
+
+    Сопоставление остаётся ПРЕФИКСНЫМ (`startswith`), как было: так
+    `BNDX`/`TLTW` и прочие производные от суверенных фондов тоже попадают
+    под guard, не требуя перечисления.
+    """
+    from finance import asset_taxonomy as _tx
+    return tuple(sorted(_tx.SOVEREIGN_BOND_ETFS | _tx.COMMODITY_ETFS))
 
 
 def _is_credit_not_applicable(ticker: str, sector: Optional[str]) -> bool:
@@ -93,7 +103,7 @@ def _is_credit_not_applicable(ticker: str, sector: Optional[str]) -> bool:
     if s in _CREDIT_NA_SECTORS:
         return True
     stem = str(ticker or "").upper().split(".")[0]
-    if stem.startswith(_CREDIT_NA_TICKER_PREFIXES):
+    if stem.startswith(_credit_na_prefixes()):
         return True
     try:
         from finance.leveraged import is_leveraged_etp

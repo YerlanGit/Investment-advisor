@@ -173,6 +173,13 @@ class DemoProvider:
 # (пользователь может не быть клиентом брокера, и проверить это нельзя).
 _MANUAL_FORBIDDEN = frozenset({"tradernet"})
 
+# A-3: ИСТОЧНИКИ ПОРТФЕЛЯ, которые движок умеет обслуживать.  Список — часть
+# юридического контракта, а не удобство: всё, чего здесь нет, отвергается ДО
+# сетевых вызовов и до списания токена.  Расширять его — сознательное решение
+# («этому источнику Tradernet-данные показывать законно?»), а не побочный
+# эффект опечатки в `connection_mode`.
+_KNOWN_SOURCES = frozenset({"freedom", "demo", "manual"})
+
 _REGISTRY: dict[str, type] = {
     "tradernet": TradernetProvider,
     "demo": DemoProvider,
@@ -197,6 +204,21 @@ def provider_for_source(source: str, *, client=None) -> PriceProvider:
     ДО сетевых вызовов и до списания токена.
     """
     src = str(source or "freedom").lower()
+
+    # A-3 (2026-08-02): fail-CLOSED.  Раньше гард был привязан к ИМЕНИ источника
+    # (`== "manual"`), а всё остальное падало в `return TradernetProvider(...)`:
+    # `provider_for_source('stooq')` и `('eodhd')` МОЛЧА отдавали брокерский фид.
+    # Сегодня это не эксплуатируется (`tg_bot` передаёт только demo/freedom), но
+    # сработало бы ровно в момент появления Фазы 9 — и молча, тогда как весь
+    # смысл модуля в охране юридической границы I-12 (данные Tradernet нельзя
+    # показывать не-клиентам Freedom).  Неизвестный источник = отказ, а не
+    # тихая подстановка брокера.
+    if src not in _KNOWN_SOURCES:
+        raise ProviderUnavailable(
+            f"I-12: неизвестный источник портфеля '{src}'. Разрешены: "
+            f"{', '.join(sorted(_KNOWN_SOURCES))}. Молча отдать брокерский фид "
+            "нельзя — рыночные данные Tradernet доступны только клиентам Freedom."
+        )
 
     if src == "demo":
         return DemoProvider()

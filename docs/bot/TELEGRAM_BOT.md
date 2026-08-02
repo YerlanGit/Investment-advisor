@@ -22,7 +22,15 @@
   max-instances=1, поэтому переживает только рестарт).
 - **Единственный инстанс:** Cloud Run `max-instances=1 / concurrency=1`. Фоновый
   анализ идёт как `asyncio.create_task` в polling-процессе — отсюда single-flight
-  guard (`_IN_FLIGHT_USERS`), чтобы один юзер не занял воркер параллельными джобами.
+  guard, чтобы один юзер не занял воркер параллельными джобами.
+- **Single-flight — АРЕНДА В SQLite (A-4, 2026-08-02).** Таблица `report_locks`
+  (`telegram_id` PK, `owner`, `tier`, `expires_at`); взятие — один атомарный
+  `INSERT … ON CONFLICT DO UPDATE … WHERE expires_at <= now` в `BEGIN IMMEDIATE`,
+  снятие — только СВОЕЙ строки (`owner` = pid+uuid процесса), просрочка 30 мин
+  спасает от умершего инстанса. Зачем межпроцессно при `max-instances=1`: токен
+  списывается ПОСЛЕ доставки отчёта, поэтому два инстанса на одного юзера дали бы
+  два отчёта за один токен. `_IN_FLIGHT_USERS` остался как быстрый отказ и как
+  деградация при недоступной БД. `AUDIT §−47`.
 
 ---
 

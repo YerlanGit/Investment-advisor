@@ -62,20 +62,11 @@ DEFAULT_LIMITS = {
 # Maps portfolio tickers to the ASSET_KEYS used in limits_dict.
 # This must align with profile_manager.ASSET_KEYS.
 
-_CLASS_CRYPTO = {"BTC", "ETH", "SOL", "BNB", "DOGE", "ADA", "DOT"}
-_CLASS_COMMODITIES = {
-    "GLD", "SLV", "GDX", "USO", "UNG", "DBC", "PDBC",
-    "GOLD", "SILVER", "OIL",
-}
-_CLASS_BONDS = {
-    "TLT", "AGG", "BND", "TNX", "LQD", "HYG", "BIL", "IEF", "SHY", "EMB",
-}
-_CLASS_KZ = {"KSPI", "HSBK", "KAP", "KZTK", "KCEL", "BAST", "HRGL", "KZAP"}
-_CLASS_ETF = {
-    "SPY", "QQQ", "IWM", "EEM", "URTH", "VTI", "VOO",
-    "MTUM", "VLUE", "QUAL", "XLK", "XLF", "XLE", "XLV",
-    "SOXX", "XME", "XLP", "XLI",
-}
+# A-5 (2026-08-02): перечни тикеров — из SSOT `finance.asset_taxonomy`.
+# Здесь остаётся только РЕШЕНИЕ «в какой лимит мандата попадает бумага».
+# Импорт локальный внутри функции: `gatekeeper` обязан оставаться
+# импортируемым без тяжёлых зависимостей (asset_taxonomy — stdlib-only, но
+# правило единообразия дешевле исключения).
 
 
 # Underlyings whose leveraged/inverse wrappers are ECONOMICALLY crypto
@@ -95,8 +86,10 @@ def _classify_to_asset_key(ticker: str, _depth: int = 0) -> str:
     mandate limits, a 3× QQQ wrapper is what QQQ is.  Recursion is depth-
     capped; unknown underlyings fall through to the ticker's own heuristics.
     """
-    t = ticker.split(".")[0].upper() if "." in ticker else ticker.upper()
-    suffix = ticker.upper().rsplit(".", 1)[-1] if "." in ticker else ""
+    from finance import asset_taxonomy as _tx
+
+    t = _tx.ticker_base(ticker)
+    suffix = _tx.ticker_suffix(ticker)
 
     if _depth < 2:
         try:
@@ -111,20 +104,17 @@ def _classify_to_asset_key(ticker: str, _depth: int = 0) -> str:
         except Exception:
             pass
 
-    if t in _CLASS_CRYPTO or "-USD" in ticker.upper():
+    if _tx.is_crypto(ticker) or "-USD" in ticker.upper():
         return "Crypto"
-    if t in _CLASS_COMMODITIES:
+    if _tx.is_commodity(ticker):
         return "Commodities"
-    if t in _CLASS_BONDS:
+    # Долговая проверка — ДО «KZ-бумага»: AIX-нота экономически долговая
+    # (риск-прокси `VWOB.US`, §−38), и это исторический ответ этой функции.
+    if _tx.is_bond_like(ticker):
         return "Bonds"
-    # ISIN-pattern bonds from Freedom Finance
-    if t.startswith(("KZ2P", "KZ1P", "XS", "US912")):
-        return "Bonds"
-    if "BOND" in t or "OVD" in t or "FFSPC" in t:
-        return "Bonds"
-    if t in _CLASS_KZ or suffix in ("KZ", "IL") or ticker.upper().endswith(".AIX"):
+    if _tx.is_kz_listed(ticker):
         return "Stocks_KZ"
-    if t in _CLASS_ETF:
+    if _tx.ticker_base(ticker) in _tx.EQUITY_ETFS:
         return "GlobalETFs"
     # Cash / settlement balances (incl. a NEGATIVE margin-debt leg).  Sprint-5
     # Task 5: cash is NOT a mandate asset class and must NOT be mislabelled
@@ -133,7 +123,7 @@ def _classify_to_asset_key(ticker: str, _depth: int = 0) -> str:
     # absent from limits_dict, so the Check-8 mandate sweep naturally skips it);
     # gross exposure / leverage are reported separately via the engine's
     # leverage_metrics.
-    if t in ("USD", "EUR", "CASH", "RUB", "KZT"):
+    if _tx.is_cash(ticker):
         return "Cash"
     # Default: US stocks
     return "Stocks_US"

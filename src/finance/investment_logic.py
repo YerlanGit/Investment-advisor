@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 import logging
 from dataclasses import dataclass, field
+from typing import Optional
 from sklearn.linear_model import Ridge
 from sklearn.covariance import LedoitWolf
 
@@ -14,6 +15,15 @@ from freedom_portfolio.history import HistoryResult
 # Настройка логирования
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger("Antigravity_RiskEngine")
+
+
+def _safe_num(v, default=None):
+    """Число или `default` — NaN/None/мусор не должны ронять конверсию (−37)."""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return default
+    return f if f == f else default        # NaN != NaN
 
 # Sprint-5 Task 4 — mandate → Black-Litterman constraint table.  Maps the
 # canonical 3-state risk mandate to the optimiser's risk-aversion (δ), turnover
@@ -560,6 +570,9 @@ class MAC3RiskEngine:
         # Audit trail filled by `_apply_fx_conversion` — surfaced into the
         # report's QC panel so the user can verify what was converted.
         self._last_fx_records: list = []
+        # −37: кэш курсов «валюта → базовая» на один прогон отчёта (курс обязан
+        # быть ОДИН для всех строк, иначе цена покупки и стоимость разъедутся).
+        self._fx_rate_cache: dict = {}
         self._last_asset_currencies: dict[str, str] = {}
 
     def math_firewall(self, df):
@@ -928,6 +941,52 @@ class MAC3RiskEngine:
                 ", ".join(r.pair for r in result.fx_records),
             )
         return result.prices_base
+
+    def fx_rate_to_base(self, currency: str) -> Optional[float]:
+        """Курс `currency → reporting_currency` (МУЛЬТИПЛИКАТИВНЫЙ), либо None.
+
+        −37 (2026-08-02).  Тот же курс и та же конвенция, что у матрицы цен
+        (`convert_price_matrix`: `цена × rate`), поэтому стоимость позиции и её
+        цена покупки пересчитываются ОДНИМ курсом — решение владельца
+        «единый текущий курс, движение с момента покупки не учитываем».
+
+        Зачем отдельный метод, если есть `_last_fx_records`: там лежат только
+        валюты, встретившиеся в МАТРИЦЕ ЦЕН.  Тенговый кэш при портфеле из
+        одних US-бумаг в матрицу не попадает, а конвертировать его обязательно —
+        иначе 2 500 000 ₸ входят в портфель как $2 500 000 (замерено).
+        """
+        ccy = str(currency or "").upper().strip()
+        rep = self.reporting_currency.value
+        if not ccy or ccy == rep:
+            return 1.0
+        if ccy in self._fx_rate_cache:
+            return self._fx_rate_cache[ccy]
+
+        rate: Optional[float] = None
+        # 1. Уже посчитано при конверсии матрицы цен — берём ровно то значение.
+        for rec in (self._last_fx_records or []):
+            if getattr(rec, "pair", "") == f"{ccy}{rep}":
+                lv = getattr(rec, "last_value", None)
+                if lv is not None and np.isfinite(lv) and lv > 0:
+                    rate = float(lv)
+                break
+        # 2. Валюты не было в матрице (типичный случай — кэш) → спросить провайдера.
+        if rate is None and self.fx_provider is not None:
+            try:
+                from finance.currency import _PENCE_SCALE
+                lookup, unit_scale = _PENCE_SCALE.get(ccy, (ccy, 1.0))
+                if lookup == rep:
+                    rate = float(unit_scale)
+                else:
+                    series = self.fx_provider(lookup, rep)
+                    if series is not None and len(series) > 0:
+                        last = float(pd.Series(series).dropna().iloc[-1])
+                        if np.isfinite(last) and last > 0:
+                            rate = last * unit_scale
+            except Exception as exc:
+                logger.warning("FX %s→%s недоступен: %s", ccy, rep, exc)
+        self._fx_rate_cache[ccy] = rate
+        return rate
 
     def get_ticker_sector(self, ticker: str) -> str:
         """Возвращает сектор для тикера (или 'Other').
@@ -1821,6 +1880,16 @@ class UniversalPortfolioManager:
                 _bp = grp['Broker_Current_Price'].dropna()
                 if not _bp.empty:
                     row['Broker_Current_Price'] = _bp.iloc[0]
+            # −37: валюта инструмента одна на все его лоты — сохраняем первую
+            # непустую, иначе склейка обнулит признак и цена покупки останется
+            # неконвертированной.  H-2 (`PHASE_04 §5d`) требует конверсии ДО
+            # склейки; здесь это соблюдено: склейка идёт по УЖЕ размеченным
+            # строкам, а конверсия — позже, единым курсом на бумагу.
+            if 'Currency' in grp.columns:
+                _cc = grp['Currency'].astype(str).str.strip()
+                _cc = _cc[_cc.ne("") & _cc.ne("nan")]
+                if not _cc.empty:
+                    row['Currency'] = _cc.iloc[0]
             rows.append(row)
 
         logger.info(
@@ -1947,6 +2016,7 @@ class UniversalPortfolioManager:
         current_prices = {}
         broker_priced_only: set = set()  # тикеры, оцениваемые только через брокера (без фактор-модели)
         priced_at_cost: set = set()      # проксированные бумаги без рыночной цены → по цене покупки
+        priced_from_matrix: set = set()  # −37: цена взята из УЖЕ сконвертированной матрицы
         for orig in df.index:
             orig_str = str(orig).upper().strip()
             if orig_str in self.engine.NON_RISK_ASSETS:
@@ -1957,6 +2027,9 @@ class UniversalPortfolioManager:
             is_proxied = self.engine.proxy_for(orig_str) is not None
             if not is_proxied and res in all_data.columns:
                 current_prices[orig] = all_data[res].iloc[-1]
+                # −37: эта цена пришла из МАТРИЦЫ, а она уже сконвертирована
+                # `_apply_fx_conversion`.  Повторно её умножать нельзя.
+                priced_from_matrix.add(orig)
             elif orig in broker_current_prices:
                 # KZ облигации / AIX-ноты: используем mkt_price от Freedom API
                 current_prices[orig] = broker_current_prices[orig]
@@ -1978,6 +2051,62 @@ class UniversalPortfolioManager:
 
         df['Current_Price'] = pd.Series(current_prices)
         df = df.dropna(subset=['Current_Price'])
+
+        # ── −37: ВСЁ В БАЗОВОЙ ВАЛЮТЕ (2026-08-02) ───────────────────────────
+        # Матрица цен уже сконвертирована (`_apply_fx_conversion`), но две
+        # величины приходили СЫРЫМИ и портили результат:
+        #
+        #   1. `Purchase_Price` — цена покупки в валюте сделки.  Для KASE-бумаги
+        #      (100 шт по 12 000 ₸ при базовой USD) `Total_Cost` = $1 200 000
+        #      против `Current_Value` ≈ $2 500 → доходность −99.8%.
+        #   2. КЭШ в неба́зовой валюте — цена пиннится в 1.0 безусловно, поэтому
+        #      2 500 000 ₸ (≈$4 800) входили в портфель как **$2 500 000**
+        #      (замерено): портфель раздувался в сотни раз вместе с весами,
+        #      риском и мандатной панелью.
+        #
+        # Решение владельца: ЕДИНЫЙ ТЕКУЩИЙ КУРС — тот же множитель, которым
+        # сконвертирована последняя строка матрицы цен (`fx_rate_to_base`), без
+        # учёта движения курса с момента покупки.
+        #
+        # Математическое следствие, которое ОБЯЗАНО быть раскрыто в отчёте:
+        # при едином курсе он сокращается тождественно
+        #   Return = (P_now·r − P_buy·r)/(P_buy·r) = (P_now − P_buy)/P_buy,
+        # то есть доходность позиции — в ВАЛЮТЕ ИНСТРУМЕНТА, а не долларового
+        # инвестора.  Это конвенция, а не приближение: стоимость, веса, мандат
+        # и вся риск-математика при этом корректны (курс в числителе и
+        # знаменателе один).  Раскрытие — `results["fx_converted_rows"]`.
+        _rep_ccy = self.engine.reporting_currency.value
+        _fx_rows: list[dict] = []
+        if 'Currency' in df.columns:
+            for _t in df.index:
+                _ccy = str(df.at[_t, 'Currency'] or "").upper().strip()
+                if not _ccy or _ccy == _rep_ccy:
+                    continue
+                _rate = self.engine.fx_rate_to_base(_ccy)
+                if _rate is None or not np.isfinite(_rate) or _rate <= 0:
+                    logger.warning(
+                        "−37: нет курса %s→%s для %s — строка остаётся в своей "
+                        "валюте (раскрывается в отчёте)", _ccy, _rep_ccy, _t)
+                    continue
+                # Цена ПОКУПКИ всегда в валюте сделки → конвертируем всегда.
+                _pp = _safe_num(df.at[_t, 'Purchase_Price'])
+                if _pp is not None:
+                    df.at[_t, 'Purchase_Price'] = _pp * _rate
+                # ТЕКУЩАЯ цена — только если она НЕ из матрицы: матрица уже
+                # прошла `_apply_fx_conversion`, второй множитель испортил бы
+                # её.  Конвертировать надо ровно те источники, что дают цену в
+                # валюте инструмента: цена брокера, цена покупки (priced_at_cost)
+                # и пиннящаяся в 1.0 строка кэша.
+                if _t not in priced_from_matrix:
+                    _cp = _safe_num(df.at[_t, 'Current_Price'])
+                    if _cp is not None:
+                        df.at[_t, 'Current_Price'] = _cp * _rate
+                _fx_rows.append({"ticker": str(_t), "currency": _ccy,
+                                 "rate": round(float(_rate), 8)})
+            if _fx_rows:
+                logger.info("−37: в базовую валюту (%s) переведено %d строк: %s",
+                            _rep_ccy, len(_fx_rows),
+                            ", ".join(f"{r['ticker']}({r['currency']})" for r in _fx_rows))
 
         # Стоимости и Веса
         df['Total_Cost'] = df['Quantity'] * df['Purchase_Price']
@@ -2836,6 +2965,11 @@ class UniversalPortfolioManager:
             # математики.  `PHASE_04 §3.2` требует показывать результат склейки
             # пользователю, а отброшенная строка обязана быть названа — молча
             # терять позицию нельзя.
+            # −37: какие строки переведены в базовую валюту и по какому курсу.
+            # Отчёт ОБЯЗАН это показать: доходность таких позиций — в валюте
+            # инструмента (единый курс сокращается), а не долларовая.
+            "fx_converted_rows": _fx_rows,
+            "reporting_currency": _rep_ccy,
             "merged_positions": [{"ticker": t, "rows": n} for t, n in _merged_rows],
             "dropped_rows":     [{"ticker": t, "reason": r} for t, r in _dropped_rows],
             "stress_scenarios": stress_scenarios,

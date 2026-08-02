@@ -68,6 +68,15 @@ const HoldingRow = ({ h, open, onToggle }) => {
               <div>
                 <div className="text-[10.5px] tracking-widest uppercase text-ink-500 font-mono">Фундаментал · SEC EDGAR</div>
                 <div className="text-[15px] text-ink-900 font-medium mt-0.5">{h.name}</div>
+                {/* −37: валюта сделки. Стоимость позиции и вес считаются в базовой
+                    валюте отчёта; цена покупки печатается в ней же, а исходная
+                    сумма — в скобках, чтобы «12 000 ₸» не читалось как доллары. */}
+                {h.buyPrice && h.buyPrice !== '—' && (
+                  <div className="text-[11px] text-ink-500 font-mono mt-1">
+                    Цена покупки: <span className="text-ink-700">{h.buyPrice}</span>
+                    {h.fxConverted && <span className="text-ink-400"> · стоимость пересчитана по курсу</span>}
+                  </div>
+                )}
               </div>
               <span className="text-[10px] font-mono text-ink-400 tracking-wider px-2.5 py-1 rounded-full bg-cream-50 border border-ink-900/5">{h.cls}</span>
             </div>
