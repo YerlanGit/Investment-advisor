@@ -1212,7 +1212,13 @@ const HoldingRow = ({
     className: "text-[11px] tracking-widest uppercase text-ink-500 font-mono"
   }, "Фундаментал · SEC EDGAR"), /*#__PURE__*/React.createElement("div", {
     className: "text-[15px] text-ink-900 font-medium mt-0.5"
-  }, h.name)), /*#__PURE__*/React.createElement("div", {
+  }, h.name), h.buyPrice && h.buyPrice !== '—' && /*#__PURE__*/React.createElement("div", {
+    className: "text-[11px] text-ink-500 font-mono mt-1"
+  }, "Цена покупки: ", /*#__PURE__*/React.createElement("span", {
+    className: "text-ink-700"
+  }, h.buyPrice), h.fxConverted && /*#__PURE__*/React.createElement("span", {
+    className: "text-ink-400"
+  }, " · стоимость пересчитана по курсу"))), /*#__PURE__*/React.createElement("div", {
     className: "grid grid-cols-2 md:grid-cols-6 gap-3"
   }, /*#__PURE__*/React.createElement(FundCell, {
     label: "ROE",

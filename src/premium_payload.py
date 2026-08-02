@@ -125,6 +125,13 @@ def _map_deep(p: dict, meta: dict) -> dict:
             # to the engine note when there's no SEC coverage.
             "fundNote": _fund_verdict(fund) or (_txt(a, "note") if _g(a, "note") else ""),
             "note": _txt(a, "note") if _g(a, "note") else "",
+            # −37 (2026-08-02): валюта сделки доезжает до карточки позиции.
+            # Стоимость/веса/риск ВСЕГДА в базовой валюте отчёта (USD) — цена
+            # покупки показывается в базе и, если сделка была в другой валюте,
+            # с исходной суммой в скобках («23.08 USD (12 002 ₸)»).
+            "buyPrice": _txt(a, "purchase_price"),
+            "ccy": _txt(a, "currency") if _g(a, "currency") else "",
+            "fxConverted": bool(_g(a, "fx_converted")),
         })
     conc = sorted(
         [{"t": h["t"], "w": h["w"], "beta": _num(_find(assets, "ticker", h["t"]), "beta", default=0.0),
@@ -437,6 +444,11 @@ def _map_base(p: dict, meta: dict) -> dict:
         # `_map_deep` — иначе два тира расходятся по смыслу одного блока.
         "fundNote": _fund_verdict(_fund_for(fmap, a)) or (_txt(a, "note") if _g(a, "note") else ""),
         "note": _txt(a, "note") if _g(a, "note") else "",
+        # −37: см. комментарий в `_map_deep` — оба тира показывают валюту сделки
+        # одинаково, иначе «12 000» у KASE-бумаги читается как доллары.
+        "buyPrice": _txt(a, "purchase_price"),
+        "ccy": _txt(a, "currency") if _g(a, "currency") else "",
+        "fxConverted": bool(_g(a, "fx_converted")),
     } for a in assets]
 
     # Top risk hotspot = the asset with the largest Euler TRC.  The old mapper

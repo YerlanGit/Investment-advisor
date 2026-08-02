@@ -56,6 +56,34 @@ def _action_color(action: Optional[str]) -> str:
     }.get(action or "", "neut")
 
 
+def _fmt_purchase_price(pp_base, row_ccy: str, rep_ccy: str,
+                         fx_rows: list) -> str:
+    """Цена покупки в БАЗОВОЙ валюте + исходная сумма в валюте сделки (−37).
+
+    Владелец: «общая сумма позиции всегда в долларах, но валюта сделки должна
+    быть видна».  Поэтому показываем «23.08 USD (12 000 ₸)» — база слева
+    (по ней считаются стоимость, веса и риск), исходник в скобках, чтобы
+    пользователь узнал свою сделку.
+    """
+    if pp_base is None:
+        return "—"
+    _SYM = {"USD": "$", "KZT": "₸", "EUR": "€", "GBP": "£", "RUB": "₽"}
+    base = f"{pp_base:,.2f} {rep_ccy}".replace(",", " ")
+    ccy = (row_ccy or "").upper().strip()
+    if not ccy or ccy == rep_ccy:
+        return base
+    rate = next((r.get("rate") for r in fx_rows
+                 if str(r.get("currency", "")).upper() == ccy), None)
+    if not rate:
+        return base
+    try:
+        local = float(pp_base) / float(rate)
+    except (TypeError, ValueError, ZeroDivisionError):
+        return base
+    sym = _SYM.get(ccy, ccy)
+    return f"{base} ({local:,.0f} {sym})".replace(",", " ")
+
+
 def _score_reason(total) -> str:
     """Короткая словесная классификация сводного 4-Pillar (R-6).
 
@@ -836,6 +864,8 @@ def build_payload(results: dict, tier: str,
     asset_scores = results.get("asset_scores") or {}
     technicals_dict = results.get("technicals") or {}
 
+    # −37: базовая валюта отчёта — все СТОИМОСТИ приведены к ней движком.
+    _rep_ccy_payload = str(results.get("reporting_currency") or "USD").upper()
     assets: list[dict] = []
     if perf_df is not None and not perf_df.empty:
         # Best/Worst within position-to-date P/L.
@@ -903,6 +933,8 @@ def build_payload(results: dict, tier: str,
                 extremes.append("TRC > 20%")
             if _flag(atr_pct, kind="atr_pct"):
                 extremes.append("ATR > 3%")
+            _row_ccy = str(row.get("Currency") or "").upper().strip()
+            _pp_num = _safe_float(row.get("Purchase_Price"), None)
             assets.append({
                 "ticker":        ticker,
                 "weight":        f"{weight_pct:.1f}%",
@@ -937,6 +969,18 @@ def build_payload(results: dict, tier: str,
                 "pnl_abs_num":   round(float(pnl_abs), 2),
                 "beta_num":      beta_mkt,                       # None when unknown
                 "atr_pct_num":   atr_pct,                        # None when unknown
+                # −37 (2026-08-02): валюта СДЕЛКИ и цена покупки.  Стоимость и
+                # веса всегда в базовой валюте отчёта (USD), а цена покупки
+                # показывается рядом с её валютой — иначе «12 000» у KASE-бумаги
+                # читается как доллары.  `fx_converted` помечает строки, у
+                # которых доходность посчитана В ВАЛЮТЕ ИНСТРУМЕНТА (единый
+                # курс сокращается) — это надо назвать, а не прятать.
+                "currency":      _row_ccy,
+                "fx_converted":  bool(_row_ccy and _row_ccy != _rep_ccy_payload),
+                "purchase_price": _fmt_purchase_price(
+                    _pp_num, _row_ccy, _rep_ccy_payload,
+                    (results.get("fx_converted_rows") or [])),
+                "purchase_price_num": _pp_num,
                 # Cash positions never carry a real P&L — colour them
                 # neutrally so a margin-debt (negative-weight) USD row
                 # does not render as "green/profit" (it isn't).
@@ -1983,6 +2027,20 @@ def _build_integrity_checks(results: dict,
     else:
         checks.append({"status": "⚠", "label": "Серия доходностей",
                         "detail": "ряд не построен"})
+
+    # 2c. −37 (2026-08-02): валютная конверсия.  Чип УСЛОВНЫЙ — только когда в
+    # книге есть позиции не в базовой валюте.  Он обязан назвать КОНВЕНЦИЮ:
+    # стоимость и веса в базовой валюте корректны, но доходность таких строк
+    # измерена В ВАЛЮТЕ ИНСТРУМЕНТА (единый текущий курс сокращается в
+    # числителе и знаменателе), а не в долларах инвестора.
+    _fx_rows = results.get("fx_converted_rows") or []
+    if _fx_rows:
+        _rep = str(results.get("reporting_currency") or "USD").upper()
+        _names = " · ".join(f"{r.get('ticker')} ({r.get('currency')})" for r in _fx_rows)
+        checks.append({"status": "⚠", "label": f"Валютная конверсия → {_rep}",
+                        "detail": (f"по текущему курсу: {_names}. Стоимость и веса в {_rep}; "
+                                   f"доходность этих строк — в валюте инструмента "
+                                   f"(движение курса с момента покупки не учитывается)")})
 
     # 2b. A-1/A-2 (2026-08-01): что движок сделал с входным фреймом ДО расчётов.
     # Оба чипа УСЛОВНЫЕ.  Склейку требует показывать `PHASE_04 §3.2`; отброшенная

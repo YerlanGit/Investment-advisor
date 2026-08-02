@@ -329,6 +329,12 @@ class FreedomConnector:
                 "Asset_Class":          _aclass.value,        # canonical enum value
                 "Asset_Class_Label":    _dl(_aclass),         # ready RU display label
                 "Raw_Ticker":           p.i,    # untouched broker ticker for history fetch
+                # −37 (2026-08-02): ВАЛЮТА СДЕЛКИ.  Брокер отдаёт её в `p.curr`
+                # с самого начала, но колонка не доезжала до движка — и
+                # `Purchase_Price` уходил в P&L СЫРЫМ, тогда как `Current_Price`
+                # уже сконвертирован матрицей цен.  Числитель и знаменатель
+                # доходности оказывались в разных валютах.
+                "Currency":             (p.curr or "").upper().strip(),
             })
 
         # Cash positions from the ``acc`` array.  Each currency line becomes a
@@ -347,13 +353,16 @@ class FreedomConnector:
                 "Broker_Current_Price": 1.0,
                 "Asset_Type":           "Кэш",
                 "Raw_Ticker":           curr,
+                # −37: тенговый остаток обязан быть помечен KZT, иначе он войдёт
+                # в портфель как доллары 1:1 (замер: 2 500 000 ₸ → $2 500 000).
+                "Currency":             curr,
             })
             logger.info("Добавлен кэш: %s = %.2f", curr, cash_qty)
 
         return pd.DataFrame(
             rows,
             columns=["Ticker", "Quantity", "Purchase_Price", "Broker_Current_Price",
-                     "Asset_Type", "Raw_Ticker"],
+                     "Asset_Type", "Raw_Ticker", "Currency"],
         )
 
     @staticmethod
