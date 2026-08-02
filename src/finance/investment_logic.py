@@ -950,9 +950,19 @@ class MAC3RiskEngine:
         Рассчитывает секторное распределение портфеля.
 
         Returns dict mapping sector name to total weight %.
+
+        R-1 (2026-08-02): кэш и маржинальный остаток СЮДА НЕ ВХОДЯТ.
+        `get_ticker_sector("USD")` → `Other`, поэтому отрицательный вес маржи
+        раньше СКЛАДЫВАЛСЯ с акциями сектора Other: в живом отчёте 30.07 сектор
+        27.03% рисовался как 7% (27.03 − 20.20 маржи), и с диаграммы исчезал
+        главный источник риска (CRCL, 17.5% всего риска). Кэш — не сектор;
+        плечо раскрывается СВОЕЙ панелью (leverage badge), а не искажением
+        секторного разреза.
         """
         sectors: dict[str, float] = {}
         for t in tickers:
+            if str(t).upper().strip() in self.NON_RISK_ASSETS:
+                continue
             sector = self.get_ticker_sector(t)
             sectors[sector] = sectors.get(sector, 0) + weights.get(t, 0)
         # Sort by weight descending
@@ -2764,7 +2774,14 @@ class UniversalPortfolioManager:
         # consumes the raw weights_dict unchanged.
         _NON_RISK = self.engine.NON_RISK_ASSETS
         long_weight = sum(max(0.0, float(w)) for w in weights_dict.values())
-        gross_expo  = sum(abs(float(w))      for w in weights_dict.values())
+        # R-7 (2026-08-02): валовая экспозиция — Σ|w| по ПОЗИЦИЯМ, без кэша.
+        # Маржинальный остаток — это ФИНАНСИРОВАНИЕ, а не рыночная позиция:
+        # прежний Σ|w| по всем строкам считал |−20.2%| маржи как экспозицию и
+        # печатал «валовая ≈140.4%» рядом с собственным «плечо ≈1.2x» в одном
+        # предложении вердикта (экономически 120.2% = leverage_ratio × NAV).
+        # Для книги с шортами формула остаётся верной: лонги + |шорты|.
+        gross_expo  = sum(abs(float(w)) for t, w in weights_dict.items()
+                          if str(t).upper() not in _NON_RISK)
         net_expo    = sum(float(w)           for w in weights_dict.values())
         cash_weight = sum(float(weights_dict.get(t, 0.0)) for t in weights_dict
                           if str(t).upper() in _NON_RISK)

@@ -56,6 +56,23 @@ def _action_color(action: Optional[str]) -> str:
     }.get(action or "", "neut")
 
 
+def _score_reason(total) -> str:
+    """Короткая словесная классификация сводного 4-Pillar (R-6).
+
+    Та же лестница порогов, что v3-шаблон печатает инлайном (report_deep_v3
+    строка ~2787) — Premium и фолбэк обязаны говорить одними словами.
+    """
+    try:
+        t = float(total)
+    except (TypeError, ValueError):
+        return "нейтральный профиль"
+    if t >= 2:    return "сильный совокупный сигнал"
+    if t >= 0.5:  return "положительный профиль"
+    if t <= -2:   return "слабый совокупный сигнал"
+    if t <= -0.5: return "отрицательный профиль"
+    return "нейтральный профиль"
+
+
 def _risk_score_label(score: int) -> str:
     if score < 33:  return "Консервативный"
     if score < 66:  return "Умеренный"
@@ -1121,6 +1138,21 @@ def build_payload(results: dict, tier: str,
     available_cols = []
     if history is not None and getattr(history, "data", None) is not None:
         available_cols = list(getattr(history, "data").columns)
+
+    # R-8 (2026-08-02): годовая волатильность профильного бенчмарка — по его же
+    # ценовому ряду (лог-доходности × √252).  Раньше карточка «Рост против
+    # рынка» несла жёсткий 0: график утверждал, что у Nasdaq 100 нулевая
+    # волатильность.  0 остаётся честным маркером «ряда нет».
+    benchmark_vol_pct = 0.0
+    _bm_ticker = results.get("profile_benchmark_ticker")
+    if _bm_ticker and _bm_ticker in available_cols:
+        try:
+            _bm_px = getattr(history, "data")[_bm_ticker].dropna()
+            if len(_bm_px) >= 60:
+                _bm_lr = np.log(_bm_px / _bm_px.shift(1)).dropna()
+                benchmark_vol_pct = float(_bm_lr.std(ddof=1) * math.sqrt(252) * 100)
+        except Exception:
+            benchmark_vol_pct = 0.0
     factors_loaded = sum(1 for f in _FACTOR_ETFS if f in available_cols)
     factors_total  = len(_FACTOR_ETFS)
     bm_loaded = len(results.get("benchmark_comparison") or {})
@@ -1228,6 +1260,8 @@ def build_payload(results: dict, tier: str,
         "volatility_num":    round(vol_raw * 100, 2),
         # BLOCK 5 — portfolio FORWARD expected annual return & ex-ante Sharpe.
         "expected_return_annual": exp_ret_str,
+        # R-8: годовая волатильность профильного бенчмарка (0 = «ряда нет»).
+        "benchmark_vol_pct": round(benchmark_vol_pct, 1),
         "expected_return_pct_num": exp_ret_num,          # numeric (chart-safe)
         "expected_sharpe":        exp_sharpe_str,
         "risk_pct":          composite,
@@ -1474,6 +1508,11 @@ def build_payload(results: dict, tier: str,
                 "total":        f"{sc.get('total', 0):+.1f}",
                 "action":       sc.get("action", "Hold"),
                 "action_color": _action_color(sc.get("action")),
+                # R-6 (2026-08-02): `deep-factors.jsx:170` рендерит `s.reason`,
+                # а источник его не производил — у ВСЕХ бумаг была пустая
+                # строка.  Классификация — та же, что v3-шаблон (строка 2787)
+                # печатает сам: единый текст в обоих рендерах.
+                "reason":       _score_reason(sc.get("total", 0)),
             })
         payload["score_breakdown"] = score_breakdown
 

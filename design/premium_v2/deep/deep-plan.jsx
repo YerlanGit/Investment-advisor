@@ -124,8 +124,13 @@ const ActionPlan = ({ rows }) => (
           <div className="text-right text-[12px] num text-ink-700">{r.price.toFixed(2)}</div>
           <div className="text-right text-[12px] num text-sage-600">{r.target}</div>
           <div className="text-right text-[12px] num text-rust-600">{r.stop}</div>
+          {/* R-6: `reason` из движка — «deferred (turnover cap)», «вне модели:
+              история < 60 торг. дней», «BL расходится с сигналом» — раньше
+              терялся маппером, и HOLD после демоции выглядел необъяснимым. */}
           <div className="text-[11px] text-ink-500 leading-tight">
-            Score {r.score>0?'+':''}{r.score.toFixed(1)}{r.hot && ' · Hotspot TRC>20%'}{r.defer && ' · отложено (turnover cap)'}
+            {r.reason
+              ? r.reason
+              : <>Score {r.score>0?'+':''}{r.score.toFixed(1)}{r.hot && ' · Hotspot TRC>20%'}</>}
           </div>
         </div>
         );
