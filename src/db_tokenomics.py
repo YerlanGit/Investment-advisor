@@ -17,6 +17,7 @@ import aiosqlite
 import json
 import logging
 import os
+import time as _time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -270,7 +271,122 @@ async def init_db() -> None:
             ON CONFLICT(telegram_id) DO NOTHING
         """)
 
+        # A-4 (2026-08-02): межпроцессный single-flight отчётов.
+        # Прежний гард жил в `set()` внутри процесса.  Токен списывается ПОСЛЕ
+        # доставки отчёта (CHECKPOINT 3), поэтому два инстанса, взявшие одного
+        # пользователя параллельно, доставляют ДВА отчёта и списывают ОДИН
+        # токен: второй `deduct_tokens` падает `InsufficientFundsError`, но
+        # отчёт уже отправлен.  С `max-instances=1` окна нет — эта таблица
+        # обязана появиться ДО его снятия.  `expires_at` — аренда: инстанс,
+        # умерший посреди расчёта, не запирает пользователя навсегда.
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS report_locks (
+                telegram_id INTEGER PRIMARY KEY,
+                owner       TEXT    NOT NULL,
+                tier        TEXT,
+                acquired_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expires_at  REAL    NOT NULL
+            )
+        """)
+
         await db.commit()
+
+    # Просроченные аренды прошлых инстансов — убрать на старте, чтобы таблица
+    # не росла (сама по себе просрочка уже не блокирует: её перехватывает
+    # `acquire_report_lock`).
+    try:
+        purged = await purge_expired_report_locks()
+        if purged:
+            logger.info("A-4: убрано просроченных аренд отчёта: %d", purged)
+    except Exception as exc:                       # никогда не роняем старт
+        logger.warning("A-4: очистка аренд пропущена: %s", exc)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# A-4 · Межпроцессный single-flight отчётов (аренда в SQLite)
+# ═════════════════════════════════════════════════════════════════════════════
+#: Максимальная длительность аренды.  Должна ПЕРЕЖИВАТЬ самый долгий отчёт
+#: (DEEP с холодным кэшем цен — единицы минут), но не запирать пользователя
+#: навсегда, если инстанс умер посреди расчёта.  30 минут — с запасом ×5.
+REPORT_LOCK_TTL_SEC: float = float(os.getenv("REPORT_LOCK_TTL_SEC", "1800"))
+
+
+async def acquire_report_lock(telegram_id: int, owner: str,
+                              tier: str | None = None,
+                              ttl_sec: float | None = None) -> bool:
+    """Взять аренду на построение отчёта пользователя. True — взяли.
+
+    Атомарность обеспечивает ОДИН оператор: `INSERT … ON CONFLICT DO UPDATE …
+    WHERE expires_at <= now`.  Занятая и НЕ просроченная аренда не обновляется
+    → `rowcount == 0` → мы не получили слот.  Проверки-затем-записи в Python
+    нет, поэтому два инстанса не могут выиграть одновременно.
+
+    `BEGIN IMMEDIATE` берётся до оператора — тот же протокол, что у денежных
+    операций (`_begin_immediate`), чтобы конкурирующие писатели
+    детерминированно ждали блокировку, а не гонялись через `await`.
+    """
+    ttl = float(ttl_sec if ttl_sec is not None else REPORT_LOCK_TTL_SEC)
+    now = _time.time()
+    async with _get_conn_tx() as db:
+        await _begin_immediate(db)
+        try:
+            cursor = await db.execute(
+                """
+                INSERT INTO report_locks (telegram_id, owner, tier, expires_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(telegram_id) DO UPDATE SET
+                    owner       = excluded.owner,
+                    tier        = excluded.tier,
+                    acquired_at = CURRENT_TIMESTAMP,
+                    expires_at  = excluded.expires_at
+                WHERE report_locks.expires_at <= ?
+                """,
+                (telegram_id, owner, tier, now + ttl, now),
+            )
+            won = cursor.rowcount > 0
+        except Exception:
+            await db.execute("ROLLBACK")
+            raise
+        await db.execute("COMMIT")
+    return won
+
+
+async def release_report_lock(telegram_id: int, owner: str) -> bool:
+    """Освободить аренду — ТОЛЬКО свою. True, если строка действительно снята.
+
+    Сверка `owner` обязательна: если наша аренда успела просрочиться и её
+    перехватил другой инстанс, наш (запоздавший) release не должен выбить
+    нового держателя.  Идемпотентно — в обработчике release вызывается из
+    десятка веток выхода.
+    """
+    async with _get_conn_tx() as db:
+        await _begin_immediate(db)
+        try:
+            cursor = await db.execute(
+                "DELETE FROM report_locks WHERE telegram_id = ? AND owner = ?",
+                (telegram_id, owner),
+            )
+            removed = cursor.rowcount > 0
+        except Exception:
+            await db.execute("ROLLBACK")
+            raise
+        await db.execute("COMMIT")
+    return removed
+
+
+async def purge_expired_report_locks() -> int:
+    """Удалить просроченные аренды. Возвращает число снятых строк."""
+    async with _get_conn_tx() as db:
+        await _begin_immediate(db)
+        try:
+            cursor = await db.execute(
+                "DELETE FROM report_locks WHERE expires_at <= ?", (_time.time(),))
+            n = cursor.rowcount or 0
+        except Exception:
+            await db.execute("ROLLBACK")
+            raise
+        await db.execute("COMMIT")
+    return n
 
 
 async def init_user(telegram_id: int) -> bool:

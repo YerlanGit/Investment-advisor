@@ -79,21 +79,28 @@ class WhitelistEnvParseTest(unittest.TestCase):
         self.assertEqual(tg._allowed_users(), {111, 222, 333})
 
 
-class SingleFlightTest(unittest.TestCase):
+class SingleFlightTest(unittest.IsolatedAsyncioTestCase):
+    """A-4 (2026-08-02): гард стал АСИНХРОННЫМ — аренда переехала в SQLite.
 
-    def test_acquire_release_cycle(self) -> None:
+    Смысл теста не изменился: тот же цикл acquire/release, но теперь через
+    `await`. Межпроцессная семантика (аренда, владение, гонка N претендентов,
+    деградация при сбое БД) закреплена отдельно в
+    `tests/test_phase43_report_lock.py`.
+    """
+
+    async def test_acquire_release_cycle(self) -> None:
         tg = _import_tg_bot()
         if tg is None:
             self.skipTest("tg_bot import unavailable")
-        self.assertTrue(tg._try_acquire_user_slot(99999))
+        self.assertTrue(await tg._try_acquire_user_slot(99999))
         # Second acquire by same user is refused.
-        self.assertFalse(tg._try_acquire_user_slot(99999))
+        self.assertFalse(await tg._try_acquire_user_slot(99999))
         # Different user is OK in parallel.
-        self.assertTrue(tg._try_acquire_user_slot(88888))
-        tg._release_user_slot(99999)
-        self.assertTrue(tg._try_acquire_user_slot(99999))
-        tg._release_user_slot(99999)
-        tg._release_user_slot(88888)
+        self.assertTrue(await tg._try_acquire_user_slot(88888))
+        await tg._release_user_slot(99999)
+        self.assertTrue(await tg._try_acquire_user_slot(99999))
+        await tg._release_user_slot(99999)
+        await tg._release_user_slot(88888)
 
 
 class DBPathEnvTest(unittest.TestCase):

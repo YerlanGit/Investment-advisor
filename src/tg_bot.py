@@ -52,6 +52,7 @@ from aiogram.types import (
 )
 
 from db_tokenomics import (
+    acquire_report_lock,
     approve_mandate,
     assert_persistent_state,
     credit_tokens,
@@ -64,6 +65,7 @@ from db_tokenomics import (
     get_last_report_snapshot,
     init_db,
     init_user,
+    release_report_lock,
     save_benchmark_ticker,
     save_connection_mode,
     save_profile,
@@ -1915,7 +1917,7 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
     # DEEP back-to-back) doubles the worker load AND double-charges tokens
     # on the second deduct.  Worker pool is single-instance (Cloud Run
     # max-instances=1), so one greedy user could starve every other user.
-    if not _try_acquire_user_slot(user_id):
+    if not await _try_acquire_user_slot(user_id, tier=tier):
         await callback.message.edit_text(
             "⏳ *У вас уже выполняется анализ.*\n\n"
             "Подождите завершения предыдущего отчёта — следующий запрос "
@@ -1936,7 +1938,7 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
         error_id = uuid.uuid4().hex[:12]
         logger.exception("Source resolution failed for %s [%s]: %s",
                          user_id, error_id, exc)
-        _release_user_slot(user_id)
+        await _release_user_slot(user_id)
         await callback.message.edit_text(
             "ℹ️ *Не удалось определить источник портфеля.*\n\n"
             f"Код ошибки для поддержки: `{error_id}`\n\n"
@@ -1951,7 +1953,7 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
             "нет ни явного выбора, ни ключей; отчёт не формируем.",
             user_id, stored_mode,
         )
-        _release_user_slot(user_id)
+        await _release_user_slot(user_id)
         # Recovery must be ONE TAP away: a returning user has no other path to
         # the connection screen (/start skips it once a profile exists), so
         # pointing them at /start created a dead loop — attach the source
@@ -1973,7 +1975,7 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
     # Checkpoint 3 (report successfully rendered + uploaded to GCS).
     balance = await get_balance(user_id)
     if cost > 0 and balance < cost:
-        _release_user_slot(user_id)
+        await _release_user_slot(user_id)
         await callback.message.edit_text(
             f"❌ *Недостаточно токенов.*\n\n"
             f"Требуется: *{cost}*, доступно: *{balance}*.\n\n"
@@ -2008,7 +2010,7 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
         except MasterKeyRotatedError as exc:
             # H-7: stored creds can't be decrypted (key rotated/corrupt).
             # Prompt clean re-onboarding instead of crashing — token NOT charged.
-            _release_user_slot(user_id)
+            await _release_user_slot(user_id)
             await callback.message.answer(
                 f"🔐 {exc.user_message}\n\n"
                 "✅ Токен *не списан*.",
@@ -2036,7 +2038,7 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
                     "сервисный ключ чужому пользователю НЕ подставляем, просим переподключить.",
                     user_id,
                 )
-                _release_user_slot(user_id)
+                await _release_user_slot(user_id)
                 await callback.message.answer(
                     "⚠️ *Брокер не подключён.*\n\n"
                     "Похоже, ваши ключи не сохранились — привяжите счёт заново в "
@@ -2071,7 +2073,7 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
         )
     except BrokerAuthError as exc:
         logger.error("Freedom Broker auth failed for %s: %s", user_id, exc)
-        _release_user_slot(user_id)          # H1: free slot — bg task never spawned
+        await _release_user_slot(user_id)          # H1: free slot — bg task never spawned
         await callback.message.answer(
             "⚠️ *Не удалось подключиться к брокеру.*\n\n"
             "Похоже, API-ключи неверны или отозваны — проверьте их в "
@@ -2082,7 +2084,7 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
         await state.clear()
         return
     except BrokerEmptyPortfolioError as exc:
-        _release_user_slot(user_id)
+        await _release_user_slot(user_id)
         await callback.message.answer(
             f"📭 *Портфель пуст*\n\n{exc}\n\n"
             "✅ Токен *не списан* — анализировать пока нечего.",
@@ -2097,7 +2099,7 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
         error_id = uuid.uuid4().hex[:12]
         logger.exception("Не удалось загрузить портфель для %s [%s]: %s",
                          user_id, error_id, exc)
-        _release_user_slot(user_id)
+        await _release_user_slot(user_id)
         await callback.message.answer(
             "ℹ️ *Не удалось загрузить портфель прямо сейчас.*\n\n"
             f"Код ошибки для поддержки: `{error_id}`\n\n"
@@ -2122,7 +2124,7 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
             "(обрыв/сбой на стороне брокера); превью не показываем, отчёт не строим.",
             user_id,
         )
-        _release_user_slot(user_id)
+        await _release_user_slot(user_id)
         await callback.message.answer(
             "❌ *Freedom Broker сейчас недоступен.*\n\n"
             "Брокерский API не вернул ваш портфель — обрыв соединения или сбой "
@@ -2513,7 +2515,7 @@ async def _run_analysis_background(
         # Always release the single-flight slot, regardless of success /
         # failure / cancellation.  Without this a single hung task locks
         # the user out forever (they would only see "анализ уже идёт").
-        _release_user_slot(user_id)
+        await _release_user_slot(user_id)
 
 
 async def cb_cancel(callback: CallbackQuery, state: FSMContext) -> None:
@@ -2897,22 +2899,56 @@ class WhitelistMiddleware(BaseMiddleware):
 
 # ── Per-user single-flight guard ─────────────────────────────────────────────
 # Prevents the same user from queuing multiple report jobs (intentional or
-# fat-finger).  The deployed service runs max-instances=1 / concurrency=1
-# (cloudbuild.yaml), but background analysis jobs run as asyncio tasks in the
-# polling process — without this guard one user spamming "DEEP" would stack
-# parallel jobs and starve everyone else.
+# fat-finger).  Background analysis jobs run as asyncio tasks in the polling
+# process — without this guard one user spamming "DEEP" would stack parallel
+# jobs and starve everyone else.
+#
+# A-4 (2026-08-02): аренда ПЕРЕЕХАЛА В SQLite.  Прежний `set()` защищал только
+# от параллели ВНУТРИ процесса, а токен списывается ПОСЛЕ доставки отчёта
+# (CHECKPOINT 3) — значит два инстанса, взявшие одного пользователя, доставят
+# ДВА отчёта и спишут ОДИН токен (второй `deduct_tokens` упадёт
+# `InsufficientFundsError`, но отчёт уже отправлен).  Сегодня окна нет только
+# потому, что `cloudbuild.yaml` задаёт `--max-instances=1`; эта правка —
+# ПРЕДУСЛОВИЕ его снятия, а не следствие.
+#
+# Владелец аренды — идентификатор ПРОЦЕССА: release снимает только свою строку,
+# поэтому запоздавший release умирающего инстанса не выбьет нового держателя.
+_INSTANCE_ID: str = f"{os.getpid()}-{uuid.uuid4().hex[:8]}"
+
+#: In-memory зеркало.  Роль двойная: (1) быстрый отказ без похода в БД,
+#: (2) ДЕГРАДАЦИЯ — если БД недоступна, гард продолжает работать ровно так,
+#: как работал до A-4 (в пределах процесса).  Отказывать в отчёте из-за сбоя
+#: БД смысла нет: следующий же шаг всё равно идёт в неё за балансом и вернёт
+#: пользователю честную ошибку.
 _IN_FLIGHT_USERS: set[int] = set()
 
 
-def _try_acquire_user_slot(user_id: int) -> bool:
+async def _try_acquire_user_slot(user_id: int, tier: str | None = None) -> bool:
+    """Взять слот на построение отчёта. False — у пользователя уже идёт расчёт."""
     if user_id in _IN_FLIGHT_USERS:
         return False
-    _IN_FLIGHT_USERS.add(user_id)
-    return True
+    try:
+        won = await acquire_report_lock(user_id, _INSTANCE_ID, tier=tier)
+    except Exception as exc:                       # noqa: BLE001
+        logger.warning(
+            "A-4: аренда отчёта недоступна (%s) — гард деградировал до "
+            "внутрипроцессного; при max-instances>1 это ОКНО.", exc)
+        _IN_FLIGHT_USERS.add(user_id)
+        return True
+    if won:
+        _IN_FLIGHT_USERS.add(user_id)
+    return won
 
 
-def _release_user_slot(user_id: int) -> None:
+async def _release_user_slot(user_id: int) -> None:
+    """Освободить слот. Идемпотентно — вызывается из десятка веток выхода."""
     _IN_FLIGHT_USERS.discard(user_id)
+    try:
+        await release_report_lock(user_id, _INSTANCE_ID)
+    except Exception as exc:                       # noqa: BLE001
+        # Не роняем доставку отчёта из-за housekeeping: просроченную аренду
+        # всё равно перехватит следующий `acquire_report_lock`.
+        logger.warning("A-4: снятие аренды не удалось для %s: %s", user_id, exc)
 
 
 # ── Per-user results cache for the one-tap Scenario button ───────────────────
@@ -2973,7 +3009,7 @@ async def cb_scenario_cached(callback: CallbackQuery, state: FSMContext) -> None
             parse_mode=ParseMode.MARKDOWN,
         )
         return
-    if not _try_acquire_user_slot(user_id):
+    if not await _try_acquire_user_slot(user_id):
         await callback.message.answer(
             "⏳ *У вас уже выполняется анализ.* Дождитесь его завершения.",
             parse_mode=ParseMode.MARKDOWN,
@@ -3031,7 +3067,7 @@ async def cb_scenario_cached(callback: CallbackQuery, state: FSMContext) -> None
             parse_mode=ParseMode.MARKDOWN,
         )
     finally:
-        _release_user_slot(user_id)
+        await _release_user_slot(user_id)
 
 
 # ── Dispatcher assembly ───────────────────────────────────────────────────────
