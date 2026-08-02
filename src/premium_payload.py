@@ -237,6 +237,12 @@ def _map_deep(p: dict, meta: dict) -> dict:
              "qty": _qty_int(_g(a, "qty_delta")),
              "dw": _num(a, "delta_w_pp"),
              "score": _score_by_t.get(_txt(a, "ticker"), 0.0),
+             # R-6 (2026-08-02): reason ОБЯЗАН доезжать до прода.  Движок пишет
+             # сюда «deferred (turnover cap)», «вне модели: история < 60 торг.
+             # дней», «BL расходится с сигналом (+X пп)» — без этой строки
+             # GOOGL с 4-Pillar BUY и планом HOLD выглядел необъяснимым
+             # (живой отчёт 30.07), а «—» в количестве — ошибкой движка.
+             "reason": _txt(a, "reason") if _g(a, "reason") else "",
              "hot": _hot_by_t.get(_txt(a, "ticker"), False)} for a in _list(p, "action_plan")]
 
     # ideas (ai_ideas buckets → 4 cards)
@@ -287,7 +293,14 @@ def _map_deep(p: dict, meta: dict) -> dict:
     regime = {
         "name": _txt(reg, "label").split()[0] if _g(reg, "label") else DASH,
         "nameRu": _txt(reg, "label_ru") if _g(reg, "label_ru") else _txt(reg, "label"),
-        "confidence": round(_num(reg, "confidence") * (100 if _num(reg, "confidence") <= 1 else 1)),
+        # R-17 (2026-08-02): строго `< 1`, НЕ `<= 1`.  pdf_payload отдаёт ЦЕЛЫЕ
+        # проценты (int(round(conf*100))), и честная единица «1%» при `<= 1`
+        # умножалась второй раз: живой отчёт 01.08 печатал «Уверенность модели
+        # 100%» рядом с «ярлык фазы почти не значим (увер. 1%)» и ИИ-текстом
+        # «определена крайне неуверенно (1%)» — минимальная уверенность
+        # показывалась как максимальная.  `< 1` ловит только настоящие доли
+        # (0.xx от старых payload'ов), целые проценты проходят как есть.
+        "confidence": round(_num(reg, "confidence") * (100 if _num(reg, "confidence") < 1 else 1)),
         # R-5: «N подтверждающих сигнала» must count CONFIRMING (✓) bullets only,
         # not the contradicting ⚠/✗ ones the same list carries.
         "confirms": len([b for b in _bullets_rc if b.get("ok")]),
@@ -823,7 +836,12 @@ def _map_performance(p: dict) -> dict:
     bench_name = str(_g(p, "performance_benchmark_name")
                      or (next(iter(prt), None) if isinstance(prt, dict) else None)
                      or "S&P 500")
-    return {"vol": {"port": _vol, "spx": 0}, "periods": periods, "summary": summary,
+    # R-8 (2026-08-02): жёсткий `"spx": 0` утверждал, что у бенчмарка НУЛЕВАЯ
+    # волатильность.  Теперь pdf_payload считает её по ряду профильного
+    # бенчмарка (`benchmark_vol_pct`); 0 остаётся честным маркером «нет данных»
+    # (компонент скрывает сравнение при нуле).
+    _bvol = round(_num(p, "benchmark_vol_pct"), 1)
+    return {"vol": {"port": _vol, "spx": _bvol}, "periods": periods, "summary": summary,
             "benchmarkName": bench_name}
 
 

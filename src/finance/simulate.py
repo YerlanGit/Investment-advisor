@@ -755,6 +755,21 @@ def simulate_after_plan(*,
         vol_after, cvar_a if not math.isnan(cvar_a) else 0.0, max_trc_after,
         mandate, max_drawdown=_mdd_a, leverage_ratio=leverage_ratio,
         sector_top_pct=_sec_top_a)
+    # R-2 (2026-08-02): якорим «до» к обложке — тот же контракт, что _anchor
+    # выше для Sharpe/CVaR/MaxDD.  Локальный пересчёт композита живёт на ДРУГОМ
+    # знаменателе доли сектора (struct-книга без кэша и sparse-dropped имён
+    # против sector_exposure обложки по всем строкам): в живом отчёте 30.07 это
+    # дало 78 на обложке против 75 в Effect — прямое нарушение инварианта
+    # `src/finance/CLAUDE.md` («гейдж «до» обязан равняться обложке»).  Якорь
+    # сохраняет СИМУЛИРОВАННУЮ дельту (эффект плана) и переносит уровень.
+    _headline_ri = current_metrics.get("Composite_Risk_Score")
+    if _headline_ri is not None:
+        try:
+            _delta_ri = int(risk_index_after) - int(risk_index_before)
+            risk_index_before = int(_headline_ri)
+            risk_index_after  = max(0, min(100, int(_headline_ri) + _delta_ri))
+        except (TypeError, ValueError):
+            pass
 
     # ── Expected return: BL μ preferred, realised fallback ────────────────
     er_before = _expected_return_from_bl(cur_w_by_ticker, bl_records)

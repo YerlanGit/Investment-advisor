@@ -2600,7 +2600,7 @@ const ActionPlan = ({
     className: "text-right text-[12px] num text-rust-600"
   }, r.stop), /*#__PURE__*/React.createElement("div", {
     className: "text-[11px] text-ink-500 leading-tight"
-  }, "Score ", r.score > 0 ? '+' : '', r.score.toFixed(1), r.hot && ' · Hotspot TRC>20%', r.defer && ' · отложено (turnover cap)'));
+  }, r.reason ? r.reason : /*#__PURE__*/React.createElement(React.Fragment, null, "Score ", r.score > 0 ? '+' : '', r.score.toFixed(1), r.hot && ' · Hotspot TRC>20%')));
 })))), /*#__PURE__*/React.createElement("div", {
   className: "mt-4 rounded-2xl bg-cream-50 border border-ink-900/5 px-4 py-3.5 flex items-start gap-3"
 }, /*#__PURE__*/React.createElement(Icons.Sparkles, {

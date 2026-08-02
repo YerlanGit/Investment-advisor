@@ -171,7 +171,19 @@ def compute_levels(*,
             if high_52w is not None and high_52w > sell_hi:
                 # Don't lift offer past the 52w high in one swoop.
                 sell_hi = max(sell_hi, min(price * 1.02, high_52w))
-            out["sell_zone"] = (float(sell_lo), float(sell_hi))
+            # R-4 (2026-08-02): зона обязана быть ИСПОЛНИМОЙ.  SELL включается
+            # по СЛАБОСТИ — бумага уже под своей SMA50, и зона (SMA50, SMA50+ATR)
+            # оказывалась целиком ВЫШЕ рынка: живой отчёт 30.07 приказывал
+            # продать AAOI по 144–152 при цене 77.51 (+86%) — у 7 из 8 строк
+            # Sell/Trim.  «Продавайте, если отскочит на 86%» — это не команда
+            # продать, а команда ждать.  Нижняя граница клипается к рынку
+            # (продать можно ПО РЫНКУ), верхняя — к досягаемому отскоку
+            # (+1 ATR от цены), когда прежняя зона недостижима целиком.
+            if sell_lo > price:
+                sell_lo = float(price)
+                sell_hi = float(min(sell_hi, price + ATR_SELL_HI_MULT * ms * atr))
+            out["sell_zone"] = (float(min(sell_lo, sell_hi)),
+                                float(max(sell_lo, sell_hi)))
         if atr is not None:
             out["stop_loss"] = float(price - ATR_STOP_MULT_SELL * ms * atr)
         return out
