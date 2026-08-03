@@ -1340,6 +1340,12 @@ def build_payload(results: dict, tier: str,
         # обязана сопровождать причина, иначе «0.49 → 0.49» читается как
         # «план ничего не дал».  Лежит на уровне payload по той же причине,
         # что и флаг выше — контракт `expected_effect` не трогаем.
+        # 2026-08-03: доля книги вне факторной модели — рядом с подписью
+        # «фактор-серий загружено N%», чтобы одно не читалось как другое.
+        "model_uncovered_pct": float(
+            (results.get("model_uncovered") or {}).get("weight_pct") or 0.0),
+        "model_uncovered_names": ", ".join(
+            (results.get("model_uncovered") or {}).get("names") or []),
         "expected_effect_sharpe_note": str(
             (results.get("expected_effect") or {}).get("sharpe_note") or ""),
         "expected_return_pct_num": exp_ret_num,          # numeric (chart-safe)

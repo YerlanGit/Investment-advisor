@@ -5,7 +5,8 @@
 
   D-1 🔴 «Наблюдений (37) мало для 13 активов» при том, что движок построил
       ПОЛНУЮ модель (покрытие факторами 100%, MaxDD −41.3%, Sharpe 0.49).
-      37 — история самой молодой бумаги книги: чекер брал СТРОГОЕ пересечение
+      37 — история самой молодой бумаги книги (SPCX, исключена движком как
+      разреженная): чекер брал СТРОГОЕ пересечение
       всех колонок, а движок сначала выбрасывает разреженные бумаги
       (`MIN_OVERLAP_TDAYS`). Три ложных предупреждения сразу: C-3, C-5, C-13.
       Это повторение ошибки F-15/F-21, которую движок уже прошёл.
@@ -223,8 +224,41 @@ class AnomalyWordingTest(unittest.TestCase):
 # ──────────────────────────────────────────────────────────────────────────
 class LeverageDisclosureGateTest(unittest.TestCase):
 
+    #: Термины ПЛЕЧА, запрещённые на книге с неотрицательным кэшем.
+    #:
+    #: Осознанно НЕ включена «маржинальность»: это ОПЕРАЦИОННАЯ МАРЖА компании
+    #: из SEC («маржинальность 30%», `premium_payload._fund_verdict`) — обычная
+    #: метрика прибыльности, к заёмным средствам отношения не имеющая.
+    #: Первая редакция теста искала подстроку «маржинальн» и ловила её —
+    #: локально этого не было видно (SEC недоступен в песочнице, поле пустое),
+    #: а CI с живым фундаменталом упал. Проверять надо ФРАЗЫ, а не корни слов.
+    _LEVERAGE_PHRASES = (
+        r"плеч[оаеу]", r"маржинальн\w*\s+долг\w*", r"заёмн\w*\s+средств\w*",
+        r"куплены\s+в\s+долг", r"\bleverage\b",
+    )
+
+    @staticmethod
+    def _visible_text(obj) -> str:
+        """Только ТЕКСТ, который увидит пользователь — без имён ключей.
+
+        Прошлая редакция дампила словарь целиком и ловила ключ контракта
+        `leverage` (`design_data["leverage"]` — числовой блок, JSX гейтит его
+        по `is_leveraged`). Имя поля пользователю не показывается; проверять
+        надо строковые ЗНАЧЕНИЯ.
+        """
+        out = []
+        stack = [obj]
+        while stack:
+            cur = stack.pop()
+            if isinstance(cur, str):
+                out.append(cur)
+            elif isinstance(cur, dict):
+                stack.extend(cur.values())          # ключи НЕ берём
+            elif isinstance(cur, (list, tuple)):
+                stack.extend(cur)
+        return " \n ".join(out)
+
     def test_non_levered_book_shows_no_leverage_wording(self):
-        import json
         import pdf_payload
         import premium_payload
         from finance.demo_portfolio import build_demo_portfolio
@@ -234,11 +268,37 @@ class LeverageDisclosureGateTest(unittest.TestCase):
         for tier in ("base", "deep"):
             d = premium_payload.build_design_data(
                 pdf_payload.build_payload(res, tier=tier), tier=tier)
-            txt = json.dumps(d, ensure_ascii=False)
-            for word in ("плеч", "маржинальн", "заёмн"):
-                self.assertEqual(
-                    len(re.findall(word, txt, re.I)), 0,
-                    f"{tier}: «{word}» на книге БЕЗ плеча")
+            txt = self._visible_text(d)
+            for phrase in self._LEVERAGE_PHRASES:
+                hits = re.findall(phrase, txt, re.I)
+                self.assertEqual(hits, [],
+                                 f"{tier}: «{phrase}» на книге БЕЗ плеча → {hits[:3]}")
+
+    def test_levered_book_DOES_disclose(self):
+        """Обратная проверка: гард не должен глушить РЕАЛЬНОЕ плечо."""
+        import pdf_payload
+        import premium_payload
+        f = _panel(UniversalPortfolioManager(price_source="demo").engine, {})
+        mgr = UniversalPortfolioManager(price_source="freedom")
+        port = pd.DataFrame({"Ticker": ["AAPL", "MSFT", "USD"],
+                             "Quantity": [40, 20, -3000.0],
+                             "Purchase_Price": [190., 380., 1.]})
+        hr = type("HR", (), {"data": f, "loaded": list(f.columns),
+                             "failed": {}, "retried": []})()
+        with patch.object(mgr.engine, "get_market_data", return_value=(f, hr)):
+            res = mgr.analyze_all(port)
+        self.assertTrue(res["leverage_metrics"]["is_leveraged"])
+        txt = self._visible_text(premium_payload.build_design_data(
+            pdf_payload.build_payload(res, tier="deep"), tier="deep"))
+        self.assertTrue(any(re.search(p, txt, re.I) for p in self._LEVERAGE_PHRASES),
+                        "плечо есть, а в отчёте о нём ни слова")
+
+    def test_profitability_wording_is_not_suppressed(self):
+        """Обратная сторона: «маржинальность» — законный термин, глушить нельзя."""
+        from premium_payload import _fund_verdict
+        v = _fund_verdict({"roe": "25%", "margin": "30%", "growth": "15%",
+                           "debt": "0.２0"})
+        self.assertIn("маржинальность", v)
 
     def test_mandate_card_gates_the_margin_row(self):
         js = (Path("src/premium_assets") / "deep-components.js").read_text(encoding="utf-8")
@@ -247,3 +307,75 @@ class LeverageDisclosureGateTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# D-5…D-7 · вторая волна: покрытие, жаргон плана (аудит 03.08, раунд 2)
+# ──────────────────────────────────────────────────────────────────────────
+class FactorCoverageHonestyTest(unittest.TestCase):
+    """🔴 «покрытие 100%» при позиции весом 5.3% БЕЗ бет."""
+
+    def test_uncovered_share_is_exposed(self):
+        mgr = UniversalPortfolioManager(price_source="freedom")
+        f = _panel(mgr.engine, {"SPCX.US": 37})
+        port = pd.DataFrame({"Ticker": ["AAPL", "MSFT", "SPCX", "USD"],
+                             "Quantity": [10, 10, 20, 500.0],
+                             "Purchase_Price": [190., 380., 14., 1.]})
+        hr = type("HR", (), {"data": f, "loaded": list(f.columns),
+                             "failed": {}, "retried": []})()
+        with patch.object(mgr.engine, "get_market_data", return_value=(f, hr)):
+            res = mgr.analyze_all(port)
+        mu = res["model_uncovered"]
+        self.assertIn("SPCX", mu["names"])
+        self.assertGreater(mu["weight_pct"], 0)
+
+    def test_report_separates_series_load_from_portfolio_coverage(self):
+        import pdf_payload
+        import premium_payload
+        mgr = UniversalPortfolioManager(price_source="freedom")
+        f = _panel(mgr.engine, {"SPCX.US": 37})
+        port = pd.DataFrame({"Ticker": ["AAPL", "MSFT", "SPCX", "USD"],
+                             "Quantity": [10, 10, 20, 500.0],
+                             "Purchase_Price": [190., 380., 14., 1.]})
+        hr = type("HR", (), {"data": f, "loaded": list(f.columns),
+                             "failed": {}, "retried": []})()
+        with patch.object(mgr.engine, "get_market_data", return_value=(f, hr)):
+            res = mgr.analyze_all(port)
+        d = premium_payload.build_design_data(
+            pdf_payload.build_payload(res, tier="deep"), tier="deep")
+        self.assertEqual(d["factorCoverage"], 100.0)   # фактор-серии загружены
+        self.assertGreater(d["uncoveredPct"], 0)       # …но книга покрыта НЕ вся
+        self.assertIn("SPCX", d["uncoveredNames"])
+
+    def test_label_no_longer_says_bare_coverage(self):
+        js = (Path("src/premium_assets") / "deep-components.js").read_text(encoding="utf-8")
+        self.assertIn("фактор-серий загружено", js)
+        self.assertIn("вне факторной модели", js)
+
+    def test_clean_book_shows_nothing(self):
+        """Блок условный: когда исключений нет, строка не появляется."""
+        from finance.demo_portfolio import build_demo_portfolio
+        mgr = UniversalPortfolioManager(price_source="demo")
+        res = mgr.analyze_all(build_demo_portfolio())
+        self.assertEqual(res["model_uncovered"]["weight_pct"], 0.0)
+
+
+class ActionPlanWordingTest(unittest.TestCase):
+    """Внутренний жаргон в тексте плана для пользователя."""
+
+    def test_no_bl_abbreviation(self):
+        src = Path("src/finance/action_plan.py").read_text(encoding="utf-8")
+        code = "\n".join(l for l in src.splitlines() if not l.lstrip().startswith("#"))
+        self.assertNotIn('f"BL расходится с сигналом', code)
+        self.assertIn("оптимизатор предлагает обратное", code)
+
+    def test_no_english_deferred(self):
+        src = Path("src/finance/action_plan.py").read_text(encoding="utf-8")
+        code = "\n".join(l for l in src.splitlines() if not l.lstrip().startswith("#"))
+        self.assertNotIn("deferred (turnover cap)", code)
+        self.assertIn("лимит оборота за период", code)
+
+    def test_divergence_note_explains_the_missing_quantity(self):
+        """Строка обязана объяснять, ПОЧЕМУ в количестве стоит «—»."""
+        src = Path("src/finance/action_plan.py").read_text(encoding="utf-8")
+        self.assertIn("количество не указываем", src)

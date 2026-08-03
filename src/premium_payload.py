@@ -405,6 +405,10 @@ def _map_deep(p: dict, meta: dict) -> dict:
         "sectorWarn": [_warn_text(x) for x in _list(p, "sector_warnings")][:3] or [DASH],
         "holdingsAI": _txt(p, "ai_holdings_comment"),
         "factors": factors, "factorCoverage": _coverage(p), "factorAI": _txt(p, "ai_factor_comment"),
+        # 2026-08-03: `factorCoverage` — доля загруженных фактор-СЕРИЙ, а не
+        # покрытие портфеля. Отдельно отдаём долю книги, у которой бет нет.
+        "uncoveredPct": round(_num(p, "model_uncovered_pct"), 1),
+        "uncoveredNames": _txt(p, "model_uncovered_names") if _g(p, "model_uncovered_names") else "",
         # B1 (2026-07-17): dynamic benchmark identity for the factor section —
         # column header, radar legend and the explainer plaque read these.
         # Defaults keep legacy payloads (and the S&P fallback) pixel-identical.

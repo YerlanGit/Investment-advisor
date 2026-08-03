@@ -210,7 +210,19 @@ const Factors = () => {
         <div className="flex items-start justify-between gap-4 flex-wrap mb-4">
           <div>
             <h3 className="text-2xl font-semibold tracking-tight text-ink-900">Факторное разложение (β)</h3>
-            <p className="text-[12px] text-ink-500 font-mono mt-1">Ridge β (α=0.001) · EWMA hl=63 ⊕ Ledoit-Wolf 70/30 · окно 60 дней · покрытие {p.factorCoverage}%</p>
+            {/* 2026-08-03: было «покрытие {factorCoverage}%». Число — это доля
+              успешно ЗАГРУЖЕННЫХ фактор-серий (10 из 10), а рядом с факторной
+              таблицей оно читалось как «портфель покрыт на 100%». В живом
+              отчёте 03.08 при «покрытии 100%» позиция SPCX весом 5.3% вообще
+              не имела бет (исключена как молодой листинг). Называем то, что
+              измеряется, и отдельно — долю книги вне модели. */}
+          <p className="text-[12px] text-ink-500 font-mono mt-1">Ridge β (α=0.001) · EWMA hl=63 ⊕ Ledoit-Wolf 70/30 · окно 60 дней · фактор-серий загружено {p.factorCoverage}%</p>
+          {p.uncoveredPct > 0 && (
+            <p className="text-[11.5px] text-ink-500 mt-1.5 font-light">
+              {p.uncoveredPct}% портфеля вне факторной модели{p.uncoveredNames ? ` (${p.uncoveredNames})` : ''} —
+              слишком короткая история котировок; риск этих позиций учтён их весом, но бет у них нет.
+            </p>
+          )}
           </div>
           <div className="flex items-center gap-4 text-[11px] text-ink-600">
             <span className="flex items-center gap-2"><span className="w-4 h-0 border-t-2 border-gold-600"/> Портфель</span>

@@ -595,7 +595,10 @@ class Audit0623Test(unittest.TestCase):
 # Premium V2 data mapper (engine payload → strict design contract)
 # ─────────────────────────────────────────────────────────────────────────────
 class PremiumMapperTest(unittest.TestCase):
-    def test_deep_contract_is_exactly_35_keys(self):
+    def test_deep_contract_is_exactly_37_keys(self):
+        # 37 = 35 + `uncoveredPct`/`uncoveredNames` (2026-08-03: `factorCoverage`
+        # это доля загруженных фактор-СЕРИЙ, а не покрытие портфеля — в живом
+        # отчёте 03.08 при «покрытии 100%» позиция весом 5.3% не имела бет).
         # 35 = 29 + `factorVariance` (факторная декомпозиция дисперсии, additive)
         # + `effectScope`/`effectScoped` (R2#5: какие позиции меняет Action Plan —
         # источник «до/после», вместо захардкоженной «Δ по идеям»)
@@ -604,7 +607,7 @@ class PremiumMapperTest(unittest.TestCase):
         # + `effectActions` (2026-07-18: явная разбивка Продать/Купить в Effect).
         from premium_payload import build_design_data
         d = build_design_data({}, "deep")          # empty payload → no KeyError
-        self.assertEqual(len(d), 35)
+        self.assertEqual(len(d), 37)
         self.assertIn("factorVariance", d)
         self.assertIsNone(d["factorVariance"])
         self.assertIn("effectScope", d)
