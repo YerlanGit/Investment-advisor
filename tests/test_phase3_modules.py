@@ -228,7 +228,9 @@ class ActionPlanBuilderTest(unittest.TestCase):
         self.assertEqual(rows[0].action, "Sell")        # priority sells first
         last = rows[-1]
         self.assertEqual(last.delta_w_pp, 0.0)         # demoted
-        self.assertIn("turnover cap", last.reason)
+        # 2026-08-03: английский жаргон «deferred (turnover cap)» заменён
+        # русской формулировкой — отчёт русскоязычный.
+        self.assertIn("лимит оборота", last.reason)
         # Cumulative |delta| of executed rows ≤ 25%.
         executed = sum(abs(r.delta_w_pp) / 100.0 for r in rows if r.delta_w_pp != 0.0)
         self.assertLessEqual(executed, MAX_TRADE_BLOCK_PORTFOLIO_PCT + 1e-9)
@@ -271,11 +273,11 @@ class ActionPlanBuilderTest(unittest.TestCase):
         # Взгляд оптимизатора НЕ потерян — он остался там, где не конфликтует
         # с чипом действия: в тексте пометки «BL расходится с сигналом (+0.4пп)».
         self.assertIsNone(by["AAOI"].qty_delta)
-        self.assertIn("BL расходится", by["AAOI"].reason)
+        self.assertIn("оптимизатор предлагает обратное", by["AAOI"].reason)
         self.assertEqual(by["AAOI"].delta_w_pp, -0.4)    # знак — от ACTION (Sell)
         self.assertIn("+0.4", by["AAOI"].reason)         # сырой BL — в пометке
         self.assertIsNone(by["MSFT"].qty_delta)
-        self.assertIn("BL расходится", by["MSFT"].reason)
+        self.assertIn("оптимизатор предлагает обратное", by["MSFT"].reason)
         self.assertEqual(by["MSFT"].delta_w_pp, -3.4)    # Trim ⇒ отрицательная Δw
         self.assertIn("+3.4", by["MSFT"].reason)
         # Agreeing SELL keeps its (negative) quantity.

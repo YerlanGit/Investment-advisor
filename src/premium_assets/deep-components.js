@@ -2110,7 +2110,9 @@ const Factors = () => {
     className: "text-2xl font-semibold tracking-tight text-ink-900"
   }, "Факторное разложение (β)"), /*#__PURE__*/React.createElement("p", {
     className: "text-[12px] text-ink-500 font-mono mt-1"
-  }, "Ridge β (α=0.001) · EWMA hl=63 ⊕ Ledoit-Wolf 70/30 · окно 60 дней · покрытие ", p.factorCoverage, "%")), /*#__PURE__*/React.createElement("div", {
+  }, "Ridge β (α=0.001) · EWMA hl=63 ⊕ Ledoit-Wolf 70/30 · окно 60 дней · фактор-серий загружено ", p.factorCoverage, "%"), p.uncoveredPct > 0 && /*#__PURE__*/React.createElement("p", {
+    className: "text-[11.5px] text-ink-500 mt-1.5 font-light"
+  }, p.uncoveredPct, "% портфеля вне факторной модели", p.uncoveredNames ? ` (${p.uncoveredNames})` : '', " — слишком короткая история котировок; риск этих позиций учтён их весом, но бет у них нет.")), /*#__PURE__*/React.createElement("div", {
     className: "flex items-center gap-4 text-[11px] text-ink-600"
   }, /*#__PURE__*/React.createElement("span", {
     className: "flex items-center gap-2"

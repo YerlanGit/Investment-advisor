@@ -151,13 +151,18 @@ def _proxy_status(results: dict) -> Optional[dict]:
     )
 
 
-#: Ф-3: человеческие названия блоков — читателю нужен смысл, а не код чекера.
-_DQ_BLOCK_NAMES = {"A": "целостность выгрузки", "B": "корректность ряда",
-                   "C": "достаточность для математики"}
+#: Ф-3: чем ОБЪЯСНИТЬ находку читателю. Ключ — префикс id проверки, значение —
+#: тема на человеческом языке. Сами идентификаторы (`C-3`, `B-6`) наружу НЕ
+#: выходят: `PHASE_03 §4.1` прямо запрещает «коды ошибок и имена внутренних
+#: проверок» в пользовательском тексте — правило, нарушенное первой редакцией
+#: этой строки (в живом отчёте 03.08 читатель увидел «сработали B-6, C-11,
+#: C-13, C-3, C-5» и справедливо не понял, что это).
+_DQ_TOPIC = {"A": "загрузка данных", "B": "качество ценового ряда",
+             "C": "достаточность истории для расчёта"}
 
 
 def _data_quality_status(results: dict) -> Optional[dict]:
-    """Ф-3: DEGRADE-находки чекеров качества данных.
+    """Ф-3: DEGRADE-находки чекеров качества данных, человеческим языком.
 
     Возвращает None, когда придраться не к чему, — строка в CoVe не появляется
     (реестр сжат до 16 строк, всегда-включённую добавлять нельзя).
@@ -165,23 +170,31 @@ def _data_quality_status(results: dict) -> Optional[dict]:
     BLOCK сюда не попадает по построению: он выбрасывает `DataQualityBlocked`
     в движке, и отчёта не существует. Здесь только то, что расчёт пережил, но
     о чём читатель обязан знать: короткое окно, частичное покрытие стоимости,
-    валюта без курса, устаревший или дырявый ряд.
+    валюта без курса, дырявый ряд.
     """
     dq = results.get("data_quality") or {}
     findings = [f for f in (dq.get("findings") or [])
                 if str(f.get("level")) == "degrade"]
     if not findings:
         return None
-    blocks = sorted({str(f.get("id", "?"))[:1] for f in findings})
-    ids = ", ".join(sorted({str(f.get("id", "?")) for f in findings}))
-    what = " · ".join(_DQ_BLOCK_NAMES.get(b, b) for b in blocks)
-    # Сообщения чекеров уже человеческие («Общая история короче года…»).
-    detail = "; ".join(dict.fromkeys(str(f.get("message", "")).strip()
-                                     for f in findings if f.get("message")))
+    topics = []
+    for block in ("A", "B", "C"):
+        if any(str(f.get("id", "?")).startswith(block) for f in findings):
+            topics.append(_DQ_TOPIC[block])
+    # Сообщения чекеров уже человеческие («Общая история короче года…») —
+    # их и показываем, без идентификаторов и без служебной нумерации.
+    detail = " · ".join(dict.fromkeys(
+        str(f.get("message", "")).strip().rstrip(".")
+        for f in findings if f.get("message")))
+    n = len(findings)
+    word = "замечание" if n % 10 == 1 and n % 100 != 11 else (
+        "замечания" if n % 10 in (2, 3, 4) and n % 100 not in (12, 13, 14)
+        else "замечаний")
     return _row(
-        name   = f"Качество данных: замечания ({len(findings)})",
-        source = f"Quant Engine · data_checks [{dq.get('profile') or 'legacy'}]",
-        method = f"Блоки {what} · сработали {ids}",
+        name   = f"Качество данных: {n} {word}",
+        source = "Quant Engine · автоматические проверки",
+        method = ("Проверено: " + ", ".join(topics)
+                  if topics else "Автоматические проверки данных"),
         status = "degraded",
         note   = detail[:400],
     )

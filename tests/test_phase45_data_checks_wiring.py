@@ -301,7 +301,14 @@ class LineageSurfaceTest(unittest.TestCase):
             "profile": "legacy",
             "findings": [{"id": "C-8", "level": "block", "message": "x"}]}}))
 
-    def test_row_names_the_checks_and_carries_the_text(self):
+    def test_row_speaks_human_not_check_codes(self):
+        """2026-08-03: строка НЕ имеет права печатать идентификаторы проверок.
+
+        `PHASE_03 §4.1` запрещает «коды ошибок и имена внутренних проверок» в
+        пользовательском тексте. Первая редакция это правило нарушила — в живом
+        отчёте 03.08 читатель увидел «сработали B-6, C-11, C-13, C-3, C-5».
+        """
+        import re
         from finance.data_lineage import _data_quality_status
         row = _data_quality_status({"data_quality": {
             "profile": "legacy",
@@ -309,10 +316,13 @@ class LineageSurfaceTest(unittest.TestCase):
                 {"id": "C-3", "level": "degrade", "message": "Окно короче года."},
                 {"id": "C-13", "level": "degrade", "message": "Мало наблюдений."}]}})
         self.assertIsNotNone(row)
-        self.assertIn("C-3", row["method"])
-        self.assertIn("C-13", row["method"])
         self.assertEqual(row["status"], "degraded")
-        self.assertIn("Окно короче года.", row["note"])
+        # тема — словами, а не кодом
+        self.assertIn("достаточность истории", row["method"])
+        # сообщения чекеров сохранены
+        self.assertIn("Окно короче года", row["note"])
+        # …и ни одного идентификатора во всей строке
+        self.assertEqual(re.findall(r"\b[ABC]-\d+\b", str(row)), [])
 
     def test_unconvertible_currency_reaches_c11(self):
         """−37 только писал в лог; теперь факт доезжает до чекера."""

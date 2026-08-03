@@ -2869,6 +2869,8 @@ class UniversalPortfolioManager:
         # rather than the full BL target — keeping Идеи → Action Plan →
         # Ожидаемый эффект one consistent story.
         action_plan_rows: list[dict] = []
+        # Доля книги вне факторной модели — дефолт на случай сбоя блока ниже.
+        _model_uncovered = {"weight_pct": 0.0, "names": []}
         try:
             from finance.action_plan import build_action_plan
             ap_scores = {
@@ -2900,6 +2902,16 @@ class UniversalPortfolioManager:
                 uncovered       = _uncovered,
             )
             action_plan_rows = [r.as_dict() for r in rows]
+            # 2026-08-03: доля книги ВНЕ факторной модели. Отчёт печатал
+            # «покрытие 100%» — это доля загруженных фактор-СЕРИЙ, а позиция
+            # весом 5.3% бет не имела вовсе; читатель понимал строку как
+            # «портфель покрыт полностью». Считаем здесь, где известны и
+            # исключения, и веса.
+            _unc_w = sum(float(weights_dict.get(t, 0.0) or 0.0) for t in _uncovered)
+            _model_uncovered = {
+                "weight_pct": round(_unc_w * 100.0, 2),
+                "names": sorted(str(t) for t in _uncovered),
+            }
         except Exception as exc:
             logger.warning("Action plan skipped: %s", exc)
             action_plan_rows = []
@@ -3106,6 +3118,8 @@ class UniversalPortfolioManager:
             # Отчёт ОБЯЗАН это показать: доходность таких позиций — в валюте
             # инструмента (единый курс сокращается), а не долларовая.
             "fx_converted_rows": _fx_rows,
+            # Доля портфеля вне факторной модели (короткая история котировок).
+            "model_uncovered": _model_uncovered,
             # Ф-3: DEGRADE-находки чекеров. BLOCK сюда не попадает — он
             # выбросил исключение выше и отчёта не будет вовсе.
             "data_quality": {

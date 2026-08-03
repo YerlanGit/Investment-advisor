@@ -56,22 +56,33 @@ def _action_color(action: Optional[str]) -> str:
     }.get(action or "", "neut")
 
 
+_CCY_SYMBOL = {"USD": "$", "KZT": "₸", "EUR": "€", "GBP": "£", "RUB": "₽"}
+
+
 def _fmt_purchase_price(pp_base, row_ccy: str, rep_ccy: str,
-                         fx_rows: list) -> str:
+                         fx_rows: list, *, converted: bool = True) -> str:
     """Цена покупки в БАЗОВОЙ валюте + исходная сумма в валюте сделки (−37).
 
     Владелец: «общая сумма позиции всегда в долларах, но валюта сделки должна
     быть видна».  Поэтому показываем «23.08 USD (12 000 ₸)» — база слева
     (по ней считаются стоимость, веса и риск), исходник в скобках, чтобы
     пользователь узнал свою сделку.
+
+    🔴 2026-08-03: если курса НЕ НАШЛОСЬ, строка НЕ конвертирована (§−45:
+    «остаётся в своей валюте»), и печатать её с ярлыком базовой валюты —
+    прямая ложь.  Живой DEEP 03.08: тенговая строка кэша выводилась как
+    «1.00 USD».  При `converted=False` сумма печатается в СВОЕЙ валюте.
     """
     if pp_base is None:
         return "—"
-    _SYM = {"USD": "$", "KZT": "₸", "EUR": "€", "GBP": "£", "RUB": "₽"}
-    base = f"{pp_base:,.2f} {rep_ccy}".replace(",", " ")
     ccy = (row_ccy or "").upper().strip()
+    base = f"{pp_base:,.2f} {rep_ccy}".replace(",", " ")
     if not ccy or ccy == rep_ccy:
         return base
+    if not converted:
+        # Курса нет → число осталось в валюте инструмента. Называем её честно.
+        sym = _CCY_SYMBOL.get(ccy, ccy)
+        return f"{pp_base:,.2f} {sym}".replace(",", " ")
     rate = next((r.get("rate") for r in fx_rows
                  if str(r.get("currency", "")).upper() == ccy), None)
     if not rate:
@@ -80,7 +91,7 @@ def _fmt_purchase_price(pp_base, row_ccy: str, rep_ccy: str,
         local = float(pp_base) / float(rate)
     except (TypeError, ValueError, ZeroDivisionError):
         return base
-    sym = _SYM.get(ccy, ccy)
+    sym = _CCY_SYMBOL.get(ccy, ccy)
     return f"{base} ({local:,.0f} {sym})".replace(",", " ")
 
 
@@ -866,6 +877,9 @@ def build_payload(results: dict, tier: str,
 
     # −37: базовая валюта отчёта — все СТОИМОСТИ приведены к ней движком.
     _rep_ccy_payload = str(results.get("reporting_currency") or "USD").upper()
+    # Тикеры, для которых конверсия РЕАЛЬНО состоялась (курс нашёлся).
+    _fx_done_tickers = {str(r.get("ticker")) for r in
+                        (results.get("fx_converted_rows") or []) if r.get("ticker")}
     assets: list[dict] = []
     if perf_df is not None and not perf_df.empty:
         # Best/Worst within position-to-date P/L.
@@ -976,10 +990,16 @@ def build_payload(results: dict, tier: str,
                 # которых доходность посчитана В ВАЛЮТЕ ИНСТРУМЕНТА (единый
                 # курс сокращается) — это надо назвать, а не прятать.
                 "currency":      _row_ccy,
-                "fx_converted":  bool(_row_ccy and _row_ccy != _rep_ccy_payload),
+                # 🔴 2026-08-03: флаг брался из НЕСОВПАДЕНИЯ валют, а не из
+                # факта конверсии. Когда курса нет, строка остаётся в своей
+                # валюте (§−45), но карточка всё равно заявляла «пересчитано»
+                # и печатала тенге с ярлыком USD. Источник — реестр реально
+                # сконвертированных строк.
+                "fx_converted":  bool(_fx_done_tickers and ticker in _fx_done_tickers),
                 "purchase_price": _fmt_purchase_price(
                     _pp_num, _row_ccy, _rep_ccy_payload,
-                    (results.get("fx_converted_rows") or [])),
+                    (results.get("fx_converted_rows") or []),
+                    converted=(ticker in _fx_done_tickers)),
                 "purchase_price_num": _pp_num,
                 # Cash positions never carry a real P&L — colour them
                 # neutrally so a margin-debt (negative-weight) USD row
@@ -1320,6 +1340,12 @@ def build_payload(results: dict, tier: str,
         # обязана сопровождать причина, иначе «0.49 → 0.49» читается как
         # «план ничего не дал».  Лежит на уровне payload по той же причине,
         # что и флаг выше — контракт `expected_effect` не трогаем.
+        # 2026-08-03: доля книги вне факторной модели — рядом с подписью
+        # «фактор-серий загружено N%», чтобы одно не читалось как другое.
+        "model_uncovered_pct": float(
+            (results.get("model_uncovered") or {}).get("weight_pct") or 0.0),
+        "model_uncovered_names": ", ".join(
+            (results.get("model_uncovered") or {}).get("names") or []),
         "expected_effect_sharpe_note": str(
             (results.get("expected_effect") or {}).get("sharpe_note") or ""),
         "expected_return_pct_num": exp_ret_num,          # numeric (chart-safe)

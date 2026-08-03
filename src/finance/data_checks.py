@@ -278,9 +278,19 @@ def _b_anomalies(series: pd.Series, ticker: str, **_):
     if len(vals) < 2 or np.any(vals <= 0):
         return None
     lr = np.diff(np.log(vals))
-    share = float(np.mean(np.abs(lr) > _ANOMALY_LOG_RETURN))
+    n_jumps = int(np.sum(np.abs(lr) > _ANOMALY_LOG_RETURN))
+    share = float(n_jumps) / max(1, len(lr))
     if share > _ANOMALY_SHARE:
-        return f"аномальные дневные скачки в {share * 100:.2f}% наблюдений"
+        # 2026-08-03: было «аномальные дневные скачки в 0.24% наблюдений» —
+        # доля в процентах от числа наблюдений читателю ничего не говорит и
+        # звучит как поломка данных. Проверка ЭВРИСТИЧЕСКАЯ: она не отличает
+        # реальный обвал на отчётности (AAOI — волатильный small-cap, у него
+        # такие дни настоящие) от неучтённого сплита. Поэтому называем ФАКТ
+        # (сколько дней и какой величины) и не выносим вердикт.
+        pct = (math.exp(_ANOMALY_LOG_RETURN) - 1) * 100
+        return (f"{n_jumps} дн. с движением цены более {pct:.0f}% — обычно это "
+                "отчётность или корпоративное действие; проверьте, если бумага "
+                "обычно спокойная")
     return None
 
 
@@ -358,6 +368,33 @@ def _is_cash(ticker) -> bool:
     return is_cash(str(ticker))
 
 
+def _effective_window(data) -> int:
+    """Окно, которое ДЕЙСТВИТЕЛЬНО использует движок (общие даты после
+    выброса разреженных бумаг).
+
+    Порог берётся из `period_returns.MIN_OVERLAP_TDAYS` — того же места, что
+    импортирует движок, поэтому разойтись они не могут. Фолбэк на строгое
+    пересечение оставлен на случай недоступности модуля: он консервативен
+    (занижает окно), то есть в худшем случае даст лишнее предупреждение, а не
+    пропустит реальную проблему.
+    """
+    if data is None or getattr(data, "empty", True):
+        return 0
+    try:
+        from finance.period_returns import MIN_OVERLAP_TDAYS
+    except Exception:                                   # pragma: no cover
+        return int(len(data.dropna(axis=0, how="any")))
+    dense = [c for c in data.columns
+             if int(data[c].notna().sum()) >= MIN_OVERLAP_TDAYS]
+    if not dense:
+        return 0
+    rows = int(len(data[dense].dropna(axis=0, how="any")))
+    # Движок считает на ЛОГ-ДОХОДНОСТЯХ: `np.log(data / data.shift(1)).dropna()`
+    # теряет первую строку. Вычитаем её и здесь, иначе чекер и движок вечно
+    # расходятся на единицу («200» в отчёте против 199 в модели).
+    return max(0, rows - 1)
+
+
 def _engine_min_obs(n_factors: int) -> int:
     """Порог движка: ниже него структурная модель не строится в принципе."""
     return max(2 * max(int(n_factors), 1), 30)
@@ -410,9 +447,23 @@ def check_portfolio_sufficiency(
     # C-2 / C-3 — эффективное общее окно.  Пороги ЗЕРКАЛЯТ движок, а не
     # назначаются: max(2K,30) — граница, ниже которой модель не строится;
     # 252 = engine.trading_days — граница, где гаснет форвардная панель (F-14).
-    effective = 0
-    if data is not None and not data.empty:
-        effective = int(len(data.dropna(axis=0, how="any")))
+    #
+    # 🔴 2026-08-03: окно считалось как СТРОГОЕ ПЕРЕСЕЧЕНИЕ всех колонок
+    # (`dropna(how="any")`) — и одна молодая бумага обнуляла его для всей
+    # книги.  Живой DEEP 03.08: движок построил модель на ПОЛНОМ окне
+    # (покрытие факторами 100%, MaxDD −41.3%, Sharpe 0.49 — это сотни
+    # наблюдений), а чекер доложил «Наблюдений (37) мало для 13 активов».
+    # 37 — это история самой молодой бумаги книги (AAOI), и ровно она
+    # схлопывала пересечение.  Отсюда ТРИ ложных предупреждения сразу:
+    # C-3, C-5 и C-13.
+    #
+    # Это повторение ошибки, которую движок уже прошёл: F-15/F-21 отказались
+    # от row-dropna по всем именам именно потому, что «один листинг с историей
+    # < 60 дней схлопывал общее окно» (`portfolio_series.py`).  Движок сначала
+    # ВЫБРАСЫВАЕТ разреженные бумаги (`MIN_OVERLAP_TDAYS`), и только потом
+    # берёт пересечение — чекер обязан делать ТО ЖЕ САМОЕ, иначе он меряет
+    # величину, которой в расчёте не существует.
+    effective = _effective_window(data)
     n_factors = len([t for t in FACTOR_ETFS if t in cols])
     floor = _engine_min_obs(n_factors)
     if effective < floor:
