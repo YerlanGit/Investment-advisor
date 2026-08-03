@@ -151,6 +151,42 @@ def _proxy_status(results: dict) -> Optional[dict]:
     )
 
 
+#: Ф-3: человеческие названия блоков — читателю нужен смысл, а не код чекера.
+_DQ_BLOCK_NAMES = {"A": "целостность выгрузки", "B": "корректность ряда",
+                   "C": "достаточность для математики"}
+
+
+def _data_quality_status(results: dict) -> Optional[dict]:
+    """Ф-3: DEGRADE-находки чекеров качества данных.
+
+    Возвращает None, когда придраться не к чему, — строка в CoVe не появляется
+    (реестр сжат до 16 строк, всегда-включённую добавлять нельзя).
+
+    BLOCK сюда не попадает по построению: он выбрасывает `DataQualityBlocked`
+    в движке, и отчёта не существует. Здесь только то, что расчёт пережил, но
+    о чём читатель обязан знать: короткое окно, частичное покрытие стоимости,
+    валюта без курса, устаревший или дырявый ряд.
+    """
+    dq = results.get("data_quality") or {}
+    findings = [f for f in (dq.get("findings") or [])
+                if str(f.get("level")) == "degrade"]
+    if not findings:
+        return None
+    blocks = sorted({str(f.get("id", "?"))[:1] for f in findings})
+    ids = ", ".join(sorted({str(f.get("id", "?")) for f in findings}))
+    what = " · ".join(_DQ_BLOCK_NAMES.get(b, b) for b in blocks)
+    # Сообщения чекеров уже человеческие («Общая история короче года…»).
+    detail = "; ".join(dict.fromkeys(str(f.get("message", "")).strip()
+                                     for f in findings if f.get("message")))
+    return _row(
+        name   = f"Качество данных: замечания ({len(findings)})",
+        source = f"Quant Engine · data_checks [{dq.get('profile') or 'legacy'}]",
+        method = f"Блоки {what} · сработали {ids}",
+        status = "degraded",
+        note   = detail[:400],
+    )
+
+
 def _sec_status(results: dict, today: date) -> list[dict]:
     """
     ONE merged row (2026-07-09) covering both fundamental Z-scores and
@@ -673,6 +709,13 @@ def build_lineage(results: dict,
     _proxy_row = _proxy_status(results)
     if _proxy_row is not None:
         rows.append(_proxy_row)
+
+    # Ф-3 (2026-08-02): замечания чекеров качества данных — тоже условная
+    # строка и тоже рядом с источником цен: и прокси, и качество ряда отвечают
+    # на один вопрос читателя «насколько можно верить числам ниже».
+    _dq_row = _data_quality_status(results)
+    if _dq_row is not None:
+        rows.append(_dq_row)
 
     # Sprint-5.4: currency layer (FX conversion + risk-free rate) — sits right
     # after the price source it transforms.

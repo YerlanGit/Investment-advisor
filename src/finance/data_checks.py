@@ -342,6 +342,22 @@ _BOOTSTRAP_MIN = 500
 _TRUNCATION_SHARE = 0.20
 
 
+def _is_cash(ticker) -> bool:
+    """Денежная позиция — по SSOT `asset_taxonomy` (A-5), не по локальному списку.
+
+    Ф-3 (2026-08-02): здесь лежала СЕДЬМАЯ копия классификации — кортеж
+    `("USD","EUR","KZT","RUB","CASH")`, в котором не было `GBP`/`CHF`/`CNY`/
+    `JPY`/`RUR`. После −37 строка кэша в такой валюте реальна, и она попадала
+    сразу в две ловушки: считалась РИСКОВЫМ активом (C-5/C-7) и НЕПОКРЫТОЙ
+    стоимостью (C-8) — то есть могла заблокировать корректный отчёт.
+    """
+    try:
+        from finance.asset_taxonomy import is_cash
+    except Exception:                                   # pragma: no cover
+        return str(ticker).upper() in ("USD", "EUR", "KZT", "RUB", "CASH")
+    return is_cash(str(ticker))
+
+
 def _engine_min_obs(n_factors: int) -> int:
     """Порог движка: ниже него структурная модель не строится в принципе."""
     return max(2 * max(int(n_factors), 1), 30)
@@ -426,16 +442,26 @@ def check_portfolio_sufficiency(
 
     # C-5 — обусловленность: наблюдений против числа рисковых активов
     risky = [t for t, w in weights.items() if abs(float(w or 0)) > 0
-             and str(t) not in ("USD", "EUR", "KZT", "RUB", "CASH")]
+             and not _is_cash(t)]
     n_risky = len(risky)
     if n_risky and effective < 3 * n_risky:
         add("C-5", CheckLevel.BLOCK if strict else CheckLevel.DEGRADE,
             f"Наблюдений ({effective}) мало для {n_risky} активов — "
             "оценки риска неустойчивы.", obs=effective, assets=n_risky)
 
-    # C-7 — диверсификации нет, TRC не определён
+    # C-7 — диверсификации нет, TRC не определён.
+    #
+    # Ф-3 (2026-08-02, калибровка при подключении): уровень стал ЗАВИСЕТЬ ОТ
+    # ПРОФИЛЯ.  Раньше стоял безусловный BLOCK, и это прямо противоречило
+    # принципу самого профиля LEGACY — «не хуже, чем сегодня: пороги равны тем,
+    # что движок реализует прямо сейчас».  Сегодня движок СТРОИТ отчёт по книге
+    # из одной рисковой позиции (TRC там тривиально 100%), поэтому в LEGACY это
+    # предупреждение, а не отказ: подключение чекеров не имеет права отнять у
+    # живого пользователя отчёт, который он получал вчера.
+    # В STRICT (ручной ввод) остаётся BLOCK: там пользователь сам набрал состав,
+    # и попросить вторую позицию дешевле, чем отдать бессмысленную декомпозицию.
     if n_risky < 2:
-        add("C-7", CheckLevel.BLOCK,
+        add("C-7", CheckLevel.BLOCK if strict else CheckLevel.DEGRADE,
             "В портфеле меньше двух рисковых позиций — "
             "распределение риска не рассчитывается.", risky=n_risky)
 
@@ -445,13 +471,13 @@ def check_portfolio_sufficiency(
     # Первая метрика пропустит катастрофу, вторая остановит (ловушка Т-6).
     total_value = sum(abs(float(v or 0)) for v in values.values())
     covered_value = sum(abs(float(values.get(t) or 0)) for t in values
-                        if str(t) in cols or str(t) in ("USD", "EUR", "KZT", "RUB", "CASH"))
+                        if str(t) in cols or _is_cash(t))
     coverage = (covered_value / total_value) if total_value > 0 else 0.0
     if total_value > 0:
         if coverage < _COVERAGE_BLOCK:
             uncovered = [t for t in values
                          if str(t) not in cols
-                         and str(t) not in ("USD", "EUR", "KZT", "RUB", "CASH")]
+                         and not _is_cash(t)]
             add("C-8", CheckLevel.BLOCK,
                 f"Не удалось загрузить цены по {len(uncovered)} из {len(values)} "
                 f"бумаг ({(1 - coverage) * 100:.0f}% стоимости портфеля).",
@@ -477,7 +503,7 @@ def check_portfolio_sufficiency(
                 total=round(total_w, 8))
 
     # C-12 — кэш вне рисковых расчётов, но в знаменателе долей.  Тоже про баг.
-    cash_keys = [t for t in weights if str(t) in ("USD", "EUR", "KZT", "RUB", "CASH")]
+    cash_keys = [t for t in weights if _is_cash(t)]
     if cash_keys and any(str(t) in cols for t in cash_keys):
         add("C-12", CheckLevel.BLOCK,
             "Внутренняя ошибка: денежная позиция попала в факторную модель.",

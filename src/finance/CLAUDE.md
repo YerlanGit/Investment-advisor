@@ -32,11 +32,14 @@
 - **Sharpe при отрицательной премии (`er < rf`) не упорядочивает портфели**: `∂S/∂σ > 0`,
   снижение риска механически ухудшает коэффициент. `simulate` гасит дельту и отдаёт
   `sharpe_note` — отчёт обязан причину напечатать. `MATH_ENGINE.md §4.3a`.
+- **Чекеры качества (`data_checks.py`) вызываются в `analyze_all` после `weights_dict`.**
+  Веса/стоимости обязаны быть в namespace МАТРИЦЫ (`resolve_tickers`) и СУММИРОВАТЬСЯ
+  при коллизии прокси — иначе C-8/C-10 блокируют здоровую книгу. `AUDIT §−49`.
 - Ортогонализация (BLOCK 3.5) и её β̂ должны сбрасываться в начале `analyze_all`
   (F-1) — иначе стресс residualize-ится на устаревших бетах.
 
 ## Обязательный цикл
 1. Правь `src/finance/*` и `tests/test_phase*.py` вместе.
 2. `PYTHONPATH=src python -m pytest tests/ -q` — префикс ОБЯЗАТЕЛЕН, без него
-   `import finance…` не находится (baseline: 1150 passed, 5 skipped, 1 xfailed).
+   `import finance…` не находится (baseline: 1175 passed, 5 skipped, 1 xfailed).
 3. Крупное изменение → строка Было/Стало в `docs/audit/AUDIT.md`.
