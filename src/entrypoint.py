@@ -15,6 +15,8 @@ freshest knowledge base without a redeploy.
 import asyncio
 import logging
 import os
+
+from env_config import env_int
 import sys
 import threading
 
@@ -209,7 +211,7 @@ def _boot_ingest_from_inbox() -> None:
 
 async def _health_server() -> None:
     """Minimal HTTP/1.0 server: any GET → 200 OK."""
-    port = int(os.environ.get("PORT", 8080))
+    port = env_int("PORT", 8080, lo=1, hi=65535)   # A-7
 
     async def _handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         try:

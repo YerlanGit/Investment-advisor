@@ -311,6 +311,16 @@ def _nearest_psd(mat: "np.ndarray", floor: float = 1e-12) -> "np.ndarray":
         return M
     if np.all(w >= -floor):                  # already PSD → leave untouched
         return M
+    # C-6 (2026-08-02): починка ОСТАЁТСЯ молчаливой для математики, но факт
+    # записывается — `PHASE_03 §3a.4`: «чекеры не должны ПОВТОРЯТЬ то, что
+    # движок уже чинит, они должны СООБЩАТЬ об этом».  Отрицательное
+    # собственное значение блендa означает вырожденную/почти вырожденную
+    # факторную ковариацию, а значит неустойчивые беты и ERC.
+    _nearest_psd.last_repair = {                     # type: ignore[attr-defined]
+        "min_eigenvalue": float(np.min(w)),
+        "n_clipped": int(np.sum(w < floor)),
+        "size": int(M.shape[0]),
+    }
     w_clipped = np.clip(w, floor, None)
     return (V * w_clipped) @ V.T
 
@@ -573,6 +583,9 @@ class MAC3RiskEngine:
         # −37: кэш курсов «валюта → базовая» на один прогон отчёта (курс обязан
         # быть ОДИН для всех строк, иначе цена покупки и стоимость разъедутся).
         self._fx_rate_cache: dict = {}
+        # C-6: заполняется в `calculate_structural_risk`, если PSD-проекция
+        # реально чинила факторную ковариацию (вырожденный бленд).
+        self._last_psd_repair = None
         self._last_asset_currencies: dict[str, str] = {}
 
     def math_firewall(self, df):
@@ -1283,7 +1296,10 @@ class MAC3RiskEngine:
         # Sprint-3 #9: the EWMA+LW blend is not guaranteed PSD — project it onto
         # the nearest PSD matrix so Σ = B·F·Bᵀ + D stays PSD (well-defined ERC,
         # no negative w'Σw).  No-op within tolerance when the blend is already PSD.
+        _nearest_psd.last_repair = None              # type: ignore[attr-defined]
         cov_factors = _nearest_psd(cov_factors)
+        # C-6: результат — на движке, чтобы блок C мог о нём доложить.
+        self._last_psd_repair = getattr(_nearest_psd, "last_repair", None)
 
         # ── BLOCK 4.6: factor-multicollinearity diagnostic (read-only) ───────
         # The structural model ALREADY avoids double-counting correlated risk:
@@ -2129,8 +2145,33 @@ class UniversalPortfolioManager:
         # Second guard: even with rows, if every Current_Price is 0 or all
         # rows are NON_RISK_ASSETS with zero balance, total is 0.  Don't
         # divide — propagate the same user-friendly error.
-        if not np.isfinite(total_portfolio_value) or total_portfolio_value <= 0:
-            logger.warning("MAC3 ENGINE ▸ total portfolio value is 0 or NaN — halting.")
+        # A-6 (2026-08-02): ТРИ РАЗНЫХ состояния под одним сообщением.
+        # Раньше все они печатали «Стоимость портфеля = 0. Проверьте подключение
+        # к брокеру» — и при ОТРИЦАТЕЛЬНОМ капитале это прямая ложь: связь с
+        # брокером в порядке, данные доехали, просто маржинальный заём превысил
+        # активы. Пользователь шёл проверять подключение вместо того, чтобы
+        # закрывать плечо. Диагноз теперь называет то, что произошло.
+        if not np.isfinite(total_portfolio_value):
+            logger.warning("MAC3 ENGINE ▸ total portfolio value is NaN — halting.")
+            raise RealPortfolioRequired(
+                "Не удалось посчитать стоимость портфеля — в данных брокера "
+                "встретились некорректные числа. Повторите анализ позже; "
+                "если ошибка повторяется, напишите в /support."
+            )
+        if total_portfolio_value < 0:
+            _neg_assets = float(df.loc[df['Current_Value'] > 0, 'Current_Value'].sum())
+            _neg_debt = float(-df.loc[df['Current_Value'] < 0, 'Current_Value'].sum())
+            logger.warning(
+                "MAC3 ENGINE ▸ NEGATIVE equity: assets=%.2f debt=%.2f net=%.2f — halting.",
+                _neg_assets, _neg_debt, total_portfolio_value)
+            raise RealPortfolioRequired(
+                "Заёмные средства превышают стоимость активов — собственный "
+                "капитал счёта отрицательный, и доли позиций посчитать нельзя "
+                "(они делятся на капитал). Это НЕ сбой подключения: данные "
+                "получены. Сократите плечо или пополните счёт и повторите анализ."
+            )
+        if total_portfolio_value == 0:
+            logger.warning("MAC3 ENGINE ▸ total portfolio value is 0 — halting.")
             raise RealPortfolioRequired(
                 "Стоимость портфеля = 0. Проверьте подключение к брокеру "
                 "или откройте позиции — анализ невозможен на пустом счёте."
@@ -2216,6 +2257,29 @@ class UniversalPortfolioManager:
             if t not in self.engine.NON_RISK_ASSETS and t not in broker_priced_only
         ]
         cov_matrix, factor_df, port_metrics = self.engine.calculate_structural_risk(all_data, actual_risky, weights_dict)
+
+        # ── C-6 (2026-08-02): вырожденная факторная ковариация ──────────────
+        # Вход появляется ТОЛЬКО здесь — матрица считается внутри вызова выше,
+        # уже после того, как стали известны веса.  Поэтому C-6 идёт вторым,
+        # коротким проходом и доливается в тот же отчёт: сигнатуры чекеров
+        # блока C при этом не тронуты (56 тестов Фазы 3 действуют как есть).
+        # Движок вырождение ЧИНИТ сам (`_nearest_psd`) и правильно делает —
+        # отчёт лучше построить; но чинит молча, а `PHASE_03 §3a.4` требует об
+        # этом СООБЩАТЬ. В STRICT — отказ, там источник один.
+        try:
+            from finance import data_checks as _dc6
+            _c6 = _dc6.check_covariance_health(
+                getattr(self.engine, "_last_psd_repair", None),
+                profile=_dc6.profile_for_source(self.engine.price_source))
+            if _c6.findings:
+                for _f in _c6.findings:
+                    logger.info("Ф-3 %s [%s] %s", _f.id, _f.level.value, _f.message)
+                _dq_report = _dc6.merge_reports(_dq_report, _c6) \
+                    if _dq_report is not None else _c6
+                if _c6.blocked:
+                    raise _dc6.DataQualityBlocked(_dq_report)
+        except ImportError:                            # pragma: no cover
+            pass
         
         # ATR (Intraday Margin Standard — SEC 34-105226)
         # Uses True ATR (OHLC) when available, falls back to Close-only

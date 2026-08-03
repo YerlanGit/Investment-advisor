@@ -40,6 +40,8 @@ default 1825 ≈ 5 лет) — окно ОСНОВНОГО отчёта (HISTORY
 from __future__ import annotations
 
 import os
+
+from env_config import env_int
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
@@ -49,7 +51,9 @@ import pandas as pd
 TRADING_DAYS = 252
 
 # ── Фаза 0/1 · параметры (все — env-переопределяемые) ────────────────────────
-SCENARIO_LOOKBACK_DAYS = int(os.environ.get("SCENARIO_LOOKBACK_DAYS", "1825"))
+# A-7: env_int вместо голого int() — иначе опечатка в переменной роняет
+# импорт модуля. Кламп совпадает с окном основного отчёта.
+SCENARIO_LOOKBACK_DAYS = env_int("SCENARIO_LOOKBACK_DAYS", 1825, lo=90, hi=3650)
 _RFR_DEFAULT           = 0.045          # USD, синхронно с основным отчётом
 _MIN_PERIODS_COV       = 252            # ≥1 год общих наблюдений для пары
 # Шаг 2 фреймворка — funding decision-tree:
