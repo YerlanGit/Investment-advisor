@@ -34,6 +34,8 @@ from __future__ import annotations
 
 import logging
 import os
+
+from env_config import env_int
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
@@ -48,7 +50,10 @@ BUCKET_NAME       = os.getenv("REPORT_BUCKET_NAME", "").strip()
 # lowered 168h → 48h (still long enough for a user to revisit a link the
 # bot sent, short enough to bound exposure if a link leaks).  Override via
 # REPORT_URL_TTL_HOURS but the default is now privacy-conservative.
-DEFAULT_TTL_HOURS = int(os.getenv("REPORT_URL_TTL_HOURS", "48"))    # 2 days
+# A-7: через `env_int` — мусор в переменной больше не роняет импорт
+# модуля (а с ним и старт контейнера). Кламп 1…168 ч: ноль сделал бы
+# ссылку мёртвой в момент выдачи, неделя — потолок приватности.
+DEFAULT_TTL_HOURS = env_int("REPORT_URL_TTL_HOURS", 48, lo=1, hi=168)  # 2 days
 CONTENT_TYPE      = "text/html; charset=utf-8"
 # Never let a private financial report rest in any shared/CDN/browser cache.
 CACHE_CONTROL     = "private, no-store, max-age=0"

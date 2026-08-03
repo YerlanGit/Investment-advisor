@@ -17,6 +17,8 @@ import aiosqlite
 import json
 import logging
 import os
+
+from env_config import env_float
 import time as _time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -308,7 +310,11 @@ async def init_db() -> None:
 #: Максимальная длительность аренды.  Должна ПЕРЕЖИВАТЬ самый долгий отчёт
 #: (DEEP с холодным кэшем цен — единицы минут), но не запирать пользователя
 #: навсегда, если инстанс умер посреди расчёта.  30 минут — с запасом ×5.
-REPORT_LOCK_TTL_SEC: float = float(os.getenv("REPORT_LOCK_TTL_SEC", "1800"))
+# A-7: через `env_float` — голый float() на уровне модуля роняет ИМПОРТ
+# (а с ним и старт бота) от опечатки в переменной. Кламп 60 с…6 ч:
+# аренда короче минуты бессмысленна, длиннее шести часов запирает юзера.
+REPORT_LOCK_TTL_SEC: float = env_float("REPORT_LOCK_TTL_SEC", 1800.0,
+                                       lo=60.0, hi=21600.0)
 
 
 async def acquire_report_lock(telegram_id: int, owner: str,

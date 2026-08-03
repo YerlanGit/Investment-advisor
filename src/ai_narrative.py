@@ -343,6 +343,37 @@ def _regime_for_prompt(regime: Optional[dict]) -> Optional[dict]:
     return out
 
 
+def _money_for_prompt(metrics: dict, total_value) -> dict:
+    """Денежные эквиваленты рисковых метрик — ОДНА конвенция с KPI-карточкой.
+
+    Повторяет `pdf_payload._dollar`: сумма считается от ПОКАЗАННОГО процента
+    (округлённого до одного знака), а не от сырой доли. Иначе текст ИИ и
+    карточка расходятся на пару долларов при одном и том же числе (R-13).
+    """
+    try:
+        tv = float(total_value or 0)
+    except (TypeError, ValueError):
+        tv = 0.0
+    if tv <= 0:
+        return {}
+
+    def _d(frac) -> Optional[str]:
+        try:
+            pct_disp = round(float(frac or 0) * 100.0, 1)     # тот же округлённый %
+        except (TypeError, ValueError):
+            return None
+        return f"${abs(pct_disp / 100.0 * tv):,.0f}"
+
+    out = {}
+    for key, src in (("cvar_95", "CVaR_95_Daily"),
+                     ("var_95", "VaR_95_Daily"),
+                     ("max_dd", "Max_Drawdown")):
+        val = _d(metrics.get(src))
+        if val:
+            out[key] = val
+    return out
+
+
 def _summarise_for_prompt(results: dict) -> dict:
     """
     Build a compact, JSON-serialisable view of analyze_all() results.
@@ -465,6 +496,14 @@ def _summarise_for_prompt(results: dict) -> dict:
             "max_erc_pct":  _safe_round(metrics.get("Max_Euler_Risk_Pct"), 1),
             "composite":    metrics.get("Composite_Risk_Score"),
         },
+        # R-13 (2026-08-02): ГОТОВЫЕ рублёвые/долларовые суммы — те же строки,
+        # что печатает KPI-карточка.  Раньше модель получала только процент и
+        # NAV и считала произведение сама, а `pdf_payload._dollar` намеренно
+        # берёт ПОКАЗАННЫЙ (округлённый до 0.1) процент — чтобы «−3.3%» и
+        # сумма рядом были согласованы.  Две разные конвенции округления дали
+        # в живом отчёте 02.08 «$467» на карточке против «около 469 долларов»
+        # в тексте ИИ.  Теперь сумма приходит готовой и цитируется дословно.
+        "money": _money_for_prompt(metrics, results.get("total_value")),
         "total_value":  _safe_round(results.get("total_value"), 0),
         # Audit 06-25: feed the AI the SAME pre-rounded confidence integer the
         # panel shows (int(round(conf*100))) so the prose can't print 74% next to
@@ -1002,6 +1041,13 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
         "Не складывай, не вычитай, не усредняй, не пересчитывай проценты в деньги "
         "и обратно, не выводи «примерно столько же». Нужного числа нет в данных — "
         "значит его нет в отчёте.\n"
+        # R-13: раньше суммы в тексте приходилось выводить самому (был только
+        # процент и NAV), и модель нарушала правило выше «по необходимости».
+        # Теперь готовая сумма лежит в `money` — цитировать её, а не считать.
+        "- ДЕНЕЖНЫЕ суммы для CVaR/VaR/просадки бери ГОТОВЫМИ из блока `money` "
+        "(там ровно те строки, что печатает карточка отчёта). Не умножай процент "
+        "на стоимость портфеля сам — получится другое число, и текст разойдётся "
+        "с карточкой.\n"
         "- ТЕМП (trend) цитируй ВЕРБАТИМ вместе с окном из trend_window: "
         "«+1.61 за 1м». Не пересчитывай темп на другое окно и не меняй его знак: "
         "если trend положительный — показатель РАСТЁТ, отрицательный — ПАДАЕТ, "

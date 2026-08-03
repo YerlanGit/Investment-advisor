@@ -5,7 +5,8 @@ const FactorTable = ({ factors, benchmarkName }) => (
     <thead>
       <tr className="text-[9.5px] tracking-widest uppercase text-ink-400 font-mono border-b border-ink-900/8">
         <th className="text-left font-medium py-2">Фактор</th>
-        <th className="text-right font-medium py-2">β портф.</th>
+        <th className="text-right font-medium py-2"
+            title="Частная (multi-factor) бета из Ridge-регрессии: влияние ЭТОЙ оси при удержании остальных постоянными. Не равна средневзвешенной бете позиций из таблицы «Что держите» — та считает каждую бумагу отдельно, без контроля прочих факторов.">β портф.</th>
         <th className="text-right font-medium py-2" title={`${benchmarkName} — факторные беты вашего бенчмарка (его тоже разложили по этим осям)`}>{benchmarkName}</th>
         <th className="text-right font-medium py-2" title="Активный наклон портфеля относительно бенчмарка">Наклон Δ</th>
       </tr>
@@ -86,6 +87,17 @@ const FactorVariance = ({ fv }) => {
       <div className="divide-y divide-ink-900/5">
         {fv.rows.map((r, i) => <VarianceRow key={i} r={r} maxAbs={maxAbs}/>)}
       </div>
+      {/* R-15: отрицательная доля дисперсии математически корректна —
+          ковариационные перекрёстные члены могут быть отрицательными, и такой
+          источник СНИЖАЕТ общий риск. Без сноски «−0.2%» читается как ошибка
+          расчёта. Появляется только при наличии отрицательной строки. */}
+      {fv.rows.some(r => r.pct < 0) && (
+        <div className="mt-3 text-[10.5px] text-ink-500 font-light leading-snug">
+          Отрицательная доля — не ошибка: этот источник движется против
+          остальных и <span className="text-sage-600 font-medium">снижает</span> общий
+          риск портфеля (перекрёстные члены ковариации отрицательны).
+        </div>
+      )}
       {/* twins */}
       {fv.twins && fv.twins.length > 0 && (
         <div className="mt-3.5 pt-3 border-t border-ink-900/8">

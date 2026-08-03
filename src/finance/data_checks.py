@@ -525,6 +525,54 @@ def check_portfolio_sufficiency(
     return report
 
 
+#: C-6: насколько отрицательным должно быть собственное значение, чтобы это
+#: считалось вырождением, а не арифметическим шумом float64.  Порог на порядки
+#: выше `floor=1e-12` самой проекции: клипование на уровне 1e-15 — рутина
+#: округления и поводом для сообщения не является.
+_PSD_NOISE_TOLERANCE = 1e-8
+
+
+def check_covariance_health(psd_repair: Optional[dict], *,
+                            profile: CheckProfile) -> DataQualityReport:
+    """C-6: факторная ковариация оказалась вырожденной и была починена.
+
+    Отдельная функция, а не строка в `check_portfolio_sufficiency`, потому что
+    вход появляется ПОЗЖЕ: матрица считается в `calculate_structural_risk`,
+    уже после того, как известны веса.  Сигнатуры существующих чекеров при
+    этом не тронуты (56 тестов Фазы 3 продолжают действовать как есть).
+
+    Движок чинит вырождение сам (`_nearest_psd`, Higham-клипование) — и это
+    правильно: отчёт лучше построить.  Но чинит МОЛЧА, а `PHASE_03 §3a.4`
+    прямо требует: «чекеры не должны ПОВТОРЯТЬ то, что движок уже чинит, они
+    должны СООБЩАТЬ об этом».  Отрицательное собственное значение бленда
+    EWMA⊕Ledoit-Wolf означает, что факторы почти линейно зависимы, а значит
+    беты и Euler-вклады на этом прогоне неустойчивы — читатель обязан знать.
+
+    STRICT блокирует: у ручного портфеля источник один, и вырожденная матрица
+    там означает негодные данные, а не редкий край рынка.
+    """
+    report = DataQualityReport(profile=profile)
+    if not isinstance(psd_repair, dict):
+        return report
+    try:
+        min_eig = float(psd_repair.get("min_eigenvalue"))
+    except (TypeError, ValueError):
+        return report
+    if not math.isfinite(min_eig) or min_eig >= -_PSD_NOISE_TOLERANCE:
+        return report                     # шум округления — не находка
+    level = (CheckLevel.BLOCK if profile is CheckProfile.STRICT
+             else CheckLevel.DEGRADE)
+    n_clipped = int(psd_repair.get("n_clipped") or 0)
+    size = int(psd_repair.get("size") or 0)
+    report.findings.append(CheckFinding(
+        "C-6", level,
+        f"Факторная ковариация вырождена ({n_clipped} из {size} направлений "
+        "имели отрицательную дисперсию) — матрица восстановлена, но оценки "
+        "бет и вкладов в риск на этом прогоне менее устойчивы.",
+        detail={"min_eigenvalue": min_eig, "n_clipped": n_clipped, "size": size}))
+    return report
+
+
 def merge_reports(*reports: DataQualityReport) -> DataQualityReport:
     """Слить отчёты блоков в один (профиль берётся у первого)."""
     reports = [r for r in reports if r is not None]
@@ -544,6 +592,7 @@ __all__ = [
     "DataQualityBlocked",
     "DataQualityReport",
     "FACTOR_ETFS",
+    "check_covariance_health",
     "check_portfolio_sufficiency",
     "check_price_matrix",
     "check_response_body",

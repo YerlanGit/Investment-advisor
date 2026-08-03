@@ -1205,7 +1205,9 @@ const MandateCard = ({
   stroke: 2
 }), /*#__PURE__*/React.createElement("span", {
   className: "text-[11px] text-rust-600 font-medium"
-}, "Маржинальный долг ", m.marginPct > 0 ? `≈${m.marginPct}% NAV` : 'обнаружен', " — позиции частично куплены в долг")), /*#__PURE__*/React.createElement("div", {
+}, "Маржинальный долг ", m.marginPct > 0 ? `≈${m.marginPct}% NAV` : 'обнаружен', " — позиции частично куплены в долг")), m.leveraged && /*#__PURE__*/React.createElement("div", {
+  className: "text-[10.5px] text-ink-500 font-light mb-3 leading-snug"
+}, "Доли — от собственного капитала. Позиции куплены частично в долг, поэтому их сумма превышает 100%: разница и есть маржинальный долг."), /*#__PURE__*/React.createElement("div", {
   className: "space-y-3.5 mt-auto"
 }, m.rows.map((r, i) => {
   const tone = {
@@ -1242,6 +1244,14 @@ const _KPI_METHOD = {
   cvar: 'Средний убыток в худшие 5% дней (1-дневный горизонт), эмпирически + bootstrap-CI.',
   dd: 'Максимальная просадка пик→дно по реконструированной кривой капитала exp(Σ log-доходностей).'
 };
+
+// R-9 (2026-08-02): у ЧИСЛА и у ГРАФИКА разные окна, и это надо назвать.
+// Крупная цифра — по полному окну истории; точки спарклайна — 12 срезов за
+// последний год, каждый по СКОЛЬЗЯЩЕМУ окну 60 дней. Отсюда законная, но
+// сбивающая с толку картина: Sharpe в заголовке +0.55, а линия целиком ниже
+// нуля (последний год был хуже полной истории). Без подписи это читается
+// как противоречие в отчёте.
+const _SPARK_NOTE = '12 срезов за год · каждый по скользящему окну 60 дней (число выше — по полному окну истории)';
 const KpiCard = ({
   k
 }) => {
@@ -1269,13 +1279,15 @@ const KpiCard = ({
     className: "flex items-center justify-between text-[8.5px] tracking-widest uppercase text-ink-400 font-mono mb-0.5"
   }, /*#__PURE__*/React.createElement("span", null, "Динамика · 12 мес"), /*#__PURE__*/React.createElement("span", null, "сейчас")), /*#__PURE__*/React.createElement("div", {
     className: "h-12"
-  }, hasPts ? /*#__PURE__*/React.createElement(Sparkline, {
+  }, hasPts ? /*#__PURE__*/React.createElement("div", {
+    title: _SPARK_NOTE
+  }, /*#__PURE__*/React.createElement(Sparkline, {
     points: k.pts,
     color: k.color,
     height: 44,
     width: 300,
     gradId: `spk-${k.key}`
-  }) : k.svg ? /*#__PURE__*/React.createElement("div", {
+  })) : k.svg ? /*#__PURE__*/React.createElement("div", {
     className: "w-full h-full",
     dangerouslySetInnerHTML: {
       __html: k.svg
@@ -1842,7 +1854,8 @@ const FactorTable = ({
 }, /*#__PURE__*/React.createElement("th", {
   className: "text-left font-medium py-2"
 }, "Фактор"), /*#__PURE__*/React.createElement("th", {
-  className: "text-right font-medium py-2"
+  className: "text-right font-medium py-2",
+  title: "Частная (multi-factor) бета из Ridge-регрессии: влияние ЭТОЙ оси при удержании остальных постоянными. Не равна средневзвешенной бете позиций из таблицы «Что держите» — та считает каждую бумагу отдельно, без контроля прочих факторов."
 }, "β портф."), /*#__PURE__*/React.createElement("th", {
   className: "text-right font-medium py-2",
   title: `${benchmarkName} — факторные беты вашего бенчмарка (его тоже разложили по этим осям)`
@@ -1936,7 +1949,11 @@ const FactorVariance = ({
     key: i,
     r: r,
     maxAbs: maxAbs
-  }))), fv.twins && fv.twins.length > 0 && /*#__PURE__*/React.createElement("div", {
+  }))), fv.rows.some(r => r.pct < 0) && /*#__PURE__*/React.createElement("div", {
+    className: "mt-3 text-[10.5px] text-ink-500 font-light leading-snug"
+  }, "Отрицательная доля — не ошибка: этот источник движется против остальных и ", /*#__PURE__*/React.createElement("span", {
+    className: "text-sage-600 font-medium"
+  }, "снижает"), " общий риск портфеля (перекрёстные члены ковариации отрицательны)."), fv.twins && fv.twins.length > 0 && /*#__PURE__*/React.createElement("div", {
     className: "mt-3.5 pt-3 border-t border-ink-900/8"
   }, /*#__PURE__*/React.createElement("div", {
     className: "text-[11px] text-ink-800 font-medium mb-2"

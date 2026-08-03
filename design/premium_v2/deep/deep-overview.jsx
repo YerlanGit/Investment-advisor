@@ -102,6 +102,16 @@ const MandateCard = ({ m }) => (
         </span>
       </div>
     )}
+    {/* R-12: доли считаются от СОБСТВЕННОГО капитала (NAV). На счёте с
+        маржинальным долгом длинные позиции куплены частично в долг, поэтому
+        их сумма законно превышает 100% — без этой строки читатель видит
+        «120.2%» и считает это ошибкой. Блок появляется только при плече. */}
+    {m.leveraged && (
+      <div className="text-[10.5px] text-ink-500 font-light mb-3 leading-snug">
+        Доли — от собственного капитала. Позиции куплены частично в долг,
+        поэтому их сумма превышает 100%: разница и есть маржинальный долг.
+      </div>
+    )}
     <div className="space-y-3.5 mt-auto">
       {m.rows.map((r,i) => {
         const tone = { ok:'text-ink-900', over:'text-rust-600', under:'text-gold-700' }[r.state];
@@ -132,6 +142,14 @@ const _KPI_METHOD = {
   dd:     'Максимальная просадка пик→дно по реконструированной кривой капитала exp(Σ log-доходностей).',
 };
 
+// R-9 (2026-08-02): у ЧИСЛА и у ГРАФИКА разные окна, и это надо назвать.
+// Крупная цифра — по полному окну истории; точки спарклайна — 12 срезов за
+// последний год, каждый по СКОЛЬЗЯЩЕМУ окну 60 дней. Отсюда законная, но
+// сбивающая с толку картина: Sharpe в заголовке +0.55, а линия целиком ниже
+// нуля (последний год был хуже полной истории). Без подписи это читается
+// как противоречие в отчёте.
+const _SPARK_NOTE = '12 срезов за год · каждый по скользящему окну 60 дней (число выше — по полному окну истории)';
+
 const KpiCard = ({ k }) => {
   const border = { normal:'#5d7c5c', good:'#caa01a', watch:'#c47358' }[k.status];
   const hasPts = Array.isArray(k.pts) && k.pts.length >= 2;
@@ -150,7 +168,7 @@ const KpiCard = ({ k }) => {
         </div>
         <div className="h-12">
           {hasPts
-            ? <Sparkline points={k.pts} color={k.color} height={44} width={300} gradId={`spk-${k.key}`}/>
+            ? <div title={_SPARK_NOTE}><Sparkline points={k.pts} color={k.color} height={44} width={300} gradId={`spk-${k.key}`}/></div>
             : (k.svg
                 ? <div className="w-full h-full" dangerouslySetInnerHTML={{ __html: k.svg }}/>
                 : <div className="w-full h-full flex items-center justify-center text-[9px] text-ink-300 font-mono">нет истории</div>)}

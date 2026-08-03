@@ -41,5 +41,5 @@
 ## Обязательный цикл
 1. Правь `src/finance/*` и `tests/test_phase*.py` вместе.
 2. `PYTHONPATH=src python -m pytest tests/ -q` — префикс ОБЯЗАТЕЛЕН, без него
-   `import finance…` не находится (baseline: 1175 passed, 5 skipped, 1 xfailed).
+   `import finance…` не находится (baseline: 1207 passed, 5 skipped, 1 xfailed).
 3. Крупное изменение → строка Было/Стало в `docs/audit/AUDIT.md`.
