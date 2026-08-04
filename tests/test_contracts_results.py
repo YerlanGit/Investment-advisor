@@ -11,7 +11,10 @@
 1. Множество ключей, которые движок РЕАЛЬНО кладёт в возвращаемый словарь,
    совпадает с `finance.contracts.AnalyzeResults`. Сверка идёт по AST самого
    `investment_logic.py`, поэтому забыть обновить контракт нельзя: тест
-   назовёт и лишние, и недостающие ключи.
+   назовёт и лишние, и недостающие ключи. С Арх-3.1 сборка живёт в
+   `_build_results`, и тест дополнительно требует, чтобы `analyze_all` её
+   БОЛЬШЕ НЕ делал — иначе «единственная точка сборки» снова станет
+   пожеланием.
 2. `portfolio_metrics` — то же самое для вложенного блока, который собирается
    в другой функции (`calculate_structural_risk`).
 3. `analyze_all` аннотирован типом контракта — иначе связь «функция ↔ форма»
@@ -79,24 +82,42 @@ class AnalyzeResultsContractTest(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.tree = ast.parse(_ENGINE.read_text(encoding="utf-8"))
         cls.fn = _function_node(cls.tree, "analyze_all")
+        # Арх-3.1: словарь собирается в выделенном методе-стадии, а не в теле
+        # `analyze_all`. Инвариант «сборка в ОДНОМ месте» сохранён — изменился
+        # адрес этого места, и тест следует за ним.
+        cls.builder = _function_node(cls.tree, "_build_results")
 
     def test_single_contract_return(self) -> None:
-        """У `analyze_all` ровно один собственный `return` со словарём.
+        """Контрактный словарь собирается РОВНО в одном месте — `_build_results`.
 
         Это и есть основание для `total=True` в контракте: раз выход один,
         все ключи присутствуют всегда, а отсутствие данных выражается
         ЗНАЧЕНИЕМ. Появится второй выход — контракт станет условным, и его
         придётся пересмотреть, а не молча разойтись с реальностью.
         """
-        dict_returns = [r for r in _own_returns(self.fn) if isinstance(r.value, ast.Dict)]
+        dict_returns = [r for r in _own_returns(self.builder) if isinstance(r.value, ast.Dict)]
         self.assertEqual(
             len(dict_returns), 1,
-            "ожидался ЕДИНСТВЕННЫЙ контрактный return-словарь; "
+            "ожидался ЕДИНСТВЕННЫЙ контрактный return-словарь в `_build_results`; "
             f"найдено {len(dict_returns)} — пересмотри total=True в contracts.py",
         )
 
+    def test_analyze_all_no_longer_assembles_the_dict(self) -> None:
+        """`analyze_all` — оркестратор: сам словарь он больше НЕ строит.
+
+        Инвариант введён Арх-3.1 и охраняет главную цель фазы: пока сборка
+        может происходить в двух местах, «единственная точка правды» —
+        пожелание, а не свойство кода.
+        """
+        own = [r for r in _own_returns(self.fn) if isinstance(r.value, ast.Dict)]
+        self.assertFalse(
+            own,
+            "в `analyze_all` снова появился словарь-литерал в return — "
+            "сборка обязана жить только в `_build_results`",
+        )
+
     def test_engine_keys_match_contract(self) -> None:
-        dict_returns = [r for r in _own_returns(self.fn) if isinstance(r.value, ast.Dict)]
+        dict_returns = [r for r in _own_returns(self.builder) if isinstance(r.value, ast.Dict)]
         engine_keys = _dict_keys(dict_returns[0].value)
 
         missing = engine_keys - RESULTS_KEYS
@@ -134,8 +155,9 @@ class AnalyzeResultsContractTest(unittest.TestCase):
 
     def test_analyze_all_is_annotated(self) -> None:
         """Связь «функция ↔ форма» закреплена в коде, а не подразумевается."""
-        self.assertIsNotNone(self.fn.returns, "у analyze_all нет аннотации возврата")
-        self.assertIn("AnalyzeResults", ast.unparse(self.fn.returns))
+        for fn in (self.fn, self.builder):
+            self.assertIsNotNone(fn.returns, f"у {fn.name} нет аннотации возврата")
+            self.assertIn("AnalyzeResults", ast.unparse(fn.returns))
 
 
 class ContractsLayerTest(unittest.TestCase):

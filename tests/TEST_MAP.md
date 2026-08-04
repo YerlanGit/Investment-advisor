@@ -25,7 +25,7 @@
 > импорт), то есть когда карта действительно врёт.
 
 
-**Замер:** 59 тест-файлов · 49 модулей `src/` имеют хотя бы один адресный тест-импорт.
+**Замер:** 60 тест-файлов · 49 модулей `src/` имеют хотя бы один адресный тест-импорт.
 
 ## Модуль → тесты
 
@@ -43,7 +43,7 @@
 | `finance.black_litterman` | 3 | `test_phase18_sprint5.py` · `test_phase20_sprint_refactor.py` · `test_phase3_modules.py` |
 | `finance.broker_api` | 5 | `test_phase13_security.py` · `test_phase34_broker_outage_honesty.py` · `test_phase41_fx_base_currency.py` · `test_phase42_instrument_ssot.py` · `test_phase46_p2_maintainability.py` |
 | `finance.cds_feed` | 3 | `test_phase38_fred_memo.py` · `test_phase3_modules.py` · `test_phase4_reporting.py` |
-| `finance.contracts` | 1 | `test_contracts_results.py` |
+| `finance.contracts` | 2 | `test_contracts_golden.py` · `test_contracts_results.py` |
 | `finance.currency` | 3 | `test_phase25_math_sprint1.py` · `test_phase6_currency_h2.py` · `test_phase6_fx_feed.py` |
 | `finance.data_checks` | 1 | `test_phase35_data_checks.py` |
 | `finance.data_lineage` | 7 | `test_phase18_sprint5.py` · `test_phase19_block_audit.py` · `test_phase28_risk_methodology_audit.py` · `test_phase36_illiquid_proxy.py` · `test_phase45_data_checks_wiring.py` · `test_phase47_cove_and_fx_honesty.py` · `test_phase4_reporting.py` |
