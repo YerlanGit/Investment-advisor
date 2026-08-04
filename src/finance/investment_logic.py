@@ -11,6 +11,11 @@ from sklearn.covariance import LedoitWolf
 from finance.broker_api import RealPortfolioRequired
 from freedom_portfolio import TradernetClient, get_history_frame
 from freedom_portfolio.history import HistoryResult
+# Арх-2: SSOT ФОРМЫ возврата `analyze_all` (35 ключей, 8 потребителей).
+# Слой L0 — только typing, без логики и без обратных импортов, цикла нет.
+# Новый ключ добавляется СНАЧАЛА туда: `tests/test_contracts_results.py`
+# сверяет множества по AST и падает, если они разошлись.
+from finance.contracts import AnalyzeResults
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
@@ -1923,7 +1928,7 @@ class UniversalPortfolioManager:
         return df
 
     def analyze_all(self, source, scenario_shocks=None, profile_benchmark: str | None = None,
-                    risk_mandate: str | None = None):
+                    risk_mandate: str | None = None) -> AnalyzeResults:
         """
         profile_benchmark: Tradernet ETF ticker for the user's mandate benchmark
         (e.g. 'AGG.US' for Conservative, 'SPY.US' for Moderate, 'QQQ.US' for Aggressive).
