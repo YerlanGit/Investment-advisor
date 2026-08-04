@@ -2196,23 +2196,29 @@ class UniversalPortfolioManager:
             logger.warning("Ф-3: data_checks недоступен — проверки пропущены")
         return _dq_report
 
-    def analyze_all(self, source, scenario_shocks=None, profile_benchmark: str | None = None,
-                    risk_mandate: str | None = None) -> AnalyzeResults:
-        """
-        profile_benchmark: Tradernet ETF ticker for the user's mandate benchmark
-        (e.g. 'AGG.US' for Conservative, 'SPY.US' for Moderate, 'QQQ.US' for Aggressive).
-        When provided it is computed first and labelled 'Профильный бенчмарк' in results.
+    def _stage_price_and_fx(self, df):
+        """Стадия 2: цены позиций, валюта строк, стоимость и веса (Арх-3.4).
 
-        risk_mandate: CONSERVATIVE / MODERATE / AGGRESSIVE (or an RU/EN profile
-        name / numeric score) — drives the composite-risk-score calibration
-        (H4).  When None, the engine keeps its current mandate (MODERATE
-        default).
-        """
-        if risk_mandate is not None:
-            from finance.scoring import normalize_risk_mandate as _nrm
-            self.engine.risk_mandate = _nrm(risk_mandate)
-        df, _merged_rows, _dropped_rows = self._stage_normalize(source)
+        Самая насыщенная стадия конвейера — здесь книга превращается из списка
+        бумаг в оценённый портфель:
 
+        * загрузка истории и разрешение тикеров, включая ПРОКСИ неликвидных
+          бумаг (H-1). Прокси влияет ТОЛЬКО на риск: цена и P&L всегда от
+          реального тикера, иначе нота, купленная по 100, оценивалась бы по
+          последней цене прокси;
+        * Base Currency Approach (−37): строка в чужой валюте переводится в
+          валюту отчёта, и в реестр `fx_converted_rows` попадают только
+          ФАКТИЧЕСКИ сконвертированные — заявить пересчёт, которого не было,
+          нельзя (D-2);
+        * три гарда капитала: `NaN`, отрицательный (заём превысил активы) и
+          нулевой. Каждый говорит СВОЁ — при отрицательном капитале совет
+          «проверьте подключение» был бы прямой ложью (A-6);
+        * `weights_dict` — вход всей последующей матричной математики.
+
+        Возвращает 10 значений. Это не признак плохого разреза, а ЗАМЕР:
+        стадия действительно производит столько состояния, и все десять
+        читаются дальше по конвейеру. Их конечный дом — `_AnalysisCtx`.
+        """
         # Extract broker-provided current prices before any further processing.
         # Used as fallback for instruments with no Tradernet history
         # (KZ bonds with ISIN tickers, cash balances from Freedom API "acc").
@@ -2399,6 +2405,28 @@ class UniversalPortfolioManager:
                 "или откройте позиции — анализ невозможен на пустом счёте."
             )
         weights_dict = (df['Current_Value'] / total_portfolio_value).to_dict()
+        return (df, all_data, history_result, broker_priced_only, priced_at_cost, _rep_ccy, _fx_rows, _fx_unconvertible, total_portfolio_value, weights_dict)
+
+    def analyze_all(self, source, scenario_shocks=None, profile_benchmark: str | None = None,
+                    risk_mandate: str | None = None) -> AnalyzeResults:
+        """
+        profile_benchmark: Tradernet ETF ticker for the user's mandate benchmark
+        (e.g. 'AGG.US' for Conservative, 'SPY.US' for Moderate, 'QQQ.US' for Aggressive).
+        When provided it is computed first and labelled 'Профильный бенчмарк' in results.
+
+        risk_mandate: CONSERVATIVE / MODERATE / AGGRESSIVE (or an RU/EN profile
+        name / numeric score) — drives the composite-risk-score calibration
+        (H4).  When None, the engine keeps its current mandate (MODERATE
+        default).
+        """
+        if risk_mandate is not None:
+            from finance.scoring import normalize_risk_mandate as _nrm
+            self.engine.risk_mandate = _nrm(risk_mandate)
+        df, _merged_rows, _dropped_rows = self._stage_normalize(source)
+
+        (df, all_data, history_result, broker_priced_only, priced_at_cost,
+         _rep_ccy, _fx_rows, _fx_unconvertible, total_portfolio_value,
+         weights_dict) = self._stage_price_and_fx(df)
 
         _dq_report = self._stage_data_quality(
             df, weights_dict, all_data, _fx_unconvertible)
