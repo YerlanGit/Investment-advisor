@@ -152,7 +152,7 @@ _EXCHANGE_TO_CURRENCY: dict[str, str] = {
     # "GBX"), NOT pounds.  Mapping them straight to "GBP" fed pence prices into
     # a pounds cross-rate — a ×100 valuation error for any non-override .IL/.L
     # ticker.  GBX is converted as price÷100 → GBP → cross-rate (see
-    # convert_price_matrix / _PENCE_SCALE).  USD-settling GDRs (HSBK.IL,
+    # convert_price_matrix / PENCE_SCALE).  USD-settling GDRs (HSBK.IL,
     # KAP.IL) keep their explicit USD override below.
     "IL":    "GBX",     # London IOB — pence quotes
     "LSE":   "GBX",
@@ -296,7 +296,7 @@ FxProvider = Callable[[str, str], Optional[pd.Series]]
 # the GBP cross-rate.  The registry keeps the design open for other
 # minor-unit quotes (e.g. ZAc — South African cents) without touching the
 # conversion loop.
-_PENCE_SCALE: dict[str, tuple[str, float]] = {
+PENCE_SCALE: dict[str, tuple[str, float]] = {
     "GBX": ("GBP", 0.01),   # pence sterling → pounds
 }
 
@@ -378,7 +378,7 @@ def convert_price_matrix(
         # MAJOR unit first (÷100 → GBP), then the major-unit cross-rate
         # applies.  The FX cache is keyed by the major unit so a GBX and a
         # GBP ticker share one fetched series.
-        lookup_ccy, unit_scale = _PENCE_SCALE.get(asset_ccy, (asset_ccy, 1.0))
+        lookup_ccy, unit_scale = PENCE_SCALE.get(asset_ccy, (asset_ccy, 1.0))
 
         if lookup_ccy == rep_ccy:
             # Pence of the reporting currency itself (e.g. GBX book reported
@@ -447,3 +447,8 @@ __all__ = [
     "align_fx_to_prices",
     "convert_price_matrix",
 ]
+
+# Арх-5: имя стало ПУБЛИЧНЫМ (его импортируют другие модули — значит это
+# контракт, а не внутренность).  Приватный алиас сохранён, чтобы не трогать
+# уже написанные тесты.  `ARCHITECTURE_FOR_AGENTS.md` §4 Арх-5.
+_PENCE_SCALE = PENCE_SCALE

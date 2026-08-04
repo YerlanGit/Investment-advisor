@@ -176,7 +176,7 @@ def _build_mandate_compliance(perf_df, total_val: float,
     if not limits or perf_df is None or getattr(perf_df, "empty", True):
         return None
     try:
-        from agent.gatekeeper import _classify_to_asset_key
+        from agent.gatekeeper import classify_to_asset_key
         from profile_manager import ASSET_DISPLAY
     except Exception:
         return None
@@ -186,7 +186,7 @@ def _build_mandate_compliance(perf_df, total_val: float,
     if "Ticker" in perf_df.columns and total_val:
         for _, row in perf_df.iterrows():
             cv = _safe_float(row.get("Current_Value"), 0.0)
-            cls = _classify_to_asset_key(str(row.get("Ticker", "?")))
+            cls = classify_to_asset_key(str(row.get("Ticker", "?")))
             actual[cls] = actual.get(cls, 0.0) + (cv / total_val) * 100.0
 
     rows: list[dict] = []
@@ -307,7 +307,7 @@ def _build_regime_consistency(regime: Optional[dict],
     return {"status": "aligned", "signals": stress, "note": note}
 
 
-def _model_display_name(model_id: str) -> str:
+def model_display_name(model_id: str) -> str:
     """Convert internal model ID to short human-readable label for PDF."""
     _MAP = {
         "claude-haiku-4-5-20251001": "Claude Haiku 4.5",
@@ -1451,7 +1451,7 @@ def build_payload(results: dict, tier: str,
         "ai_ideas":              ai_ideas,
         "ideas_count":           ideas_count,
         "used_rag":              bool((ai_summary or {}).get("used_rag")),
-        "ai_model_used":         _model_display_name((ai_summary or {}).get("model_used", "")),
+        "ai_model_used":         model_display_name((ai_summary or {}).get("model_used", "")),
         # Bot @username for the report's «Применить идею» deep-link
         # (t.me/<bot>?start=scn_<n>).  Env-configurable; strips a leading «@».
         # Default is the LIVE bot handle so the link works even if BOT_USERNAME
@@ -2279,7 +2279,7 @@ def _build_integrity_checks(results: dict,
     })
 
     # 7. AI model attribution
-    model = _model_display_name((ai_summary or {}).get("model_used", ""))
+    model = model_display_name((ai_summary or {}).get("model_used", ""))
     checks.append({
         "status": "✓" if model else "—",
         "label":  "AI-модель",
@@ -2321,3 +2321,8 @@ def _build_integrity_checks(results: dict,
 
 
 __all__ = ["build_payload", "TIER_BASE", "TIER_DEEP", "TIER_SCENARIO"]
+
+# Арх-5: имя стало ПУБЛИЧНЫМ (его импортируют другие модули — значит это
+# контракт, а не внутренность).  Приватный алиас сохранён, чтобы не трогать
+# уже написанные тесты.  `ARCHITECTURE_FOR_AGENTS.md` §4 Арх-5.
+_model_display_name = model_display_name

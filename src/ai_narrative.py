@@ -231,7 +231,7 @@ def _regime_ru(label: str) -> str:
 # The property names mirror exactly what the downstream extractor reads via
 # parsed.get(...), and the per-field CONTENT rules still come from the user
 # prompt (lengths, citation tags, anti-re-aggregation directives).
-_REPORT_TOOL: dict = {
+REPORT_TOOL: dict = {
     "name": "emit_report",
     "description": ("Вернуть институциональный нарратив строго в этой структуре. "
                     "Заполни КАЖДОЕ поле по правилам из пользовательского запроса "
@@ -284,7 +284,7 @@ _REPORT_TOOL: dict = {
 
 # ── System prompt ────────────────────────────────────────────────────────────
 
-def _build_system_prompt() -> str:
+def build_system_prompt() -> str:
     here = os.path.dirname(__file__)
     for path in [
         os.path.join(here, "..", "SYSTEM_PROMPT.md"),
@@ -1919,7 +1919,7 @@ def generate_narrative(results: dict, tier: str = "base",
             # Sonnet DEEP keep separate caches — both still benefit at volume.)
             system      = [{
                 "type": "text",
-                "text": _build_system_prompt(),
+                "text": build_system_prompt(),
                 "cache_control": {"type": "ephemeral"},
             }],
             messages    = [{
@@ -1933,7 +1933,7 @@ def generate_narrative(results: dict, tier: str = "base",
             # Structured Outputs — force the report through a typed tool call so
             # the SDK returns a GUARANTEED dict.  No brace-finding, no
             # _repair_truncated_json: JSON parsing is now strictly deterministic.
-            tools       = [_REPORT_TOOL],
+            tools       = [REPORT_TOOL],
             tool_choice = {"type": "tool", "name": "emit_report"},
         )
         usage      = response.usage
@@ -2222,7 +2222,7 @@ def _remove_mandate_banned_picks(stock_picks: dict,
     contradict the mandate panel one page above.  The prompt already carries
     the rule; this post-filter GUARANTEES it even when the model (or the
     rule-based backfill) slips.  Classification reuses the same
-    `_classify_to_asset_key` the Mandate-Compliance panel and Gatekeeper use,
+    `classify_to_asset_key` the Mandate-Compliance panel and Gatekeeper use,
     so «запрещённый класс» means the same thing everywhere.  Pure/graceful:
     no mandate / no banned classes / import failure → picks unchanged.
     """
@@ -2240,7 +2240,7 @@ def _remove_mandate_banned_picks(stock_picks: dict,
     if not banned:
         return stock_picks
     try:
-        from agent.gatekeeper import _classify_to_asset_key
+        from agent.gatekeeper import classify_to_asset_key
     except Exception:                                  # pragma: no cover
         return stock_picks
     for scenario_key, scenario in stock_picks.items():
@@ -2250,7 +2250,7 @@ def _remove_mandate_banned_picks(stock_picks: dict,
         filtered, removed = [], []
         for p in original:
             tkr = str((p or {}).get("ticker", "")).strip()
-            if tkr and _classify_to_asset_key(tkr) in banned:
+            if tkr and classify_to_asset_key(tkr) in banned:
                 removed.append(tkr)
                 continue
             filtered.append(p)
@@ -2281,10 +2281,10 @@ def _mandate_allows(ticker: str, user_mandate: dict | None) -> bool:
     if not banned:
         return True
     try:
-        from agent.gatekeeper import _classify_to_asset_key
+        from agent.gatekeeper import classify_to_asset_key
     except Exception:                                  # pragma: no cover
         return True
-    return _classify_to_asset_key(str(ticker or "").strip()) not in banned
+    return classify_to_asset_key(str(ticker or "").strip()) not in banned
 
 
 def _backfill_empty_scenarios(stock_picks: dict, regime_label: str, tier: str,
@@ -2345,3 +2345,13 @@ def _backfill_empty_scenarios(stock_picks: dict, regime_label: str, tier: str,
 
 
 __all__ = ["generate_narrative"]
+
+# Арх-5: имена, которые импортирует `batch_reports`, — это фактический
+# контракт модуля, а не внутренность; приватность была неправдой.
+# `_user_prompt`/`_summarise_for_prompt` НЕ переименованы: на них завязаны
+# 8 тест-файлов, и массовая правка тестов ради косметики имени — плохой
+# размен.  Им заведены ПУБЛИЧНЫЕ синонимы, потребитель импортирует их.
+user_prompt = _user_prompt
+summarise_for_prompt = _summarise_for_prompt
+_REPORT_TOOL = REPORT_TOOL
+_build_system_prompt = build_system_prompt

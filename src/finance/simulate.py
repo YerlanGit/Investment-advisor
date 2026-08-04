@@ -77,7 +77,7 @@ from finance.scoring import composite_risk_score as _composite_risk_score  # noq
 # (investment_logic.factor_tickers) — their full 5-year history is fetched on
 # EVERY run, so the simulation prices them with real data at zero extra cost.
 # Ordering per mandate = allocation priority; `asset_key` matches
-# profile_manager limits (gatekeeper._classify_to_asset_key agrees: IEF/EMB →
+# profile_manager limits (gatekeeper.classify_to_asset_key agrees: IEF/EMB →
 # Bonds, EEM → GlobalETFs), so the buys serve the mandate bands — e.g. the
 # MODERATE-AGGRESSIVE profile REQUIRES GlobalETFs 10–40%, and a US-tech-only
 # book sits at 0% (below the lower bound).
@@ -345,14 +345,14 @@ def high_priority_target_weights(
             # We keep the OPTIMISER'S MAGNITUDE |Δw| but force the ACTION'S sign,
             # so the effect simulates executing the plan the report actually
             # recommends and the buy/sell breakdown matches the Action Plan.
-            # SSOT знака — `action_plan._action_signed_delta` (единая функция для
+            # SSOT знака — `action_plan.action_signed_delta` (единая функция для
             # строки плана и этой панели, иначе они расходятся: дефект R-1).
             # С 2026-07-29 строки плана приходят сюда УЖЕ выровненными, но вызов
             # оставлен: функция идемпотентна, а панель не должна зависеть от того,
             # кто её вызвал и в каком порядке.
-            from finance.action_plan import _action_signed_delta
+            from finance.action_plan import action_signed_delta
             _act = str(r.get("action") or "")
-            signed = _action_signed_delta(_act, dpp)
+            signed = action_signed_delta(_act, dpp)
             target[t] = cur + signed / 100.0
             hp_tickers.append(str(t)); acted.add(str(t))
             if signed < 0:

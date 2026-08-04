@@ -5,7 +5,7 @@ Message Batches API (50% token discount).
 Offline counterpart to `ai_narrative.generate_narrative`: instead of one
 synchronous call per user, scheduled/planned reports are submitted as a single
 batch, processed within ~1h, and pulled back. It reuses the EXACT same
-structured-output tool (`_REPORT_TOOL`) and cached system prompt as the live
+structured-output tool (`REPORT_TOOL`) and cached system prompt as the live
 path, so the narratives are identical in shape — only cheaper and async.
 
 Status: architecture scaffold. The Anthropic wiring is real; the two
@@ -30,7 +30,7 @@ from typing import Iterable
 # Reuse the live pipeline's building blocks so batch == sync in shape.
 from ai_narrative import (
     MODEL_BASE, MODEL_DEEP, MAX_TOKENS_BASE, MAX_TOKENS_DEEP,
-    _REPORT_TOOL, _build_system_prompt, _summarise_for_prompt, _user_prompt,
+    REPORT_TOOL, build_system_prompt, summarise_for_prompt, user_prompt,
 )
 
 logger = logging.getLogger("batch_reports")
@@ -73,23 +73,23 @@ class BatchNarrativeGenerator:
     def _request_params(self, job: BatchJob) -> dict:
         model   = MODEL_DEEP if job.tier == "deep" else MODEL_BASE
         max_tok = MAX_TOKENS_DEEP if job.tier == "deep" else MAX_TOKENS_BASE
-        summary = _summarise_for_prompt(job.results)
+        summary = summarise_for_prompt(job.results)
         return {
             "model":       model,
             "max_tokens":  max_tok,
             "temperature": 0.1,
             "system": [{                         # cached 25 KB system prompt
                 "type": "text",
-                "text": _build_system_prompt(),
+                "text": build_system_prompt(),
                 "cache_control": {"type": "ephemeral"},
             }],
             "messages": [{
                 "role": "user",
-                "content": _user_prompt(summary, tier=job.tier,
+                "content": user_prompt(summary, tier=job.tier,
                                         market_context=job.market_context,
                                         user_profile=job.user_risk_profile),
             }],
-            "tools":       [_REPORT_TOOL],       # structured outputs
+            "tools":       [REPORT_TOOL],       # structured outputs
             "tool_choice": {"type": "tool", "name": "emit_report"},
         }
 

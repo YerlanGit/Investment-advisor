@@ -78,7 +78,7 @@ DEFAULT_LIMITS = {
 _CRYPTO_UNDERLYINGS = {"COIN", "MSTR", "BTC", "ETH", "MARA", "RIOT"}
 
 
-def _classify_to_asset_key(ticker: str, _depth: int = 0) -> str:
+def classify_to_asset_key(ticker: str, _depth: int = 0) -> str:
     """Classify a ticker into the asset-class keys used by limits_dict.
 
     Leveraged/inverse ETPs are classified by their UNDERLYING (registry
@@ -100,7 +100,7 @@ def _classify_to_asset_key(ticker: str, _depth: int = 0) -> str:
                 if u in _CRYPTO_UNDERLYINGS:
                     return "Crypto"
                 if u != t:
-                    return _classify_to_asset_key(u, _depth + 1)
+                    return classify_to_asset_key(u, _depth + 1)
         except Exception:
             pass
 
@@ -264,7 +264,7 @@ def run_gatekeeper(
                     ticker = row.get(ticker_col, "?")
                     cv = row.get("Current_Value", 0) or 0
                     weight_pct = (cv / total_value) * 100
-                    asset_class = _classify_to_asset_key(ticker)
+                    asset_class = classify_to_asset_key(ticker)
                     actual_alloc[asset_class] = actual_alloc.get(asset_class, 0) + weight_pct
 
                 for asset_class, (lo, hi) in mandate_limits.items():
@@ -345,3 +345,8 @@ def run_gatekeeper(
         "warnings": warnings,
         "summary": summary
     }
+
+# Арх-5: имя стало ПУБЛИЧНЫМ (его импортируют другие модули — значит это
+# контракт, а не внутренность).  Приватный алиас сохранён, чтобы не трогать
+# уже написанные тесты.  `ARCHITECTURE_FOR_AGENTS.md` §4 Арх-5.
+_classify_to_asset_key = classify_to_asset_key
