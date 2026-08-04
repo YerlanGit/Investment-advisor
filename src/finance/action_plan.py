@@ -209,7 +209,7 @@ _SELL_ACTIONS = ("Trim", "Sell")
 _BUY_ACTIONS = ("Buy", "Strong Buy")
 
 
-def _action_signed_delta(action: str, delta_w_pp: float) -> float:
+def action_signed_delta(action: str, delta_w_pp: float) -> float:
     """Величина — от Black-Litterman, знак — от 4-Pillar ACTION.
 
     Два движка могут расходиться: BL хочет +Δw на бумаге с рейтингом Sell
@@ -394,7 +394,7 @@ def build_action_plan(*,
         # поэтому ни одна сумма не «поехала».  Для `simulate` правка идемпотентна:
         # `high_priority_target_weights` и так берёт abs() и форсирует знак сам,
         # а отбор кандидатов на реинвест читает `bl_records`, а не эти строки.
-        delta_w_pp = _action_signed_delta(action, delta_w_pp)
+        delta_w_pp = action_signed_delta(action, delta_w_pp)
 
         rows.append(AssetActionRow(
             ticker=ticker, action=action, delta_w_pp=delta_w_pp,
@@ -434,3 +434,8 @@ def build_action_plan(*,
 
 __all__ = ["AssetActionRow", "compute_levels", "build_action_plan",
            "MAX_TRADE_BLOCK_PORTFOLIO_PCT", "MANDATE_LEVEL_SCALE"]
+
+# Арх-5: имя стало ПУБЛИЧНЫМ (его импортируют другие модули — значит это
+# контракт, а не внутренность).  Приватный алиас сохранён, чтобы не трогать
+# уже написанные тесты.  `ARCHITECTURE_FOR_AGENTS.md` §4 Арх-5.
+_action_signed_delta = action_signed_delta

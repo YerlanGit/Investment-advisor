@@ -15,7 +15,7 @@ GCP Cloud Run (long-polling) · Cloud Function (RAG-ингест) · ChromaDB ·
 ## Верификация (обязательна перед каждым пушем)
 
 ```bash
-PYTHONPATH=src python -m pytest tests/ -q          # → 1252 passed, 1 xfailed
+PYTHONPATH=src python -m pytest tests/ -q          # → 1255 passed, 1 xfailed
 ```
 
 - Префикс `PYTHONPATH=src` **ОБЯЗАТЕЛЕН** — без него `import finance…` не находится
@@ -23,7 +23,7 @@ PYTHONPATH=src python -m pytest tests/ -q          # → 1252 passed, 1 xfailed
 - **Прогонов ДВА.** Второй — зеркало деплой-образа, в нём НЕТ каталога `design/`:
   ```bash
   cp -r src tests SYSTEM_PROMPT.md requirements*.txt <tmp>/ && cd <tmp>
-  PYTHONPATH=src python -m pytest tests/ -q        # → 1236 passed, 16 skipped, 1 xfailed
+  PYTHONPATH=src python -m pytest tests/ -q        # → 1239 passed, 16 skipped, 1 xfailed
   ```
   Зелёный GitHub CI НЕ означает, что деплой пройдёт: CI видит полный чекаут,
   Cloud Build — только образ. Разница 16 тестов — ровно те, что читают
@@ -49,6 +49,8 @@ PYTHONPATH=src python -m pytest tests/ -q          # → 1252 passed, 1 xfailed
 - `cloud_function/rag_engine.py` держится ИДЕНТИЧНЫМ `src/agent/rag_engine.py`.
 - Premium-бандлы `src/premium_assets/*` руками НЕ править — только через `build.sh`.
 - Расширил DEEP/BASE-контракт → обнови пин в `tests/test_phase19_block_audit.py`.
+- Приватное `_имя` НЕ ходит между модулями: нужное двоим — публичное (`tests/test_layering.py`).
+- Слой отчёта не импортирует `tg_bot`: это инверсия и затаскивание `aiogram` в рендер.
 - Крупное изменение → строка «Было/Стало» в `docs/audit/AUDIT.md`.
 
 ## Зависимости
@@ -68,7 +70,8 @@ PYTHONPATH=src python -m pytest tests/ -q          # → 1252 passed, 1 xfailed
 ```
 L4 Delivery  tg_bot.py · entrypoint.py · db_tokenomics.py · services/report_storage.py
 L3 Report    pdf_payload.py → premium_payload.py → premium_renderer.py · html_renderer.py
-             ai_narrative.py · pdf_charts.py · finance/data_lineage.py · finance/scenario_report.py
+             ai_narrative.py · pdf_charts.py · report_charts.py · report_mocks.py
+             finance/data_lineage.py · finance/scenario_report.py
 L2 Engine    finance/investment_logic.py (analyze_all) · scoring*.py · stress.py · simulate.py
              black_litterman.py · regime.py · period_returns.py · scenario_engine.py · data_checks.py
 L1 Data      freedom_portfolio/* · services/{fx_feed,macro_data}.py · finance/{broker_api,

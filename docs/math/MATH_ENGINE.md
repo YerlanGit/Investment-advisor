@@ -1,5 +1,5 @@
 # MATH_ENGINE.md — полный справочник формул квант-движка RAMP
-<!-- nav | area:math | code:src/finance/investment_logic.py,src/finance/scoring.py,src/finance/black_litterman.py,src/finance/regime.py,src/finance/stress.py | read-before:ЛЮБАЯ правка формул движка — SSOT математики -->
+<!-- nav | area:math | code:src/finance/investment_logic.py,src/finance/scoring.py,src/finance/black_litterman.py,src/finance/regime.py,src/finance/stress.py,src/finance/sec_edgar.py,src/finance/scoring_orchestrator.py,src/finance/technicals.py,src/finance/factor_decomposition.py,src/finance/period_returns.py,src/finance/action_plan.py,src/finance/currency.py,src/finance/cds_feed.py,src/services/macro_data.py,src/finance/asset_taxonomy.py | read-before:ЛЮБАЯ правка формул движка — SSOT математики -->
 
 > **Статус:** 📌 справочник · **Дата:** 2026-07-14 · Формулы сверены с кодом
 > (каждый раздел ссылается на `модуль::функция`). При изменении математики

@@ -432,8 +432,8 @@ def composite_risk_score(volatility: float, cvar: float,
 # suffix-aware version; both call sites now import it.
 #
 # NOTE: this is intentionally SEPARATE from:
-#   • gatekeeper._classify_to_asset_key  → English limits keys (Stocks_US…)
-#   • broker_api._classify_instrument    → instrument TYPE via Tradernet t_field
+#   • gatekeeper.classify_to_asset_key  → English limits keys (Stocks_US…)
+#   • broker_api.classify_instrument    → instrument TYPE via Tradernet t_field
 # Those have different output contracts and purposes; merging them would
 # break the limits lookup / broker-metadata typing.
 #

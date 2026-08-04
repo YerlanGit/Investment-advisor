@@ -13,7 +13,7 @@ from __future__ import annotations
 # All shapes mirror what build_payload / engine helpers emit, so the same
 # Jinja bindings work without modification in production.
 
-_MOCK_STRESS_SCENARIOS = [
+MOCK_STRESS_SCENARIOS = [
     {"name": "Equity DM −20%",  "port_pct": -0.158, "port_dollar":  -7900,
      "max_dd_pct": -0.220, "recovery_months": 6, "tag": "Tech sell-off"},
     {"name": "Equity EM −25%",  "port_pct": -0.075, "port_dollar":  -3750,
@@ -30,7 +30,7 @@ _MOCK_STRESS_SCENARIOS = [
      "max_dd_pct": -0.038, "recovery_months": 3, "tag": "Inflation surprise"},
 ]
 
-_MOCK_EXPECTED_EFFECT = {
+MOCK_EXPECTED_EFFECT = {
     "risk_index":      {"before": 62,    "after": 54,    "delta_pp": -8,    "favourable": True},
     "cvar_95":         {"before": -0.052,"after": -0.041,"delta_pp": 1.1,   "favourable": True},
     "sharpe":          {"before": 1.18,  "after": 1.32,  "delta_pp": 0.14,  "favourable": True},
@@ -41,7 +41,7 @@ _MOCK_EXPECTED_EFFECT = {
     "it_share":        {"before": 0.62,  "after": 0.50,  "delta_pp": -12.0, "favourable": True},
 }
 
-_MOCK_MACRO_DRIVERS = {
+MOCK_MACRO_DRIVERS = {
     "as_of":  "2026-05-14",
     "regime": "Expansion (late)",
     "series": [
@@ -56,7 +56,7 @@ _MOCK_MACRO_DRIVERS = {
     ],
 }
 
-_MOCK_REGIME = {
+MOCK_REGIME = {
     "label":      "Expansion (late)",
     "confidence": 72,
     "growth":     0.08,
@@ -68,7 +68,7 @@ _MOCK_REGIME = {
     ],
 }
 
-_MOCK_ACTION_PLAN = [
+MOCK_ACTION_PLAN = [
     {"ticker":"AAPL","action":"Sell 25%","reason":"HOTSPOT 24% риска; фиксируем часть прибыли (+25%)",
      "price":"$197.40","buy_zone":"$182–188","sell_target":"$215","stop_loss":"$175"},
     {"ticker":"KSPI","action":"Reduce 50%","reason":"TRC 22% при просадке −16.7% — концентрация выше порога",
@@ -77,14 +77,14 @@ _MOCK_ACTION_PLAN = [
      "price":"$72.18","buy_zone":"$71–73","sell_target":"$76","stop_loss":"$69"},
 ]
 
-_MOCK_HOTSPOTS = [
+MOCK_HOTSPOTS = [
     {"ticker":"AAPL","trc_pct":18.4,"reason":"TRC 18.4% при весе 50% — высокая концентрация"},
     {"ticker":"KSPI","trc_pct":22.1,"reason":"TRC 22% — KSPI EM hotspot"},
 ]
 
 # Risk waterfall — engine shape from pdf_payload._build_risk_waterfall.
 # Sample numbers chosen so sum_standalone − total = positive diversification.
-_MOCK_RISK_WATERFALL = {
+MOCK_RISK_WATERFALL = {
     "contributions": [
         {"ticker": "AAPL", "weight_pct": 50.0, "standalone_vol_pct": 24.5,
          "standalone_pp": 12.25, "standalone_share_pct": 67.3},
@@ -102,7 +102,7 @@ _MOCK_RISK_WATERFALL = {
 }
 
 # 4-pillar scoring — engine shape from pdf_payload (asset_scores).
-_MOCK_SCORE_BREAKDOWN = [
+MOCK_SCORE_BREAKDOWN = [
     {"ticker":"AAPL","fundamentals":"+2.0","valuations": "0.0","technicals":"+1.0","credit":"+1.0",
      "total":"+4.0","action":"Buy","action_color":"pos"},
     {"ticker":"KSPI","fundamentals":"+1.0","valuations":"+0.5","technicals":"-1.0","credit": "0.0",
@@ -112,7 +112,7 @@ _MOCK_SCORE_BREAKDOWN = [
 ]
 
 # Scenarios (benchmark comparison) — payload shape from pdf_payload (scenarios).
-_MOCK_SCENARIOS = [
+MOCK_SCENARIOS = [
     {"name": "S&P 500", "excess": "+5.1%", "te": "8.4%", "ir": "0.61",
      "beating": True,  "color": "pos", "pnl": "+9.1%"},
 ]
@@ -120,7 +120,7 @@ _MOCK_SCENARIOS = [
 # Multi-period returns — payload shape from results.period_returns_table.
 # Engine builds this from benchmark_comparison.periods list.  Per-period
 # shape: {period_label, portfolio_return, benchmark_return, excess}.
-_MOCK_PERIOD_RETURNS = {
+MOCK_PERIOD_RETURNS = {
     "S&P 500": {
         "periods": [
             {"label":"1М",  "portfolio":"+2.0%", "benchmark":"+1.4%", "excess":"+0.6 пп"},
@@ -141,7 +141,7 @@ _MOCK_PERIOD_RETURNS = {
 #   • expected_effect lists 3 metrics — DEEP enrichment (BASE shows 2)
 #   • sources include a stress reference chip — DEEP enrichment
 # Engine populates via AdvisorBot.generate_stock_picks(tier='deep').
-_MOCK_AI_STOCK_PICKS = {
+MOCK_AI_STOCK_PICKS = {
     "risk_reduction": [
         {"idea_num":"01", "category":"Снижение риска", "priority":"high",
          "title":"Сократить долю AAPL с 50% до ~30%",
@@ -255,3 +255,18 @@ _MOCK_AI_STOCK_PICKS = {
         },
     ],
 }
+
+# Арх-5: константы стали ПУБЛИЧНЫМИ — весь смысл модуля в том, чтобы их
+# импортировал `html_renderer` для смоук-рендера, то есть это его контракт,
+# а не внутренность.  Приватные алиасы сохранены на всякий случай.
+_MOCK_STRESS_SCENARIOS = MOCK_STRESS_SCENARIOS
+_MOCK_EXPECTED_EFFECT = MOCK_EXPECTED_EFFECT
+_MOCK_MACRO_DRIVERS = MOCK_MACRO_DRIVERS
+_MOCK_REGIME = MOCK_REGIME
+_MOCK_ACTION_PLAN = MOCK_ACTION_PLAN
+_MOCK_HOTSPOTS = MOCK_HOTSPOTS
+_MOCK_RISK_WATERFALL = MOCK_RISK_WATERFALL
+_MOCK_SCORE_BREAKDOWN = MOCK_SCORE_BREAKDOWN
+_MOCK_SCENARIOS = MOCK_SCENARIOS
+_MOCK_PERIOD_RETURNS = MOCK_PERIOD_RETURNS
+_MOCK_AI_STOCK_PICKS = MOCK_AI_STOCK_PICKS

@@ -203,16 +203,19 @@ def _mock_payload(tier: str = "base") -> dict:
         # Mirror the post-build enrichment done in tg_bot._render_v2 so the
         # new factor + CoVe sections actually populate in the smoke render.
         try:
-            from tg_bot import (_build_equity_curve_svg,
-                                  _build_factor_radar_svg,
-                                  _build_factor_betas_table)
+            # Арх-5: раньше эти билдеры импортировались из `tg_bot` — слой
+            # отчёта тянул ВВЕРХ, в слой доставки, и ради трёх SVG затаскивал
+            # весь `aiogram`.  Теперь они в `report_charts` (тот же слой L3).
+            from report_charts import (build_equity_curve_svg,
+                                       build_factor_radar_svg,
+                                       build_factor_betas_table)
             results = _mock_results()
-            payload["equity_curve_svg"] = _build_equity_curve_svg(results)
-            payload["factor_radar_svg"] = _build_factor_radar_svg(results)
-            payload["factor_betas"]     = _build_factor_betas_table(results)
+            payload["equity_curve_svg"] = build_equity_curve_svg(results)
+            payload["factor_radar_svg"] = build_factor_radar_svg(results)
+            payload["factor_betas"]     = build_factor_betas_table(results)
         except Exception as exc:
-            # tg_bot has many heavy deps (aiogram); fall back to a synthetic
-            # radar + an 8-row table so the template at least renders cleanly.
+            # Страховка сохранена: синтетический радар + таблица, чтобы шаблон
+            # отрисовался даже если билдеры почему-то недоступны.
             logger.warning("Smoke fallback for radar — tg_bot import failed: %s", exc)
             from pdf_charts import factor_radar_svg
             mock_betas = {
@@ -231,26 +234,26 @@ def _mock_payload(tier: str = "base") -> dict:
         # Synthesise mock stress/effect/macro/regime so the design pages
         # render fully populated.  Engine produces identical shapes in
         # production from real inputs (FRED + simulate_after_plan).
-        payload["stress_scenarios"] = _MOCK_STRESS_SCENARIOS
-        payload["expected_effect"]  = _MOCK_EXPECTED_EFFECT
-        payload["macro_drivers"]    = _MOCK_MACRO_DRIVERS
-        payload["regime"]           = _MOCK_REGIME
-        payload["action_plan"]      = _MOCK_ACTION_PLAN
-        payload["hotspots"]         = _MOCK_HOTSPOTS
-        payload["risk_waterfall"]   = _MOCK_RISK_WATERFALL
-        payload["score_breakdown"]  = _MOCK_SCORE_BREAKDOWN
+        payload["stress_scenarios"] = MOCK_STRESS_SCENARIOS
+        payload["expected_effect"]  = MOCK_EXPECTED_EFFECT
+        payload["macro_drivers"]    = MOCK_MACRO_DRIVERS
+        payload["regime"]           = MOCK_REGIME
+        payload["action_plan"]      = MOCK_ACTION_PLAN
+        payload["hotspots"]         = MOCK_HOTSPOTS
+        payload["risk_waterfall"]   = MOCK_RISK_WATERFALL
+        payload["score_breakdown"]  = MOCK_SCORE_BREAKDOWN
     # Shared mock keys for BOTH tiers — engine-correct shapes,
     # so the same template bindings work in production.
     if not payload.get("scenarios"):
-        payload["scenarios"] = _MOCK_SCENARIOS
+        payload["scenarios"] = MOCK_SCENARIOS
     if not payload.get("period_returns_table"):
-        payload["period_returns_table"] = _MOCK_PERIOD_RETURNS
+        payload["period_returns_table"] = MOCK_PERIOD_RETURNS
     if not payload.get("risk_waterfall") and tier == "base":
-        payload["risk_waterfall"] = _MOCK_RISK_WATERFALL
+        payload["risk_waterfall"] = MOCK_RISK_WATERFALL
     # ai_ideas is the v3 idea-card schema; populate the mock when empty so the
     # smoke render exercises the ideas grid.
     if not any((payload.get("ai_ideas") or {}).values()):
-        payload["ai_ideas"] = _MOCK_AI_STOCK_PICKS
+        payload["ai_ideas"] = MOCK_AI_STOCK_PICKS
     if not payload.get("kpi_sparklines"):
         payload["kpi_sparklines"] = _build_mock_sparklines()
     return payload
@@ -283,11 +286,12 @@ def _build_mock_sparklines() -> dict:
         "mdd_pts":    [round(x * 100, 2) for x in mdd_pts],
     }
     try:
-        from tg_bot import _sparkline_svg
+        # Арх-5: было `from tg_bot import _sparkline_svg` — инверсия слоёв.
+        from report_charts import sparkline_svg
         return {
-            "cvar_svg":   _sparkline_svg(cvar_pts,   color="#3F8F5F", invert=True),
-            "sharpe_svg": _sparkline_svg(sharpe_pts, color="#9A7A10", invert=False),
-            "mdd_svg":    _sparkline_svg(mdd_pts,    color="#C0492F", invert=True),
+            "cvar_svg":   sparkline_svg(cvar_pts,   color="#3F8F5F", invert=True),
+            "sharpe_svg": sparkline_svg(sharpe_pts, color="#9A7A10", invert=False),
+            "mdd_svg":    sparkline_svg(mdd_pts,    color="#C0492F", invert=True),
             **_pts,
         }
     except Exception:
@@ -317,10 +321,10 @@ def _build_mock_sparklines() -> dict:
 # ── Mock fixtures — moved to report_mocks.py (§−14 C-7); re-exported here so
 # existing imports (tests / CLI) keep working unchanged.
 from report_mocks import (            # noqa: E402  (import after helpers)
-    _MOCK_STRESS_SCENARIOS, _MOCK_EXPECTED_EFFECT, _MOCK_MACRO_DRIVERS,
-    _MOCK_REGIME, _MOCK_ACTION_PLAN, _MOCK_HOTSPOTS, _MOCK_RISK_WATERFALL,
-    _MOCK_SCORE_BREAKDOWN, _MOCK_SCENARIOS, _MOCK_PERIOD_RETURNS,
-    _MOCK_AI_STOCK_PICKS,
+    MOCK_STRESS_SCENARIOS, MOCK_EXPECTED_EFFECT, MOCK_MACRO_DRIVERS,
+    MOCK_REGIME, MOCK_ACTION_PLAN, MOCK_HOTSPOTS, MOCK_RISK_WATERFALL,
+    MOCK_SCORE_BREAKDOWN, MOCK_SCENARIOS, MOCK_PERIOD_RETURNS,
+    MOCK_AI_STOCK_PICKS,
 )
 
 MOCK_DATA: dict = {}   # lazily filled by the CLI / smoke entry-point below.

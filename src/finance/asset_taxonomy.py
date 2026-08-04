@@ -55,7 +55,7 @@ _DISPLAY_LABEL: dict[AssetClass, str] = {
     # долевую бумагу, тогда как панель мандата считала её «Облигации», а
     # риск-модель проксировала на `VWOB.US` (EM govt bond, §−38).  Один
     # инструмент — один ответ: нота долговая.  Структурная природа при этом
-    # НЕ теряется: `broker_api._classify_instrument` держит для неё
+    # НЕ теряется: `broker_api.classify_instrument` держит для неё
     # отдельный `Asset_Type` = «Структ.нота» в своей колонке.
     AssetClass.STRUCTURED:   "Облигации",
     AssetClass.UNKNOWN:      "Прочее",
@@ -77,8 +77,8 @@ _DISPLAY_LABEL: dict[AssetClass, str] = {
 #
 #   asset_taxonomy.from_freedom_metadata   → AssetClass (тип инструмента)
 #   scoring.classify_asset_class           → русская подпись для таблицы
-#   gatekeeper._classify_to_asset_key      → ключ ЛИМИТА мандата (Check 8)
-#   broker_api._classify_instrument        → Asset_Type строки портфеля
+#   gatekeeper.classify_to_asset_key      → ключ ЛИМИТА мандата (Check 8)
+#   broker_api.classify_instrument        → Asset_Type строки портфеля
 #   sec_edgar._should_skip                 → ходить ли в SEC за 10-K
 #   scoring_orchestrator._is_credit_not_applicable → применим ли C-пиллар
 #

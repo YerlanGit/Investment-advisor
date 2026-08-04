@@ -228,7 +228,7 @@ def build_demo_portfolio() -> pd.DataFrame:
     ниже по конвейеру демо неотличимо от брокерского фрейма, поэтому никакой
     отдельной ветки в движке не нужно.
     """
-    from finance.broker_api import _classify_instrument
+    from finance.broker_api import classify_instrument
     from finance.investment_logic import MAC3RiskEngine
 
     # Количество выводится из ЦЕЛЕВОЙ ДОЛИ и детерминированной финальной цены,
@@ -252,7 +252,7 @@ def build_demo_portfolio() -> pd.DataFrame:
             # Ставить сюда Purchase_Price НЕЛЬЗЯ — позиция уйдёт в
             # broker_priced_only и выпадет из факторной модели.
             "Broker_Current_Price": None,
-            "Asset_Type":           _classify_instrument(ticker),
+            "Asset_Type":           classify_instrument(ticker),
             "Raw_Ticker":           ticker,
         })
     for currency, amount in DEMO_CASH:

@@ -16,11 +16,16 @@
 
 Как работает
 ------------
-Читает AST каждого `tests/test_*.py`, собирает импорты модулей из `src/`
-(включая ОТЛОЖЕННЫЕ импорты внутри функций — в этом репозитории так
-импортируют `tg_bot`/`ai_narrative`, чтобы не тянуть тяжёлые зависимости на
-этапе коллекции) и считает тест-функции. Импорт — доказательство того, что
-файл реально трогает модуль; упоминание в строке — нет, поэтому строки не в счёт.
+Читает AST каждого `tests/test_*.py` и собирает импорты модулей из `src/`,
+включая ОТЛОЖЕННЫЕ импорты внутри функций — в этом репозитории так импортируют
+тяжёлые `tg_bot`/`ai_narrative`, чтобы не тянуть зависимости на этапе коллекции.
+Импорт — доказательство того, что файл реально трогает модуль; упоминание в
+строке — нет, поэтому строки не в счёт.
+
+Чисел тестов карта НЕ печатает намеренно: сумма тест-функций по файлам, которые
+импортируют модуль, — верхняя оценка, а не покрытие (один файл проверяет
+несколько модулей). Заодно это избавляет от ложных срабатываний `--check`:
+карта устаревает только при изменении СТРУКТУРЫ, а не от каждого нового теста.
 
 Запуск
 ------
@@ -45,7 +50,6 @@ TESTS = REPO_ROOT / "tests"
 OUT = TESTS / "TEST_MAP.md"
 
 _HEADER = """# TEST_MAP.md — какие тесты защищают какой модуль
-
 <!-- nav | area:tests | code:(все модули src/) | read-before:правка любого модуля — сначала посмотри, что уже защищено -->
 
 > **Файл СГЕНЕРИРОВАН** — не правь руками:
@@ -59,6 +63,17 @@ _HEADER = """# TEST_MAP.md — какие тесты защищают какой
 > Переименование `test_phase*.py` отклонено осознанно (`AUDIT §−50`): оно рвёт
 > ссылки в `AUDIT.md` и доках. Для НОВЫХ файлов конвенция другая —
 > `test_<область>_<тема>.py`, номер раунда в докстринге.
+>
+> **Почему здесь НЕТ числа тестов на модуль.** Такое число было бы суммой
+> тест-функций в файлах, которые модуль импортируют, то есть верхней оценкой,
+> а не покрытием: один файл обычно проверяет несколько модулей. Печатать его
+> рядом со словом «тесты» — ровно тот класс лукавых чисел, который в проекте
+> ловят как дефект (`AUDIT §−52`, D-5). Карта отвечает на «куда смотреть»;
+> на «насколько покрыто» отвечает coverage, а не импорты.
+>
+> Побочная выгода: без счётчиков карта не устаревает от каждого нового теста —
+> `--check` краснеет только когда изменилась СТРУКТУРА (новый файл, новый
+> импорт), то есть когда карта действительно врёт.
 """
 
 
@@ -92,18 +107,11 @@ def _imports_of(tree: ast.AST) -> set[str]:
     return found
 
 
-def _test_count(tree: ast.AST) -> int:
-    return sum(
-        1 for n in ast.walk(tree)
-        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name.startswith("test")
-    )
-
-
 def build_map() -> str:
     src_mods = _src_modules()
-    # модуль → {тест-файл: число тестов}
-    by_module: dict[str, dict[str, int]] = defaultdict(dict)
-    file_tests: dict[str, int] = {}
+    # модуль → множество тест-файлов, которые его импортируют
+    by_module: dict[str, set[str]] = defaultdict(set)
+    seen_files: list[str] = []
     untied: list[str] = []
 
     for path in sorted(TESTS.glob("test_*.py")):
@@ -112,8 +120,7 @@ def build_map() -> str:
         except SyntaxError:
             continue
         name = path.name
-        n_tests = _test_count(tree)
-        file_tests[name] = n_tests
+        seen_files.append(name)
         imported = _imports_of(tree)
         touched = set()
         for imp in imported:
@@ -128,32 +135,22 @@ def build_map() -> str:
         if not touched:
             untied.append(name)
         for mod in touched:
-            by_module[mod][name] = n_tests
+            by_module[mod].add(name)
 
     lines: list[str] = [_HEADER, ""]
-    total_files = len(file_tests)
-    total_tests = sum(file_tests.values())
+    total_files = len(seen_files)
     lines.append(
-        f"**Замер:** {total_files} тест-файлов · {total_tests} тест-функций · "
-        f"{len(by_module)} модулей `src/` под покрытием.\n"
+        f"**Замер:** {total_files} тест-файлов · "
+        f"{len(by_module)} модулей `src/` имеют хотя бы один адресный тест-импорт.\n"
     )
 
     lines.append("## Модуль → тесты\n")
-    lines.append(
-        "> **Как читать колонку «тест-функций†».** Это сумма тест-функций В ФАЙЛАХ, которые\n"
-        "> импортируют модуль, — **верхняя оценка, а не счётчик тестов именно этого модуля**:\n"
-        "> один файл обычно проверяет несколько модулей сразу. Колонка отвечает на вопрос\n"
-        "> «куда смотреть», а не «насколько покрыто». Для второго нужен coverage, а не импорты.\n"
-    )
-    lines.append("| Модуль `src/` | тест-функций† | Файлы (тест-функций в файле) |")
+    lines.append("| Модуль `src/` | Файлов | Тест-файлы |")
     lines.append("|---|---|---|")
     for mod in sorted(by_module):
-        files = by_module[mod]
-        total = sum(files.values())
-        cells = " · ".join(
-            f"`{f}` ({n})" for f, n in sorted(files.items(), key=lambda x: (-x[1], x[0]))
-        )
-        lines.append(f"| `{mod}` | {total} | {cells} |")
+        files = sorted(by_module[mod])
+        cells = " · ".join(f"`{f}`" for f in files)
+        lines.append(f"| `{mod}` | {len(files)} | {cells} |")
 
     uncovered = sorted(m for m in src_mods if m not in by_module and not m.endswith("__init__"))
     if uncovered:

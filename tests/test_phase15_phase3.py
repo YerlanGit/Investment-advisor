@@ -129,8 +129,18 @@ class PortLogReturnsTest(unittest.TestCase):
         src_root = Path(__file__).resolve().parent.parent / "src"
         bot = (src_root / "tg_bot.py").read_text()
         self.assertNotIn("@ _np.array(weights)", bot)
-        # Bot delegates the series math to the finance core (SoC).
-        self.assertIn("compute_equity_curve_series", bot)
+
+        # Арх-5 (2026-08-04): делегирование переехало на слой отчёта.
+        # Раньше здесь проверялось `assertIn("compute_equity_curve_series", bot)`
+        # — что БОТ делегирует расчёт серии в finance.  Теперь бот не делает и
+        # этого: построение SVG вместе с вызовом finance-слоя живёт в
+        # `report_charts.py` (L3), а `tg_bot` только импортирует готовый
+        # билдер.  Инвариант «математика серии — не в боте» стал СТРОЖЕ, и
+        # проверяется он там, где делегирование теперь происходит.
+        charts = (src_root / "report_charts.py").read_text()
+        self.assertIn("compute_equity_curve_series", charts)
+        self.assertNotIn("@ _np.array(weights)", charts)
+
         # The engine-series consumption lives in the finance layer now.
         fin = (src_root / "finance" / "portfolio_series.py").read_text()
         self.assertIn('results.get("port_log_returns")', fin)

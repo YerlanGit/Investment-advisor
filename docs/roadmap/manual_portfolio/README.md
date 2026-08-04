@@ -1,6 +1,6 @@
 # Manual Portfolio + миграция источника цен — разбор задания и план фаз
 
-<!-- nav | area:roadmap | code:src/finance/price_providers.py,src/finance/data_checks.py,src/finance/manual_portfolio.py,src/freedom_portfolio/history.py,src/tg_bot.py | read-before:прежде чем трогать ручной ввод портфеля, провайдеры цен или чекеры данных -->
+<!-- nav | area:roadmap | code:src/finance/price_providers.py,src/finance/data_checks.py,src/finance/manual_portfolio.py,src/freedom_portfolio/history.py,src/tg_bot.py,src/freedom_portfolio/client.py | read-before:прежде чем трогать ручной ввод портфеля, провайдеры цен или чекеры данных -->
 
 > **Что это.** Разбор задания `RAMP_ClaudeCode_Task_v2.md` (ревизия v2, 2026-07-26) против
 > фактического состояния кода на 2026-07-27 (ветка `claude/task-analysis-planning-q7e7a7`,

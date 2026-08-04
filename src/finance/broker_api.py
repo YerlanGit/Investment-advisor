@@ -103,7 +103,7 @@ def _strip_exchange_suffix(ticker: str) -> str:
 _ISIN_PATTERN = re.compile(r"^[A-Z]{2}[A-Z0-9]{9}\d$")
 
 
-def _classify_instrument(ticker: str, t_field: int | None = None) -> str:
+def classify_instrument(ticker: str, t_field: int | None = None) -> str:
     """
     Определяет тип инструмента: 'Облигация' | 'Акция' | 'ETF' | 'Кэш'
                                 | 'Крипто' | 'Структ.нота'
@@ -327,7 +327,7 @@ class FreedomConnector:
                 "Quantity":             qty,
                 "Purchase_Price":       purchase_price,
                 "Broker_Current_Price": broker_current,
-                "Asset_Type":           _classify_instrument(p.i, t_field=p.t),
+                "Asset_Type":           classify_instrument(p.i, t_field=p.t),
                 "Asset_Class":          _aclass.value,        # canonical enum value
                 "Asset_Class_Label":    _dl(_aclass),         # ready RU display label
                 "Raw_Ticker":           p.i,    # untouched broker ticker for history fetch
@@ -382,3 +382,8 @@ class FreedomConnector:
         """
         from finance.demo_portfolio import build_demo_portfolio
         return build_demo_portfolio()
+
+# Арх-5: имя стало ПУБЛИЧНЫМ (его импортируют другие модули — значит это
+# контракт, а не внутренность).  Приватный алиас сохранён, чтобы не трогать
+# уже написанные тесты.  `ARCHITECTURE_FOR_AGENTS.md` §4 Арх-5.
+_classify_instrument = classify_instrument
