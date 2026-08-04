@@ -2038,21 +2038,26 @@ class UniversalPortfolioManager:
             if actual_col: df = df.rename(columns={actual_col: standard})
         return df
 
-    def analyze_all(self, source, scenario_shocks=None, profile_benchmark: str | None = None,
-                    risk_mandate: str | None = None) -> AnalyzeResults:
-        """
-        profile_benchmark: Tradernet ETF ticker for the user's mandate benchmark
-        (e.g. 'AGG.US' for Conservative, 'SPY.US' for Moderate, 'QQQ.US' for Aggressive).
-        When provided it is computed first and labelled 'Профильный бенчмарк' in results.
+    def _stage_normalize(self, source) -> "tuple[pd.DataFrame, list, list]":
+        """Стадия 1: проверить ИСТОЧНИК книги и привести её к канону (Арх-3.2).
 
-        risk_mandate: CONSERVATIVE / MODERATE / AGGRESSIVE (or an RU/EN profile
-        name / numeric score) — drives the composite-risk-score calibration
-        (H4).  When None, the engine keeps its current mandate (MODERATE
-        default).
+        Здесь портфель ещё не считается — только доказывается, что считать
+        ЕСТЬ ЧТО и что строки пригодны:
+
+        * три гейта источника (`_ramp_is_fallback` / `_ramp_is_mock` / пустой
+          фрейм). Гейт fallback-мока — не формальность: без него отчёт
+          строился бы по синтетике, когда брокер молчит, и пользователь принял
+          бы его за свой (инцидент `AUDIT §−30`);
+        * `_standardize_columns` — имена колонок;
+        * `_normalize_positions` — склейка дублей позиции (A-1) и отбрасывание
+          строк с нечисловым количеством (A-2). Обе операции обязаны быть
+          НАЗВАНЫ пользователю, поэтому возвращаются реестры, а не молча
+          применяются.
+
+        Возвращает `(df, merged_rows, dropped_rows)` — вход остальных стадий.
+        Самая изолированная стадия конвейера (вход 0 переменных), поэтому
+        вынесена первой: на ней обкатан приём.
         """
-        if risk_mandate is not None:
-            from finance.scoring import normalize_risk_mandate as _nrm
-            self.engine.risk_mandate = _nrm(risk_mandate)
         if isinstance(source, pd.DataFrame): raw_df = source
         else: raise ValueError("Неверный источник данных.")
 
@@ -2106,6 +2111,24 @@ class UniversalPortfolioManager:
         df = self._standardize_columns(raw_df)
         df, _merged_rows, _dropped_rows = self._normalize_positions(df)
         df = df.set_index('Ticker')
+        return df, _merged_rows, _dropped_rows
+
+    def analyze_all(self, source, scenario_shocks=None, profile_benchmark: str | None = None,
+                    risk_mandate: str | None = None) -> AnalyzeResults:
+        """
+        profile_benchmark: Tradernet ETF ticker for the user's mandate benchmark
+        (e.g. 'AGG.US' for Conservative, 'SPY.US' for Moderate, 'QQQ.US' for Aggressive).
+        When provided it is computed first and labelled 'Профильный бенчмарк' in results.
+
+        risk_mandate: CONSERVATIVE / MODERATE / AGGRESSIVE (or an RU/EN profile
+        name / numeric score) — drives the composite-risk-score calibration
+        (H4).  When None, the engine keeps its current mandate (MODERATE
+        default).
+        """
+        if risk_mandate is not None:
+            from finance.scoring import normalize_risk_mandate as _nrm
+            self.engine.risk_mandate = _nrm(risk_mandate)
+        df, _merged_rows, _dropped_rows = self._stage_normalize(source)
 
         # Extract broker-provided current prices before any further processing.
         # Used as fallback for instruments with no Tradernet history
