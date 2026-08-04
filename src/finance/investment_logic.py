@@ -2113,6 +2113,89 @@ class UniversalPortfolioManager:
         df = df.set_index('Ticker')
         return df, _merged_rows, _dropped_rows
 
+    def _stage_data_quality(self, df, weights_dict, all_data, _fx_unconvertible):
+        """Стадия 3: чекеры качества входных данных, блоки B и C (Арх-3.2→3.3).
+
+        Отвечает на вопрос «можно ли вообще строить отчёт по этим данным» и
+        при уровне BLOCK поднимает `DataQualityBlocked` — отказ БЕЗ списания
+        токена (списание живёт после доставки отчёта, поэтому исключение
+        здесь гарантирует, что пользователь не заплатил).
+
+        Имена параметров совпадают с прежними локальными переменными
+        намеренно: тело стадии перенесено ДОСЛОВНО, и это главная опора
+        доказательства, что разрез ничего не изменил.
+
+        Возвращает отчёт чекеров (уровень DEGRADE) либо `None`, если модуль
+        `data_checks` недоступен.
+        """
+        # ── Ф-3 (2026-08-02): ЧЕКЕРЫ КАЧЕСТВА ДАННЫХ, блоки B и C ───────────
+        # `data_checks.py` (526 строк, 56 тестов) полгода existed как библиотека
+        # без потребителя.  Точка вызова — ЗДЕСЬ, а не в слое бота, как
+        # предполагал `PHASE_03 §3a.1`: бот между Шагом 1 и Шагом 2 знает
+        # количество и цену покупки, но НЕ знает текущую стоимость и веса —
+        # без них C-8 выродился бы в подсчёт тикеров (ровно ловушка Т-6,
+        # ради которой блок C и написан).  Здесь оба есть, а дорогая часть
+        # (факторная модель, SEC, скоринг) ещё не запускалась.
+        #
+        # 🔴 МОСТ ПРОСТРАНСТВ ИМЁН — без него подключение блокировало БЫ ВСЕХ.
+        # Замерено на демо-портфеле: `values` идут ключами ПОРТФЕЛЯ (`AAPL`,
+        # `TLT`), а `data.columns` — РАЗРЕШЁННЫМИ (`AAPL.US`, `TLT.US`), и
+        # C-8 доложил «не загружены цены по 7 из 9 бумаг (70% стоимости)» на
+        # книге, которая строит нормальный отчёт.  Поэтому и веса, и стоимости
+        # переводятся в namespace матрицы через `resolve_tickers` — тот же
+        # SSOT, что решает, что скачивать и что класть в фактор-модель.
+        def _dq_requested_days() -> int:
+            """То же окно, что запросил `get_market_data` — C-4 отличает
+            УСЕЧЕНИЕ выгрузки от молодого листинга только по нему."""
+            try:
+                return max(90, min(3650, int(os.getenv("HISTORY_LOOKBACK_DAYS", "1825"))))
+            except (TypeError, ValueError):
+                return 1825
+
+        _dq_report = None
+        try:
+            from finance import data_checks as _dc
+            _profile = _dc.profile_for_source(self.engine.price_source)
+
+            def _res_key(_t):
+                _r = self.engine.resolve_tickers([_t])
+                return _r[0] if _r else str(_t)
+
+            # 🔴 При КОЛЛИЗИИ ключей веса и стоимости СУММИРУЮТСЯ, а не
+            # затираются: две неликвидные бумаги законно делят один прокси
+            # (§−38 намеренно сохраняет дубликаты в `valid_resolved`).
+            # Наивный dict-comprehension схлопывал их в одну запись, Σ весов
+            # переставала равняться 1.0, и C-10 объявлял «внутреннюю ошибку
+            # расчёта долей» на совершенно корректной книге — поймано
+            # регрессией (`test_two_illiquid_names_sharing_one_proxy`).
+            _dq_weights: dict[str, float] = {}
+            _dq_values: dict[str, float] = {}
+            for _t in df.index:
+                _k = _res_key(_t)
+                _dq_weights[_k] = _dq_weights.get(_k, 0.0) + \
+                    float(weights_dict.get(_t, 0.0) or 0.0)
+                _dq_values[_k] = _dq_values.get(_k, 0.0) + \
+                    float(df.at[_t, 'Current_Value'] or 0.0)
+            _dq_report = _dc.merge_reports(
+                _dc.check_price_matrix(all_data, profile=_profile),
+                _dc.check_portfolio_sufficiency(
+                    data=all_data, weights=_dq_weights, values=_dq_values,
+                    profile=_profile,
+                    requested_days=_dq_requested_days(),
+                    unconvertible_currencies=_fx_unconvertible,
+                ),
+            )
+            for _f in _dq_report.findings:
+                logger.info("Ф-3 %s [%s] %s", _f.id, _f.level.value, _f.message)
+            if _dq_report.blocked:
+                # Отказ БЕЗ списания токена: та же ветка, что `RealPortfolioRequired`
+                # (списание живёт после CHECKPOINT 3, поэтому исключение здесь
+                # гарантирует, что пользователь не заплатил).
+                raise _dc.DataQualityBlocked(_dq_report)
+        except ImportError:                            # pragma: no cover
+            logger.warning("Ф-3: data_checks недоступен — проверки пропущены")
+        return _dq_report
+
     def analyze_all(self, source, scenario_shocks=None, profile_benchmark: str | None = None,
                     risk_mandate: str | None = None) -> AnalyzeResults:
         """
@@ -2317,72 +2400,8 @@ class UniversalPortfolioManager:
             )
         weights_dict = (df['Current_Value'] / total_portfolio_value).to_dict()
 
-        # ── Ф-3 (2026-08-02): ЧЕКЕРЫ КАЧЕСТВА ДАННЫХ, блоки B и C ───────────
-        # `data_checks.py` (526 строк, 56 тестов) полгода existed как библиотека
-        # без потребителя.  Точка вызова — ЗДЕСЬ, а не в слое бота, как
-        # предполагал `PHASE_03 §3a.1`: бот между Шагом 1 и Шагом 2 знает
-        # количество и цену покупки, но НЕ знает текущую стоимость и веса —
-        # без них C-8 выродился бы в подсчёт тикеров (ровно ловушка Т-6,
-        # ради которой блок C и написан).  Здесь оба есть, а дорогая часть
-        # (факторная модель, SEC, скоринг) ещё не запускалась.
-        #
-        # 🔴 МОСТ ПРОСТРАНСТВ ИМЁН — без него подключение блокировало БЫ ВСЕХ.
-        # Замерено на демо-портфеле: `values` идут ключами ПОРТФЕЛЯ (`AAPL`,
-        # `TLT`), а `data.columns` — РАЗРЕШЁННЫМИ (`AAPL.US`, `TLT.US`), и
-        # C-8 доложил «не загружены цены по 7 из 9 бумаг (70% стоимости)» на
-        # книге, которая строит нормальный отчёт.  Поэтому и веса, и стоимости
-        # переводятся в namespace матрицы через `resolve_tickers` — тот же
-        # SSOT, что решает, что скачивать и что класть в фактор-модель.
-        def _dq_requested_days() -> int:
-            """То же окно, что запросил `get_market_data` — C-4 отличает
-            УСЕЧЕНИЕ выгрузки от молодого листинга только по нему."""
-            try:
-                return max(90, min(3650, int(os.getenv("HISTORY_LOOKBACK_DAYS", "1825"))))
-            except (TypeError, ValueError):
-                return 1825
-
-        _dq_report = None
-        try:
-            from finance import data_checks as _dc
-            _profile = _dc.profile_for_source(self.engine.price_source)
-
-            def _res_key(_t):
-                _r = self.engine.resolve_tickers([_t])
-                return _r[0] if _r else str(_t)
-
-            # 🔴 При КОЛЛИЗИИ ключей веса и стоимости СУММИРУЮТСЯ, а не
-            # затираются: две неликвидные бумаги законно делят один прокси
-            # (§−38 намеренно сохраняет дубликаты в `valid_resolved`).
-            # Наивный dict-comprehension схлопывал их в одну запись, Σ весов
-            # переставала равняться 1.0, и C-10 объявлял «внутреннюю ошибку
-            # расчёта долей» на совершенно корректной книге — поймано
-            # регрессией (`test_two_illiquid_names_sharing_one_proxy`).
-            _dq_weights: dict[str, float] = {}
-            _dq_values: dict[str, float] = {}
-            for _t in df.index:
-                _k = _res_key(_t)
-                _dq_weights[_k] = _dq_weights.get(_k, 0.0) + \
-                    float(weights_dict.get(_t, 0.0) or 0.0)
-                _dq_values[_k] = _dq_values.get(_k, 0.0) + \
-                    float(df.at[_t, 'Current_Value'] or 0.0)
-            _dq_report = _dc.merge_reports(
-                _dc.check_price_matrix(all_data, profile=_profile),
-                _dc.check_portfolio_sufficiency(
-                    data=all_data, weights=_dq_weights, values=_dq_values,
-                    profile=_profile,
-                    requested_days=_dq_requested_days(),
-                    unconvertible_currencies=_fx_unconvertible,
-                ),
-            )
-            for _f in _dq_report.findings:
-                logger.info("Ф-3 %s [%s] %s", _f.id, _f.level.value, _f.message)
-            if _dq_report.blocked:
-                # Отказ БЕЗ списания токена: та же ветка, что `RealPortfolioRequired`
-                # (списание живёт после CHECKPOINT 3, поэтому исключение здесь
-                # гарантирует, что пользователь не заплатил).
-                raise _dc.DataQualityBlocked(_dq_report)
-        except ImportError:                            # pragma: no cover
-            logger.warning("Ф-3: data_checks недоступен — проверки пропущены")
+        _dq_report = self._stage_data_quality(
+            df, weights_dict, all_data, _fx_unconvertible)
 
         # MAC3 Structural Risk.
         # Исключены из факторной модели:
