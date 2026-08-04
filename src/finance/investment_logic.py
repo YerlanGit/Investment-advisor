@@ -48,7 +48,7 @@ import pandas as pd
 import numpy as np
 import logging
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Optional
 from sklearn.linear_model import Ridge
 from sklearn.covariance import LedoitWolf
 
@@ -1797,6 +1797,73 @@ class MarketDataPreview:
     proxy_map: dict = field(default_factory=dict)   # original → proxy ticker
 
 
+@dataclass
+class _AnalysisCtx:
+    """Состояние ОДНОГО прогона `analyze_all` (Арх-3.1).
+
+    Зачем контекст, а не передача аргументами
+    -----------------------------------------
+    Замер потока данных показал, что он СТРОГО НАКАПЛИВАЮЩИЙ: множество живых
+    переменных на границах растёт от 3 до 34, минимума в середине нет — почти
+    всё, что посчитано, доживает до финальной сборки (она читает 41 имя).
+    Значит «узких» швов, где стадии передавали бы друг другу два-три значения,
+    не существует, и цепочка функций дала бы сигнатуры на 20–34 параметра —
+    читать их тяжелее, чем нынешнюю простыню, то есть цель фазы была бы
+    провалена. Стадии вместо этого ДОПИСЫВАЮТ поля сюда.
+
+    Что это НЕ является
+    -------------------
+    Не хранилищем состояния движка. Шесть каналов (`_last_psd_repair`,
+    `_last_regression_nobs`, `_last_ortho_betas`, `_last_sparse_dropped`,
+    `_last_port_log_returns`, `_last_fx_records`) по-прежнему живут на
+    `self.engine` и читаются через `getattr`. Именно они задают ПОРЯДОК
+    стадий, поэтому переставлять стадии нельзя — молча изменятся числа.
+
+    Поля добавляются по мере выноса стадий (`ARCHITECTURE_FOR_AGENTS.md §4`).
+    Имена совпадают с прежними локальными переменными намеренно: так диф
+    каждой подзадачи остаётся читаемым, а golden-фикстура сверяется побайтово.
+    """
+
+    # ── стадия 1: нормализация книги ─────────────────────────────────────────
+    df: Any
+    _merged_rows: Any
+    _dropped_rows: Any
+    # ── стадия 2: цены, валюта, веса ─────────────────────────────────────────
+    total_portfolio_value: float
+    weights_dict: Any
+    priced_at_cost: Any
+    _fx_rows: Any
+    _rep_ccy: Any
+    history_result: Any
+    # ── стадия 3: чекеры качества ────────────────────────────────────────────
+    _dq_report: Any
+    # ── стадия 4: риск-модель ────────────────────────────────────────────────
+    cov_matrix: Any
+    port_metrics: Any
+    perf: Any
+    _model_uncovered: Any
+    # ── стадия 5: бенчмарки, периоды, стресс ────────────────────────────────
+    profile_benchmark: Any
+    benchmark_factor_profile: Any
+    benchmark_results: Any
+    period_returns_table: Any
+    return_coverage: Any
+    stress_scenarios: Any
+    # ── стадия 6: секторы, скоринг, режим ────────────────────────────────────
+    sector_exposure: Any
+    factor_scores: Any
+    macro_drivers: Any
+    regime_reading: Any
+    technicals_map: Any
+    asset_scores: Any
+    cds_summary: Any
+    # ── стадия 7: наложения ──────────────────────────────────────────────────
+    bl_records: Any
+    action_plan_rows: Any
+    expected_effect: Any
+    smart_money: Any
+
+
 class UniversalPortfolioManager:
     COLUMN_ALIASES = {
         'Ticker': ['Symbol', 'Asset', 'Тикер', 'Name'],
@@ -3094,23 +3161,74 @@ class UniversalPortfolioManager:
             logger.warning("Expected-effect simulator skipped: %s", exc)
             expected_effect = None
 
+
+        # ── Арх-3.1: состояние прогона собрано в один контекст ─────────────
+        # Пока это ЧИСТОЕ добавление: локальные переменные выше не тронуты,
+        # контекст лишь фиксирует, ЧТО именно доезжает до сборки результата.
+        # Так доказывается достаточность контекста ДО того, как резать
+        # функцию на стадии (`ARCHITECTURE_FOR_AGENTS.md §4 Арх-3`).
+        ctx = _AnalysisCtx(
+            _dq_report=_dq_report,
+            _dropped_rows=_dropped_rows,
+            _fx_rows=_fx_rows,
+            _merged_rows=_merged_rows,
+            _model_uncovered=_model_uncovered,
+            _rep_ccy=_rep_ccy,
+            action_plan_rows=action_plan_rows,
+            asset_scores=asset_scores,
+            benchmark_factor_profile=benchmark_factor_profile,
+            benchmark_results=benchmark_results,
+            bl_records=bl_records,
+            cds_summary=cds_summary,
+            cov_matrix=cov_matrix,
+            df=df,
+            expected_effect=expected_effect,
+            factor_scores=factor_scores,
+            history_result=history_result,
+            macro_drivers=macro_drivers,
+            perf=perf,
+            period_returns_table=period_returns_table,
+            port_metrics=port_metrics,
+            priced_at_cost=priced_at_cost,
+            profile_benchmark=profile_benchmark,
+            regime_reading=regime_reading,
+            return_coverage=return_coverage,
+            sector_exposure=sector_exposure,
+            smart_money=smart_money,
+            stress_scenarios=stress_scenarios,
+            technicals_map=technicals_map,
+            total_portfolio_value=total_portfolio_value,
+            weights_dict=weights_dict,
+        )
+        return self._build_results(ctx)
+
+    def _build_results(self, ctx: "_AnalysisCtx") -> AnalyzeResults:
+        """ЕДИНСТВЕННОЕ место сборки контракта `results{}` (Арх-3.1).
+
+        Сюда же переехал расчёт плеча/экспозиции — он и есть стадия 8
+        «сборка результата»: читает готовые веса, ничего не считает заново.
+
+        Форма возврата описана в `finance/contracts.py`; `tests/test_contracts_results.py`
+        сверяет ключи ЭТОГО литерала с контрактом по AST, а
+        `tests/test_contracts_golden.py` — сами числа с эталоном.
+        """
         # ── Leverage / gross exposure (read-only, AFTER risk math) ─────────
         # Margin debt manifests as a NEGATIVE weight on the cash leg (e.g.
         # USD wt = -17.7% → leverage 117.7%).  We compute these metrics
         # AFTER all matrix maths so the linear-algebra pipeline still
         # consumes the raw weights_dict unchanged.
         _NON_RISK = self.engine.NON_RISK_ASSETS
-        long_weight = sum(max(0.0, float(w)) for w in weights_dict.values())
+        long_weight = sum(max(0.0, float(w)) for w in ctx.weights_dict.values())
         # R-7 (2026-08-02): валовая экспозиция — Σ|w| по ПОЗИЦИЯМ, без кэша.
         # Маржинальный остаток — это ФИНАНСИРОВАНИЕ, а не рыночная позиция:
         # прежний Σ|w| по всем строкам считал |−20.2%| маржи как экспозицию и
         # печатал «валовая ≈140.4%» рядом с собственным «плечо ≈1.2x» в одном
         # предложении вердикта (экономически 120.2% = leverage_ratio × NAV).
         # Для книги с шортами формула остаётся верной: лонги + |шорты|.
-        gross_expo  = sum(abs(float(w)) for t, w in weights_dict.items()
+        gross_expo  = sum(abs(float(w)) for t, w in ctx.weights_dict.items()
                           if str(t).upper() not in _NON_RISK)
-        net_expo    = sum(float(w)           for w in weights_dict.values())
-        cash_weight = sum(float(weights_dict.get(t, 0.0)) for t in weights_dict
+        net_expo    = sum(float(w)           for w in ctx.weights_dict.values())
+        cash_weight = sum(float(ctx.weights_dict.get(t, 0.0)) for t in ctx.weights_dict
                           if str(t).upper() in _NON_RISK)
         # Strict threshold guards float noise on a fully-funded book.
         is_leveraged = cash_weight < -0.001
@@ -3124,11 +3242,11 @@ class UniversalPortfolioManager:
         }
 
         return {
-            "performance_table": perf,
-            "risk_matrix": cov_matrix,
-            "total_portfolio_pnl": df['PnL'].sum(),
-            "total_value": total_portfolio_value,
-            "portfolio_metrics": port_metrics,
+            "performance_table": ctx.perf,
+            "risk_matrix": ctx.cov_matrix,
+            "total_portfolio_pnl": ctx.df['PnL'].sum(),
+            "total_value": ctx.total_portfolio_value,
+            "portfolio_metrics": ctx.port_metrics,
             "leverage_metrics":  leverage_metrics,
             # H3 (Phase-3): date-indexed portfolio log-return series for the
             # Telegram equity-curve SVG — the bot no longer recomputes it.
@@ -3136,17 +3254,17 @@ class UniversalPortfolioManager:
             # H4: the mandate actually used for the composite-risk calibration.
             "risk_mandate":      getattr(self.engine, "risk_mandate", "MODERATE"),
             "risk_free_rate": self.engine.current_rfr_annual,
-            "benchmark_comparison": benchmark_results,
+            "benchmark_comparison": ctx.benchmark_results,
             # The user's chosen benchmark TICKER (e.g. QQQ.US), so downstream
             # visuals (equity-curve line) can honour the actual choice instead
             # of defaulting to the first concrete benchmark.  None → no profile
             # benchmark selected.
-            "profile_benchmark_ticker": profile_benchmark,
+            "profile_benchmark_ticker": ctx.profile_benchmark,
             # B1 (2026-07-17): факторные беты мандатного бенчмарка для секции
             # «Факторное разложение» — {ticker, name, betas} или None.
-            "benchmark_factor_profile": benchmark_factor_profile,
-            "period_returns_table": period_returns_table,
-            "return_series_coverage": return_coverage,
+            "benchmark_factor_profile": ctx.benchmark_factor_profile,
+            "period_returns_table": ctx.period_returns_table,
+            "return_series_coverage": ctx.return_coverage,
             # H-1 (2026-07-29): раскрытие подмены неликвидных бумаг.
             # `proxy_substitutions` — {оригинал: прокси}: риск и беты этих строк
             # посчитаны по ликвидному индексу, а не по самой бумаге.
@@ -3155,10 +3273,10 @@ class UniversalPortfolioManager:
             # Отчёт ОБЯЗАН показать оба списка: иначе пользователь не поймёт,
             # почему у его структурной ноты «чужая» бета.
             "proxy_substitutions": {
-                str(t): p for t in df.index
+                str(t): p for t in ctx.df.index
                 if (p := self.engine.proxy_for(t)) is not None
             },
-            "priced_at_cost": sorted(str(t) for t in priced_at_cost),
+            "priced_at_cost": sorted(str(t) for t in ctx.priced_at_cost),
             # A-1 / A-2 (2026-08-01): что движок сделал с входным фреймом ДО
             # математики.  `PHASE_04 §3.2` требует показывать результат склейки
             # пользователю, а отброшенная строка обязана быть названа — молча
@@ -3166,34 +3284,34 @@ class UniversalPortfolioManager:
             # −37: какие строки переведены в базовую валюту и по какому курсу.
             # Отчёт ОБЯЗАН это показать: доходность таких позиций — в валюте
             # инструмента (единый курс сокращается), а не долларовая.
-            "fx_converted_rows": _fx_rows,
+            "fx_converted_rows": ctx._fx_rows,
             # Доля портфеля вне факторной модели (короткая история котировок).
-            "model_uncovered": _model_uncovered,
+            "model_uncovered": ctx._model_uncovered,
             # Ф-3: DEGRADE-находки чекеров. BLOCK сюда не попадает — он
             # выбросил исключение выше и отчёта не будет вовсе.
             "data_quality": {
-                "profile": _dq_report.profile.value if _dq_report else None,
+                "profile": ctx._dq_report.profile.value if ctx._dq_report else None,
                 "findings": [
                     {"id": f.id, "level": f.level.value, "message": f.message,
                      "ticker": f.ticker}
-                    for f in (_dq_report.findings if _dq_report else [])
+                    for f in (ctx._dq_report.findings if ctx._dq_report else [])
                 ],
             },
-            "reporting_currency": _rep_ccy,
-            "merged_positions": [{"ticker": t, "rows": n} for t, n in _merged_rows],
-            "dropped_rows":     [{"ticker": t, "reason": r} for t, r in _dropped_rows],
-            "stress_scenarios": stress_scenarios,
-            "expected_effect": expected_effect,
-            "cds_summary":     cds_summary,
-            "history_result": history_result,
-            "sector_exposure": sector_exposure,
-            "factor_scores": factor_scores,
+            "reporting_currency": ctx._rep_ccy,
+            "merged_positions": [{"ticker": t, "rows": n} for t, n in ctx._merged_rows],
+            "dropped_rows":     [{"ticker": t, "reason": r} for t, r in ctx._dropped_rows],
+            "stress_scenarios": ctx.stress_scenarios,
+            "expected_effect": ctx.expected_effect,
+            "cds_summary":     ctx.cds_summary,
+            "history_result": ctx.history_result,
+            "sector_exposure": ctx.sector_exposure,
+            "factor_scores": ctx.factor_scores,
             # Phase 2 additions
-            "regime":            regime_reading.as_dict() if regime_reading else None,
-            "macro_drivers":     macro_drivers,
+            "regime":            ctx.regime_reading.as_dict() if ctx.regime_reading else None,
+            "macro_drivers":     ctx.macro_drivers,
             "technicals":        {t: {"score": r.score, "raw": r.raw,
                                        "components": r.components}
-                                  for t, r in technicals_map.items()},
+                                  for t, r in ctx.technicals_map.items()},
             "asset_scores":      {t: {
                                       "fundamentals": s.fundamentals,
                                       "valuations":   s.valuations,
@@ -3204,10 +3322,10 @@ class UniversalPortfolioManager:
                                       "hotspot":      s.hotspot,
                                       "credit_applicable": getattr(s, "credit_applicable", True),
                                       "fundamentals_applicable": getattr(s, "fundamentals_applicable", True),
-                                  } for t, s in asset_scores.items()},
+                                  } for t, s in ctx.asset_scores.items()},
             # Phase 3 additions
-            "black_litterman":   bl_records,
-            "action_plan":       action_plan_rows,
+            "black_litterman":   ctx.bl_records,
+            "action_plan":       ctx.action_plan_rows,
             # BLOCK 3.5 / B2.4 — insider (Form-4) signals for the DEEP layer.
-            "smart_money":       smart_money,
+            "smart_money":       ctx.smart_money,
         }
