@@ -47,54 +47,65 @@ class GoldenResultsTest(unittest.TestCase):
     """`analyze_all` на детерминированном входе даёт зафиксированный результат."""
 
     def test_snapshot_matches(self) -> None:
-        produced = gs.fixture_json()
+        for scenario in gs.SCENARIOS:
+            with self.subTest(scenario=scenario):
+                produced = gs.fixture_json(scenario=scenario)
+                path = gs.fixture_path(scenario)
 
+                if os.getenv("GOLDEN_UPDATE") == "1":
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text(produced, encoding="utf-8")
+                    continue
+
+                self.assertTrue(
+                    path.exists(),
+                    f"нет эталона {path} — создай его: GOLDEN_UPDATE=1 "
+                    "PYTHONPATH=src python -m pytest tests/test_contracts_golden.py",
+                )
+                expected = path.read_text(encoding="utf-8")
+                if produced == expected:
+                    continue
+
+                # Расхождение: показать ИМЕННО те ключи, которые разошлись, —
+                # иначе разбор 50 KB диффа превращается в археологию.
+                import json
+                got, want = json.loads(produced), json.loads(expected)
+                changed = sorted(k for k in set(got) | set(want)
+                                 if got.get(k) != want.get(k))
+                self.fail(
+                    f"сценарий «{scenario}» разошёлся с эталоном.\n"
+                    f"расходятся ключи ({len(changed)}): {changed}\n"
+                    f"sha256 получено={gs.fixture_sha256(produced)[:16]} "
+                    f"ожидалось={gs.fixture_sha256(expected)[:16]}\n"
+                    "🔴 В фазе Арх-3 это ОШИБКА РАЗРЕЗА, а не повод обновить снимок."
+                )
         if os.getenv("GOLDEN_UPDATE") == "1":
-            gs.FIXTURE_PATH.parent.mkdir(parents=True, exist_ok=True)
-            gs.FIXTURE_PATH.write_text(produced, encoding="utf-8")
-            self.skipTest(f"снимок перезаписан: {gs.FIXTURE_PATH}")
-
-        self.assertTrue(
-            gs.FIXTURE_PATH.exists(),
-            f"нет эталона {gs.FIXTURE_PATH} — создай его: "
-            "GOLDEN_UPDATE=1 PYTHONPATH=src python -m pytest tests/test_contracts_golden.py",
-        )
-        expected = gs.FIXTURE_PATH.read_text(encoding="utf-8")
-        if produced == expected:
-            return
-
-        # Расхождение: показать ИМЕННО те ключи, которые разошлись, — иначе
-        # разбор 42 KB диффа превращается в археологию.
-        import json
-        got, want = json.loads(produced), json.loads(expected)
-        changed = sorted(k for k in set(got) | set(want) if got.get(k) != want.get(k))
-        self.fail(
-            "результат analyze_all разошёлся с эталоном.\n"
-            f"расходятся ключи ({len(changed)}): {changed}\n"
-            f"sha256 получено={gs.fixture_sha256(produced)[:16]} "
-            f"ожидалось={gs.fixture_sha256(expected)[:16]}\n"
-            "🔴 В фазе Арх-3 это ОШИБКА РАЗРЕЗА, а не повод обновить снимок."
-        )
+            self.skipTest("снимки перезаписаны")
 
     def test_snapshot_covers_full_contract(self) -> None:
-        """Снимок обязан покрывать ВЕСЬ контракт, а не удобное подмножество."""
+        """Каждый снимок покрывает ВЕСЬ контракт, а не удобное подмножество."""
         import json
 
         from finance.contracts import RESULTS_KEYS
 
-        snapshot = json.loads(gs.FIXTURE_PATH.read_text(encoding="utf-8"))
-        missing = sorted(set(RESULTS_KEYS) - set(snapshot))
-        self.assertFalse(missing, f"эталон не содержит ключей контракта: {missing}")
+        for scenario in gs.SCENARIOS:
+            with self.subTest(scenario=scenario):
+                snapshot = json.loads(gs.fixture_path(scenario).read_text(encoding="utf-8"))
+                missing = sorted(set(RESULTS_KEYS) - set(snapshot))
+                self.assertFalse(missing, f"эталон не содержит ключей контракта: {missing}")
 
     def test_run_is_deterministic(self) -> None:
-        """Два прогона подряд дают идентичный текст.
+        """Два прогона подряд дают идентичный текст — для КАЖДОГО сценария.
 
         Без этого снимок бесполезен: «расхождение» нельзя будет отличить от
         собственного шума прогона. Проверяется каждый раз, а не однократно при
         создании, потому что недетерминизм может ПОЯВИТЬСЯ (новый вызов
         времени, случайный сид, порядок словаря из внешней библиотеки).
         """
-        self.assertEqual(gs.fixture_json(), gs.fixture_json())
+        for scenario in gs.SCENARIOS:
+            with self.subTest(scenario=scenario):
+                self.assertEqual(gs.fixture_json(scenario=scenario),
+                                 gs.fixture_json(scenario=scenario))
 
 
 class GoldenIsolationTest(unittest.TestCase):
@@ -135,26 +146,47 @@ class GoldenIsolationTest(unittest.TestCase):
         self.assertTrue(r["black_litterman"], "BL обязан посчитаться")
         self.assertTrue(r["stress_scenarios"], "стресс-сценарии обязаны посчитаться")
 
-    def test_blind_keys_do_not_grow(self) -> None:
-        """Слепых (пустых) ключей — не больше известного минимума.
+    def test_leveraged_scenario_covers_its_branches(self) -> None:
+        """Вторая книга обязана реально включать плечо, ETP и валюту.
 
-        Это метрика ЦЕННОСТИ снимка: чем больше пустых ключей, тем меньше он
-        ловит. Замер на 2026-08-04: ровно один — `fx_converted_rows`
-        (ограничение v1, задокументировано в `golden_support`).
+        Иначе она просто удваивает время прогона, ничего не добавляя.
+        """
+        r = gs.run_analyze_all("leveraged_fx")
+        self.assertTrue(r["leverage_metrics"]["is_leveraged"],
+                        "книга задумана с маржинальным долгом")
+        self.assertLess(r["leverage_metrics"]["cash_weight"], -0.001)
+        self.assertGreater(r["leverage_metrics"]["leverage_ratio"], 1.0)
+        fx = r["fx_converted_rows"]
+        self.assertTrue(fx, "строка в тенге обязана попасть в реестр конверсий")
+        self.assertEqual({row["currency"] for row in fx}, {"KZT"})
+        self.assertIn("CONL.US", r["asset_scores"], "плечевой ETP должен быть оценён")
+
+    def test_no_key_is_blind_in_every_scenario(self) -> None:
+        """Ни один ключ не должен быть пустым ВО ВСЕХ сценариях сразу.
+
+        Это метрика ЦЕННОСТИ эталонов: ключ, пустой везде, не страхует разрез —
+        его потерю снимок не заметит. На одном сценарии таких было 8, после
+        добавления второй книги — **ни одного** (замер 2026-08-04).
+
+        Пустой ключ в ОДНОМ сценарии — норма: книга без плеча не обязана
+        заполнять `fx_converted_rows`, а книга с плечом — `merged_positions`.
         """
         import json
-
-        snapshot = json.loads(gs.FIXTURE_PATH.read_text(encoding="utf-8"))
 
         def _empty(v: object) -> bool:
             return v in (None, {}, [], "") or (
                 isinstance(v, dict) and len(v) <= 2 and not any(v.values()))
 
-        blind = sorted(k for k, v in snapshot.items() if _empty(v))
-        self.assertEqual(
-            blind, ["fx_converted_rows"],
-            "изменился набор «слепых» ключей эталона: "
-            f"{blind}. Ключ, ставший пустым, перестал страховать разрез.",
+        blind_sets = []
+        for scenario in gs.SCENARIOS:
+            snap = json.loads(gs.fixture_path(scenario).read_text(encoding="utf-8"))
+            blind_sets.append({k for k, v in snap.items() if _empty(v)})
+
+        blind_everywhere = sorted(set.intersection(*blind_sets))
+        self.assertFalse(
+            blind_everywhere,
+            f"ключи, пустые во ВСЕХ сценариях: {blind_everywhere}. "
+            "Такой ключ не страхует разрез — расширь состав книги.",
         )
 
 

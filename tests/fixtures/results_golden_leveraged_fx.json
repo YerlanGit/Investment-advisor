@@ -1,0 +1,2325 @@
+{
+ "action_plan": [
+  {
+   "action": "Trim",
+   "buy_zone": null,
+   "delta_w_pp": -1.97,
+   "price": 191.9673,
+   "qty_delta": -7,
+   "reason": "Score +1.5 · 🔥 Hotspot TRC>20%",
+   "sell_zone": [
+    188.5135,
+    195.2374
+   ],
+   "stop_loss": 190.1098,
+   "take_target": null,
+   "ticker": "AAPL.US"
+  },
+  {
+   "action": "Trim",
+   "buy_zone": null,
+   "delta_w_pp": -3.3,
+   "price": 130.1138,
+   "qty_delta": null,
+   "reason": "Score +1.5 · 🔥 Hotspot TRC>20% · оптимизатор предлагает обратное (+3.3 пп) — количество не указываем",
+   "sell_zone": [
+    127.455,
+    130.9265
+   ],
+   "stop_loss": 128.8124,
+   "take_target": null,
+   "ticker": "CONL.US"
+  },
+  {
+   "action": "Trim",
+   "buy_zone": null,
+   "delta_w_pp": -1.32,
+   "price": 141.0691,
+   "qty_delta": -7,
+   "reason": "Score +1.5 · 🔥 Hotspot TRC>20%",
+   "sell_zone": [
+    140.1124,
+    143.1759
+   ],
+   "stop_loss": 139.7071,
+   "take_target": null,
+   "ticker": "TLT.US"
+  },
+  {
+   "action": "Hold",
+   "buy_zone": null,
+   "delta_w_pp": 0.0,
+   "price": 115.5556,
+   "qty_delta": null,
+   "reason": "Score +0.0",
+   "sell_zone": null,
+   "stop_loss": null,
+   "take_target": null,
+   "ticker": "KSPI.KZ"
+  },
+  {
+   "action": "Hold",
+   "buy_zone": null,
+   "delta_w_pp": 0.0,
+   "price": 1.0,
+   "qty_delta": null,
+   "reason": "Score +0.0",
+   "sell_zone": null,
+   "stop_loss": null,
+   "take_target": null,
+   "ticker": "USD"
+  }
+ ],
+ "asset_scores": {
+  "AAPL.US": {
+   "action": "Trim",
+   "credit": 0.0,
+   "credit_applicable": true,
+   "fundamentals": 0.0,
+   "fundamentals_applicable": true,
+   "hotspot": true,
+   "technicals": 1.5,
+   "total": 1.5,
+   "valuations": 0.0
+  },
+  "CONL.US": {
+   "action": "Trim",
+   "credit": 0.0,
+   "credit_applicable": false,
+   "fundamentals": 0.0,
+   "fundamentals_applicable": false,
+   "hotspot": true,
+   "technicals": 1.5,
+   "total": 1.5,
+   "valuations": 0.0
+  },
+  "KSPI.KZ": {
+   "action": "Hold",
+   "credit": 0.0,
+   "credit_applicable": true,
+   "fundamentals": 0.0,
+   "fundamentals_applicable": true,
+   "hotspot": false,
+   "technicals": 0.0,
+   "total": 0.0,
+   "valuations": 0.0
+  },
+  "TLT.US": {
+   "action": "Trim",
+   "credit": 0.0,
+   "credit_applicable": false,
+   "fundamentals": 0.0,
+   "fundamentals_applicable": false,
+   "hotspot": true,
+   "technicals": 1.5,
+   "total": 1.5,
+   "valuations": 0.0
+  },
+  "USD": {
+   "action": "Hold",
+   "credit": 0.0,
+   "credit_applicable": true,
+   "fundamentals": 0.0,
+   "fundamentals_applicable": true,
+   "hotspot": false,
+   "technicals": 0.0,
+   "total": 0.0,
+   "valuations": 0.0
+  }
+ },
+ "benchmark_comparison": {
+  "EM Bonds": {
+   "Beating_Benchmark": true,
+   "Benchmark_Ann_Return": 0.09866090337,
+   "Benchmark_Return": 0.6242111591,
+   "Excess_Return": 1.387466949,
+   "Excess_Return_Ann": -0.02126044673,
+   "Information_Ratio": -0.3007196344,
+   "Portfolio_Ann_Return": 0.07740045663,
+   "Portfolio_Return": 2.011678108,
+   "Tracking_Error": 0.06498053441
+  },
+  "MSCI EM": {
+   "Beating_Benchmark": true,
+   "Benchmark_Ann_Return": 0.1140132231,
+   "Benchmark_Return": 0.7446510192,
+   "Excess_Return": 1.267027089,
+   "Excess_Return_Ann": -0.03661276647,
+   "Information_Ratio": -0.5016536307,
+   "Portfolio_Ann_Return": 0.07740045663,
+   "Portfolio_Return": 2.011678108,
+   "Tracking_Error": 0.066615398
+  },
+  "Nasdaq 100": {
+   "Beating_Benchmark": true,
+   "Benchmark_Ann_Return": 0.1404675907,
+   "Benchmark_Return": 0.9690149191,
+   "Excess_Return": 1.042663189,
+   "Excess_Return_Ann": -0.06306713406,
+   "Information_Ratio": -0.8945793297,
+   "Portfolio_Ann_Return": 0.07740045663,
+   "Portfolio_Return": 2.011678108,
+   "Tracking_Error": 0.0635909959
+  },
+  "Russell 2000": {
+   "Beating_Benchmark": true,
+   "Benchmark_Ann_Return": 0.1190889938,
+   "Benchmark_Return": 0.7860166568,
+   "Excess_Return": 1.225661451,
+   "Excess_Return_Ann": -0.04168853721,
+   "Information_Ratio": -0.5721959072,
+   "Portfolio_Ann_Return": 0.07740045663,
+   "Portfolio_Return": 2.011678108,
+   "Tracking_Error": 0.06634755753
+  },
+  "S&P 500": {
+   "Beating_Benchmark": true,
+   "Benchmark_Ann_Return": 0.1289118562,
+   "Benchmark_Return": 0.8683143007,
+   "Excess_Return": 1.143363807,
+   "Excess_Return_Ann": -0.05151139959,
+   "Information_Ratio": -0.7140045978,
+   "Portfolio_Ann_Return": 0.07740045663,
+   "Portfolio_Return": 2.011678108,
+   "Tracking_Error": 0.0654100194
+  },
+  "Профильный бенчмарк": {
+   "Beating_Benchmark": true,
+   "Benchmark_Ann_Return": 0.1289118562,
+   "Benchmark_Return": 0.8683143007,
+   "Excess_Return": 1.143363807,
+   "Excess_Return_Ann": -0.05151139959,
+   "Information_Ratio": -0.7140045978,
+   "Portfolio_Ann_Return": 0.07740045663,
+   "Portfolio_Return": 2.011678108,
+   "Tracking_Error": 0.0654100194
+  }
+ },
+ "benchmark_factor_profile": {
+  "betas": {
+   "Commodities": 0.02407995032,
+   "EM_Bond": 0.02509826588,
+   "EM_Equity": -0.008626823693,
+   "Market": 0.930110869,
+   "Momentum": -0.008815402859,
+   "Quality": -0.01350364566,
+   "Rates": 0.04238468714,
+   "Size": -0.01117420049,
+   "Value": -0.01064711161,
+   "Volatility": -0.008116367964
+  },
+  "name": "S&P 500",
+  "ticker": "SPY.US"
+ },
+ "black_litterman": [
+  {
+   "current_w": 0.2417991181,
+   "delta_w_pp": -1.971566658,
+   "n_views": 3,
+   "posterior_mu": 0.01332057531,
+   "target_w": 0.2220834515,
+   "ticker": "AAPL.US"
+  },
+  {
+   "current_w": 0.4916680952,
+   "delta_w_pp": 3.2965443,
+   "n_views": 3,
+   "posterior_mu": 0.01511644809,
+   "target_w": 0.5246335382,
+   "ticker": "CONL.US"
+  },
+  {
+   "current_w": 0.2665327867,
+   "delta_w_pp": -1.324977642,
+   "n_views": 3,
+   "posterior_mu": 0.01317651508,
+   "target_w": 0.2532830103,
+   "ticker": "TLT.US"
+  }
+ ],
+ "cds_summary": {
+  "checked": 3,
+  "enabled": true,
+  "gated_out": 3,
+  "loaded": 0
+ },
+ "data_quality": {
+  "findings": [
+   {
+    "id": "C-9",
+    "level": "degrade",
+    "message": "Цены покрывают 97.5% стоимости портфеля.",
+    "ticker": null
+   }
+  ],
+  "profile": "legacy"
+ },
+ "dropped_rows": [],
+ "expected_effect": {
+  "driver": "high_priority_action_plan",
+  "high_priority_actions": [
+   {
+    "action": "Buy",
+    "asset_key": "Bonds",
+    "delta_pp": 6.59,
+    "is_external": true,
+    "name": "гособлигации США 7–10 лет",
+    "side": "buy",
+    "ticker": "IEF"
+   },
+   {
+    "action": "Trim",
+    "delta_pp": -3.3,
+    "side": "sell",
+    "ticker": "CONL.US"
+   },
+   {
+    "action": "Trim",
+    "delta_pp": -1.97,
+    "side": "sell",
+    "ticker": "AAPL.US"
+   },
+   {
+    "action": "Trim",
+    "delta_pp": -1.32,
+    "side": "sell",
+    "ticker": "TLT.US"
+   }
+  ],
+  "high_priority_tickers": [
+   "AAPL.US",
+   "CONL.US",
+   "TLT.US",
+   "IEF"
+  ],
+  "method": "vol/TRC via √(w'Σw) on structural cov · CVaR/Sharpe/MDD via sample replay on daily log-returns · composite = 0.4·vol+0.4·|CVaR|+0.2·max_TRC normalised",
+  "metrics": {
+   "cvar_95": {
+    "after": -0.01186587495,
+    "before": -0.01201972218,
+    "delta": 0.0001538472391,
+    "delta_pp": 0.02,
+    "improved": true
+   },
+   "expected_return": {
+    "after": 0.01453321096,
+    "before": 0.01546839908,
+    "delta": -0.0009351881195,
+    "delta_pp": -0.09,
+    "improved": false
+   },
+   "it_share": {
+    "after": 0.2443455456,
+    "before": 0.2640455456,
+    "delta": -0.0197,
+    "delta_pp": -1.97,
+    "improved": null
+   },
+   "max_drawdown": {
+    "after": -0.1144306011,
+    "before": -0.1242909619,
+    "delta": 0.009860360773,
+    "delta_pp": 0.99,
+    "improved": true
+   },
+   "max_trc": {
+    "after": 49.1291526,
+    "before": 51.91654223,
+    "delta": -2.787389627,
+    "improved": true
+   },
+   "risk_index": {
+    "after": 38,
+    "before": 38,
+    "delta": 0.0,
+    "improved": null
+   },
+   "sharpe": {
+    "after": 0.4175063171,
+    "before": 0.4175063171,
+    "delta": 0.0,
+    "improved": null
+   },
+   "volatility_ann": {
+    "after": 0.0942743508,
+    "before": 0.09536558289,
+    "delta": -0.001091232096,
+    "delta_pp": -0.11,
+    "improved": true
+   }
+  },
+  "n_days_used": 1299,
+  "sharpe_delta_meaningful": false,
+  "sharpe_note": "Ожидаемая доходность ниже безрисковой ставки (премия -3.0 пп), поэтому Sharpe перестаёт упорядочивать портфели: при отрицательном избытке снижение волатильности механически ухудшает коэффициент. Дельта не показана — смотрите на волатильность, CVaR и просадку.",
+  "uses_bl_returns": true,
+  "verdict": {
+   "headline": "Снижение риска без значимых компромиссов",
+   "kind": "improvement",
+   "worsened": []
+  },
+  "weight_changes": [
+   {
+    "after_pct": 6.59,
+    "before_pct": 0.0,
+    "delta_pp": 6.59,
+    "ticker": "IEF"
+   },
+   {
+    "after_pct": 50.39,
+    "before_pct": 53.69,
+    "delta_pp": -3.3,
+    "ticker": "CONL.US"
+   },
+   {
+    "after_pct": 24.43,
+    "before_pct": 26.4,
+    "delta_pp": -1.97,
+    "ticker": "AAPL.US"
+   },
+   {
+    "after_pct": 27.79,
+    "before_pct": 29.11,
+    "delta_pp": -1.32,
+    "ticker": "TLT.US"
+   }
+  ]
+ },
+ "factor_scores": {
+  "AAPL.US": {
+   "group_a_style": {
+    "Alpha_Specific": 11.13316308,
+    "Beta_Commodities": 0.1275336855,
+    "Beta_EM_Bond": 0.08320452049,
+    "Beta_EM_Equity": 0.0804981544,
+    "Beta_Market": 0.4789519142,
+    "Beta_Momentum": 0.0880643397,
+    "Beta_Quality": 0.1124205983,
+    "Beta_Rates": 0.1397474367,
+    "Beta_Size": 0.1081172942,
+    "Beta_Value": 0.03873998497,
+    "Beta_Volatility": 0.1450794973,
+    "Euler_Risk_Contribution_Pct": 23.04264999,
+    "Expected_Return": 0.1684503838,
+    "Residual_Vol_Ann": 0.05918236406,
+    "Specific_Alpha_Daily": -0.0001114458415
+   },
+   "group_b_fundamental": {}
+  },
+  "CONL.US": {
+   "group_a_style": {
+    "Alpha_Specific": 318.2911451,
+    "Beta_Commodities": 0.08378849531,
+    "Beta_EM_Bond": 0.1130891051,
+    "Beta_EM_Equity": 0.07950307563,
+    "Beta_Market": 0.4549265917,
+    "Beta_Momentum": 0.04788636821,
+    "Beta_Quality": 0.1232764412,
+    "Beta_Rates": 0.1914845976,
+    "Beta_Size": 0.06058056336,
+    "Beta_Value": 0.1213717823,
+    "Beta_Volatility": 0.1316331428,
+    "Euler_Risk_Contribution_Pct": 51.91654223,
+    "Expected_Return": 0.1542148268,
+    "Residual_Vol_Ann": 0.05898906053,
+    "Specific_Alpha_Daily": -0.0004112562101
+   },
+   "group_b_fundamental": {}
+  },
+  "KSPI.KZ": {
+   "group_a_style": {
+    "Alpha_Specific": 15.55555556,
+    "Beta_Commodities": "<NaN>",
+    "Beta_EM_Bond": "<NaN>",
+    "Beta_EM_Equity": "<NaN>",
+    "Beta_Market": "<NaN>",
+    "Beta_Momentum": "<NaN>",
+    "Beta_Quality": "<NaN>",
+    "Beta_Rates": "<NaN>",
+    "Beta_Size": "<NaN>",
+    "Beta_Value": "<NaN>",
+    "Beta_Volatility": "<NaN>",
+    "Euler_Risk_Contribution_Pct": 0.0,
+    "Expected_Return": 0.0,
+    "Residual_Vol_Ann": 0.0,
+    "Specific_Alpha_Daily": "<NaN>"
+   },
+   "group_b_fundamental": {}
+  },
+  "TLT.US": {
+   "group_a_style": {
+    "Alpha_Specific": 31.51325478,
+    "Beta_Commodities": 0.06807670738,
+    "Beta_EM_Bond": 0.0889566267,
+    "Beta_EM_Equity": 0.1169894367,
+    "Beta_Market": 0.49918021,
+    "Beta_Momentum": 0.1635485609,
+    "Beta_Quality": 0.08569638522,
+    "Beta_Rates": 0.1450501993,
+    "Beta_Size": 0.0658802474,
+    "Beta_Value": 0.08615352566,
+    "Beta_Volatility": 0.07699156319,
+    "Euler_Risk_Contribution_Pct": 25.04080778,
+    "Expected_Return": 0.1698054644,
+    "Residual_Vol_Ann": 0.05777191575,
+    "Specific_Alpha_Daily": -0.0003562598811
+   },
+   "group_b_fundamental": {}
+  },
+  "USD": {
+   "group_a_style": {
+    "Alpha_Specific": 0.0,
+    "Beta_Commodities": "<NaN>",
+    "Beta_EM_Bond": "<NaN>",
+    "Beta_EM_Equity": "<NaN>",
+    "Beta_Market": "<NaN>",
+    "Beta_Momentum": "<NaN>",
+    "Beta_Quality": "<NaN>",
+    "Beta_Rates": "<NaN>",
+    "Beta_Size": "<NaN>",
+    "Beta_Value": "<NaN>",
+    "Beta_Volatility": "<NaN>",
+    "Euler_Risk_Contribution_Pct": 0.0,
+    "Expected_Return": 0.0,
+    "Residual_Vol_Ann": 0.0,
+    "Specific_Alpha_Daily": "<NaN>"
+   },
+   "group_b_fundamental": {}
+  }
+ },
+ "fx_converted_rows": [
+  {
+   "currency": "KZT",
+   "rate": 0.00222222,
+   "ticker": "KSPI.KZ"
+  }
+ ],
+ "history_result": {
+  "__type__": "_FakeHistory",
+  "data": {
+   "__type__": "DataFrame:digest",
+   "columns": [
+    "SPY.US",
+    "MTUM.US",
+    "VLUE.US",
+    "QUAL.US",
+    "IWM.US",
+    "SPLV.US",
+    "DBC.US",
+    "IEF.US",
+    "EEM.US",
+    "EMB.US",
+    "QQQ.US",
+    "AGG.US",
+    "URTH.US",
+    "AAPL.US",
+    "CONL.US",
+    "TLT.US"
+   ],
+   "index_first_last": [
+    "2023-01-02 00:00:00",
+    "2027-12-24 00:00:00"
+   ],
+   "shape": [
+    1300,
+    16
+   ],
+   "values_sha256": "557a18e198ed73b874bb165b80b7b0c2993d4fe0676e1ee721a012e70ae162dc"
+  },
+  "failed": [],
+  "loaded": [
+   "SPY.US",
+   "MTUM.US",
+   "VLUE.US",
+   "QUAL.US",
+   "IWM.US",
+   "SPLV.US",
+   "DBC.US",
+   "IEF.US",
+   "EEM.US",
+   "EMB.US",
+   "QQQ.US",
+   "AGG.US",
+   "URTH.US",
+   "AAPL.US",
+   "CONL.US",
+   "TLT.US"
+  ],
+  "ohlc_data": {},
+  "retried": []
+ },
+ "leverage_metrics": {
+  "cash_weight": -0.123792,
+  "gross_exposure": 1.123792,
+  "is_leveraged": true,
+  "leverage_ratio": 1.1238,
+  "long_weight": 1.123792,
+  "net_exposure": 1.0
+ },
+ "macro_drivers": {
+  "breakeven_inflation": {
+   "as_of": null,
+   "fetched_at": null,
+   "freshness_days": null,
+   "history_30d": [],
+   "label": "10Y Breakeven Inflation Rate",
+   "note": "FRED_API_KEY not set in env",
+   "publish_cadence": "daily",
+   "series_id": "T10YIE",
+   "status": "missing",
+   "unit": "%",
+   "value": null
+  },
+  "gdp_growth": {
+   "as_of": null,
+   "fetched_at": null,
+   "freshness_days": null,
+   "history_30d": [],
+   "label": "Real GDP growth (SAAR)",
+   "note": "FRED_API_KEY not set in env",
+   "publish_cadence": "quarterly",
+   "series_id": "A191RL1Q225SBEA",
+   "status": "missing",
+   "unit": "%",
+   "value": null
+  },
+  "hy_credit_spread": {
+   "as_of": null,
+   "fetched_at": null,
+   "freshness_days": null,
+   "history_30d": [],
+   "label": "US HY OAS (ICE BofA)",
+   "note": "FRED_API_KEY not set in env",
+   "publish_cadence": "daily",
+   "series_id": "BAMLH0A0HYM2",
+   "status": "missing",
+   "unit": "pp",
+   "value": null
+  },
+  "unemployment": {
+   "as_of": null,
+   "fetched_at": null,
+   "freshness_days": null,
+   "history_30d": [],
+   "label": "US Unemployment Rate",
+   "note": "FRED_API_KEY not set in env",
+   "publish_cadence": "monthly",
+   "series_id": "UNRATE",
+   "status": "missing",
+   "unit": "%",
+   "value": null
+  },
+  "vix": {
+   "as_of": null,
+   "fetched_at": null,
+   "freshness_days": null,
+   "history_30d": [],
+   "label": "CBOE VIX",
+   "note": "FRED_API_KEY not set in env",
+   "publish_cadence": "daily",
+   "series_id": "VIXCLS",
+   "status": "missing",
+   "unit": "index",
+   "value": null
+  },
+  "yield_curve_10y2y": {
+   "as_of": null,
+   "fetched_at": null,
+   "freshness_days": null,
+   "history_30d": [],
+   "label": "10Y−2Y Treasury spread",
+   "note": "FRED_API_KEY not set in env",
+   "publish_cadence": "daily",
+   "series_id": "T10Y2Y",
+   "status": "missing",
+   "unit": "pp",
+   "value": null
+  }
+ },
+ "merged_positions": [],
+ "model_uncovered": {
+  "names": [],
+  "weight_pct": 0.0
+ },
+ "performance_table": {
+  "__type__": "DataFrame",
+  "columns": [
+   "Ticker",
+   "Quantity",
+   "Purchase_Price",
+   "Currency",
+   "Current_Price",
+   "Total_Cost",
+   "Current_Value",
+   "PnL",
+   "Return_Pct",
+   "ATR_Absolute",
+   "ATR_Pct",
+   "Beta_Market",
+   "Beta_Momentum",
+   "Beta_Value",
+   "Beta_Quality",
+   "Beta_Size",
+   "Beta_Volatility",
+   "Beta_Commodities",
+   "Beta_Rates",
+   "Beta_EM_Equity",
+   "Beta_EM_Bond",
+   "Specific_Alpha_Daily",
+   "Residual_Vol_Ann",
+   "Weight_Pct",
+   "Euler_Risk_Contribution_Pct",
+   "Marginal_VaR_Daily",
+   "Expected_Return",
+   "Alpha_Specific",
+   "Score_Fundamentals",
+   "Score_Valuations",
+   "Score_Technicals",
+   "Score_Credit",
+   "Score_Total",
+   "Score_Action",
+   "Score_Hotspot"
+  ],
+  "data": [
+   [
+    "AAPL.US",
+    100,
+    150.0,
+    "USD",
+    191.9673022,
+    15000.0,
+    19196.73022,
+    4196.730219,
+    0.2797820146,
+    0.9287710004,
+    0.4838172907,
+    0.4789519142,
+    0.0880643397,
+    0.03873998497,
+    0.1124205983,
+    0.1081172942,
+    0.1450794973,
+    0.1275336855,
+    0.1397474367,
+    0.0804981544,
+    0.08320452049,
+    -0.0001114458415,
+    0.05918236406,
+    26.40455456,
+    23.04264999,
+    0.005535476454,
+    0.1684503838,
+    11.13316308,
+    0.0,
+    0.0,
+    1.5,
+    0.0,
+    1.5,
+    "Trim",
+    true
+   ],
+   [
+    "CONL.US",
+    300,
+    30.0,
+    "USD",
+    130.1137883,
+    9000.0,
+    39034.1365,
+    30034.1365,
+    3.337126278,
+    0.6506749441,
+    0.500081469,
+    0.4549265917,
+    0.04788636821,
+    0.1213717823,
+    0.1232764412,
+    0.06058056336,
+    0.1316331428,
+    0.08378849531,
+    0.1914845976,
+    0.07950307563,
+    0.1130891051,
+    -0.0004112562101,
+    0.05898906053,
+    53.69034075,
+    51.91654223,
+    -0.004580951186,
+    0.1542148268,
+    318.2911451,
+    0.0,
+    0.0,
+    1.5,
+    0.0,
+    1.5,
+    "Trim",
+    true
+   ],
+   [
+    "TLT.US",
+    150,
+    95.0,
+    "USD",
+    141.0691112,
+    14250.0,
+    21160.36667,
+    6910.366674,
+    0.4849380122,
+    0.6810149603,
+    0.4827527123,
+    0.49918021,
+    0.1635485609,
+    0.08615352566,
+    0.08569638522,
+    0.0658802474,
+    0.07699156319,
+    0.06807670738,
+    0.1450501993,
+    0.1169894367,
+    0.0889566267,
+    -0.0003562598811,
+    0.05777191575,
+    29.10548046,
+    25.04080778,
+    0.001328757768,
+    0.1698054644,
+    31.51325478,
+    0.0,
+    0.0,
+    1.5,
+    0.0,
+    1.5,
+    "Trim",
+    true
+   ],
+   [
+    "KSPI.KZ",
+    20,
+    100.0,
+    "KZT",
+    115.5555556,
+    2000.0,
+    2311.111111,
+    311.1111111,
+    0.1555555556,
+    "<NaN>",
+    "<NaN>",
+    "<NaN>",
+    "<NaN>",
+    "<NaN>",
+    "<NaN>",
+    "<NaN>",
+    "<NaN>",
+    "<NaN>",
+    "<NaN>",
+    "<NaN>",
+    "<NaN>",
+    "<NaN>",
+    0.0,
+    "<NaN>",
+    0.0,
+    "<NaN>",
+    0.0,
+    15.55555556,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    "Hold",
+    false
+   ],
+   [
+    "USD",
+    -9000,
+    1.0,
+    "USD",
+    1.0,
+    -9000.0,
+    -9000.0,
+    0.0,
+    0.0,
+    "<NaN>",
+    "<NaN>",
+    "<NaN>",
+    "<NaN>",
+    "<NaN>",
+    "<NaN>",
+    "<NaN>",
+    "<NaN>",
+    "<NaN>",
+    "<NaN>",
+    "<NaN>",
+    "<NaN>",
+    "<NaN>",
+    0.0,
+    "<NaN>",
+    0.0,
+    "<NaN>",
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    "Hold",
+    false
+   ]
+  ],
+  "index": [
+   "0",
+   "1",
+   "2",
+   "3",
+   "4"
+  ],
+  "index_first_last": [
+   "0",
+   "4"
+  ],
+  "shape": [
+   5,
+   35
+  ]
+ },
+ "period_returns_table": {
+  "EM Bonds": {
+   "n_days_total": 1299,
+   "periods": [
+    {
+     "bm_pct": 0.00504201966,
+     "excess_pp": -0.009620168217,
+     "n_days": 21,
+     "period": "1m",
+     "port_pct": -0.004578148557
+    },
+    {
+     "bm_pct": 0.09248178773,
+     "excess_pp": 0.005556182039,
+     "n_days": 63,
+     "period": "3m",
+     "port_pct": 0.09803796977
+    },
+    {
+     "bm_pct": 0.1172580792,
+     "excess_pp": -0.02545698907,
+     "n_days": 126,
+     "period": "6m",
+     "port_pct": 0.09180109017
+    },
+    {
+     "bm_pct": 0.2855190686,
+     "excess_pp": 0.05132585691,
+     "n_days": 252,
+     "period": "12m",
+     "port_pct": 0.3368449255
+    },
+    {
+     "bm_pct": 0.2874895265,
+     "excess_pp": 0.0514359741,
+     "n_days": 256,
+     "period": "YTD",
+     "port_pct": 0.3389255006
+    }
+   ],
+   "window_end": "2027-12-24",
+   "window_start": "2023-01-03"
+  },
+  "MSCI EM": {
+   "n_days_total": 1299,
+   "periods": [
+    {
+     "bm_pct": -0.02832669224,
+     "excess_pp": 0.02374854368,
+     "n_days": 21,
+     "period": "1m",
+     "port_pct": -0.004578148557
+    },
+    {
+     "bm_pct": 0.04719672883,
+     "excess_pp": 0.05084124094,
+     "n_days": 63,
+     "period": "3m",
+     "port_pct": 0.09803796977
+    },
+    {
+     "bm_pct": 0.02742251491,
+     "excess_pp": 0.06437857526,
+     "n_days": 126,
+     "period": "6m",
+     "port_pct": 0.09180109017
+    },
+    {
+     "bm_pct": 0.2413768242,
+     "excess_pp": 0.09546810133,
+     "n_days": 252,
+     "period": "12m",
+     "port_pct": 0.3368449255
+    },
+    {
+     "bm_pct": 0.2494923925,
+     "excess_pp": 0.08943310811,
+     "n_days": 256,
+     "period": "YTD",
+     "port_pct": 0.3389255006
+    }
+   ],
+   "window_end": "2027-12-24",
+   "window_start": "2023-01-03"
+  },
+  "Nasdaq 100": {
+   "n_days_total": 1299,
+   "periods": [
+    {
+     "bm_pct": -0.01717754616,
+     "excess_pp": 0.0125993976,
+     "n_days": 21,
+     "period": "1m",
+     "port_pct": -0.004578148557
+    },
+    {
+     "bm_pct": 0.1362945028,
+     "excess_pp": -0.03825653302,
+     "n_days": 63,
+     "period": "3m",
+     "port_pct": 0.09803796977
+    },
+    {
+     "bm_pct": 0.1483949299,
+     "excess_pp": -0.05659383975,
+     "n_days": 126,
+     "period": "6m",
+     "port_pct": 0.09180109017
+    },
+    {
+     "bm_pct": 0.292319406,
+     "excess_pp": 0.04452551951,
+     "n_days": 252,
+     "period": "12m",
+     "port_pct": 0.3368449255
+    },
+    {
+     "bm_pct": 0.2867062519,
+     "excess_pp": 0.05221924872,
+     "n_days": 256,
+     "period": "YTD",
+     "port_pct": 0.3389255006
+    }
+   ],
+   "window_end": "2027-12-24",
+   "window_start": "2023-01-03"
+  },
+  "Russell 2000": {
+   "n_days_total": 1299,
+   "periods": [
+    {
+     "bm_pct": -0.01213862049,
+     "excess_pp": 0.007560471928,
+     "n_days": 21,
+     "period": "1m",
+     "port_pct": -0.004578148557
+    },
+    {
+     "bm_pct": 0.1021554174,
+     "excess_pp": -0.004117447587,
+     "n_days": 63,
+     "period": "3m",
+     "port_pct": 0.09803796977
+    },
+    {
+     "bm_pct": 0.1397742634,
+     "excess_pp": -0.04797317322,
+     "n_days": 126,
+     "period": "6m",
+     "port_pct": 0.09180109017
+    },
+    {
+     "bm_pct": 0.3143698819,
+     "excess_pp": 0.02247504367,
+     "n_days": 252,
+     "period": "12m",
+     "port_pct": 0.3368449255
+    },
+    {
+     "bm_pct": 0.3126075199,
+     "excess_pp": 0.02631798073,
+     "n_days": 256,
+     "period": "YTD",
+     "port_pct": 0.3389255006
+    }
+   ],
+   "window_end": "2027-12-24",
+   "window_start": "2023-01-03"
+  },
+  "S&P 500": {
+   "n_days_total": 1299,
+   "periods": [
+    {
+     "bm_pct": -0.009520295299,
+     "excess_pp": 0.004942146741,
+     "n_days": 21,
+     "period": "1m",
+     "port_pct": -0.004578148557
+    },
+    {
+     "bm_pct": 0.05879893947,
+     "excess_pp": 0.0392390303,
+     "n_days": 63,
+     "period": "3m",
+     "port_pct": 0.09803796977
+    },
+    {
+     "bm_pct": 0.01689517749,
+     "excess_pp": 0.07490591268,
+     "n_days": 126,
+     "period": "6m",
+     "port_pct": 0.09180109017
+    },
+    {
+     "bm_pct": 0.3303916076,
+     "excess_pp": 0.00645331797,
+     "n_days": 252,
+     "period": "12m",
+     "port_pct": 0.3368449255
+    },
+    {
+     "bm_pct": 0.3163445346,
+     "excess_pp": 0.02258096603,
+     "n_days": 256,
+     "period": "YTD",
+     "port_pct": 0.3389255006
+    }
+   ],
+   "window_end": "2027-12-24",
+   "window_start": "2023-01-03"
+  },
+  "Профильный бенчмарк": {
+   "n_days_total": 1299,
+   "periods": [
+    {
+     "bm_pct": -0.009520295299,
+     "excess_pp": 0.004942146741,
+     "n_days": 21,
+     "period": "1m",
+     "port_pct": -0.004578148557
+    },
+    {
+     "bm_pct": 0.05879893947,
+     "excess_pp": 0.0392390303,
+     "n_days": 63,
+     "period": "3m",
+     "port_pct": 0.09803796977
+    },
+    {
+     "bm_pct": 0.01689517749,
+     "excess_pp": 0.07490591268,
+     "n_days": 126,
+     "period": "6m",
+     "port_pct": 0.09180109017
+    },
+    {
+     "bm_pct": 0.3303916076,
+     "excess_pp": 0.00645331797,
+     "n_days": 252,
+     "period": "12m",
+     "port_pct": 0.3368449255
+    },
+    {
+     "bm_pct": 0.3163445346,
+     "excess_pp": 0.02258096603,
+     "n_days": 256,
+     "period": "YTD",
+     "port_pct": 0.3389255006
+    }
+   ],
+   "window_end": "2027-12-24",
+   "window_start": "2023-01-03"
+  }
+ },
+ "port_log_returns": {
+  "__type__": "Series:digest",
+  "index_first_last": [
+   "2023-01-03 00:00:00",
+   "2027-12-24 00:00:00"
+  ],
+  "length": 1299,
+  "values_sha256": "8920ba08ae03c368435d6021a0ba8f45b348670edc80afddc217aaf4be7b703e"
+ },
+ "portfolio_metrics": {
+  "Annualised_Return": 0.08481573329,
+  "CVaR_95_Bootstrap": {
+   "hi95": -0.01108726067,
+   "lo95": -0.01295282089,
+   "point": -0.01197228284
+  },
+  "CVaR_95_Daily": -0.01201972218,
+  "Composite_Risk_Score": 38,
+  "Expected_Return_Annual": 0.1766997358,
+  "Expected_Return_Cash_Weight": 0.0,
+  "Expected_Return_Invested_Weight": 1.0,
+  "Expected_Sharpe": 1.380998593,
+  "Max_Drawdown": -0.1242909619,
+  "Max_Euler_Risk_Pct": 51.91654223,
+  "Positive_Days_Pct": 53.11778291,
+  "Sharpe_Ratio": 0.4175063171,
+  "Sortino_Ratio": 0.611142774,
+  "Total_Volatility_Ann": 0.09536558289,
+  "VaR_95_Daily": -0.009590889223,
+  "beta_reliability": "ok",
+  "beta_shrinkage_applied": false,
+  "beta_standard_errors": {
+   "AAPL.US": {
+    "Commodities": 0.017115,
+    "EM_Bond": 0.023052,
+    "EM_Equity": 0.022841,
+    "Market": 0.017569,
+    "Momentum": 0.021823,
+    "Quality": 0.022869,
+    "Rates": 0.017079,
+    "Size": 0.022546,
+    "Value": 0.021988,
+    "Volatility": 0.022246
+   },
+   "CONL.US": {
+    "Commodities": 0.017059,
+    "EM_Bond": 0.022977,
+    "EM_Equity": 0.022766,
+    "Market": 0.017512,
+    "Momentum": 0.021751,
+    "Quality": 0.022794,
+    "Rates": 0.017023,
+    "Size": 0.022472,
+    "Value": 0.021916,
+    "Volatility": 0.022174
+   },
+   "TLT.US": {
+    "Commodities": 0.016707,
+    "EM_Bond": 0.022503,
+    "EM_Equity": 0.022296,
+    "Market": 0.01715,
+    "Momentum": 0.021302,
+    "Quality": 0.022324,
+    "Rates": 0.016672,
+    "Size": 0.022009,
+    "Value": 0.021464,
+    "Volatility": 0.021716
+   }
+  },
+  "composite_aggravators": {
+   "leverage_ratio": 1.1238,
+   "max_drawdown": -0.1242909619,
+   "sector_top_pct": 47.78
+  },
+  "expected_return_clamped_n": 0,
+  "expected_return_window_days": 1299,
+  "factor_decomposition": {
+   "betas_covered": {
+    "Commodities": 0.09,
+    "EM_Bond": 0.099,
+    "EM_Equity": 0.09,
+    "Market": 0.473,
+    "Momentum": 0.088,
+    "Quality": 0.111,
+    "Rates": 0.167,
+    "Size": 0.073,
+    "Value": 0.092,
+    "Volatility": 0.12
+   },
+   "driven_by": {
+    "Commodities": [
+     {
+      "contribution": 0.045,
+      "ticker": "CONL.US"
+     },
+     {
+      "contribution": 0.034,
+      "ticker": "AAPL.US"
+     },
+     {
+      "contribution": 0.02,
+      "ticker": "TLT.US"
+     }
+    ],
+    "EM_Bond": [
+     {
+      "contribution": 0.061,
+      "ticker": "CONL.US"
+     },
+     {
+      "contribution": 0.026,
+      "ticker": "TLT.US"
+     },
+     {
+      "contribution": 0.022,
+      "ticker": "AAPL.US"
+     }
+    ],
+    "EM_Equity": [
+     {
+      "contribution": 0.043,
+      "ticker": "CONL.US"
+     },
+     {
+      "contribution": 0.034,
+      "ticker": "TLT.US"
+     },
+     {
+      "contribution": 0.021,
+      "ticker": "AAPL.US"
+     }
+    ],
+    "Market": [
+     {
+      "contribution": 0.244,
+      "ticker": "CONL.US"
+     },
+     {
+      "contribution": 0.145,
+      "ticker": "TLT.US"
+     },
+     {
+      "contribution": 0.126,
+      "ticker": "AAPL.US"
+     }
+    ],
+    "Momentum": [
+     {
+      "contribution": 0.048,
+      "ticker": "TLT.US"
+     },
+     {
+      "contribution": 0.026,
+      "ticker": "CONL.US"
+     },
+     {
+      "contribution": 0.023,
+      "ticker": "AAPL.US"
+     }
+    ],
+    "Quality": [
+     {
+      "contribution": 0.066,
+      "ticker": "CONL.US"
+     },
+     {
+      "contribution": 0.03,
+      "ticker": "AAPL.US"
+     },
+     {
+      "contribution": 0.025,
+      "ticker": "TLT.US"
+     }
+    ],
+    "Rates": [
+     {
+      "contribution": 0.103,
+      "ticker": "CONL.US"
+     },
+     {
+      "contribution": 0.042,
+      "ticker": "TLT.US"
+     },
+     {
+      "contribution": 0.037,
+      "ticker": "AAPL.US"
+     }
+    ],
+    "Size": [
+     {
+      "contribution": 0.033,
+      "ticker": "CONL.US"
+     },
+     {
+      "contribution": 0.029,
+      "ticker": "AAPL.US"
+     },
+     {
+      "contribution": 0.019,
+      "ticker": "TLT.US"
+     }
+    ],
+    "Value": [
+     {
+      "contribution": 0.065,
+      "ticker": "CONL.US"
+     },
+     {
+      "contribution": 0.025,
+      "ticker": "TLT.US"
+     },
+     {
+      "contribution": 0.01,
+      "ticker": "AAPL.US"
+     }
+    ],
+    "Volatility": [
+     {
+      "contribution": 0.071,
+      "ticker": "CONL.US"
+     },
+     {
+      "contribution": 0.038,
+      "ticker": "AAPL.US"
+     },
+     {
+      "contribution": 0.022,
+      "ticker": "TLT.US"
+     }
+    ]
+   },
+   "factor_shares": [
+    {
+     "beta": 0.516,
+     "factor": "Market",
+     "share_pct": 37.4
+    },
+    {
+     "beta": 0.097,
+     "factor": "Momentum",
+     "share_pct": 3.5
+    },
+    {
+     "beta": 0.1,
+     "factor": "Value",
+     "share_pct": 2.9
+    },
+    {
+     "beta": 0.121,
+     "factor": "Quality",
+     "share_pct": 4.2
+    },
+    {
+     "beta": 0.08,
+     "factor": "Size",
+     "share_pct": 2.7
+    },
+    {
+     "beta": 0.131,
+     "factor": "Volatility",
+     "share_pct": 4.0
+    },
+    {
+     "beta": 0.098,
+     "factor": "Commodities",
+     "share_pct": 7.8
+    },
+    {
+     "beta": 0.182,
+     "factor": "Rates",
+     "share_pct": 14.6
+    },
+    {
+     "beta": 0.098,
+     "factor": "EM_Equity",
+     "share_pct": 3.2
+    },
+    {
+     "beta": 0.109,
+     "factor": "EM_Bond",
+     "share_pct": 2.9
+    }
+   ],
+   "group_shares": [
+    {
+     "factors": [
+      "Market"
+     ],
+     "share_pct": 37.4,
+     "source": "Рыночная бета"
+    },
+    {
+     "factors": [
+      "Momentum",
+      "Value",
+      "Quality",
+      "Size",
+      "Volatility"
+     ],
+     "share_pct": 17.3,
+     "source": "Стилевые наклоны"
+    },
+    {
+     "factors": [
+      "EM_Equity",
+      "EM_Bond"
+     ],
+     "share_pct": 6.1,
+     "source": "EM-риск"
+    },
+    {
+     "factors": [
+      "Rates"
+     ],
+     "share_pct": 14.6,
+     "source": "Ставки / дюрация"
+    },
+    {
+     "factors": [
+      "Commodities"
+     ],
+     "share_pct": 7.8,
+     "source": "Сырьё / золото"
+    },
+    {
+     "factors": [],
+     "share_pct": 16.8,
+     "source": "Идиосинкратический (специфика бумаг)"
+    }
+   ],
+   "identity_gap_pct": 0.0,
+   "idio_pct": 16.8,
+   "portfolio_betas": {
+    "Commodities": 0.098,
+    "EM_Bond": 0.109,
+    "EM_Equity": 0.098,
+    "Market": 0.516,
+    "Momentum": 0.097,
+    "Quality": 0.121,
+    "Rates": 0.182,
+    "Size": 0.08,
+    "Value": 0.1,
+    "Volatility": 0.131
+   },
+   "systematic_pct": 83.2,
+   "total_variance_daily": 3.608966032e-05,
+   "twins": [
+    {
+     "combined_weight_pct": 80.1,
+     "pair": [
+      "AAPL.US",
+      "CONL.US"
+     ],
+     "systematic_corr": 0.996
+    },
+    {
+     "combined_weight_pct": 82.8,
+     "pair": [
+      "CONL.US",
+      "TLT.US"
+     ],
+     "systematic_corr": 0.995
+    },
+    {
+     "combined_weight_pct": 55.5,
+     "pair": [
+      "AAPL.US",
+      "TLT.US"
+     ],
+     "systematic_corr": 0.994
+    }
+   ],
+   "unique_risk": [
+    {
+     "ticker": "AAPL.US",
+     "unique_risk_pct": 34.9,
+     "weight_pct": 26.4
+    },
+    {
+     "ticker": "CONL.US",
+     "unique_risk_pct": 35.4,
+     "weight_pct": 53.7
+    },
+    {
+     "ticker": "TLT.US",
+     "unique_risk_pct": 34.9,
+     "weight_pct": 29.1
+    }
+   ]
+  },
+  "factor_diagnostics": {
+   "condition_number": 29.59,
+   "corr_window_days": 1299,
+   "factors": [
+    "Market",
+    "Momentum",
+    "Value",
+    "Quality",
+    "Size",
+    "Volatility",
+    "Commodities",
+    "Rates",
+    "EM_Equity",
+    "EM_Bond"
+   ],
+   "max_abs_corr": 0.6525,
+   "max_corr_ci95": [
+    0.6201,
+    0.6827
+   ],
+   "n_factors": 10,
+   "near_collinear": false,
+   "orthogonalized": true
+  },
+  "fx_conversion": [],
+  "leveraged_adjustments": {
+   "CONL.US": {
+    "L": 2.0,
+    "drag_ann_pct": -0.23,
+    "drag_daily": -9.29e-06,
+    "fee_ann_pct": -1.03,
+    "fee_daily": -4.127e-05,
+    "method": "contractual",
+    "underlying": "COIN"
+   }
+  },
+  "leveraged_drag_tickers": [
+   "CONL.US"
+  ],
+  "realized_window_days": 1299,
+  "reporting_currency": "USD",
+  "risk_free_rate_annual": 0.045,
+  "risk_free_rate_daily": 0.0001746854359,
+  "risk_free_rate_source": "fixture[USD]=0.045",
+  "sharpe_basis_note": "Sharpe/Sortino: числитель — реализованная геометрическая доходность за всё окно наблюдений (композитная серия: дни считаются по именам, реально торговавшимся, веса ренормализуются по-дневно); знаменатель — структурная волатильность EWMA(hl=63)⊕Ledoit-Wolf, взвешенная к последним ~3 месяцам. В спокойном свежем рынке оценка выше классической sample-Sharpe, после недавнего стресса — ниже.",
+  "stress_test_disclaimer": "Стресс-сценарии используют линейное приближение β-факторов, стабильное для шоков до ±20%. Для активов, чья модельная просадка превышает 20%, применяется выпуклое сглаживание с асимптотой ±35% — это компенсирует нестабильность бет в хвостах, но в реальном тейл-событии возможны более глубокие потери. Сценарии — иллюстративный stress-test, не прогноз.",
+  "var_reliability": "ok",
+  "volatility_ci": {
+   "confidence": 0.95,
+   "hi_mult": 1.04,
+   "lo_mult": 0.963,
+   "window_days": 1299
+  }
+ },
+ "priced_at_cost": [],
+ "profile_benchmark_ticker": "SPY.US",
+ "proxy_substitutions": {},
+ "regime": {
+  "confidence": 0.104,
+  "cycle_score": 0.0256,
+  "growth_score": 0.0108,
+  "regime": "Expansion",
+  "signals": {
+   "confidence_directional": 0.75,
+   "confidence_magnitude": 0.139,
+   "eem_60d": 0.0414,
+   "iwm_vs_spy_60d": 0.0256,
+   "spy_120d": 0.0145,
+   "spy_vs_ief_60d": -0.0163
+  }
+ },
+ "reporting_currency": "USD",
+ "return_series_coverage": {
+  "covered_weight": 1.092,
+  "dropped": [],
+  "kept": [
+   "AAPL.US",
+   "CONL.US",
+   "TLT.US"
+  ],
+  "n_days": 1299
+ },
+ "risk_free_rate": 0.045,
+ "risk_mandate": "MODERATE",
+ "risk_matrix": {
+  "__type__": "DataFrame",
+  "columns": [
+   "AAPL.US",
+   "CONL.US",
+   "TLT.US"
+  ],
+  "data": [
+   [
+    0.01002752282,
+    0.006411563126,
+    0.006344273921
+   ],
+   [
+    0.006411563126,
+    0.009831688787,
+    0.00626177323
+   ],
+   [
+    0.006344273921,
+    0.00626177323,
+    0.009576755798
+   ]
+  ],
+  "index": [
+   "AAPL.US",
+   "CONL.US",
+   "TLT.US"
+  ],
+  "index_first_last": [
+   "AAPL.US",
+   "TLT.US"
+  ],
+  "shape": [
+   3,
+   3
+  ]
+ },
+ "sector_exposure": {
+  "Bonds": 0.2910548046,
+  "EM_Kazakhstan": 0.03178867376,
+  "Other": 0.5369034075,
+  "Technology": 0.2640455456
+ },
+ "smart_money": {
+  "AAPL.US": {
+   "as_of": null,
+   "buy_count": 0,
+   "cluster_flag": false,
+   "distinct_buyers": 0,
+   "net_flow_usd": 0.0,
+   "note": "SMART_MONEY_INSIDERS=0 (insider layer off)",
+   "score": 0.0,
+   "sell_count": 0,
+   "status": "disabled",
+   "ticker": "AAPL.US"
+  },
+  "CONL.US": {
+   "as_of": null,
+   "buy_count": 0,
+   "cluster_flag": false,
+   "distinct_buyers": 0,
+   "net_flow_usd": 0.0,
+   "note": "SMART_MONEY_INSIDERS=0 (insider layer off)",
+   "score": 0.0,
+   "sell_count": 0,
+   "status": "disabled",
+   "ticker": "CONL.US"
+  },
+  "KSPI.KZ": {
+   "as_of": null,
+   "buy_count": 0,
+   "cluster_flag": false,
+   "distinct_buyers": 0,
+   "net_flow_usd": 0.0,
+   "note": "SMART_MONEY_INSIDERS=0 (insider layer off)",
+   "score": 0.0,
+   "sell_count": 0,
+   "status": "disabled",
+   "ticker": "KSPI.KZ"
+  },
+  "TLT.US": {
+   "as_of": null,
+   "buy_count": 0,
+   "cluster_flag": false,
+   "distinct_buyers": 0,
+   "net_flow_usd": 0.0,
+   "note": "SMART_MONEY_INSIDERS=0 (insider layer off)",
+   "score": 0.0,
+   "sell_count": 0,
+   "status": "disabled",
+   "ticker": "TLT.US"
+  },
+  "USD": {
+   "as_of": null,
+   "buy_count": 0,
+   "cluster_flag": false,
+   "distinct_buyers": 0,
+   "net_flow_usd": 0.0,
+   "note": "SMART_MONEY_INSIDERS=0 (insider layer off)",
+   "score": 0.0,
+   "sell_count": 0,
+   "status": "disabled",
+   "ticker": "USD"
+  }
+ },
+ "stress_scenarios": [
+  {
+   "by_asset": [
+    {
+     "asset_delta_pct": -2.15,
+     "asset_delta_raw": -2.1,
+     "contrib_dollar": -837.44,
+     "contrib_pct": -1.152,
+     "path_dependent": true,
+     "ticker": "CONL.US",
+     "weight_pct": 53.69
+    },
+    {
+     "asset_delta_pct": -3.92,
+     "asset_delta_raw": -3.92,
+     "contrib_dollar": -828.52,
+     "contrib_pct": -1.14,
+     "path_dependent": false,
+     "ticker": "TLT.US",
+     "weight_pct": 29.11
+    },
+    {
+     "asset_delta_pct": -2.86,
+     "asset_delta_raw": -2.86,
+     "contrib_dollar": -549.42,
+     "contrib_pct": -0.756,
+     "path_dependent": false,
+     "ticker": "AAPL.US",
+     "weight_pct": 26.4
+    },
+    {
+     "asset_delta_pct": 0.0,
+     "asset_delta_raw": 0.0,
+     "contrib_dollar": 0.0,
+     "contrib_pct": 0.0,
+     "path_dependent": false,
+     "ticker": "KSPI.KZ",
+     "weight_pct": 3.18
+    }
+   ],
+   "category": "equity",
+   "convexity_applied_n": 0,
+   "coverage": "direct",
+   "coverage_pct": 100.0,
+   "factors_missing": [],
+   "factors_used": [
+    "Market",
+    "Momentum",
+    "Quality"
+   ],
+   "letf_path_n": 1,
+   "max_dd_pct": -0.0782,
+   "name": "Tech sell-off (как Q2 2022)",
+   "note": "broad equity -10% + momentum factor much harder hit; calibrated against SPX -16% / NDX -22% Q2 2022",
+   "port_dollar": -2215.38,
+   "port_pct": -0.0305,
+   "recovery_months": 12.0,
+   "residualized": true,
+   "shocks": {
+    "Market": -0.1,
+    "Momentum": -0.15,
+    "Quality": -0.05
+   },
+   "shocks_applied": {
+    "EM_Equity": 0.064724,
+    "Market": -0.1,
+    "Momentum": -0.084134,
+    "Quality": 0.01848,
+    "Size": 0.064939,
+    "Value": 0.068942,
+    "Volatility": 0.066891
+   }
+  },
+  {
+   "by_asset": [
+    {
+     "asset_delta_pct": -0.73,
+     "asset_delta_raw": -0.68,
+     "contrib_dollar": -286.56,
+     "contrib_pct": -0.394,
+     "path_dependent": true,
+     "ticker": "CONL.US",
+     "weight_pct": 53.69
+    },
+    {
+     "asset_delta_pct": -0.79,
+     "asset_delta_raw": -0.79,
+     "contrib_dollar": -167.98,
+     "contrib_pct": -0.231,
+     "path_dependent": false,
+     "ticker": "TLT.US",
+     "weight_pct": 29.11
+    },
+    {
+     "asset_delta_pct": -0.64,
+     "asset_delta_raw": -0.64,
+     "contrib_dollar": -123.55,
+     "contrib_pct": -0.17,
+     "path_dependent": false,
+     "ticker": "AAPL.US",
+     "weight_pct": 26.4
+    },
+    {
+     "asset_delta_pct": 0.0,
+     "asset_delta_raw": 0.0,
+     "contrib_dollar": 0.0,
+     "contrib_pct": 0.0,
+     "path_dependent": false,
+     "ticker": "KSPI.KZ",
+     "weight_pct": 3.18
+    }
+   ],
+   "category": "credit",
+   "convexity_applied_n": 0,
+   "coverage": "direct",
+   "coverage_pct": 100.0,
+   "factors_missing": [],
+   "factors_used": [
+    "EM_Bond",
+    "Market",
+    "Quality",
+    "Rates"
+   ],
+   "letf_path_n": 1,
+   "max_dd_pct": -0.0556,
+   "name": "Credit blow-out (+200 bps HY)",
+   "note": "HY OAS +200 bps → IEF -2% from rate spike; quality bid; EM credit hit hardest (2008/2020/2023 analogues)",
+   "port_dollar": -578.08,
+   "port_pct": -0.008,
+   "recovery_months": 8.4,
+   "residualized": true,
+   "shocks": {
+    "EM_Bond": -0.08,
+    "Market": -0.05,
+    "Quality": 0.03,
+    "Rates": 0.02
+   },
+   "shocks_applied": {
+    "EM_Bond": -0.092646,
+    "EM_Equity": 0.032362,
+    "Market": -0.05,
+    "Momentum": 0.032933,
+    "Quality": 0.06424,
+    "Rates": 0.02,
+    "Size": 0.032469,
+    "Value": 0.034471,
+    "Volatility": 0.033445
+   }
+  },
+  {
+   "by_asset": [
+    {
+     "asset_delta_pct": -0.15,
+     "asset_delta_raw": -0.09,
+     "contrib_dollar": -59.08,
+     "contrib_pct": -0.081,
+     "path_dependent": true,
+     "ticker": "CONL.US",
+     "weight_pct": 53.69
+    },
+    {
+     "asset_delta_pct": -0.16,
+     "asset_delta_raw": -0.16,
+     "contrib_dollar": -34.35,
+     "contrib_pct": -0.047,
+     "path_dependent": false,
+     "ticker": "TLT.US",
+     "weight_pct": 29.11
+    },
+    {
+     "asset_delta_pct": -0.15,
+     "asset_delta_raw": -0.15,
+     "contrib_dollar": -29.22,
+     "contrib_pct": -0.04,
+     "path_dependent": false,
+     "ticker": "AAPL.US",
+     "weight_pct": 26.4
+    },
+    {
+     "asset_delta_pct": 0.0,
+     "asset_delta_raw": 0.0,
+     "contrib_dollar": 0.0,
+     "contrib_pct": 0.0,
+     "path_dependent": false,
+     "ticker": "KSPI.KZ",
+     "weight_pct": 3.18
+    }
+   ],
+   "category": "rates",
+   "convexity_applied_n": 0,
+   "coverage": "direct",
+   "coverage_pct": 100.0,
+   "factors_missing": [],
+   "factors_used": [
+    "Market",
+    "Rates"
+   ],
+   "letf_path_n": 1,
+   "max_dd_pct": -0.0494,
+   "name": "Fed +50 bps surprise",
+   "note": "single hawkish surprise; IEF -0.5%, equity wobble -2%",
+   "port_dollar": -122.66,
+   "port_pct": -0.0017,
+   "recovery_months": 7.5,
+   "residualized": true,
+   "shocks": {
+    "Market": -0.02,
+    "Rates": 0.005
+   },
+   "shocks_applied": {
+    "EM_Bond": -0.003161,
+    "EM_Equity": 0.012945,
+    "Market": -0.02,
+    "Momentum": 0.013173,
+    "Quality": 0.013696,
+    "Rates": 0.005,
+    "Size": 0.012988,
+    "Value": 0.013788,
+    "Volatility": 0.013378
+   }
+  },
+  {
+   "by_asset": [
+    {
+     "asset_delta_pct": -1.69,
+     "asset_delta_raw": -1.64,
+     "contrib_dollar": -658.32,
+     "contrib_pct": -0.906,
+     "path_dependent": true,
+     "ticker": "CONL.US",
+     "weight_pct": 53.69
+    },
+    {
+     "asset_delta_pct": -2.23,
+     "asset_delta_raw": -2.23,
+     "contrib_dollar": -472.28,
+     "contrib_pct": -0.65,
+     "path_dependent": false,
+     "ticker": "TLT.US",
+     "weight_pct": 29.11
+    },
+    {
+     "asset_delta_pct": -1.43,
+     "asset_delta_raw": -1.43,
+     "contrib_dollar": -274.44,
+     "contrib_pct": -0.377,
+     "path_dependent": false,
+     "ticker": "AAPL.US",
+     "weight_pct": 26.4
+    },
+    {
+     "asset_delta_pct": 0.0,
+     "asset_delta_raw": 0.0,
+     "contrib_dollar": 0.0,
+     "contrib_pct": 0.0,
+     "path_dependent": false,
+     "ticker": "KSPI.KZ",
+     "weight_pct": 3.18
+    }
+   ],
+   "category": "geo",
+   "convexity_applied_n": 0,
+   "coverage": "direct",
+   "coverage_pct": 100.0,
+   "factors_missing": [],
+   "factors_used": [
+    "Commodities",
+    "EM_Bond",
+    "EM_Equity",
+    "Market"
+   ],
+   "letf_path_n": 1,
+   "max_dd_pct": -0.067,
+   "name": "Geopolitical risk-off",
+   "note": "broad sell-off + EM hit hardest + gold/oil bid; calibrated against 2022-02-24 and 2014-Q1 analogues",
+   "port_dollar": -1405.04,
+   "port_pct": -0.0193,
+   "recovery_months": 10.2,
+   "residualized": true,
+   "shocks": {
+    "Commodities": 0.05,
+    "EM_Bond": -0.05,
+    "EM_Equity": -0.12,
+    "Market": -0.07
+   },
+   "shocks_applied": {
+    "Commodities": 0.05,
+    "EM_Bond": -0.05,
+    "EM_Equity": -0.074693,
+    "Market": -0.07,
+    "Momentum": 0.046106,
+    "Quality": 0.047936,
+    "Size": 0.045457,
+    "Value": 0.04826,
+    "Volatility": 0.046824
+   }
+  },
+  {
+   "by_asset": [
+    {
+     "asset_delta_pct": 0.27,
+     "asset_delta_raw": 0.27,
+     "contrib_dollar": 56.23,
+     "contrib_pct": 0.077,
+     "path_dependent": false,
+     "ticker": "TLT.US",
+     "weight_pct": 29.11
+    },
+    {
+     "asset_delta_pct": 0.25,
+     "asset_delta_raw": 0.25,
+     "contrib_dollar": 48.02,
+     "contrib_pct": 0.066,
+     "path_dependent": false,
+     "ticker": "AAPL.US",
+     "weight_pct": 26.4
+    },
+    {
+     "asset_delta_pct": 0.11,
+     "asset_delta_raw": 0.17,
+     "contrib_dollar": 43.24,
+     "contrib_pct": 0.059,
+     "path_dependent": true,
+     "ticker": "CONL.US",
+     "weight_pct": 53.69
+    },
+    {
+     "asset_delta_pct": 0.0,
+     "asset_delta_raw": 0.0,
+     "contrib_dollar": 0.0,
+     "contrib_pct": 0.0,
+     "path_dependent": false,
+     "ticker": "KSPI.KZ",
+     "weight_pct": 3.18
+    }
+   ],
+   "category": "rates",
+   "convexity_applied_n": 0,
+   "coverage": "direct",
+   "coverage_pct": 100.0,
+   "factors_missing": [],
+   "factors_used": [
+    "Market",
+    "Rates"
+   ],
+   "letf_path_n": 1,
+   "max_dd_pct": 0.0,
+   "name": "Fed cut surprise (−50 bps)",
+   "note": "dovish surprise: rate-sensitive rally; IEF +0.5%, equity +3%",
+   "port_dollar": 147.48,
+   "port_pct": 0.002,
+   "recovery_months": null,
+   "residualized": true,
+   "shocks": {
+    "Market": 0.03,
+    "Rates": -0.005
+   },
+   "shocks_applied": {
+    "EM_Bond": 0.003161,
+    "EM_Equity": -0.019417,
+    "Market": 0.03,
+    "Momentum": -0.01976,
+    "Quality": -0.020544,
+    "Rates": -0.005,
+    "Size": -0.019482,
+    "Value": -0.020683,
+    "Volatility": -0.020067
+   }
+  },
+  {
+   "by_asset": [
+    {
+     "asset_delta_pct": -1.13,
+     "asset_delta_raw": -1.07,
+     "contrib_dollar": -439.91,
+     "contrib_pct": -0.605,
+     "path_dependent": true,
+     "ticker": "CONL.US",
+     "weight_pct": 53.69
+    },
+    {
+     "asset_delta_pct": -1.12,
+     "asset_delta_raw": -1.12,
+     "contrib_dollar": -237.87,
+     "contrib_pct": -0.327,
+     "path_dependent": false,
+     "ticker": "TLT.US",
+     "weight_pct": 29.11
+    },
+    {
+     "asset_delta_pct": -1.16,
+     "asset_delta_raw": -1.16,
+     "contrib_dollar": -223.11,
+     "contrib_pct": -0.307,
+     "path_dependent": false,
+     "ticker": "AAPL.US",
+     "weight_pct": 26.4
+    },
+    {
+     "asset_delta_pct": 0.0,
+     "asset_delta_raw": 0.0,
+     "contrib_dollar": 0.0,
+     "contrib_pct": 0.0,
+     "path_dependent": false,
+     "ticker": "KSPI.KZ",
+     "weight_pct": 3.18
+    }
+   ],
+   "category": "macro",
+   "convexity_applied_n": 0,
+   "coverage": "proxy",
+   "coverage_pct": 100.0,
+   "factors_missing": [],
+   "factors_used": [
+    "Commodities",
+    "EM_Bond",
+    "EM_Equity"
+   ],
+   "letf_path_n": 1,
+   "max_dd_pct": -0.0601,
+   "name": "USD +5% rally",
+   "note": "PROXY (no direct USD factor): strong USD typically -5% EM, -3% EM credit, -4% commodities. Would benefit from UUP.US.",
+   "port_dollar": -900.89,
+   "port_pct": -0.0124,
+   "recovery_months": 9.1,
+   "residualized": false,
+   "shocks": {
+    "Commodities": -0.04,
+    "EM_Bond": -0.03,
+    "EM_Equity": -0.05
+   },
+   "shocks_applied": {
+    "Commodities": -0.04,
+    "EM_Bond": -0.03,
+    "EM_Equity": -0.05
+   }
+  },
+  {
+   "by_asset": [
+    {
+     "asset_delta_pct": 0.13,
+     "asset_delta_raw": 0.19,
+     "contrib_dollar": 52.63,
+     "contrib_pct": 0.072,
+     "path_dependent": true,
+     "ticker": "CONL.US",
+     "weight_pct": 53.69
+    },
+    {
+     "asset_delta_pct": -0.09,
+     "asset_delta_raw": -0.09,
+     "contrib_dollar": -16.41,
+     "contrib_pct": -0.023,
+     "path_dependent": false,
+     "ticker": "AAPL.US",
+     "weight_pct": 26.4
+    },
+    {
+     "asset_delta_pct": 0.0,
+     "asset_delta_raw": 0.0,
+     "contrib_dollar": -0.98,
+     "contrib_pct": -0.001,
+     "path_dependent": false,
+     "ticker": "TLT.US",
+     "weight_pct": 29.11
+    },
+    {
+     "asset_delta_pct": 0.0,
+     "asset_delta_raw": 0.0,
+     "contrib_dollar": 0.0,
+     "contrib_pct": 0.0,
+     "path_dependent": false,
+     "ticker": "KSPI.KZ",
+     "weight_pct": 3.18
+    }
+   ],
+   "category": "macro",
+   "convexity_applied_n": 0,
+   "coverage": "proxy",
+   "coverage_pct": 100.0,
+   "factors_missing": [],
+   "factors_used": [
+    "Market",
+    "Rates",
+    "Value"
+   ],
+   "letf_path_n": 1,
+   "max_dd_pct": 0.0,
+   "name": "CPI shock (+1 пп surprise)",
+   "note": "PROXY (no direct Inflation factor): rates spike +150 bps, equity sell-off, value rotates in. Would benefit from TIP.US.",
+   "port_dollar": 35.24,
+   "port_pct": 0.0005,
+   "recovery_months": null,
+   "residualized": true,
+   "shocks": {
+    "Market": -0.03,
+    "Rates": 0.015,
+    "Value": 0.02
+   },
+   "shocks_applied": {
+    "EM_Bond": -0.009484,
+    "EM_Equity": 0.019417,
+    "Market": -0.03,
+    "Momentum": 0.01976,
+    "Quality": 0.020544,
+    "Rates": 0.015,
+    "Size": 0.019482,
+    "Value": 0.040683,
+    "Volatility": 0.020067
+   }
+  }
+ ],
+ "technicals": {
+  "AAPL.US": {
+   "components": {
+    "bollinger": 0.0,
+    "hi52": 0.5,
+    "macd": 0.0,
+    "momentum": 0.0,
+    "rsi": 0.0,
+    "sma200": 1.0
+   },
+   "raw": {
+    "bollinger_z": 0.146092845,
+    "high_52w_prox": 0.9832504136,
+    "macd": {
+     "hist": -0.2635482223,
+     "line": 0.5688357872,
+     "signal": 0.8323840095
+    },
+    "momentum_12m1m": 0.4417788093,
+    "rsi14": 56.47070668,
+    "sma_state": {
+     "close": 191.9673022,
+     "golden_cross": true,
+     "sma100": 180.9814982,
+     "sma200": 172.1426661,
+     "sma50": 188.5134985
+    },
+    "volume_ratio": null
+   },
+   "score": 1.5
+  },
+  "CONL.US": {
+   "components": {
+    "bollinger": 0.0,
+    "hi52": 0.5,
+    "macd": 0.0,
+    "momentum": 0.0,
+    "rsi": 0.0,
+    "sma200": 1.0
+   },
+   "raw": {
+    "bollinger_z": 0.4338825437,
+    "high_52w_prox": 0.9937928011,
+    "macd": {
+     "hist": -0.1648813555,
+     "line": 0.5560214945,
+     "signal": 0.72090285
+    },
+    "momentum_12m1m": 0.3047471898,
+    "rsi14": 57.43242058,
+    "sma_state": {
+     "close": 130.1137883,
+     "golden_cross": true,
+     "sma100": 123.009488,
+     "sma200": 119.2100878,
+     "sma50": 127.4550207
+    },
+    "volume_ratio": null
+   },
+   "score": 1.5
+  },
+  "TLT.US": {
+   "components": {
+    "bollinger": 0.0,
+    "hi52": 0.5,
+    "macd": 0.0,
+    "momentum": 0.0,
+    "rsi": 0.0,
+    "sma200": 1.0
+   },
+   "raw": {
+    "bollinger_z": -0.2275330423,
+    "high_52w_prox": 0.9852853868,
+    "macd": {
+     "hist": -0.2819279881,
+     "line": 0.3093814738,
+     "signal": 0.5913094619
+    },
+    "momentum_12m1m": 0.3281761693,
+    "rsi14": 50.32869376,
+    "sma_state": {
+     "close": 141.0691112,
+     "golden_cross": true,
+     "sma100": 136.9054218,
+     "sma200": 131.5690072,
+     "sma50": 140.1123907
+    },
+    "volume_ratio": null
+   },
+   "score": 1.5
+  }
+ },
+ "total_portfolio_pnl": 41452.3445,
+ "total_value": 72702.3445
+}
