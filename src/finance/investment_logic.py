@@ -2407,6 +2407,407 @@ class UniversalPortfolioManager:
         weights_dict = (df['Current_Value'] / total_portfolio_value).to_dict()
         return (df, all_data, history_result, broker_priced_only, priced_at_cost, _rep_ccy, _fx_rows, _fx_unconvertible, total_portfolio_value, weights_dict)
 
+    def _stage_benchmarks(self, df, all_data, weights_dict, actual_risky,
+                          port_metrics, total_portfolio_value, letf_sigma_map,
+                          profile_benchmark):
+        """Стадия 5: сравнение с бенчмарками, периоды и стресс-сценарии (Арх-3.5).
+
+        Первая стадия, которая опирается на состояние, оставленное риск-моделью:
+        `_last_ortho_betas` движка читается через `getattr` и уходит в стресс.
+        Поэтому она вынесена РАНЬШЕ самой риск-модели (3.7) — если неявный
+        порядок где-то нарушится, это всплывёт здесь, на компактном блоке, а не
+        в сердце движка.
+
+        Что внутри:
+
+        * набор бенчмарков: профильный ставится ПЕРВЫМ — от него считается
+          Tracking Error, и порядок словаря тут содержателен;
+        * портфельная лог-серия строится ОДИН раз и переиспользуется и в TE/IR,
+          и в таблице периодов, поэтому окно у них общее (иначе IR считался бы
+          в одном окне, а доходность — в другом);
+        * `benchmark_factor_profile` (B1): реальные беты бенчмарка тем же
+          Ridge-пайплайном, что и активы. `None` допустим — потребители обязаны
+          это переживать;
+        * стресс-сценарии: беты уже подогнаны, шок мапится в то же residual-
+          пространство (F-1), плечевые ETP считаются path-dependent (P-7).
+
+        Возвращает 6 значений; `port_resolved` нужен позже оверлею (3.8), а не
+        только здесь — поэтому он в выходе, хотя вычислен «по дороге».
+        """
+        # ═══════════════ BENCHMARK COMPARISON ═══════════════
+        # Профильный бенчмарк ставится первым для корректного расчёта Tracking Error.
+        benchmarks: dict[str, str] = {}
+        if profile_benchmark:
+            benchmarks["Профильный бенчмарк"] = profile_benchmark
+
+        # Бенчмарки в формате Tradernet (.US ETF-прокси для индексов).
+        # EEM.US и EMB.US уже запрошены как EM-факторы → данные гарантированно есть.
+        benchmarks.update({
+            'S&P 500':      'SPY.US',   # ETF-прокси на ^GSPC
+            'Nasdaq 100':   'QQQ.US',   # ETF-прокси на ^NDX
+            'Russell 2000': 'IWM.US',   # ETF-прокси на ^RUT
+            'MSCI EM':      'EEM.US',   # Emerging Markets equity index — EM/KASE сравнение
+            'EM Bonds':     'EMB.US',   # JP Morgan EM Bond index — для KZ bond holders
+        })
+        # ── Weighted portfolio log-return series — built ONCE, robustly ────
+        # Sparse-history constituents (thinly-traded local listings) are
+        # dropped from the panel and the surviving weights renormalised, so
+        # one bad name can no longer collapse the overlap window for the
+        # whole book.  See period_returns.build_portfolio_log_returns.
+        port_resolved = self.engine.resolve_tickers(actual_risky)
+        col_weights: dict[str, float] = {}
+        for orig, res in zip(actual_risky, port_resolved):
+            if res in all_data.columns:
+                col_weights[res] = col_weights.get(res, 0.0) + float(weights_dict.get(orig, 0.0))
+        port_log_series, return_coverage = _build_portfolio_log_returns(
+            all_data[list(col_weights)] if col_weights else None, col_weights
+        )
+        if return_coverage["dropped"]:
+            logger.info("Return series: dropped %d sparse-history name(s): %s "
+                        "(covered weight %.1f%%)",
+                        len(return_coverage["dropped"]),
+                        ", ".join(return_coverage["dropped"]),
+                        return_coverage["covered_weight"] * 100)
+
+        # Benchmark log-returns — one Series per benchmark (per-pair join).
+        bm_logs: dict[str, pd.Series] = {}
+        for bm_name, bm_ticker in benchmarks.items():
+            if bm_ticker in all_data.columns:
+                bm_prices = all_data[bm_ticker].dropna()
+                if len(bm_prices) >= 2:
+                    bm_logs[bm_name] = np.log(bm_prices / bm_prices.shift(1)).dropna()
+
+        # ═══════════════ BENCHMARK FACTOR PROFILE (B1 2026-07-17) ═══════════════
+        # Реальные факторные беты выбранного бенчмарка (тот же Ridge-пайплайн,
+        # что и активы) — столбец «бенчмарк» в секции «Факторное разложение»
+        # больше не константа (Market=1, rest=0)=S&P 500.  Для SPY.US беты
+        # ≈ (Market≈1, стили≈0) → отчёт обратносовместим по построению.
+        # None (нет бенчмарка / нет истории) — потребители обязаны переживать.
+        benchmark_factor_profile: dict | None = None
+        if profile_benchmark:
+            _bm_betas = self.engine.fit_factor_betas(all_data, profile_benchmark)
+            if _bm_betas:
+                try:
+                    from profile_manager import BENCHMARK_LIST as _BM_NAMES
+                except Exception:                     # pragma: no cover
+                    _BM_NAMES = {}
+                benchmark_factor_profile = {
+                    "ticker": profile_benchmark,
+                    "name":   _BM_NAMES.get(profile_benchmark, profile_benchmark),
+                    "betas":  _bm_betas,
+                }
+            else:
+                logger.info(
+                    "Benchmark factor profile: беты для %s недоступны — секция "
+                    "факторов использует S&P-константу (graceful fallback).",
+                    profile_benchmark)
+
+        # ═══════════════ BENCHMARK COMPARISON ═══════════════
+        # TE / IR / annualised excess are computed per benchmark on a PAIR
+        # inner-join (compute_benchmark_stats) — a benchmark's own short
+        # history can no longer null the comparison, and numerator and
+        # denominator share one aligned window (no IR scale bug).
+        benchmark_results: dict[str, dict] = {}
+        port_return = float(df['Return_Pct'].fillna(0).values @ np.array(
+            [weights_dict.get(t, 0) for t in df.index]))
+        for bm_name, bm_ticker in benchmarks.items():
+            if bm_ticker not in all_data.columns:
+                continue
+            bm_prices = all_data[bm_ticker].dropna()
+            if len(bm_prices) <= 1:
+                continue
+            bm_return = float(bm_prices.iloc[-1] / bm_prices.iloc[0]) - 1.0
+            stats = _compute_benchmark_stats(port_log_series, bm_logs.get(bm_name),
+                                             trading_days=self.engine.trading_days)
+            benchmark_results[bm_name] = {
+                "Benchmark_Return":     bm_return,                  # period total (display)
+                "Portfolio_Return":     port_return,                # period total (display)
+                "Excess_Return":        port_return - bm_return,    # period total (display)
+                "Portfolio_Ann_Return": stats["port_ann_return"]   if stats else None,
+                "Benchmark_Ann_Return": stats["bm_ann_return"]     if stats else None,
+                "Excess_Return_Ann":    stats["excess_ann"]        if stats else None,
+                "Tracking_Error":       stats["tracking_error"]    if stats else None,
+                "Information_Ratio":    stats["information_ratio"] if stats else None,
+                "Beating_Benchmark":    port_return > bm_return,
+            }
+
+        # ═══════════════ MULTI-PERIOD RETURNS TABLE ═══════════════
+        # Reuses the SAME robust port_log_series + per-benchmark bm_logs, so
+        # every period row shares one aligned window with the TE/IR figures.
+        period_returns_table: dict[str, dict] = {}
+        try:
+            if port_log_series is not None and bm_logs:
+                period_returns_table = _compute_period_returns_table(
+                    port_log_series, bm_logs
+                )
+        except Exception as exc:  # never block the rest of the pipeline
+            logger.warning("period_returns_table build failed: %s", exc)
+            period_returns_table = {}
+
+        # ═══════════════ STRESS SCENARIOS ═══════════════
+        # Parametric factor-shock scenarios using the betas just fitted.  The
+        # default catalog ships 7 scenarios (5 direct, 2 proxy).  Result is a
+        # list[dict] — always present, possibly empty when perf_df is too
+        # thin to support any scenario.
+        try:
+            # Recovery rate = portfolio's own annualised return, clamped to a
+            # realistic band [8%, 18%].  A growth book recovers faster than
+            # the generic 8% market drift, but we cap at 18% so an
+            # unsustainable trailing CAGR (e.g. +36%) cannot fabricate an
+            # absurdly fast recovery.  Floor 8% = long-run market average.
+            _ann_ret = float(port_metrics.get("Annualised_Return") or 0.0)
+            _recovery_rate = min(0.18, max(0.08, _ann_ret))
+            stress_scenarios = _run_stress_scenarios(
+                perf_df      = df.reset_index(),
+                total_value  = total_portfolio_value,
+                port_metrics = port_metrics,
+                ann_return_baseline = _recovery_rate,
+                # F-1: the Beta_* columns in perf_df live in the RESIDUAL factor
+                # space when orthogonalization ran; hand the fitted child→parent
+                # betas to the stress engine so it maps the raw shock catalog
+                # into the same space (invariant to FACTOR_ORTHOGONALIZE).
+                ortho_betas  = getattr(self.engine, "_last_ortho_betas", {}) or {},
+                # P-7: реестровые daily-reset ETP считаются path-dependent —
+                # (1+X_u)^L·exp(−½L(L−1)σ_u²·63)−1 вместо линейного β·shock
+                # с капом ±35% (кап срезал КОНТРАКТНУЮ выпуклость плеча).
+                letf_sigma_daily = letf_sigma_map,
+            )
+        except Exception as exc:
+            logger.warning("stress scenarios build failed: %s", exc)
+            stress_scenarios = []
+
+        return (port_resolved, benchmark_factor_profile, benchmark_results,
+                period_returns_table, return_coverage, stress_scenarios)
+
+    def _stage_scoring(self, df, weights_dict, port_metrics, beta_cols,
+                       all_data, actual_risky):
+        """Стадия 6: секторы, аггравторы гейджа, внешние сигналы, 4-Pillar (Арх-3.6).
+
+        Стадия внешних сервисов: макро (FRED), режим, техникалс, CDS, SEC —
+        каждый под своим `try`, потому что отчёт обязан строиться и без них.
+        Отсюда её главное свойство для разреза: **большая часть веток здесь —
+        аварийные**, их не исполняет ни один тест (покрытие 73.9% / 75.0%,
+        §0c). Поэтому доказательством служит дословность переноса, а не снимок:
+        перенос без изменения текста не может сломать ветку, которую никто не
+        исполняет.
+
+        🔴 У стадии есть НЕВИДИМЫЙ выход: она дописывает в `port_metrics`
+        ключи `Composite_Risk_Score` и `composite_aggravators` — то есть
+        мутирует словарь, пришедший из риск-модели, ПО ССЫЛКЕ. В возвращаемом
+        кортеже этого не видно, и убирать мутацию сейчас нельзя: гейдж обязан
+        считаться на тех же mandate+аггравторах, что и обложка с `simulate`
+        (инвариант `finance/CLAUDE.md`), а любая правка поведения на шаге
+        разреза запрещена. Кандидат в отдельную задачу после 3.11.
+
+        Возвращает 9 значений — в порядке их вычисления, а не «по важности»:
+        так соответствие блоку читается глазами.
+        """
+        # Sector exposure analysis
+        sector_exposure = self.engine.get_sector_exposure(list(df.index), weights_dict)
+
+        # ── Composite-risk aggravators (2026-07-18) ────────────────────────────
+        # Re-score the composite gauge with the STRUCTURAL/TAIL signals the base
+        # three (vol/CVaR/single-name-ERC) miss — leverage, single-sector
+        # concentration and the realised max drawdown.  Live audit: a 73%-tech,
+        # margin-funded book with a −43.5% historical drawdown read «48 ·
+        # Умеренный».  The aggravators are bounded and can only RAISE the gauge;
+        # a clean, diversified, unlevered book is unchanged.  Computed HERE
+        # (sector_exposure + weights available) and passed to BOTH the verdict
+        # gauge and the effect simulator so «до/после» stays consistent.
+        _agg_lev_ratio = None
+        try:
+            _lw = sum(max(0.0, float(w)) for w in weights_dict.values())
+            _nw = sum(float(w) for w in weights_dict.values())
+            _agg_lev_ratio = round(_lw / _nw, 4) if _nw > 1e-9 else 1.0
+        except Exception:
+            _agg_lev_ratio = None
+        _agg_sector_top_pct = None
+        try:
+            # Use the SAME super-group concentration the report headlines
+            # («Tech-комплекс 73%»), not the biggest SINGLE sector (59%) — the
+            # correlated Technology+Semiconductors block is the real
+            # concentration the gauge must reflect (SSOT: asset_taxonomy).
+            from finance.asset_taxonomy import top_sector_concentration_pct
+            _top = top_sector_concentration_pct(sector_exposure or {})
+            _agg_sector_top_pct = _top if _top > 0 else None
+        except Exception:
+            _agg_sector_top_pct = None
+        try:
+            _base_vol = float(port_metrics.get("Total_Volatility_Ann") or 0.0)
+            _base_cvar = float(port_metrics.get("CVaR_95_Daily") or 0.0)
+            _base_erc = float(port_metrics.get("Max_Euler_Risk_Pct") or 0.0)
+            _base_mdd = port_metrics.get("Max_Drawdown")
+            _mandate_str = str(getattr(self.engine, "risk_mandate", "MODERATE"))
+            port_metrics["Composite_Risk_Score"] = self.engine._composite_risk_score(
+                _base_vol, _base_cvar, _base_erc, _mandate_str,
+                max_drawdown=(float(_base_mdd) if _base_mdd is not None else None),
+                leverage_ratio=_agg_lev_ratio,
+                sector_top_pct=_agg_sector_top_pct)
+            # Surface the aggravators for the QC/AI layer (why the gauge is
+            # higher than the raw vol/CVaR would suggest).
+            port_metrics["composite_aggravators"] = {
+                "max_drawdown":   (float(_base_mdd) if _base_mdd is not None else None),
+                "leverage_ratio": _agg_lev_ratio,
+                "sector_top_pct": _agg_sector_top_pct,
+            }
+        except Exception as _exc:
+            logger.warning("composite aggravators skipped: %s", _exc)
+
+        # ═══════════════ FACTOR SCORES GROUPING ═══════════════
+        # Group A (Style Factors): MAC3-derived betas, alpha, volatility
+        # Group B (Fundamental Factors): SEC EDGAR metrics
+        factor_scores = {}
+        perf = df.reset_index()
+        for _, row in perf.iterrows():
+            ticker = row.get('Ticker', '?')
+            group_a = {}
+            group_b = {}
+            # Style factors (Group A)
+            for col in beta_cols:
+                if col in row.index:
+                    group_a[col] = row[col]
+            for col in ['Residual_Vol_Ann', 'Euler_Risk_Contribution_Pct',
+                        'Expected_Return', 'Alpha_Specific', 'Specific_Alpha_Daily']:
+                if col in row.index:
+                    group_a[col] = row[col]
+            # Fundamental factors (Group B)
+            for col in ['Fundamental_Score', 'Fundamental_Sector',
+                        'SEC_Op_Margin', 'SEC_Debt_to_Assets',
+                        'SEC_ROE', 'SEC_Revenue_Growth_YoY', 'SEC_Filing_Date']:
+                if col in row.index:
+                    group_b[col] = row[col]
+            factor_scores[ticker] = {
+                'group_a_style': group_a,
+                'group_b_fundamental': group_b,
+            }
+
+        # ═══════════════ MACRO DRIVERS (FRED) ═══════════════
+        # 6-series pack (yield curve / HY OAS / VIX / breakeven / unemployment /
+        # real-GDP growth) used by the DEEP P5 regime page.  Disk-cached for
+        # 12h; gracefully degrades to status="missing" when FRED_API_KEY is
+        # unset and to status="stale" on transient network failures.  Fetched
+        # BEFORE classification so the regime can (optionally) consume it.
+        macro_drivers: dict = {}
+        try:
+            macro_drivers = _MacroFeed().get_regime_drivers()
+        except Exception as exc:
+            logger.warning("Macro drivers fetch skipped: %s", exc)
+            macro_drivers = {}
+
+        # ═══════════════ MACRO REGIME CLASSIFICATION ═══════════════
+        # Reuses the factor ETF prices already in `all_data` — no extra calls.
+        # BLOCK 3.4: the FRED macro pack is passed in; it is only consulted when
+        # REGIME_MACRO_OVERLAY=1 (otherwise the classifier is unchanged).
+        try:
+            from finance.regime import RegimeClassifier
+            regime_reading = RegimeClassifier().classify(all_data, macro=macro_drivers)
+        except Exception as exc:
+            logger.warning("Regime classification skipped: %s", exc)
+            regime_reading = None
+
+        # ═══════════════ TECHNICALS (pillar C) ═══════════════
+        # Computes RSI/MACD/SMA/Bollinger/52w-Hi/Mom-12m1m per-asset.
+        # Uses the same close-price frame already loaded; no new fetches.
+        technicals_map: dict = {}
+        try:
+            from finance.technicals import compute_technicals
+            tech_sector_map = {
+                t: self.engine.get_ticker_sector(t) for t in actual_risky
+            }
+            technicals_map = compute_technicals(
+                close_prices = all_data,
+                tickers      = actual_risky,
+                volume_frame = None,            # OHLC volumes wired in a later phase
+                sector_map   = tech_sector_map,
+            )
+        except Exception as exc:
+            logger.warning("Technicals computation skipped: %s", exc)
+            technicals_map = {}
+
+        # ═══════════════ CDS FEED (free layer) ═══════════════
+        # Lazy-init.  When CDS_DISABLED=1 (e.g. unit tests) we skip the feed
+        # entirely.  Failures are caught and the scoring orchestrator falls
+        # back to SEC-only Credit signals.
+        cds_lookup = None
+        if os.getenv("CDS_DISABLED") != "1":
+            try:
+                from finance.cds_feed import CDSFeed, make_lookup
+                cds_lookup = make_lookup(CDSFeed())
+            except Exception as exc:
+                logger.info("CDS feed unavailable, continuing without it: %s", exc)
+                cds_lookup = None
+
+        # Tally CDS coverage so the CoVe lineage row reflects reality
+        # (instead of the silent "no per-ticker CDS attached" placeholder).
+        # Single extra pass over the cache — microseconds for ≤20 tickers.
+        cds_summary: dict = {"enabled": cds_lookup is not None,
+                              "checked": 0, "loaded": 0, "gated_out": 0}
+        if cds_lookup is not None:
+            try:
+                checked = list(actual_risky)
+                n_loaded = sum(1 for t in checked if cds_lookup(t))
+                cds_summary.update({
+                    "checked":   len(checked),
+                    "loaded":    n_loaded,
+                    "gated_out": len(checked) - n_loaded,
+                })
+            except Exception as exc:
+                logger.info("CDS coverage tally skipped: %s", exc)
+
+        # ═══════════════ 4-PILLAR SCORING (F/V/T/C) ═══════════════
+        # Produces AssetScore per ticker, including CDS signals when available.
+        asset_scores: dict = {}
+        try:
+            from finance.scoring_orchestrator import score_portfolio
+            asset_scores = score_portfolio(
+                perf_table = perf,
+                technicals = technicals_map,
+                regime     = regime_reading,
+                cds_lookup = cds_lookup,
+                # Sprint-5.1 (S2): in production, small-sector F-pillar
+                # z-scores use the LIVE SEC cohort of sector leaders before
+                # falling back to the static 2020-25 constants.
+                dynamic_benchmarks = os.getenv("SECTOR_COHORT_DISABLED") != "1",
+            )
+            # Materialise the score columns into the perf table for downstream
+            # PDF rendering — this is purely additive, no existing column is
+            # overwritten.
+            if asset_scores:
+                score_rows = []
+                for t in perf["Ticker"].tolist():
+                    sc = asset_scores.get(str(t))
+                    if sc is None:
+                        score_rows.append({
+                            "Ticker": t,
+                            "Score_Fundamentals": None,
+                            "Score_Valuations":   None,
+                            "Score_Technicals":   None,
+                            "Score_Credit":       None,
+                            "Score_Total":        None,
+                            "Score_Action":       None,
+                            "Score_Hotspot":      False,
+                        })
+                    else:
+                        score_rows.append({
+                            "Ticker": t,
+                            "Score_Fundamentals": sc.fundamentals,
+                            "Score_Valuations":   sc.valuations,
+                            "Score_Technicals":   sc.technicals,
+                            "Score_Credit":       sc.credit,
+                            "Score_Total":        sc.total,
+                            "Score_Action":       sc.action,
+                            "Score_Hotspot":      sc.hotspot,
+                        })
+                score_df = pd.DataFrame(score_rows).set_index("Ticker")
+                # Join back onto perf without losing existing columns.
+                perf = perf.set_index("Ticker").join(score_df, how="left").reset_index()
+        except Exception as exc:
+            logger.warning("Scoring orchestrator skipped: %s", exc)
+
+        return (sector_exposure, _agg_lev_ratio, factor_scores, perf,
+                macro_drivers, regime_reading, technicals_map, cds_summary,
+                asset_scores)
+
     def analyze_all(self, source, scenario_shocks=None, profile_benchmark: str | None = None,
                     risk_mandate: str | None = None) -> AnalyzeResults:
         """
@@ -2664,349 +3065,16 @@ class UniversalPortfolioManager:
             except Exception as _exc:
                 logger.warning("portfolio expected-return aggregation skipped: %s", _exc)
 
-        # ═══════════════ BENCHMARK COMPARISON ═══════════════
-        # Профильный бенчмарк ставится первым для корректного расчёта Tracking Error.
-        benchmarks: dict[str, str] = {}
-        if profile_benchmark:
-            benchmarks["Профильный бенчмарк"] = profile_benchmark
+        (port_resolved, benchmark_factor_profile, benchmark_results,
+         period_returns_table, return_coverage, stress_scenarios) = (
+            self._stage_benchmarks(df, all_data, weights_dict, actual_risky,
+                                   port_metrics, total_portfolio_value,
+                                   letf_sigma_map, profile_benchmark))
 
-        # Бенчмарки в формате Tradernet (.US ETF-прокси для индексов).
-        # EEM.US и EMB.US уже запрошены как EM-факторы → данные гарантированно есть.
-        benchmarks.update({
-            'S&P 500':      'SPY.US',   # ETF-прокси на ^GSPC
-            'Nasdaq 100':   'QQQ.US',   # ETF-прокси на ^NDX
-            'Russell 2000': 'IWM.US',   # ETF-прокси на ^RUT
-            'MSCI EM':      'EEM.US',   # Emerging Markets equity index — EM/KASE сравнение
-            'EM Bonds':     'EMB.US',   # JP Morgan EM Bond index — для KZ bond holders
-        })
-        # ── Weighted portfolio log-return series — built ONCE, robustly ────
-        # Sparse-history constituents (thinly-traded local listings) are
-        # dropped from the panel and the surviving weights renormalised, so
-        # one bad name can no longer collapse the overlap window for the
-        # whole book.  See period_returns.build_portfolio_log_returns.
-        port_resolved = self.engine.resolve_tickers(actual_risky)
-        col_weights: dict[str, float] = {}
-        for orig, res in zip(actual_risky, port_resolved):
-            if res in all_data.columns:
-                col_weights[res] = col_weights.get(res, 0.0) + float(weights_dict.get(orig, 0.0))
-        port_log_series, return_coverage = _build_portfolio_log_returns(
-            all_data[list(col_weights)] if col_weights else None, col_weights
-        )
-        if return_coverage["dropped"]:
-            logger.info("Return series: dropped %d sparse-history name(s): %s "
-                        "(covered weight %.1f%%)",
-                        len(return_coverage["dropped"]),
-                        ", ".join(return_coverage["dropped"]),
-                        return_coverage["covered_weight"] * 100)
-
-        # Benchmark log-returns — one Series per benchmark (per-pair join).
-        bm_logs: dict[str, pd.Series] = {}
-        for bm_name, bm_ticker in benchmarks.items():
-            if bm_ticker in all_data.columns:
-                bm_prices = all_data[bm_ticker].dropna()
-                if len(bm_prices) >= 2:
-                    bm_logs[bm_name] = np.log(bm_prices / bm_prices.shift(1)).dropna()
-
-        # ═══════════════ BENCHMARK FACTOR PROFILE (B1 2026-07-17) ═══════════════
-        # Реальные факторные беты выбранного бенчмарка (тот же Ridge-пайплайн,
-        # что и активы) — столбец «бенчмарк» в секции «Факторное разложение»
-        # больше не константа (Market=1, rest=0)=S&P 500.  Для SPY.US беты
-        # ≈ (Market≈1, стили≈0) → отчёт обратносовместим по построению.
-        # None (нет бенчмарка / нет истории) — потребители обязаны переживать.
-        benchmark_factor_profile: dict | None = None
-        if profile_benchmark:
-            _bm_betas = self.engine.fit_factor_betas(all_data, profile_benchmark)
-            if _bm_betas:
-                try:
-                    from profile_manager import BENCHMARK_LIST as _BM_NAMES
-                except Exception:                     # pragma: no cover
-                    _BM_NAMES = {}
-                benchmark_factor_profile = {
-                    "ticker": profile_benchmark,
-                    "name":   _BM_NAMES.get(profile_benchmark, profile_benchmark),
-                    "betas":  _bm_betas,
-                }
-            else:
-                logger.info(
-                    "Benchmark factor profile: беты для %s недоступны — секция "
-                    "факторов использует S&P-константу (graceful fallback).",
-                    profile_benchmark)
-
-        # ═══════════════ BENCHMARK COMPARISON ═══════════════
-        # TE / IR / annualised excess are computed per benchmark on a PAIR
-        # inner-join (compute_benchmark_stats) — a benchmark's own short
-        # history can no longer null the comparison, and numerator and
-        # denominator share one aligned window (no IR scale bug).
-        benchmark_results: dict[str, dict] = {}
-        port_return = float(df['Return_Pct'].fillna(0).values @ np.array(
-            [weights_dict.get(t, 0) for t in df.index]))
-        for bm_name, bm_ticker in benchmarks.items():
-            if bm_ticker not in all_data.columns:
-                continue
-            bm_prices = all_data[bm_ticker].dropna()
-            if len(bm_prices) <= 1:
-                continue
-            bm_return = float(bm_prices.iloc[-1] / bm_prices.iloc[0]) - 1.0
-            stats = _compute_benchmark_stats(port_log_series, bm_logs.get(bm_name),
-                                             trading_days=self.engine.trading_days)
-            benchmark_results[bm_name] = {
-                "Benchmark_Return":     bm_return,                  # period total (display)
-                "Portfolio_Return":     port_return,                # period total (display)
-                "Excess_Return":        port_return - bm_return,    # period total (display)
-                "Portfolio_Ann_Return": stats["port_ann_return"]   if stats else None,
-                "Benchmark_Ann_Return": stats["bm_ann_return"]     if stats else None,
-                "Excess_Return_Ann":    stats["excess_ann"]        if stats else None,
-                "Tracking_Error":       stats["tracking_error"]    if stats else None,
-                "Information_Ratio":    stats["information_ratio"] if stats else None,
-                "Beating_Benchmark":    port_return > bm_return,
-            }
-
-        # ═══════════════ MULTI-PERIOD RETURNS TABLE ═══════════════
-        # Reuses the SAME robust port_log_series + per-benchmark bm_logs, so
-        # every period row shares one aligned window with the TE/IR figures.
-        period_returns_table: dict[str, dict] = {}
-        try:
-            if port_log_series is not None and bm_logs:
-                period_returns_table = _compute_period_returns_table(
-                    port_log_series, bm_logs
-                )
-        except Exception as exc:  # never block the rest of the pipeline
-            logger.warning("period_returns_table build failed: %s", exc)
-            period_returns_table = {}
-
-        # ═══════════════ STRESS SCENARIOS ═══════════════
-        # Parametric factor-shock scenarios using the betas just fitted.  The
-        # default catalog ships 7 scenarios (5 direct, 2 proxy).  Result is a
-        # list[dict] — always present, possibly empty when perf_df is too
-        # thin to support any scenario.
-        try:
-            # Recovery rate = portfolio's own annualised return, clamped to a
-            # realistic band [8%, 18%].  A growth book recovers faster than
-            # the generic 8% market drift, but we cap at 18% so an
-            # unsustainable trailing CAGR (e.g. +36%) cannot fabricate an
-            # absurdly fast recovery.  Floor 8% = long-run market average.
-            _ann_ret = float(port_metrics.get("Annualised_Return") or 0.0)
-            _recovery_rate = min(0.18, max(0.08, _ann_ret))
-            stress_scenarios = _run_stress_scenarios(
-                perf_df      = df.reset_index(),
-                total_value  = total_portfolio_value,
-                port_metrics = port_metrics,
-                ann_return_baseline = _recovery_rate,
-                # F-1: the Beta_* columns in perf_df live in the RESIDUAL factor
-                # space when orthogonalization ran; hand the fitted child→parent
-                # betas to the stress engine so it maps the raw shock catalog
-                # into the same space (invariant to FACTOR_ORTHOGONALIZE).
-                ortho_betas  = getattr(self.engine, "_last_ortho_betas", {}) or {},
-                # P-7: реестровые daily-reset ETP считаются path-dependent —
-                # (1+X_u)^L·exp(−½L(L−1)σ_u²·63)−1 вместо линейного β·shock
-                # с капом ±35% (кап срезал КОНТРАКТНУЮ выпуклость плеча).
-                letf_sigma_daily = letf_sigma_map,
-            )
-        except Exception as exc:
-            logger.warning("stress scenarios build failed: %s", exc)
-            stress_scenarios = []
-
-        # Sector exposure analysis
-        sector_exposure = self.engine.get_sector_exposure(list(df.index), weights_dict)
-
-        # ── Composite-risk aggravators (2026-07-18) ────────────────────────────
-        # Re-score the composite gauge with the STRUCTURAL/TAIL signals the base
-        # three (vol/CVaR/single-name-ERC) miss — leverage, single-sector
-        # concentration and the realised max drawdown.  Live audit: a 73%-tech,
-        # margin-funded book with a −43.5% historical drawdown read «48 ·
-        # Умеренный».  The aggravators are bounded and can only RAISE the gauge;
-        # a clean, diversified, unlevered book is unchanged.  Computed HERE
-        # (sector_exposure + weights available) and passed to BOTH the verdict
-        # gauge and the effect simulator so «до/после» stays consistent.
-        _agg_lev_ratio = None
-        try:
-            _lw = sum(max(0.0, float(w)) for w in weights_dict.values())
-            _nw = sum(float(w) for w in weights_dict.values())
-            _agg_lev_ratio = round(_lw / _nw, 4) if _nw > 1e-9 else 1.0
-        except Exception:
-            _agg_lev_ratio = None
-        _agg_sector_top_pct = None
-        try:
-            # Use the SAME super-group concentration the report headlines
-            # («Tech-комплекс 73%»), not the biggest SINGLE sector (59%) — the
-            # correlated Technology+Semiconductors block is the real
-            # concentration the gauge must reflect (SSOT: asset_taxonomy).
-            from finance.asset_taxonomy import top_sector_concentration_pct
-            _top = top_sector_concentration_pct(sector_exposure or {})
-            _agg_sector_top_pct = _top if _top > 0 else None
-        except Exception:
-            _agg_sector_top_pct = None
-        try:
-            _base_vol = float(port_metrics.get("Total_Volatility_Ann") or 0.0)
-            _base_cvar = float(port_metrics.get("CVaR_95_Daily") or 0.0)
-            _base_erc = float(port_metrics.get("Max_Euler_Risk_Pct") or 0.0)
-            _base_mdd = port_metrics.get("Max_Drawdown")
-            _mandate_str = str(getattr(self.engine, "risk_mandate", "MODERATE"))
-            port_metrics["Composite_Risk_Score"] = self.engine._composite_risk_score(
-                _base_vol, _base_cvar, _base_erc, _mandate_str,
-                max_drawdown=(float(_base_mdd) if _base_mdd is not None else None),
-                leverage_ratio=_agg_lev_ratio,
-                sector_top_pct=_agg_sector_top_pct)
-            # Surface the aggravators for the QC/AI layer (why the gauge is
-            # higher than the raw vol/CVaR would suggest).
-            port_metrics["composite_aggravators"] = {
-                "max_drawdown":   (float(_base_mdd) if _base_mdd is not None else None),
-                "leverage_ratio": _agg_lev_ratio,
-                "sector_top_pct": _agg_sector_top_pct,
-            }
-        except Exception as _exc:
-            logger.warning("composite aggravators skipped: %s", _exc)
-
-        # ═══════════════ FACTOR SCORES GROUPING ═══════════════
-        # Group A (Style Factors): MAC3-derived betas, alpha, volatility
-        # Group B (Fundamental Factors): SEC EDGAR metrics
-        factor_scores = {}
-        perf = df.reset_index()
-        for _, row in perf.iterrows():
-            ticker = row.get('Ticker', '?')
-            group_a = {}
-            group_b = {}
-            # Style factors (Group A)
-            for col in beta_cols:
-                if col in row.index:
-                    group_a[col] = row[col]
-            for col in ['Residual_Vol_Ann', 'Euler_Risk_Contribution_Pct',
-                        'Expected_Return', 'Alpha_Specific', 'Specific_Alpha_Daily']:
-                if col in row.index:
-                    group_a[col] = row[col]
-            # Fundamental factors (Group B)
-            for col in ['Fundamental_Score', 'Fundamental_Sector',
-                        'SEC_Op_Margin', 'SEC_Debt_to_Assets',
-                        'SEC_ROE', 'SEC_Revenue_Growth_YoY', 'SEC_Filing_Date']:
-                if col in row.index:
-                    group_b[col] = row[col]
-            factor_scores[ticker] = {
-                'group_a_style': group_a,
-                'group_b_fundamental': group_b,
-            }
-
-        # ═══════════════ MACRO DRIVERS (FRED) ═══════════════
-        # 6-series pack (yield curve / HY OAS / VIX / breakeven / unemployment /
-        # real-GDP growth) used by the DEEP P5 regime page.  Disk-cached for
-        # 12h; gracefully degrades to status="missing" when FRED_API_KEY is
-        # unset and to status="stale" on transient network failures.  Fetched
-        # BEFORE classification so the regime can (optionally) consume it.
-        macro_drivers: dict = {}
-        try:
-            macro_drivers = _MacroFeed().get_regime_drivers()
-        except Exception as exc:
-            logger.warning("Macro drivers fetch skipped: %s", exc)
-            macro_drivers = {}
-
-        # ═══════════════ MACRO REGIME CLASSIFICATION ═══════════════
-        # Reuses the factor ETF prices already in `all_data` — no extra calls.
-        # BLOCK 3.4: the FRED macro pack is passed in; it is only consulted when
-        # REGIME_MACRO_OVERLAY=1 (otherwise the classifier is unchanged).
-        try:
-            from finance.regime import RegimeClassifier
-            regime_reading = RegimeClassifier().classify(all_data, macro=macro_drivers)
-        except Exception as exc:
-            logger.warning("Regime classification skipped: %s", exc)
-            regime_reading = None
-
-        # ═══════════════ TECHNICALS (pillar C) ═══════════════
-        # Computes RSI/MACD/SMA/Bollinger/52w-Hi/Mom-12m1m per-asset.
-        # Uses the same close-price frame already loaded; no new fetches.
-        technicals_map: dict = {}
-        try:
-            from finance.technicals import compute_technicals
-            tech_sector_map = {
-                t: self.engine.get_ticker_sector(t) for t in actual_risky
-            }
-            technicals_map = compute_technicals(
-                close_prices = all_data,
-                tickers      = actual_risky,
-                volume_frame = None,            # OHLC volumes wired in a later phase
-                sector_map   = tech_sector_map,
-            )
-        except Exception as exc:
-            logger.warning("Technicals computation skipped: %s", exc)
-            technicals_map = {}
-
-        # ═══════════════ CDS FEED (free layer) ═══════════════
-        # Lazy-init.  When CDS_DISABLED=1 (e.g. unit tests) we skip the feed
-        # entirely.  Failures are caught and the scoring orchestrator falls
-        # back to SEC-only Credit signals.
-        cds_lookup = None
-        if os.getenv("CDS_DISABLED") != "1":
-            try:
-                from finance.cds_feed import CDSFeed, make_lookup
-                cds_lookup = make_lookup(CDSFeed())
-            except Exception as exc:
-                logger.info("CDS feed unavailable, continuing without it: %s", exc)
-                cds_lookup = None
-
-        # Tally CDS coverage so the CoVe lineage row reflects reality
-        # (instead of the silent "no per-ticker CDS attached" placeholder).
-        # Single extra pass over the cache — microseconds for ≤20 tickers.
-        cds_summary: dict = {"enabled": cds_lookup is not None,
-                              "checked": 0, "loaded": 0, "gated_out": 0}
-        if cds_lookup is not None:
-            try:
-                checked = list(actual_risky)
-                n_loaded = sum(1 for t in checked if cds_lookup(t))
-                cds_summary.update({
-                    "checked":   len(checked),
-                    "loaded":    n_loaded,
-                    "gated_out": len(checked) - n_loaded,
-                })
-            except Exception as exc:
-                logger.info("CDS coverage tally skipped: %s", exc)
-
-        # ═══════════════ 4-PILLAR SCORING (F/V/T/C) ═══════════════
-        # Produces AssetScore per ticker, including CDS signals when available.
-        asset_scores: dict = {}
-        try:
-            from finance.scoring_orchestrator import score_portfolio
-            asset_scores = score_portfolio(
-                perf_table = perf,
-                technicals = technicals_map,
-                regime     = regime_reading,
-                cds_lookup = cds_lookup,
-                # Sprint-5.1 (S2): in production, small-sector F-pillar
-                # z-scores use the LIVE SEC cohort of sector leaders before
-                # falling back to the static 2020-25 constants.
-                dynamic_benchmarks = os.getenv("SECTOR_COHORT_DISABLED") != "1",
-            )
-            # Materialise the score columns into the perf table for downstream
-            # PDF rendering — this is purely additive, no existing column is
-            # overwritten.
-            if asset_scores:
-                score_rows = []
-                for t in perf["Ticker"].tolist():
-                    sc = asset_scores.get(str(t))
-                    if sc is None:
-                        score_rows.append({
-                            "Ticker": t,
-                            "Score_Fundamentals": None,
-                            "Score_Valuations":   None,
-                            "Score_Technicals":   None,
-                            "Score_Credit":       None,
-                            "Score_Total":        None,
-                            "Score_Action":       None,
-                            "Score_Hotspot":      False,
-                        })
-                    else:
-                        score_rows.append({
-                            "Ticker": t,
-                            "Score_Fundamentals": sc.fundamentals,
-                            "Score_Valuations":   sc.valuations,
-                            "Score_Technicals":   sc.technicals,
-                            "Score_Credit":       sc.credit,
-                            "Score_Total":        sc.total,
-                            "Score_Action":       sc.action,
-                            "Score_Hotspot":      sc.hotspot,
-                        })
-                score_df = pd.DataFrame(score_rows).set_index("Ticker")
-                # Join back onto perf without losing existing columns.
-                perf = perf.set_index("Ticker").join(score_df, how="left").reset_index()
-        except Exception as exc:
-            logger.warning("Scoring orchestrator skipped: %s", exc)
+        (sector_exposure, _agg_lev_ratio, factor_scores, perf,
+         macro_drivers, regime_reading, technicals_map, cds_summary,
+         asset_scores) = self._stage_scoring(df, weights_dict, port_metrics,
+                                            beta_cols, all_data, actual_risky)
 
         # ═══════════════ BLACK-LITTERMAN TARGETS ═══════════════
         # Reverse-optimisation prior + score-derived views → posterior

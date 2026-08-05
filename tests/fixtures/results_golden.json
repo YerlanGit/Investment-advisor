@@ -554,7 +554,16 @@
     1300,
     18
    ],
-   "values_sha256": "1cf8d5f7c91b83cce581e396219283e33478241cebb6fa38012be873e735e7af"
+   "summary": {
+    "max": 230.292,
+    "mean": 121.918,
+    "min": 89.9516,
+    "n_floats": 22140,
+    "order_checksum": 32669300000.0,
+    "std": 23.49,
+    "sum": 2699250.0
+   },
+   "values_sha256": "58a4f14e80425e3b9f74abb071dada7b932d8700957c21732a85e4e2f06eeaf4"
   },
   "failed": [],
   "loaded": [
@@ -1221,7 +1230,16 @@
    "2027-12-24 00:00:00"
   ],
   "length": 1299,
-  "values_sha256": "b921fd0ef734af3dad9a84d24ff67323d53da10bcc19da543d48415dfa869951"
+  "summary": {
+   "max": 0.0155216,
+   "mean": 0.000372941,
+   "min": -0.0149194,
+   "n_floats": 1299,
+   "order_checksum": 445.145,
+   "std": 0.00458902,
+   "sum": 0.484451
+  },
+  "values_sha256": "ca5a5e9816bebe83ac95e382f850ea8d44b7098c80fcda428fd9c246f7addd4c"
  },
  "portfolio_metrics": {
   "Annualised_Return": 0.09853915644,
