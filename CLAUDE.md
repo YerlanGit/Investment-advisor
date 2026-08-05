@@ -79,7 +79,8 @@ L4 Delivery  tg_bot.py · entrypoint.py · db_tokenomics.py · services/report_s
 L3 Report    pdf_payload.py → premium_payload.py → premium_renderer.py · html_renderer.py
              ai_narrative.py · pdf_charts.py · report_charts.py · report_mocks.py
              finance/data_lineage.py · finance/scenario_report.py
-L2 Engine    finance/investment_logic.py (analyze_all) · scoring*.py · stress.py · simulate.py
+L2 Engine    finance/engine/{risk_engine,portfolio_manager,market_preview}.py
+             (finance/investment_logic.py — ФАСАД) · scoring*.py · stress.py · simulate.py
              black_litterman.py · regime.py · period_returns.py · scenario_engine.py · data_checks.py
 L1 Data      freedom_portfolio/* · services/{fx_feed,macro_data}.py · finance/{broker_api,
              price_providers,sec_edgar,cds_feed,currency,demo_portfolio}.py · agent/rag_engine.py
