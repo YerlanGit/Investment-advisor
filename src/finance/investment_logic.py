@@ -3102,46 +3102,55 @@ class UniversalPortfolioManager:
                 macro_drivers, regime_reading, technicals_map, cds_summary,
                 asset_scores)
 
-    def analyze_all(self, source, scenario_shocks=None, profile_benchmark: str | None = None,
-                    risk_mandate: str | None = None) -> AnalyzeResults:
+    def _stage_overlay(self, df, all_data, weights_dict, actual_risky,
+                       port_resolved, broker_priced_only, cov_matrix,
+                       port_metrics, perf, asset_scores, technicals_map,
+                       total_portfolio_value, _agg_lev_ratio):
+        """Стадия 7: наложения поверх посчитанного портфеля (Арх-3.8).
+
+        Последняя стадия конвейера и самая связная — она читает почти всё, что
+        произвели предыдущие шесть. План оценивал интерфейс в 20/8; замер дал
+        **13 входов и 5 выходов**: часть «живых» переменных, как и на 3.5/3.7,
+        оказалась целиком внутренней.
+
+        Порядок ТРЁХ из четырёх блоков содержателен, и это не стилистика —
+        каждый следующий питается предыдущим (Smart Money стоит особняком:
+        он ничего не читает у соседей и ничего им не даёт):
+
+            Black-Litterman ─→ Action Plan ─→ Expected Effect
+                    │                │              ↑
+                    └────────────────┴──────────────┘
+              bl_records кормит и план, и симуляцию; action_plan_rows — симуляцию
+
+        * **Black-Litterman**: reverse-optimisation prior + views из оценок.
+          Мандат КОНСТРАНИТ оптимизатор (δ, turnover, cap на имя), поэтому
+          консервативная книга получает меньшие отклонения, а не «один размер
+          на всех»;
+        * **Action Plan**: зоны покупки/продажи от ATR+SMA+RSI. Считается ДО
+          симуляции (BLOCK 2.3), чтобы панель эффекта двигали именно
+          high-priority идеи, а не полный BL-таргет — иначе «Идеи → План →
+          Эффект» перестают быть одной историей;
+        * **Smart Money**: слой инсайдеров заполняется ВСЕГДА, даже когда
+          провайдер выключен, — иначе секция просто исчезнет из отчёта вместо
+          честного «слой готов, источник не подключён»;
+        * **Expected Effect**: пересчёт обложечных метрик под план. Реинвест
+          ДЕКОНЦЕНТРИРУЕТ (иначе освободившийся вес возвращался в тот же
+          перегретый сектор), а блок-лист реинвеста закрывает имена, которые
+          модель не может симулировать честно (L-13).
+
+        Каждый блок под своим `try`: отчёт обязан строиться, даже если
+        оптимизатор или внешний слой отказали. Все пять выходов инициализируются
+        ДО своего `try`, поэтому возврат безопасен при любом отказе.
+
+        Неявный канал ровно один — `_last_sparse_dropped` движка, и читается он
+        ДВАЖДЫ: в Action Plan (F-20, чтобы строка объяснила, почему у неё нет
+        беты) и в блок-листе реинвеста (L-13, где к нему добавляется
+        `broker_priced_only`). Два почти одинаковых вычисления одного множества
+        — кандидат на объединение, но НЕ на шаге разреза: фаза поведенчески
+        пустая, а у слияния свой замер и свой тест (`§−66`).
+
+        Возвращает 5 значений в порядке вычисления.
         """
-        profile_benchmark: Tradernet ETF ticker for the user's mandate benchmark
-        (e.g. 'AGG.US' for Conservative, 'SPY.US' for Moderate, 'QQQ.US' for Aggressive).
-        When provided it is computed first and labelled 'Профильный бенчмарк' in results.
-
-        risk_mandate: CONSERVATIVE / MODERATE / AGGRESSIVE (or an RU/EN profile
-        name / numeric score) — drives the composite-risk-score calibration
-        (H4).  When None, the engine keeps its current mandate (MODERATE
-        default).
-        """
-        if risk_mandate is not None:
-            from finance.scoring import normalize_risk_mandate as _nrm
-            self.engine.risk_mandate = _nrm(risk_mandate)
-        df, _merged_rows, _dropped_rows = self._stage_normalize(source)
-
-        (df, all_data, history_result, broker_priced_only, priced_at_cost,
-         _rep_ccy, _fx_rows, _fx_unconvertible, total_portfolio_value,
-         weights_dict) = self._stage_price_and_fx(df)
-
-        _dq_report = self._stage_data_quality(
-            df, weights_dict, all_data, _fx_unconvertible)
-
-        (actual_risky, cov_matrix, port_metrics, _dq_report, df,
-         letf_sigma_map, beta_cols) = self._stage_risk_model(
-            df, all_data, weights_dict, broker_priced_only,
-            history_result, _dq_report)
-
-        (port_resolved, benchmark_factor_profile, benchmark_results,
-         period_returns_table, return_coverage, stress_scenarios) = (
-            self._stage_benchmarks(df, all_data, weights_dict, actual_risky,
-                                   port_metrics, total_portfolio_value,
-                                   letf_sigma_map, profile_benchmark))
-
-        (sector_exposure, _agg_lev_ratio, factor_scores, perf,
-         macro_drivers, regime_reading, technicals_map, cds_summary,
-         asset_scores) = self._stage_scoring(df, weights_dict, port_metrics,
-                                            beta_cols, all_data, actual_risky)
-
         # ═══════════════ BLACK-LITTERMAN TARGETS ═══════════════
         # Reverse-optimisation prior + score-derived views → posterior
         # target weights.  Skipped when there's no covariance matrix
@@ -3365,12 +3374,63 @@ class UniversalPortfolioManager:
             logger.warning("Expected-effect simulator skipped: %s", exc)
             expected_effect = None
 
+        return (bl_records, action_plan_rows, _model_uncovered, smart_money,
+                expected_effect)
+
+
+    def analyze_all(self, source, scenario_shocks=None, profile_benchmark: str | None = None,
+                    risk_mandate: str | None = None) -> AnalyzeResults:
+        """
+        profile_benchmark: Tradernet ETF ticker for the user's mandate benchmark
+        (e.g. 'AGG.US' for Conservative, 'SPY.US' for Moderate, 'QQQ.US' for Aggressive).
+        When provided it is computed first and labelled 'Профильный бенчмарк' in results.
+
+        risk_mandate: CONSERVATIVE / MODERATE / AGGRESSIVE (or an RU/EN profile
+        name / numeric score) — drives the composite-risk-score calibration
+        (H4).  When None, the engine keeps its current mandate (MODERATE
+        default).
+        """
+        if risk_mandate is not None:
+            from finance.scoring import normalize_risk_mandate as _nrm
+            self.engine.risk_mandate = _nrm(risk_mandate)
+        df, _merged_rows, _dropped_rows = self._stage_normalize(source)
+
+        (df, all_data, history_result, broker_priced_only, priced_at_cost,
+         _rep_ccy, _fx_rows, _fx_unconvertible, total_portfolio_value,
+         weights_dict) = self._stage_price_and_fx(df)
+
+        _dq_report = self._stage_data_quality(
+            df, weights_dict, all_data, _fx_unconvertible)
+
+        (actual_risky, cov_matrix, port_metrics, _dq_report, df,
+         letf_sigma_map, beta_cols) = self._stage_risk_model(
+            df, all_data, weights_dict, broker_priced_only,
+            history_result, _dq_report)
+
+        (port_resolved, benchmark_factor_profile, benchmark_results,
+         period_returns_table, return_coverage, stress_scenarios) = (
+            self._stage_benchmarks(df, all_data, weights_dict, actual_risky,
+                                   port_metrics, total_portfolio_value,
+                                   letf_sigma_map, profile_benchmark))
+
+        (sector_exposure, _agg_lev_ratio, factor_scores, perf,
+         macro_drivers, regime_reading, technicals_map, cds_summary,
+         asset_scores) = self._stage_scoring(df, weights_dict, port_metrics,
+                                            beta_cols, all_data, actual_risky)
+
+        (bl_records, action_plan_rows, _model_uncovered, smart_money,
+         expected_effect) = self._stage_overlay(
+            df, all_data, weights_dict, actual_risky, port_resolved,
+            broker_priced_only, cov_matrix, port_metrics, perf, asset_scores,
+            technicals_map, total_portfolio_value, _agg_lev_ratio)
+
 
         # ── Арх-3.1: состояние прогона собрано в один контекст ─────────────
-        # Пока это ЧИСТОЕ добавление: локальные переменные выше не тронуты,
-        # контекст лишь фиксирует, ЧТО именно доезжает до сборки результата.
-        # Так доказывается достаточность контекста ДО того, как резать
-        # функцию на стадии (`ARCHITECTURE_FOR_AGENTS.md §4 Арх-3`).
+        # Введён на 3.1 ПАРАЛЛЕЛЬНО прежним локальным переменным — так
+        # достаточность контекста доказывалась ДО того, как резать функцию.
+        # После 3.8 это уже не дубль: локальные выше — ровно выходы семи
+        # стадий, и контекст стал единственным, что переходит от слоя стадий
+        # к сборке (`ARCHITECTURE_FOR_AGENTS.md §4 Арх-3`).
         ctx = _AnalysisCtx(
             _dq_report=_dq_report,
             _dropped_rows=_dropped_rows,
