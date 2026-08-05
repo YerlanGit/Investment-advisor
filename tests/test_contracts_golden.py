@@ -10,7 +10,7 @@
 `_last_ortho_betas`, `_last_sparse_dropped`, `_last_port_log_returns`,
 `_last_fx_records`, а стадии читают их через `getattr` — обычный скан
 атрибутов такую связь не находит. Ошибка области видимости при разрезе НЕ
-даёт исключения: она тихо меняет число в отчёте. Существующие 1 255 тестов
+даёт исключения: она тихо меняет число в отчёте. Остальные тесты набора
 проверяют инварианты и отдельные величины; они НЕ заметят, если, например,
 Sharpe сдвинется на 3% из-за переставленной стадии.
 
@@ -26,7 +26,8 @@ Sharpe сдвинется на 3% из-за переставленной ста�
 поведенчески пустой, поэтому расхождение = ошибка разреза, а не новый эталон.
 «Обновил снимок, чтобы позеленело» — способ спрятать регресс.
 
-Ограничения фикстуры v1 честно перечислены в докстринге `golden_support`.
+Сценариев ДВА («base» и «leveraged_fx»), снимок сверяется для каждого.
+Осознанные ограничения фикстуры перечислены в докстринге `golden_support`.
 """
 
 from __future__ import annotations
@@ -188,6 +189,86 @@ class GoldenIsolationTest(unittest.TestCase):
             f"ключи, пустые во ВСЕХ сценариях: {blind_everywhere}. "
             "Такой ключ не страхует разрез — расширь состав книги.",
         )
+
+
+class DigestRobustnessTest(unittest.TestCase):
+    """Дайджест обязан иметь ЗАПАС до границы округления, а не удачу (§−62).
+
+    История: `leveraged_fx` падал в CI и проходил локально. Причина — не разрез
+    и не версии библиотек (они совпадали с lock), а то, что дайджест сворачивает
+    1 299 значений в один хеш: у него 1 299 независимых «лезвий» округления, и
+    одного значения возле границы достаточно, чтобы SHA-256 разошёлся целиком.
+    Замер тогда: запас 1 735 ULP в «base» и 176 ULP в «leveraged_fx» — разброс
+    между сборками BLAS такого порядка и есть.
+
+    Тест стережёт ЗАПАС, а не конкретные числа: пока он зелёный, эталон не
+    зависит от того, на каком железе его считали.
+    """
+
+    #: Минимальный запас до границы округления. 10 000 ULP ≈ 2e-12 относительной
+    #: величины — на порядки больше разброса BLAS (~1e-15…1e-13) и на порядки
+    #: меньше любого содержательного изменения чисел.
+    MIN_MARGIN_ULP = 10_000
+
+    def test_digested_values_are_far_from_rounding_boundaries(self) -> None:
+        import math
+
+        import numpy as np
+
+        worst: dict[str, float] = {}
+        for scenario in gs.SCENARIOS:
+            results = gs.run_analyze_all(scenario)
+            for key, value in sorted(results.items()):
+                values = self._digested_floats(value)
+                if values is None:
+                    continue
+                margin = self._min_margin_ulp(values, gs.DIGEST_FLOAT_DIGITS)
+                worst[f"{scenario}.{key}"] = margin
+
+        self.assertTrue(worst, "не нашлось ни одного дайджест-узла — тест ослеп")
+        for name, margin in sorted(worst.items(), key=lambda kv: kv[1]):
+            with self.subTest(node=name):
+                self.assertGreater(
+                    margin, self.MIN_MARGIN_ULP,
+                    f"{name}: до границы округления всего {margin:.0f} ULP — "
+                    f"дайджест снова стал зависеть от сборки BLAS. Это НЕ повод "
+                    f"обновить эталон: огрубляй DIGEST_FLOAT_DIGITS.",
+                )
+
+    @staticmethod
+    def _digested_floats(value: object):
+        """Числа узла, если он уходит в дайджест; иначе None."""
+        import numpy as np
+        import pandas as pd
+
+        if isinstance(value, pd.Series) and len(value) > gs.DIGEST_ROWS_THRESHOLD:
+            arr = pd.to_numeric(value, errors="coerce").to_numpy(dtype=float)
+        elif isinstance(value, pd.DataFrame) and len(value.index) > gs.DIGEST_ROWS_THRESHOLD:
+            arr = value.apply(pd.to_numeric, errors="coerce").to_numpy(dtype=float).ravel()
+        else:
+            return None
+        arr = arr[np.isfinite(arr)]
+        return arr if arr.size else None
+
+    @staticmethod
+    def _min_margin_ulp(arr, digits: int) -> float:
+        """Насколько далеко ближайшее значение от границы округления, в ULP."""
+        import math
+
+        import numpy as np
+
+        worst = math.inf
+        for x in arr:
+            if x == 0.0:
+                continue
+            nd = digits - 1 - int(math.floor(math.log10(abs(x))))
+            scaled = abs(x) * (10.0 ** nd)
+            # 0 → значение ровно на границе «вверх/вниз»
+            frac = abs(scaled - math.floor(scaled) - 0.5)
+            ulp = np.spacing(abs(x)) * (10.0 ** nd)
+            if ulp:
+                worst = min(worst, frac / ulp)
+        return worst
 
 
 if __name__ == "__main__":  # pragma: no cover

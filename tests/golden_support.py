@@ -34,7 +34,8 @@
 --------------------------
 Портфель подобран так, чтобы «слепых» ключей осталось как можно меньше —
 ключ с пустым значением бесполезен: его ПОТЕРЮ при разрезе снимок не заметит.
-Замер: слепых ключей **1 из 35** (был 8).
+Замер v1 (одна книга): слепых ключей 1 из 35 (было 8); в v2 их не осталось —
+цифры по сценариям ниже.
 
 | Приём | Какой ключ оживает |
 |---|---|
@@ -100,6 +101,21 @@ FIXTURE_PATH = Path(__file__).resolve().parent / "fixtures" / "results_golden.js
 #: между сборками BLAS и версиями numpy. Строгое сравнение repr(float) сделало
 #: бы тест хрупким в CI без выигрыша в чувствительности.
 FLOAT_SIGNIFICANT_DIGITS = 10
+
+#: Округление float ВНУТРИ дайджеста — намеренно грубее (§−62).
+#: Почему отдельная константа, а не те же 10 цифр: дайджест сворачивает ТЫСЯЧУ
+#: значений в один хеш, поэтому у него тысяча независимых «лезвий» округления, и
+#: достаточно ОДНОГО значения возле границы, чтобы SHA-256 разошёлся целиком.
+#: Замер на живых эталонах (2026-08-05): ближайшее к границе значение отстоит от
+#: неё на 1 735 ULP в сценарии «base» и всего на **176 ULP** в «leveraged_fx» —
+#: разброс между сборками BLAS такого порядка и есть, поэтому «base» в CI
+#: проходил, а «leveraged_fx» падал (§−62).
+#:     запас при 10 цифрах: ~1e-10 / 4e-14 ≈ 2 500     → на 1 299 значениях ≈ 50/50
+#:     запас при  6 цифрах: ~1e-06 / 4e-14 ≈ 2.5e+7    → на 1 299 значениях ≈ 5e-5
+#: Чувствительность при этом сохраняется с колоссальным запасом: ошибка разреза
+#: (переставленная стадия, пустые беты, чужие веса) двигает числа на проценты,
+#: а не на седьмую значащую цифру.
+DIGEST_FLOAT_DIGITS = 6
 
 #: Порог, после которого табличные данные сохраняются ДАЙДЖЕСТОМ, а не целиком.
 #: Смысл: `history_result` тащит в снимок всю матрицу цен (1300×17 ≈ 22 000
@@ -348,7 +364,7 @@ def run_analyze_all(scenario: str = "base") -> dict:
 
 # ── нормализация ─────────────────────────────────────────────────────────────
 
-def _num(x: float) -> Any:
+def _num(x: float, digits: int = FLOAT_SIGNIFICANT_DIGITS) -> Any:
     if isinstance(x, bool):
         return x
     f = float(x)
@@ -358,13 +374,63 @@ def _num(x: float) -> Any:
         return "<+Inf>" if f > 0 else "<-Inf>"
     if f == 0.0:
         return 0.0            # гасим −0.0, оно не несёт смысла и мешает сверке
-    return round(f, FLOAT_SIGNIFICANT_DIGITS - 1 - int(math.floor(math.log10(abs(f)))))
+    return round(f, digits - 1 - int(math.floor(math.log10(abs(f)))))
+
+
+def _coarse(cells: Any) -> Any:
+    """Перекруглить УЖЕ нормализованные значения под грубую сетку дайджеста."""
+    if isinstance(cells, list):
+        return [_coarse(c) for c in cells]
+    if isinstance(cells, float):
+        return _num(cells, DIGEST_FLOAT_DIGITS)
+    return cells
+
+
+def _float_summary(cells: Any) -> dict:
+    """Агрегатный отпечаток набора чисел — диагностика при расхождении дайджеста.
+
+    Дайджест отвечает «да/нет» и молчит о том, НАСКОЛЬКО разошлось; именно
+    поэтому падение `leveraged_fx` в CI пришлось диагностировать отдельным
+    заходом (§−62). Агрегаты отвечают на этот вопрос сразу и сами по себе
+    устойчивы: округление применяется ОДИН раз к сглаженной сумме, а не тысячу
+    раз к отдельным значениям, поэтому «лезвие» здесь одно, а не тысяча.
+
+    `order_checksum` (Σ i·xᵢ) держит чувствительность к ПЕРЕСТАНОВКЕ, которую
+    сумма и моменты не видят.
+    """
+    flat: list[float] = []
+
+    def _walk(node: Any) -> None:
+        if isinstance(node, list):
+            for n in node:
+                _walk(n)
+        elif isinstance(node, float):
+            flat.append(node)
+
+    _walk(cells)
+    if not flat:
+        return {"n_floats": 0}
+    a = np.asarray(flat, dtype=float)
+    idx = np.arange(a.size, dtype=float)
+    return {
+        "n_floats":       int(a.size),
+        "sum":            _num(float(a.sum()), DIGEST_FLOAT_DIGITS),
+        "mean":           _num(float(a.mean()), DIGEST_FLOAT_DIGITS),
+        "std":            _num(float(a.std(ddof=0)), DIGEST_FLOAT_DIGITS),
+        "min":            _num(float(a.min()), DIGEST_FLOAT_DIGITS),
+        "max":            _num(float(a.max()), DIGEST_FLOAT_DIGITS),
+        "order_checksum": _num(float(idx @ a), DIGEST_FLOAT_DIGITS),
+    }
 
 
 def _digest(payload: Any) -> str:
     """SHA-256 от УЖЕ нормализованных значений — округление применено до хеша,
     иначе дайджест ловил бы шум последнего бита, который сам же нормализатор
-    и призван гасить."""
+    и призван гасить.
+
+    🔴 Вызывать ТОЛЬКО через `_coarse` (§−62): обычной сетки в 10 цифр для
+    дайджеста недостаточно — у него столько «лезвий» округления, сколько
+    значений, и одного пограничного хватает, чтобы хеш разошёлся целиком."""
     return hashlib.sha256(
         json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
     ).hexdigest()
@@ -387,7 +453,8 @@ def normalize(value: Any, _depth: int = 0) -> Any:
                 "columns": [str(c) for c in value.columns]}
         if len(value.index) > DIGEST_ROWS_THRESHOLD:
             head["__type__"] = "DataFrame:digest"
-            head["values_sha256"] = _digest(cells)
+            head["values_sha256"] = _digest(_coarse(cells))
+            head["summary"] = _float_summary(cells)
             return head
         head["index"] = [str(i) for i in value.index]
         head["data"] = cells
@@ -398,7 +465,8 @@ def normalize(value: Any, _depth: int = 0) -> Any:
                 "index_first_last": [str(value.index[0]), str(value.index[-1])] if len(value.index) else []}
         if len(value) > DIGEST_ROWS_THRESHOLD:
             head["__type__"] = "Series:digest"
-            head["values_sha256"] = _digest(cells)
+            head["values_sha256"] = _digest(_coarse(cells))
+            head["summary"] = _float_summary(cells)
             return head
         head["index"] = [str(i) for i in value.index]
         head["data"] = cells
