@@ -15,7 +15,7 @@ GCP Cloud Run (long-polling) · Cloud Function (RAG-ингест) · ChromaDB ·
 ## Верификация (обязательна перед каждым пушем)
 
 ```bash
-PYTHONPATH=src python -m pytest tests/ -q          # → 1264 passed, 1 xfailed
+PYTHONPATH=src python -m pytest tests/ -q          # → 1268 passed, 1 xfailed
 ```
 
 - Префикс `PYTHONPATH=src` **ОБЯЗАТЕЛЕН** — без него `import finance…` не находится
@@ -23,7 +23,7 @@ PYTHONPATH=src python -m pytest tests/ -q          # → 1264 passed, 1 xfailed
 - **Прогонов ДВА.** Второй — зеркало деплой-образа, в нём НЕТ каталога `design/`:
   ```bash
   cp -r src tests SYSTEM_PROMPT.md requirements*.txt <tmp>/ && cd <tmp>
-  PYTHONPATH=src python -m pytest tests/ -q        # → 1248 passed, 16 skipped, 1 xfailed
+  PYTHONPATH=src python -m pytest tests/ -q        # → 1252 passed, 16 skipped, 1 xfailed
   ```
   Зелёный GitHub CI НЕ означает, что деплой пройдёт: CI видит полный чекаут,
   Cloud Build — только образ. Разница 16 тестов — ровно те, что читают
@@ -53,6 +53,9 @@ PYTHONPATH=src python -m pytest tests/ -q          # → 1264 passed, 1 xfailed
 - Слой отчёта не импортирует `tg_bot`: это инверсия и затаскивание `aiogram` в рендер.
 - Меняешь `analyze_all` → golden-фикстура (`tests/test_contracts_golden.py`) обязана совпасть.
   Расхождение в фазе Арх-3 = ошибка разреза, а НЕ повод обновить эталон.
+- Эталон СЛЕП к порядку ключей словаря (`normalize` сортирует ради стабильности).
+  Порядок, несущий смысл, пинится отдельным тестом — как `test_engine_benchmark_order.py`
+  для профильного бенчмарка, чей первый ключ доезжает до подписи карточки (`§−64`).
 - Крупное изменение → строка «Было/Стало» в `docs/audit/AUDIT.md`.
 
 ## Зависимости
