@@ -2407,6 +2407,286 @@ class UniversalPortfolioManager:
         weights_dict = (df['Current_Value'] / total_portfolio_value).to_dict()
         return (df, all_data, history_result, broker_priced_only, priced_at_cost, _rep_ccy, _fx_rows, _fx_unconvertible, total_portfolio_value, weights_dict)
 
+    def _stage_risk_model(self, df, all_data, weights_dict, broker_priced_only,
+                          history_result, _dq_report):
+        """Стадия 4: факторная риск-модель, ATR, форвардная E[r] (Арх-3.7).
+
+        Сердце движка: здесь книга получает ковариацию, беты, вклады в риск и
+        обе доходности — реализованную и форвардную. Вынесена ШЕСТОЙ по счёту:
+        контекст и приём к этому моменту обкатаны пятью стадиями, а последней
+        остаётся `_stage_overlay` (вход 20 — самая связная).
+
+        Что внутри:
+
+        * `calculate_structural_risk` — факторная модель Barra-стиля. Из неё
+          выходят `cov_matrix`, факторный фрейм и `port_metrics`, и она же
+          ЗАПОЛНЯЕТ состояние движка (`_last_*`), которым живут стадии ниже;
+        * C-6: вырожденную ковариацию движок чинит сам (`_nearest_psd`) и
+          правильно делает — отчёт лучше построить; но чинит МОЛЧА, поэтому
+          чекер доливает находку в тот же отчёт качества. В STRICT — отказ;
+        * ATR (OHLC, иначе Close-only) и фундаменталка SEC EDGAR — обе под
+          `try`, отчёт обязан строиться и без них;
+        * σ_ETP плечевых бумаг (P-1/P-7) — считается ОДИН раз и питает и
+          forward-drag здесь, и path-dependent стресс в стадии 5;
+        * форвардная E[r] = β·μ БЕЗ Ridge-интерсепта (F-14) плюс гейт окна:
+          при регрессионном окне короче торгового года портфельная панель
+          гаснет в «—». Именно этот гейт закрыл живой дефект обложки
+          «ожид. дох. 218.4% · Sharpe 11.29».
+
+        🔴 Чем доказан перенос. Эталон здесь защищает СЛАБЕЕ, чем на других
+        стадиях, и это ЗАМЕРЕНО, а не предположено: из шести каналов состояния
+        движка два мертвы в обоих сценариях фикстуры — `_last_psd_repair`
+        (`None`, то есть ветка C-6 внутри этой стадии не исполняется вовсе) и
+        `_last_fx_records` (`[]`, известное ограничение: `get_market_data`
+        мокается целиком). Плюс покрытие стадии всем набором — 72.8%.
+
+        Поэтому доказательством служит опора №1 — ДОСЛОВНОСТЬ переноса
+        (сверка тела с исходным блоком построчно), а не числа снимка: перенос
+        без изменения текста не может сломать ветку, которую никто не
+        исполняет. Дотягивать фикстуру до вырожденной ковариации на шаге
+        разреза НЕ нужно — это отдельная задача со своим тестом (§−61, §0c).
+
+        Возвращает 7 значений в порядке вычисления. `df` и `_dq_report` стоят
+        и на входе, и на выходе: стадия их ДОПОЛНЯЕТ (джойны колонок; находка
+        C-6 в отчёт качества), а не создаёт заново.
+        """
+        # MAC3 Structural Risk.
+        # Исключены из факторной модели:
+        #   • NON_RISK_ASSETS (кэш) — нулевая волатильность по определению
+        #   • broker_priced_only — КЗ облигации без ценовой истории в Tradernet;
+        #     их веса в weights_dict корректно разбавляют риск акций.
+        # Облигации, разрешённые в proxy-ETF (BIL/LQD/HYG), ОСТАЮТСЯ в actual_risky —
+        # у них есть ценовая история и они корректно обрабатываются Rates-фактором.
+        actual_risky = [
+            t for t in df.index
+            if t not in self.engine.NON_RISK_ASSETS and t not in broker_priced_only
+        ]
+        cov_matrix, factor_df, port_metrics = self.engine.calculate_structural_risk(all_data, actual_risky, weights_dict)
+
+        # ── C-6 (2026-08-02): вырожденная факторная ковариация ──────────────
+        # Вход появляется ТОЛЬКО здесь — матрица считается внутри вызова выше,
+        # уже после того, как стали известны веса.  Поэтому C-6 идёт вторым,
+        # коротким проходом и доливается в тот же отчёт: сигнатуры чекеров
+        # блока C при этом не тронуты (56 тестов Фазы 3 действуют как есть).
+        # Движок вырождение ЧИНИТ сам (`_nearest_psd`) и правильно делает —
+        # отчёт лучше построить; но чинит молча, а `PHASE_03 §3a.4` требует об
+        # этом СООБЩАТЬ. В STRICT — отказ, там источник один.
+        try:
+            from finance import data_checks as _dc6
+            _c6 = _dc6.check_covariance_health(
+                getattr(self.engine, "_last_psd_repair", None),
+                profile=_dc6.profile_for_source(self.engine.price_source))
+            if _c6.findings:
+                for _f in _c6.findings:
+                    logger.info("Ф-3 %s [%s] %s", _f.id, _f.level.value, _f.message)
+                _dq_report = _dc6.merge_reports(_dq_report, _c6) \
+                    if _dq_report is not None else _c6
+                if _c6.blocked:
+                    raise _dc6.DataQualityBlocked(_dq_report)
+        except ImportError:                            # pragma: no cover
+            pass
+        
+        # ATR (Intraday Margin Standard — SEC 34-105226)
+        # Uses True ATR (OHLC) when available, falls back to Close-only
+        atr_df = self.engine.calculate_atr(
+            all_data, actual_risky,
+            ohlc_data=getattr(history_result, 'ohlc_data', None),
+        )
+        if not atr_df.empty:
+            df = df.join(atr_df)
+
+        # SEC EDGAR Fundamental Scores (sector-normalized)
+        # Build sector_map from MAC3RiskEngine.TICKER_SECTOR for sector-aware thresholds
+        sector_map = {t: self.engine.get_ticker_sector(t) for t in actual_risky}
+        try:
+            from finance.sec_edgar import batch_fundamental_scan
+            sec_df = batch_fundamental_scan(actual_risky, sector_map=sector_map)
+            if not sec_df.empty:
+                df = df.join(sec_df)
+        except Exception as e:
+            logger.warning(f"SEC EDGAR scan пропущен: {e}")
+        
+        # Джойним факторы к общему DF
+        df = df.join(factor_df)
+        
+        # Для кэша выставляем волатильность 0
+        if 'Residual_Vol_Ann' in df.columns:
+            df['Residual_Vol_Ann'] = df['Residual_Vol_Ann'].fillna(0)
+            df['Euler_Risk_Contribution_Pct'] = df['Euler_Risk_Contribution_Pct'].fillna(0)
+
+        # Ожидаемая доходность: annualised CAPM-style return from factor betas.
+        #
+        # Correct approach: betas are from DAILY log-return regression, so
+        # expected return must be built from the SAME daily timescale and then
+        # annualised — NOT from the cumulative period log-return (which mixes
+        # timescales and produces nonsensical "expected" values).
+        #
+        # Algorithm:
+        #   1. Compute mean daily log-return for each factor ETF.
+        #   2. GEOMETRIC annualisation: E[r_ann] = exp(mean_daily_log * 252) - 1
+        #      This avoids the arithmetic overestimate (arithmetic: mean*252).
+        #   3. Map ETF tickers → factor key names (Beta_Market ← Market ← SPY.US).
+        #   4. Expected return = Σ beta_k * E[r_k_ann] — β·μ ONLY.  The Ridge
+        #      intercept (realised idiosyncratic drift) is EXCLUDED from the
+        #      forward forecast (F-14); it stays visible via Alpha_Specific.
+        #   5. Specific Alpha = actual return - expected return (in %).
+        # P-1/P-7: σ_ETP (daily, ddof=1) for each registry leveraged-ETP name,
+        # from its OWN price history — shared by the forward-drag adjustment
+        # and the path-dependent stress branch.  ≥60 obs floor (sparse-guard
+        # parity); thinner names simply stay absent from the map.
+        letf_sigma_map: dict[str, float] = {}
+        try:
+            for _t in df.index:
+                if not _is_leveraged_etp(_t):
+                    continue
+                _res_l = self.engine.resolve_tickers([_t])
+                _col = _res_l[0] if _res_l else None
+                if _col and _col in all_data.columns:
+                    _pr = all_data[_col].dropna()
+                    if len(_pr) >= _MIN_OVERLAP_TDAYS:
+                        _lr = np.log(_pr / _pr.shift(1)).dropna()
+                        _sd = float(_lr.std(ddof=1))
+                        if np.isfinite(_sd) and _sd > 0:
+                            letf_sigma_map[str(_t)] = _sd
+        except Exception as _exc:
+            logger.warning("LETF sigma map skipped: %s", _exc)
+            letf_sigma_map = {}
+
+        present_factor_keys = [
+            k for k, v in self.engine.factor_tickers.items() if v in all_data.columns
+        ]
+        present_factor_etfs = [self.engine.factor_tickers[k] for k in present_factor_keys]
+        f_data = all_data[present_factor_etfs] if present_factor_etfs else pd.DataFrame()
+
+        if not f_data.empty:
+            factor_daily_log = np.log(f_data / f_data.shift(1)).dropna()
+            factor_mean_daily = factor_daily_log.mean()       # index = ETF tickers
+            # Keep the per-factor expectations in DAILY LOG space — the single
+            # geometric annualisation happens once, on the combined per-asset
+            # expected log return below (F-2 fix).
+            factor_mu_daily_by_key = pd.Series({
+                k: factor_mean_daily.get(v, 0.0)
+                for k, v in zip(present_factor_keys, present_factor_etfs)
+            })
+        else:
+            factor_mu_daily_by_key = pd.Series(dtype=float)
+
+        beta_cols = [c for c in df.columns if str(c).startswith('Beta_')]
+        if beta_cols and not factor_mu_daily_by_key.empty:
+            beta_factor_keys = [c[len('Beta_'):] for c in beta_cols]
+            mu_vec = factor_mu_daily_by_key.reindex(beta_factor_keys).fillna(0.0).values
+            # F-14 (2026-07-10, пост-релизный фикс «218.4%»): the FORWARD
+            # expectation is now β·μ ONLY — the Ridge intercept (realised
+            # idiosyncratic drift) is EXCLUDED from the forecast.  Institutional
+            # convention: alpha is not a persistent premium, and annualising it
+            # geometrically explodes on short regression windows — after F-6
+            # removed the bfill look-ahead, the common window honestly shrinks
+            # to the youngest listing, and a leveraged single-stock ETF's bull
+            # streak extrapolated to «ожид. дох. 218.4% · Sharpe 11.29» on the
+            # live cover.  β are bounded by Ridge and μ_f is estimated on the
+            # FULL factor history (factor ETFs always span the whole lookback),
+            # so the β·μ expectation stays economically sane.  The realised
+            # drift remains visible через Alpha_Specific below.
+            factor_log_daily = df[beta_cols].fillna(0).values @ mu_vec
+            expected_log_daily = factor_log_daily
+            # F-23/P-1: leveraged daily-reset ETPs — lower the forward by the
+            # CONTRACTUAL variance drag −½L(L−1)σ_u² + fee −ER/252 when the
+            # multiplier L is in the registry (finance/leveraged.py), else by
+            # the empirical min(α̂,0) fallback.  Ordinary names untouched.
+            if 'Specific_Alpha_Daily' in df.columns:
+                try:
+                    # letf_sigma_map построена выше (≥60 obs floor); имена
+                    # тоньше порога падают в α̂-фолбэк (α̂=0 → no-op,
+                    # бит-в-бит пре-P-1 поведение).
+                    expected_log_daily, _lev_details = apply_leveraged_forward(
+                        expected_log_daily, list(df.index),
+                        df['Specific_Alpha_Daily'], letf_sigma_map)
+                    if _lev_details and isinstance(port_metrics, dict):
+                        port_metrics["leveraged_adjustments"] = _lev_details
+                        # Back-compat key (pre-P-1 consumers/tests).
+                        port_metrics["leveraged_drag_tickers"] = \
+                            list(_lev_details.keys())
+                except Exception as _exc:
+                    logger.warning("Leveraged-ETP drag skipped: %s", _exc)
+            df['Expected_Return'] = np.exp(
+                expected_log_daily * self.engine.trading_days) - 1.0
+            # Belt-and-suspenders: clamp the per-asset FORWARD expectation to a
+            # publishable band — a runaway β on a noisy short window must not
+            # print a four-digit forecast.  Clamped names are counted for QC.
+            _ER_LO, _ER_HI = -0.50, 1.00
+            _clamped_n = int(((df['Expected_Return'] < _ER_LO)
+                              | (df['Expected_Return'] > _ER_HI)).sum())
+            if _clamped_n:
+                logger.warning(
+                    "Expected_Return clamped to [%.0f%%, %.0f%%] for %d asset(s).",
+                    _ER_LO * 100, _ER_HI * 100, _clamped_n)
+            df['Expected_Return'] = df['Expected_Return'].clip(_ER_LO, _ER_HI)
+            if isinstance(port_metrics, dict):
+                port_metrics["expected_return_clamped_n"] = _clamped_n
+            # Specific Alpha: actual holding-period return minus the
+            # FACTOR-IMPLIED return (in %) — i.e. the realised excess the
+            # factor model does NOT explain.  This is exactly the textbook
+            # «specific alpha» reading; the forecast column above stays clean.
+            df['Alpha_Specific'] = (df['Return_Pct'] - df['Expected_Return']) * 100
+
+        # ── BLOCK 5: portfolio-level FORWARD expected annual return ──────────
+        # Aggregate the per-asset CAPM expectations into a single portfolio
+        # number the UI can show against risk:
+        #     E[r_port] = Σ_i w_i · E[r_i]   +   w_cash · r_f
+        # The risky weights generally sum to <1 (cash/bonds sit outside the
+        # factor model); the un-invested residual earns the risk-free rate, so
+        # cash drag is priced in rather than silently dropped.  This is distinct
+        # from `Annualised_Return` (the REALISED trailing CAGR) — it is the
+        # forward expectation implied by today's factor betas + factor premia.
+        # The result is fed back into the SAME port_metrics dict the structural
+        # model returned, so every downstream surface reads one figure.
+        if 'Expected_Return' in df.columns and isinstance(port_metrics, dict):
+            try:
+                # F-14: gate the ANNUALISED forward panel on the regression
+                # window.  With the F-6 look-ahead fix the common window is the
+                # honest intersection of listings — when it is shorter than one
+                # trading year, an annualised forward claim off it is noise
+                # (the live «218.4% · Sharpe 11.29» cover bug).  The per-asset
+                # Expected_Return column stays (bounded β·μ), only the
+                # portfolio-level panel degrades to «—».
+                _nobs = int(getattr(self.engine, "_last_regression_nobs", 0) or 0)
+                port_metrics["expected_return_window_days"] = _nobs
+                if _nobs < self.engine.trading_days:
+                    logger.warning(
+                        "Forward expected-return panel skipped: regression "
+                        "window %d < %d trading days.",
+                        _nobs, self.engine.trading_days)
+                    raise StopIteration          # → graceful skip below
+                _exp = df['Expected_Return']
+                _w_risky = 0.0
+                _er_weighted = 0.0
+                for _t in df.index:
+                    _w = float(weights_dict.get(_t, 0.0) or 0.0)
+                    _er = _exp.get(_t)
+                    if _er is None or not np.isfinite(float(_er)):
+                        continue
+                    _w_risky += _w
+                    _er_weighted += _w * float(_er)
+                _rfr = float(port_metrics.get("risk_free_rate_annual") or 0.0)
+                _cash_w = max(0.0, 1.0 - _w_risky)
+                _port_exp = _er_weighted + _cash_w * _rfr
+                _vol = float(port_metrics.get("Total_Volatility_Ann") or 0.0)
+                port_metrics["Expected_Return_Annual"] = _port_exp
+                # Forward (ex-ante) Sharpe — expected excess return per unit of
+                # structural vol.  Complements the realised Sharpe_Ratio above.
+                port_metrics["Expected_Sharpe"] = (
+                    (_port_exp - _rfr) / _vol if _vol > 0 else None)
+                port_metrics["Expected_Return_Cash_Weight"] = round(_cash_w, 4)
+                port_metrics["Expected_Return_Invested_Weight"] = round(_w_risky, 4)
+            except StopIteration:
+                pass                             # sub-year window — panel «—»
+            except Exception as _exc:
+                logger.warning("portfolio expected-return aggregation skipped: %s", _exc)
+
+        return (actual_risky, cov_matrix, port_metrics, _dq_report, df,
+                letf_sigma_map, beta_cols)
+
+
     def _stage_benchmarks(self, df, all_data, weights_dict, actual_risky,
                           port_metrics, total_portfolio_value, letf_sigma_map,
                           profile_benchmark):
@@ -2846,238 +3126,10 @@ class UniversalPortfolioManager:
         _dq_report = self._stage_data_quality(
             df, weights_dict, all_data, _fx_unconvertible)
 
-        # MAC3 Structural Risk.
-        # Исключены из факторной модели:
-        #   • NON_RISK_ASSETS (кэш) — нулевая волатильность по определению
-        #   • broker_priced_only — КЗ облигации без ценовой истории в Tradernet;
-        #     их веса в weights_dict корректно разбавляют риск акций.
-        # Облигации, разрешённые в proxy-ETF (BIL/LQD/HYG), ОСТАЮТСЯ в actual_risky —
-        # у них есть ценовая история и они корректно обрабатываются Rates-фактором.
-        actual_risky = [
-            t for t in df.index
-            if t not in self.engine.NON_RISK_ASSETS and t not in broker_priced_only
-        ]
-        cov_matrix, factor_df, port_metrics = self.engine.calculate_structural_risk(all_data, actual_risky, weights_dict)
-
-        # ── C-6 (2026-08-02): вырожденная факторная ковариация ──────────────
-        # Вход появляется ТОЛЬКО здесь — матрица считается внутри вызова выше,
-        # уже после того, как стали известны веса.  Поэтому C-6 идёт вторым,
-        # коротким проходом и доливается в тот же отчёт: сигнатуры чекеров
-        # блока C при этом не тронуты (56 тестов Фазы 3 действуют как есть).
-        # Движок вырождение ЧИНИТ сам (`_nearest_psd`) и правильно делает —
-        # отчёт лучше построить; но чинит молча, а `PHASE_03 §3a.4` требует об
-        # этом СООБЩАТЬ. В STRICT — отказ, там источник один.
-        try:
-            from finance import data_checks as _dc6
-            _c6 = _dc6.check_covariance_health(
-                getattr(self.engine, "_last_psd_repair", None),
-                profile=_dc6.profile_for_source(self.engine.price_source))
-            if _c6.findings:
-                for _f in _c6.findings:
-                    logger.info("Ф-3 %s [%s] %s", _f.id, _f.level.value, _f.message)
-                _dq_report = _dc6.merge_reports(_dq_report, _c6) \
-                    if _dq_report is not None else _c6
-                if _c6.blocked:
-                    raise _dc6.DataQualityBlocked(_dq_report)
-        except ImportError:                            # pragma: no cover
-            pass
-        
-        # ATR (Intraday Margin Standard — SEC 34-105226)
-        # Uses True ATR (OHLC) when available, falls back to Close-only
-        atr_df = self.engine.calculate_atr(
-            all_data, actual_risky,
-            ohlc_data=getattr(history_result, 'ohlc_data', None),
-        )
-        if not atr_df.empty:
-            df = df.join(atr_df)
-
-        # SEC EDGAR Fundamental Scores (sector-normalized)
-        # Build sector_map from MAC3RiskEngine.TICKER_SECTOR for sector-aware thresholds
-        sector_map = {t: self.engine.get_ticker_sector(t) for t in actual_risky}
-        try:
-            from finance.sec_edgar import batch_fundamental_scan
-            sec_df = batch_fundamental_scan(actual_risky, sector_map=sector_map)
-            if not sec_df.empty:
-                df = df.join(sec_df)
-        except Exception as e:
-            logger.warning(f"SEC EDGAR scan пропущен: {e}")
-        
-        # Джойним факторы к общему DF
-        df = df.join(factor_df)
-        
-        # Для кэша выставляем волатильность 0
-        if 'Residual_Vol_Ann' in df.columns:
-            df['Residual_Vol_Ann'] = df['Residual_Vol_Ann'].fillna(0)
-            df['Euler_Risk_Contribution_Pct'] = df['Euler_Risk_Contribution_Pct'].fillna(0)
-
-        # Ожидаемая доходность: annualised CAPM-style return from factor betas.
-        #
-        # Correct approach: betas are from DAILY log-return regression, so
-        # expected return must be built from the SAME daily timescale and then
-        # annualised — NOT from the cumulative period log-return (which mixes
-        # timescales and produces nonsensical "expected" values).
-        #
-        # Algorithm:
-        #   1. Compute mean daily log-return for each factor ETF.
-        #   2. GEOMETRIC annualisation: E[r_ann] = exp(mean_daily_log * 252) - 1
-        #      This avoids the arithmetic overestimate (arithmetic: mean*252).
-        #   3. Map ETF tickers → factor key names (Beta_Market ← Market ← SPY.US).
-        #   4. Expected return = Σ beta_k * E[r_k_ann] — β·μ ONLY.  The Ridge
-        #      intercept (realised idiosyncratic drift) is EXCLUDED from the
-        #      forward forecast (F-14); it stays visible via Alpha_Specific.
-        #   5. Specific Alpha = actual return - expected return (in %).
-        # P-1/P-7: σ_ETP (daily, ddof=1) for each registry leveraged-ETP name,
-        # from its OWN price history — shared by the forward-drag adjustment
-        # and the path-dependent stress branch.  ≥60 obs floor (sparse-guard
-        # parity); thinner names simply stay absent from the map.
-        letf_sigma_map: dict[str, float] = {}
-        try:
-            for _t in df.index:
-                if not _is_leveraged_etp(_t):
-                    continue
-                _res_l = self.engine.resolve_tickers([_t])
-                _col = _res_l[0] if _res_l else None
-                if _col and _col in all_data.columns:
-                    _pr = all_data[_col].dropna()
-                    if len(_pr) >= _MIN_OVERLAP_TDAYS:
-                        _lr = np.log(_pr / _pr.shift(1)).dropna()
-                        _sd = float(_lr.std(ddof=1))
-                        if np.isfinite(_sd) and _sd > 0:
-                            letf_sigma_map[str(_t)] = _sd
-        except Exception as _exc:
-            logger.warning("LETF sigma map skipped: %s", _exc)
-            letf_sigma_map = {}
-
-        present_factor_keys = [
-            k for k, v in self.engine.factor_tickers.items() if v in all_data.columns
-        ]
-        present_factor_etfs = [self.engine.factor_tickers[k] for k in present_factor_keys]
-        f_data = all_data[present_factor_etfs] if present_factor_etfs else pd.DataFrame()
-
-        if not f_data.empty:
-            factor_daily_log = np.log(f_data / f_data.shift(1)).dropna()
-            factor_mean_daily = factor_daily_log.mean()       # index = ETF tickers
-            # Keep the per-factor expectations in DAILY LOG space — the single
-            # geometric annualisation happens once, on the combined per-asset
-            # expected log return below (F-2 fix).
-            factor_mu_daily_by_key = pd.Series({
-                k: factor_mean_daily.get(v, 0.0)
-                for k, v in zip(present_factor_keys, present_factor_etfs)
-            })
-        else:
-            factor_mu_daily_by_key = pd.Series(dtype=float)
-
-        beta_cols = [c for c in df.columns if str(c).startswith('Beta_')]
-        if beta_cols and not factor_mu_daily_by_key.empty:
-            beta_factor_keys = [c[len('Beta_'):] for c in beta_cols]
-            mu_vec = factor_mu_daily_by_key.reindex(beta_factor_keys).fillna(0.0).values
-            # F-14 (2026-07-10, пост-релизный фикс «218.4%»): the FORWARD
-            # expectation is now β·μ ONLY — the Ridge intercept (realised
-            # idiosyncratic drift) is EXCLUDED from the forecast.  Institutional
-            # convention: alpha is not a persistent premium, and annualising it
-            # geometrically explodes on short regression windows — after F-6
-            # removed the bfill look-ahead, the common window honestly shrinks
-            # to the youngest listing, and a leveraged single-stock ETF's bull
-            # streak extrapolated to «ожид. дох. 218.4% · Sharpe 11.29» on the
-            # live cover.  β are bounded by Ridge and μ_f is estimated on the
-            # FULL factor history (factor ETFs always span the whole lookback),
-            # so the β·μ expectation stays economically sane.  The realised
-            # drift remains visible через Alpha_Specific below.
-            factor_log_daily = df[beta_cols].fillna(0).values @ mu_vec
-            expected_log_daily = factor_log_daily
-            # F-23/P-1: leveraged daily-reset ETPs — lower the forward by the
-            # CONTRACTUAL variance drag −½L(L−1)σ_u² + fee −ER/252 when the
-            # multiplier L is in the registry (finance/leveraged.py), else by
-            # the empirical min(α̂,0) fallback.  Ordinary names untouched.
-            if 'Specific_Alpha_Daily' in df.columns:
-                try:
-                    # letf_sigma_map построена выше (≥60 obs floor); имена
-                    # тоньше порога падают в α̂-фолбэк (α̂=0 → no-op,
-                    # бит-в-бит пре-P-1 поведение).
-                    expected_log_daily, _lev_details = apply_leveraged_forward(
-                        expected_log_daily, list(df.index),
-                        df['Specific_Alpha_Daily'], letf_sigma_map)
-                    if _lev_details and isinstance(port_metrics, dict):
-                        port_metrics["leveraged_adjustments"] = _lev_details
-                        # Back-compat key (pre-P-1 consumers/tests).
-                        port_metrics["leveraged_drag_tickers"] = \
-                            list(_lev_details.keys())
-                except Exception as _exc:
-                    logger.warning("Leveraged-ETP drag skipped: %s", _exc)
-            df['Expected_Return'] = np.exp(
-                expected_log_daily * self.engine.trading_days) - 1.0
-            # Belt-and-suspenders: clamp the per-asset FORWARD expectation to a
-            # publishable band — a runaway β on a noisy short window must not
-            # print a four-digit forecast.  Clamped names are counted for QC.
-            _ER_LO, _ER_HI = -0.50, 1.00
-            _clamped_n = int(((df['Expected_Return'] < _ER_LO)
-                              | (df['Expected_Return'] > _ER_HI)).sum())
-            if _clamped_n:
-                logger.warning(
-                    "Expected_Return clamped to [%.0f%%, %.0f%%] for %d asset(s).",
-                    _ER_LO * 100, _ER_HI * 100, _clamped_n)
-            df['Expected_Return'] = df['Expected_Return'].clip(_ER_LO, _ER_HI)
-            if isinstance(port_metrics, dict):
-                port_metrics["expected_return_clamped_n"] = _clamped_n
-            # Specific Alpha: actual holding-period return minus the
-            # FACTOR-IMPLIED return (in %) — i.e. the realised excess the
-            # factor model does NOT explain.  This is exactly the textbook
-            # «specific alpha» reading; the forecast column above stays clean.
-            df['Alpha_Specific'] = (df['Return_Pct'] - df['Expected_Return']) * 100
-
-        # ── BLOCK 5: portfolio-level FORWARD expected annual return ──────────
-        # Aggregate the per-asset CAPM expectations into a single portfolio
-        # number the UI can show against risk:
-        #     E[r_port] = Σ_i w_i · E[r_i]   +   w_cash · r_f
-        # The risky weights generally sum to <1 (cash/bonds sit outside the
-        # factor model); the un-invested residual earns the risk-free rate, so
-        # cash drag is priced in rather than silently dropped.  This is distinct
-        # from `Annualised_Return` (the REALISED trailing CAGR) — it is the
-        # forward expectation implied by today's factor betas + factor premia.
-        # The result is fed back into the SAME port_metrics dict the structural
-        # model returned, so every downstream surface reads one figure.
-        if 'Expected_Return' in df.columns and isinstance(port_metrics, dict):
-            try:
-                # F-14: gate the ANNUALISED forward panel on the regression
-                # window.  With the F-6 look-ahead fix the common window is the
-                # honest intersection of listings — when it is shorter than one
-                # trading year, an annualised forward claim off it is noise
-                # (the live «218.4% · Sharpe 11.29» cover bug).  The per-asset
-                # Expected_Return column stays (bounded β·μ), only the
-                # portfolio-level panel degrades to «—».
-                _nobs = int(getattr(self.engine, "_last_regression_nobs", 0) or 0)
-                port_metrics["expected_return_window_days"] = _nobs
-                if _nobs < self.engine.trading_days:
-                    logger.warning(
-                        "Forward expected-return panel skipped: regression "
-                        "window %d < %d trading days.",
-                        _nobs, self.engine.trading_days)
-                    raise StopIteration          # → graceful skip below
-                _exp = df['Expected_Return']
-                _w_risky = 0.0
-                _er_weighted = 0.0
-                for _t in df.index:
-                    _w = float(weights_dict.get(_t, 0.0) or 0.0)
-                    _er = _exp.get(_t)
-                    if _er is None or not np.isfinite(float(_er)):
-                        continue
-                    _w_risky += _w
-                    _er_weighted += _w * float(_er)
-                _rfr = float(port_metrics.get("risk_free_rate_annual") or 0.0)
-                _cash_w = max(0.0, 1.0 - _w_risky)
-                _port_exp = _er_weighted + _cash_w * _rfr
-                _vol = float(port_metrics.get("Total_Volatility_Ann") or 0.0)
-                port_metrics["Expected_Return_Annual"] = _port_exp
-                # Forward (ex-ante) Sharpe — expected excess return per unit of
-                # structural vol.  Complements the realised Sharpe_Ratio above.
-                port_metrics["Expected_Sharpe"] = (
-                    (_port_exp - _rfr) / _vol if _vol > 0 else None)
-                port_metrics["Expected_Return_Cash_Weight"] = round(_cash_w, 4)
-                port_metrics["Expected_Return_Invested_Weight"] = round(_w_risky, 4)
-            except StopIteration:
-                pass                             # sub-year window — panel «—»
-            except Exception as _exc:
-                logger.warning("portfolio expected-return aggregation skipped: %s", _exc)
+        (actual_risky, cov_matrix, port_metrics, _dq_report, df,
+         letf_sigma_map, beta_cols) = self._stage_risk_model(
+            df, all_data, weights_dict, broker_priced_only,
+            history_result, _dq_report)
 
         (port_resolved, benchmark_factor_profile, benchmark_results,
          period_returns_table, return_coverage, stress_scenarios) = (
