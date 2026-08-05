@@ -1,0 +1,178 @@
+name: Apply Claude changes
+
+# Ручной приёмник изменений, сгенерированных Claude ВНЕ репозитория
+# (веб-чат, локальный запуск, скрипт через Anthropic API).
+#
+# Зачем PAT, а не встроенный GITHUB_TOKEN: PR, открытый под GITHUB_TOKEN,
+# НЕ запускает другие workflow (защита GitHub от рекурсии) — python-ci.yml
+# на таком PR не стартует, и merge-гейт молча пропадает. PAT снимает это.
+#
+# Что делает: создаёт ветку → накладывает патч → прогоняет ОБА обязательных
+# прогона тестов (полный + зеркало деплой-образа без design/) → коммитит →
+# пушит → открывает PR. Красные тесты = PR не открывается.
+#
+# Требования к fine-grained PAT в секрете CLAUDE_PAT:
+#   Contents: Read & write · Pull requests: Read & write
+#   Workflows: Read & write — ТОЛЬКО если патч трогает .github/workflows/**
+#                             (без него push такой ветки отклоняется GitHub'ом)
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_msg:
+        description: 'Сообщение коммита'
+        required: true
+      patch:
+        description: 'Unified diff (вывод `git diff`). Пусто — если задан patch_url'
+        required: false
+        default: ''
+      patch_url:
+        description: 'URL сырого диффа (raw gist и т.п.). Игнорируется, если задан patch'
+        required: false
+        default: ''
+      branch:
+        description: 'Имя ветки. Пусто — claude/apply-<номер прогона>'
+        required: false
+        default: ''
+      draft:
+        description: 'Открыть PR черновиком'
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: claude-apply-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    name: patch → tests → PR
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      # PAT кладётся в .git/config (persist-credentials по умолчанию),
+      # поэтому дальше работает обычный `git push` — токен НЕ попадает
+      # в URL и не светится в логах.
+      - uses: actions/checkout@v5
+        with:
+          token: ${{ secrets.CLAUDE_PAT }}
+          fetch-depth: 0
+
+      - name: Проверить, что секрет CLAUDE_PAT задан
+        env:
+          CLAUDE_PAT: ${{ secrets.CLAUDE_PAT }}
+        run: |
+          if [ -z "${CLAUDE_PAT}" ]; then
+            echo "::error::Секрет CLAUDE_PAT не найден: Settings → Secrets and variables → Actions"
+            exit 1
+          fi
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Настроить git и создать ветку
+        id: branch
+        env:
+          BRANCH_IN: ${{ inputs.branch }}
+        run: |
+          set -euo pipefail
+          git config user.name  "claude-bot"
+          git config user.email "claude-bot@users.noreply.github.com"
+          BRANCH="${BRANCH_IN:-claude/apply-${{ github.run_number }}}"
+          git switch -c "$BRANCH"
+          echo "name=$BRANCH" >> "$GITHUB_OUTPUT"
+
+      - name: Наложить патч
+        env:
+          PATCH: ${{ inputs.patch }}
+          PATCH_URL: ${{ inputs.patch_url }}
+        run: |
+          set -euo pipefail
+          if [ -n "${PATCH}" ]; then
+            printf '%s\n' "${PATCH}" > /tmp/claude.patch
+          elif [ -n "${PATCH_URL}" ]; then
+            curl -fsSL "${PATCH_URL}" -o /tmp/claude.patch
+          else
+            echo "::error::Нужен либо patch, либо patch_url"
+            exit 1
+          fi
+          echo "--- патч, $(wc -l < /tmp/claude.patch) строк ---"
+          # --3way вытягивает контекст из blob'ов репо: патч ложится даже
+          # когда ветка ушла вперёд относительно снимка, на котором он снят.
+          git apply --3way --whitespace=nowarn /tmp/claude.patch
+          git add -A
+          if git diff --cached --quiet; then
+            echo "::error::Патч не дал изменений — нечего коммитить"
+            exit 1
+          fi
+          git diff --cached --stat
+
+      - name: Установить зависимости
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pytest
+
+      # Прогон 1 — полный чекаут, как в python-ci.yml.
+      - name: Тесты (полный чекаут)
+        env:
+          PYTHONPATH: src
+        run: python -m pytest tests/ -q
+
+      # Прогон 2 — зеркало деплой-образа: design/, CLAUDE.md и scripts/ в него
+      # не попадают, тесты, читающие их, обязаны skip'аться. Зелёный прогон 1
+      # НЕ гарантирует, что Cloud Build пройдёт — разница ровно в этих тестах.
+      - name: Тесты (зеркало деплой-образа, без design/)
+        env:
+          PYTHONPATH: src
+        run: |
+          set -euo pipefail
+          MIRROR="$(mktemp -d)"
+          cp -r src tests SYSTEM_PROMPT.md requirements*.txt "$MIRROR"/
+          cd "$MIRROR"
+          python -m pytest tests/ -q
+
+      - name: Закоммитить и запушить
+        env:
+          COMMIT_MSG: ${{ inputs.commit_msg }}
+        run: |
+          set -euo pipefail
+          git commit -m "${COMMIT_MSG}"
+          git push -u origin "${{ steps.branch.outputs.name }}"
+
+      # gh предустановлен на ubuntu-раннерах. PAT здесь обязателен: под ним
+      # PR считается созданным человеком и запускает python-ci.yml.
+      - name: Открыть PR
+        env:
+          GH_TOKEN: ${{ secrets.CLAUDE_PAT }}
+          COMMIT_MSG: ${{ inputs.commit_msg }}
+          PATCH_URL: ${{ inputs.patch_url }}
+          DRAFT: ${{ inputs.draft }}
+          BRANCH: ${{ steps.branch.outputs.name }}
+          BASE: ${{ github.event.repository.default_branch }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          SRC="передан inline"
+          [ -n "${PATCH_URL}" ] && SRC="${PATCH_URL}"
+          {
+            echo "Автоматический PR из workflow \`Apply Claude changes\`."
+            echo
+            echo "- Прогон: ${RUN_URL}"
+            echo "- Источник патча: ${SRC}"
+            echo "- Оба обязательных прогона тестов (полный и зеркало деплой-образа)"
+            echo "  прошли в этом же job'е ДО создания PR."
+          } > /tmp/pr_body.md
+          DRAFT_FLAG=""
+          [ "${DRAFT}" = "true" ] && DRAFT_FLAG="--draft"
+          gh pr create \
+            --base "${BASE}" \
+            --head "${BRANCH}" \
+            --title "Claude: ${COMMIT_MSG}" \
+            --body-file /tmp/pr_body.md \
+            ${DRAFT_FLAG} | tee /tmp/pr_url
+          echo "### PR: $(cat /tmp/pr_url)" >> "$GITHUB_STEP_SUMMARY"
