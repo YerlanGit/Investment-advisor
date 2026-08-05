@@ -40,31 +40,36 @@ def main() -> int:
     ap.add_argument("--check", action="store_true", help="код 1 при расхождении")
     args = ap.parse_args()
 
-    produced = gs.fixture_json()
-    digest = gs.fixture_sha256(produced)
+    rc = 0
+    for scenario in gs.SCENARIOS:
+        produced = gs.fixture_json(scenario=scenario)
+        digest = gs.fixture_sha256(produced)
+        path = gs.fixture_path(scenario)
 
-    if args.write:
-        gs.FIXTURE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        gs.FIXTURE_PATH.write_text(produced, encoding="utf-8")
-        print(f"записано: {gs.FIXTURE_PATH} · {len(produced) / 1024:.1f} KB · sha256 {digest}")
-        return 0
+        if args.write:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(produced, encoding="utf-8")
+            print(f"записано: {path.name} · {len(produced) / 1024:.1f} KB · sha256 {digest}")
+            continue
 
-    if args.check:
-        if not gs.FIXTURE_PATH.exists():
-            print(f"НЕТ ЭТАЛОНА: {gs.FIXTURE_PATH} — запусти с --write")
-            return 1
-        expected = gs.FIXTURE_PATH.read_text(encoding="utf-8")
-        if produced != expected:
-            import json
-            got, want = json.loads(produced), json.loads(expected)
-            changed = sorted(k for k in set(got) | set(want) if got.get(k) != want.get(k))
-            print(f"РАСХОЖДЕНИЕ в ключах ({len(changed)}): {changed}")
-            return 1
-        print(f"совпадает: sha256 {digest}")
-        return 0
+        if args.check:
+            if not path.exists():
+                print(f"НЕТ ЭТАЛОНА: {path} — запусти с --write")
+                rc = 1
+                continue
+            expected = path.read_text(encoding="utf-8")
+            if produced != expected:
+                import json
+                got, want = json.loads(produced), json.loads(expected)
+                changed = sorted(k for k in set(got) | set(want) if got.get(k) != want.get(k))
+                print(f"[{scenario}] РАСХОЖДЕНИЕ в ключах ({len(changed)}): {changed}")
+                rc = 1
+            else:
+                print(f"[{scenario}] совпадает: sha256 {digest}")
+            continue
 
-    print(f"{gs.FIXTURE_PATH} · {len(produced) / 1024:.1f} KB · sha256 {digest}")
-    return 0
+        print(f"{path.name} · {len(produced) / 1024:.1f} KB · sha256 {digest}")
+    return rc
 
 
 if __name__ == "__main__":

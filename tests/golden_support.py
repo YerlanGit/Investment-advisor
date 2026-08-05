@@ -45,11 +45,31 @@
 | `FRED_API_KEY=""` вместо мока | `macro_drivers` — реальный пак со статусом «missing» |
 | инъекция `fetch` в инсайдеров | `smart_money` — реальная логика на сеяных данных |
 
-Осознанное ограничение фикстуры v1 (честно, чтобы не считать её всеохватной)
----------------------------------------------------------------------------
-* `fx_converted_rows` остаётся пустым: `get_market_data` подменяется целиком,
-  поэтому валютный слой внутри загрузки (`_apply_fx_conversion`) не
-  исполняется, а книга ведётся в одной валюте. Покрытие FX — фикстура v2.
+ДВА сценария, а не один (v2, перед разрезом стадий 2 и 4)
+---------------------------------------------------------
+Замер coverage показал: одной книги мало. Сценарий «base» не исполняет три
+СОДЕРЖАТЕЛЬНЫЕ ветви вовсе — плечо, variance-drag плечевых ETP и строчную
+конверсию валюты. Ветку, которую эталон не исполняет, он и не защищает.
+
+Добавлен «leveraged_fx»: отрицательный кэш (маржинальный долг), `CONL.US` из
+`LEVERAGED_ETP_REGISTRY`, позиция KASE в тенге с ценой брокера.
+
+| Замер | v1 (один сценарий) | v2 (два) |
+|---|---|---|
+| покрытие конвейера `analyze_all` | 71.1% | **81.0%** |
+| блок drag плечевых ETP | 0/14 строк | **11/14** |
+| ключей, пустых ВО ВСЕХ сценариях | 8 → 1 | **0** |
+
+Пустой ключ в ОДНОМ сценарии — норма: книга без плеча не обязана заполнять
+`fx_converted_rows`, книга с плечом — `merged_positions`. Вредно другое —
+ключ, пустой везде: его потерю снимок не заметит. Их теперь нет.
+
+Осознанные ограничения (честно, чтобы не считать эталоны всеохватными)
+----------------------------------------------------------------------
+* `get_market_data` подменяется целиком, поэтому валютный слой ВНУТРИ загрузки
+  (`_apply_fx_conversion`, `_last_fx_records`) не исполняется. Строчная
+  конверсия (−37) покрыта сценарием «leveraged_fx» через подмену
+  `fx_rate_to_base` — это ДРУГОЙ код, и разницу надо держать в голове.
 * RAG/ИИ в `analyze_all` не участвуют вовсе — это слой отчёта.
 """
 
@@ -110,7 +130,7 @@ N_DAYS = 1300         # ≈5 лет торговых дней: столько ж
                       # закрепил бы нерепрезентативное состояние.
 _START = "2023-01-02"
 
-#: Портфель фикстуры. Состав подобран так, чтобы задеть разные ветви:
+#: Портфель СЦЕНАРИЯ «base». Состав подобран так, чтобы задеть разные ветви:
 #: крупная акция, вторая акция того же сектора (концентрация), бондовый ETF
 #: (кредитный пиллар неприменим) и строка кэша (не риск-актив).
 PORTFOLIO_ROWS = [
@@ -135,10 +155,68 @@ PORTFOLIO_ROWS = [
 #: поэтому движок обязан исключить её из факторной модели, но СОХРАНИТЬ вес.
 YOUNG_LISTING_DAYS = 40
 
+#: Тикеры ценовой матрицы сценария «base». Вынесены в константу, чтобы второй
+#: сценарий мог добавить СВОИ, не сдвинув ни одной колонки первого: сид каждой
+#: серии — SHA-256 её ИМЕНИ, а не позиция в списке.
+BASE_TICKERS = ["AAPL.US", "MSFT.US", "TLT.US", "SPY.US", "QQQ.US", "AGG.US",
+                "EEM.US",
+                "VWOB.US",            # прокси для AIX-ноты (H-1)
+                "YOUNG.US"]
+
+#: Портфель СЦЕНАРИЯ «leveraged_fx» — вторая книга, добавленная перед разрезом
+#: стадий 2 и 4 (Арх-3.4). Замер показал, что сценарий «base» не исполняет три
+#: содержательные ветви, а значит не защищает их при переносе кода:
+#:
+#: | Приём книги | Что оживает |
+#: |---|---|
+#: | отрицательный кэш (маржинальный долг) | `is_leveraged=True`, вся ветка плеча в `_build_results` |
+#: | `CONL.US` из `LEVERAGED_ETP_REGISTRY` | variance-drag плечевых ETP (12 строк, не покрытых НИЧЕМ) |
+#: | строка в тенге + курс | `fx_converted_rows` — последний «слепой» ключ эталона |
+#: | `Broker_Current_Price` | ветка цены от брокера вместо матрицы |
+LEVERAGED_FX_ROWS = [
+    {"Ticker": "AAPL.US", "Quantity": 100, "Purchase_Price": 150.0, "Currency": "USD"},
+    {"Ticker": "CONL.US", "Quantity": 300, "Purchase_Price": 30.0,  "Currency": "USD"},
+    {"Ticker": "TLT.US",  "Quantity": 150, "Purchase_Price": 95.0,  "Currency": "USD"},
+    # Бумага KASE в тенге: цена брокера + курс → строка ДОЛЖНА попасть в
+    # `fx_converted_rows` (реестр ФАКТИЧЕСКИ сконвертированных, D-2).
+    {"Ticker": "KSPI.KZ", "Quantity": 20, "Purchase_Price": 45000.0, "Currency": "KZT",
+     "Broker_Current_Price": 52000.0},
+    # Отрицательный кэш = маржинальный долг: cash_weight < −0.001 ⇒ is_leveraged.
+    {"Ticker": "USD", "Quantity": -9000, "Purchase_Price": 1.0, "Currency": "USD"},
+]
+
+LEVERAGED_FX_TICKERS = ["AAPL.US", "CONL.US", "TLT.US", "SPY.US", "QQQ.US",
+                        "AGG.US", "EEM.US"]
+
+#: Курсы для сценария с валютой. Подменяется ИМЕННО `fx_rate_to_base`, потому
+#: что штатный путь ушёл бы в сеть за котировкой пары — недопустимо для эталона.
+LEVERAGED_FX_RATES = {"KZT": 1.0 / 450.0}
+
+SCENARIOS: dict[str, dict] = {
+    "base": {
+        "rows": PORTFOLIO_ROWS,
+        "tickers": BASE_TICKERS,
+        "fx_rates": None,
+        "fixture": "results_golden.json",
+        "doc": "здоровая книга: дубли, отброшенная строка, прокси, молодой листинг",
+    },
+    "leveraged_fx": {
+        "rows": LEVERAGED_FX_ROWS,
+        "tickers": LEVERAGED_FX_TICKERS,
+        "fx_rates": LEVERAGED_FX_RATES,
+        "fixture": "results_golden_leveraged_fx.json",
+        "doc": "книга с плечом, плечевым ETP и позицией в тенге",
+    },
+}
+
+
+def fixture_path(scenario: str = "base") -> Path:
+    return FIXTURE_PATH.parent / SCENARIOS[scenario]["fixture"]
+
 
 # ── синтетический рынок ──────────────────────────────────────────────────────
 
-def _price_frame(engine) -> pd.DataFrame:
+def _price_frame(engine, tickers: list[str] | None = None) -> pd.DataFrame:
     """Матрица цен: факторные ETF + бенчмарки + бумаги портфеля.
 
     Каждая колонка — своя сеяная траектория. Сиды фиксированы позицией имени в
@@ -148,9 +226,7 @@ def _price_frame(engine) -> pd.DataFrame:
     cols = list(dict.fromkeys(
         list(engine.factor_tickers.values())
         + list(getattr(engine, "BENCHMARK_EXTRA", []))
-        + ["AAPL.US", "MSFT.US", "TLT.US", "SPY.US", "QQQ.US", "AGG.US", "EEM.US",
-           "VWOB.US",            # прокси для AIX-ноты (H-1)
-           "YOUNG.US"]
+        + list(tickers if tickers is not None else BASE_TICKERS)
     ))
     data: dict[str, np.ndarray] = {}
     for name in sorted(cols):
@@ -223,8 +299,15 @@ def _make_insider_stub(real_fn):
     return _stub
 
 
-def run_analyze_all() -> dict:
-    """Прогнать `analyze_all` в полностью изолированном окружении."""
+def run_analyze_all(scenario: str = "base") -> dict:
+    """Прогнать `analyze_all` в полностью изолированном окружении.
+
+    `scenario` выбирает книгу: «base» — здоровая, «leveraged_fx» — с плечом,
+    плечевым ETP и позицией в тенге. Второй сценарий добавлен потому, что
+    замер coverage показал: одной книги мало, три содержательные ветви она
+    не исполняет вовсе (см. `SCENARIOS`).
+    """
+    cfg = SCENARIOS[scenario]
     from finance.investment_logic import UniversalPortfolioManager
     from finance.smart_money import build_insider_signals as _real_insiders
 
@@ -232,15 +315,21 @@ def run_analyze_all() -> dict:
     os.environ.update(ENV_PINS)
     try:
         upm = UniversalPortfolioManager()
-        frame = _price_frame(upm.engine)
+        frame = _price_frame(upm.engine, cfg["tickers"])
         hist = _FakeHistory(frame)
         upm.engine.get_market_data = (                       # type: ignore[assignment]
             lambda tickers, period_days=1825: (frame, hist))
         # Ставка фиксируется явно: движок мог её вычислить до подмены env.
         upm.engine.current_rfr_annual = 0.045
         upm.engine.rfr_source = "fixture[USD]=0.045"
+        if cfg["fx_rates"] is not None:
+            _rates = dict(cfg["fx_rates"])
+            # Подменяем ИМЕННО конвертер строк: штатный путь пошёл бы в сеть
+            # за котировкой пары, а эталон обязан быть офлайн-детерминированным.
+            upm.engine.fx_rate_to_base = (            # type: ignore[assignment]
+                lambda ccy, _r=_rates: _r.get(str(ccy).upper()))
 
-        portfolio = pd.DataFrame(PORTFOLIO_ROWS)
+        portfolio = pd.DataFrame(cfg["rows"])
         with mock.patch("finance.sec_edgar.batch_fundamental_scan",
                         return_value=pd.DataFrame()), \
              mock.patch("finance.cds_feed.make_lookup", _fake_cds_lookup), \
@@ -330,9 +419,9 @@ def normalize(value: Any, _depth: int = 0) -> Any:
     return f"<{type(value).__name__}>"
 
 
-def fixture_json(results: dict | None = None) -> str:
+def fixture_json(results: dict | None = None, scenario: str = "base") -> str:
     """Канонический JSON снимка: отсортированные ключи, фиксированный отступ."""
-    res = results if results is not None else run_analyze_all()
+    res = results if results is not None else run_analyze_all(scenario)
     return json.dumps(normalize(res), ensure_ascii=False, indent=1, sort_keys=True) + "\n"
 
 
