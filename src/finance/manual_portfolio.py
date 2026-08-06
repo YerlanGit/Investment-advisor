@@ -137,6 +137,11 @@ class ParsedPosition:
     is_cash: bool
     currency: str
     raw_ticker: str              # как написал пользователь
+    #: Канон С биржевым суффиксом (`KSPI.KZ`, `FFSPC6.1028.AIX`); у кэша — код
+    #: валюты. Хранится, а не выводится заново: `canonical_ticker` от УЖЕ
+    #: очищенного имени даёт другой ответ (`FFSPC6.1028` → `FFSPC6.1028`, без
+    #: `.AIX`), и подмена прокси перестала бы находиться по этому ключу.
+    resolved: str = ""
 
     def as_row(self) -> dict:
         """Строка контрактного фрейма.
@@ -171,9 +176,14 @@ class ParseReport:
     positions: list[ParsedPosition] = field(default_factory=list)
     #: (номер строки, человеческая причина). Никогда не исключение.
     errors: list[tuple[int, str]] = field(default_factory=list)
-    #: (как ввёл пользователь, во что превратили) — синонимы и нормализация.
+    #: (как ввёл пользователь, во что превратили) — синонимы: «каспи» → KSPI.KZ.
     #: Показывается ОТДЕЛЬНО от подмен прокси: источник цены у них разный.
     auto_resolved: list[tuple[str, str]] = field(default_factory=list)
+    #: (бумага, её факторный прокси) — НЕ переименование, а замена инструмента
+    #: в риск-модели. Разводить эти два списка обязательно: у синонима цена
+    #: остаётся своей, а проксированная бумага оценивается ценой покупки
+    #: (`priced_at_cost`), и пользователь вправе это знать (`§5d` H-1).
+    proxied: list[tuple[str, str]] = field(default_factory=list)
 
     @property
     def valid(self) -> list[ParsedPosition]:
@@ -259,24 +269,36 @@ def parse_portfolio_text(text: str, engine) -> ParseReport:
             if len(merged_fields) <= _max_fields:
                 fields = merged_fields
 
-        # Полей ровно максимум, но последнее не похоже на код валюты — значит
-        # арность обманчива: на самом деле разряды разорваны пробелом либо
-        # случай неразрешим. Без этой проверки «AAPL 10 2 500,50» тихо стало бы
-        # ценой 2 в валюте «500,50».
-        if (not _is_cash_form and len(fields) == _max_fields
-                and not _CCY_TOKEN.fullmatch(fields[-1])):
-            merged_fields = ([] if comma_separated
-                             else _merge_thousand_groups(fields))
-            if merged_fields and len(merged_fields) < len(fields):
-                fields = merged_fields
-            else:
-                report.errors.append((
-                    line_no,
-                    f"последнее поле «{fields[-1]}» не похоже на код валюты "
-                    "(три буквы). Если запятая используется и как разделитель "
-                    "полей, и как десятичная, различить их невозможно — "
-                    "разделяйте поля пробелом или «;»"))
-                continue
+        # Полей ровно максимум, но последнее поле не той формы, какую эта
+        # арность подразумевает, — значит арность обманчива: на самом деле
+        # разряды разорваны пробелом либо случай неразрешим.
+        #
+        # Формы разные, потому что разные и последние поля. У рисковой строки
+        # четвёртое поле — код валюты, и без проверки «AAPL 10 2 500,50» тихо
+        # стало бы ценой 2 в валюте «500,50». У строки кэша третье поле — цена,
+        # а она у кэша равна 1.0 ПО ОПРЕДЕЛЕНИЮ; «1»/«1.0» под группу разрядов
+        # не подходят, поэтому трёхзначный хвост здесь однозначно читается как
+        # разорванные разряды. Без этой ветки `CASH:KZT 500 000` отвергался
+        # сообщением про цену — при том, что `2 500 000` разбирался (арность 4
+        # уходила в ветку выше). Разряды в остатке — норма ровно для тенге.
+        if len(fields) == _max_fields:
+            _tail_fits = (_GROUP3.fullmatch(fields[-1]) is None if _is_cash_form
+                          else _CCY_TOKEN.fullmatch(fields[-1]) is not None)
+            if not _tail_fits:
+                merged_fields = ([] if comma_separated
+                                 else _merge_thousand_groups(fields))
+                if merged_fields and len(merged_fields) < len(fields):
+                    fields = merged_fields
+                elif not _is_cash_form:
+                    report.errors.append((
+                        line_no,
+                        f"последнее поле «{fields[-1]}» не похоже на код валюты "
+                        "(три буквы). Если запятая используется и как разделитель "
+                        "полей, и как десятичная, различить их невозможно — "
+                        "разделяйте поля пробелом или «;»"))
+                    continue
+                # Кэш со склейкой не справился — падаем в проверку цены ниже,
+                # она объяснит про третье поле человеческим языком.
 
         if len(fields) > _max_fields:
             report.errors.append((
@@ -316,9 +338,16 @@ def parse_portfolio_text(text: str, engine) -> ParseReport:
             if qty is None:
                 report.errors.append((line_no, f"нечисловая сумма: «{fields[1]}»"))
                 continue
-            if qty <= 0:
-                report.errors.append((line_no, "сумма кэша должна быть больше нуля"))
+            if qty == 0:
+                report.errors.append((line_no, "нулевая сумма"))
                 continue
+            # ОТРИЦАТЕЛЬНАЯ сумма кэша принимается: это маржинальный заём, а не
+            # короткая продажа (`PHASE_04 §5a.2`). Брокерский путь отдаёт такие
+            # строки штатно, и книги с плечом считаются корректно (Σ весов = 1,
+            # плечо 1.07× — замерено на живом отчёте). Запрет здесь означал бы,
+            # что ручной ввод не может описать портфель, который freedom-путь
+            # обрабатывает без единой оговорки, то есть прямое нарушение I-1.
+            # Запрет на короткую продажу — ниже, в РИСКОВОЙ ветке, и он остаётся.
             if len(fields) >= 3:
                 price = _to_number(fields[2])
                 if price is None or abs(price - 1.0) > 1e-9:
@@ -329,7 +358,7 @@ def parse_portfolio_text(text: str, engine) -> ParseReport:
             report.positions.append(ParsedPosition(
                 raw_line=raw_line, line_no=line_no, ticker=cash_ccy,
                 quantity=qty, price=1.0, is_cash=True,
-                currency=cash_ccy, raw_ticker=raw_ticker))
+                currency=cash_ccy, raw_ticker=raw_ticker, resolved=cash_ccy))
             continue
 
         # ── рисковая позиция ─────────────────────────────────────────────────
@@ -360,24 +389,43 @@ def parse_portfolio_text(text: str, engine) -> ParseReport:
             report.errors.append((line_no, "цена покупки должна быть больше нуля"))
             continue
 
-        # Канон тикера спрашиваем у ДВИЖКА, а не выводим сами.
-        resolved_list = engine.resolve_tickers([raw_ticker])
-        if not resolved_list:
+        # Канон тикера спрашиваем у ДВИЖКА, а не выводим сами. Именно
+        # `canonical_ticker`, а НЕ `resolve_tickers`: второй отдаёт прокси, и
+        # позиция стала бы прокси-бумагой. Разница видна на AIX-ноте:
+        #   canonical_ticker → FFSPC6.1028.AIX   (бумага пользователя)
+        #   resolve_tickers  → VWOB.US           (её факторный заменитель)
+        # Пока в `Ticker` уезжал второй, нота ИСЧЕЗАЛА из портфеля: цена
+        # бралась рыночная от VWOB (вместо цены покупки), `Asset_Type`
+        # становился «ETF», а две разные ноты с одним прокси склеивались в одну
+        # позицию — то есть дефект `§−38` возвращался через слой ввода.
+        canon = engine.canonical_ticker(raw_ticker)
+        if not canon:
             report.errors.append((line_no, f"тикер «{raw_ticker}» не распознан"))
             continue
-        resolved = resolved_list[0]
+
+        # Подмена на прокси — ОТДЕЛЬНЫЙ факт, а не переименование: её показывает
+        # экран подтверждения своей строкой (`PHASE_04 §5d` H-1). Признак берём
+        # сравнением двух публичных ответов движка, чтобы правило подмены
+        # осталось в одном месте (`proxy_for`).
+        _resolved = engine.resolve_tickers([raw_ticker])
+        if _resolved and _resolved[0] != canon:
+            report.proxied.append((canon, _resolved[0]))
 
         # `Ticker` — без биржевого суффикса, как на брокерском пути; полная
         # форма уходит в `Raw_Ticker`.
-        ticker = strip_exchange_suffix(resolved)
-        if ticker != raw_ticker:
-            report.auto_resolved.append((raw_ticker, resolved))
+        ticker = strip_exchange_suffix(canon)
+        # В `auto_resolved` попадает только смена САМОГО СИМВОЛА («каспи» →
+        # `KSPI.KZ`), а не дописанный суффикс: сравниваются обе стороны в
+        # очищенном виде, иначе список заполнился бы парами вида
+        # «AAPL.US → AAPL.US», в которых пользователю нечего узнавать.
+        if strip_exchange_suffix(raw_ticker) != ticker:
+            report.auto_resolved.append((raw_ticker, canon))
 
         # Валюта: 4-е поле или вывод из тикера.
         if len(fields) == 4:
             currency = fields[3].upper()
         else:
-            currency = infer_asset_currency(resolved).upper()
+            currency = infer_asset_currency(canon).upper()
             if currency in AMBIGUOUS_CURRENCIES:
                 report.errors.append((
                     line_no,
@@ -398,7 +446,7 @@ def parse_portfolio_text(text: str, engine) -> ParseReport:
         report.positions.append(ParsedPosition(
             raw_line=raw_line, line_no=line_no, ticker=ticker,
             quantity=qty, price=price, is_cash=False,
-            currency=currency, raw_ticker=raw_ticker))
+            currency=currency, raw_ticker=raw_ticker, resolved=canon))
 
     return report
 
@@ -448,9 +496,21 @@ def preflight_coverage(report: ParseReport, engine, *,
     у провайдера истории нет, — её просто ещё не запрашивали. Поэтому вторая
     категория называется `unknown`, а не `missing`: обещать пользователю, что
     бумага не найдётся, мы не вправе.
+
+    Спрашивается кэш ИМЕННО того провайдера, который будет обслуживать ручной
+    отчёт (`manual_provider_name`), а не провайдера по умолчанию: кэш Фазы 1
+    ключуется провайдером, и ответ брокерского кэша здесь был бы ответом про
+    данные, которые ручному портфелю показывать нельзя (I-12). Следствие,
+    которое надо принять честно: до Фазы 9 этот кэш пуст всегда, поэтому
+    pre-flight отвечает «не знаю» по каждой бумаге — и молчит, вместо того
+    чтобы придумывать.
     """
     if cached_lookup is None:                            # pragma: no cover
-        from freedom_portfolio.history import cached_observations as cached_lookup
+        from finance.price_providers import manual_provider_name
+        from freedom_portfolio.history import cached_observations as _cached
+
+        def cached_lookup(tickers, days_):
+            return _cached(tickers, days_, provider=manual_provider_name())
 
     risky = [p for p in report.positions if not p.is_cash]
     resolved_by_ticker: dict[str, str] = {}
@@ -482,3 +542,146 @@ def preflight_coverage(report: ParseReport, engine, *,
     result.covered = sorted(set(result.covered))
     result.unknown = sorted(set(result.unknown))
     return result
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Экран подтверждения (`PHASE_05 §4`) — ЧИСЛА. Вид — за слоем доставки.
+# ═════════════════════════════════════════════════════════════════════════════
+
+@dataclass
+class ConfirmRow:
+    """Одна строка экрана подтверждения — уже посчитанная.
+
+    Слой доставки её только печатает: инвариант «числа считаются в `finance/`»
+    действует и здесь, иначе доля позиции окажется посчитанной в слое доставки, а
+    потом второй раз, иначе, в отчёте.
+    """
+
+    raw_ticker: str              # как ввёл пользователь
+    ticker: str                  # что уйдёт в портфель
+    resolved: str                # канон с биржевым суффиксом
+    asset_type: str
+    quantity: float
+    price: float                 # цена покупки в валюте сделки
+    currency: str
+    is_cash: bool
+    #: Стоимость в базовой валюте. `None` — курса нет, строка НЕ учтена в итоге.
+    value_base: Optional[float]
+    #: Доля от итога, 0..1. `None` по той же причине, что и `value_base`.
+    share: Optional[float]
+    #: Прокси для факторной модели, если бумага неликвидна (H-1).
+    proxy: Optional[str] = None
+
+
+@dataclass
+class FxNote:
+    """Раскрытие конверсии: валюта, курс, дата наблюдения."""
+
+    currency: str
+    rate: float
+    as_of: Optional[str]
+
+
+@dataclass
+class ConfirmationView:
+    """Полный материал экрана подтверждения.
+
+    Зачем экран вообще (§3.4 задания): опечатка в количестве — лишний ноль —
+    не видна в числах отчёта, но полностью искажает веса, TRC и CVaR. Доля
+    позиции делает её заметной ГЛАЗОМ, поэтому доля здесь обязательна, а не
+    опциональна.
+    """
+
+    positions: list[ConfirmRow] = field(default_factory=list)   # по убыванию доли
+    cash: list[ConfirmRow] = field(default_factory=list)
+    #: Итог в базовой валюте по строкам, которые удалось привести к ней.
+    total_base: float = 0.0
+    base_currency: str = "USD"
+    #: (номер строки, причина) — ровно то, что отвергнул парсер.
+    excluded: list[tuple[int, str]] = field(default_factory=list)
+    #: Конверсии, которые применены, — с курсом и датой.
+    fx_notes: list[FxNote] = field(default_factory=list)
+    #: Валюты БЕЗ курса: их строки не учтены в итоге и названы явно (§5.3, Т-5).
+    unconvertible: list[str] = field(default_factory=list)
+    auto_resolved: list[tuple[str, str]] = field(default_factory=list)
+    proxied: list[tuple[str, str]] = field(default_factory=list)
+
+    @property
+    def has_positions(self) -> bool:
+        return bool(self.positions or self.cash)
+
+    @property
+    def shares_are_meaningful(self) -> bool:
+        """Доли посчитаны только при положительном итоге.
+
+        Книга, у которой маржинальный заём превышает активы, даёт итог ≤ 0 —
+        доля от такого знаменателя меняет знак и вводит в заблуждение сильнее,
+        чем её отсутствие.
+        """
+        return self.total_base > 0
+
+
+def build_confirmation(report: ParseReport, engine) -> ConfirmationView:
+    """Материал экрана подтверждения: доли, итог, конверсии, потери.
+
+    Курс берётся у ДВИЖКА (`fx_quote_to_base`) — тем же методом и тем же
+    источником, каким потом пересчитает строки сам отчёт. Свой курс здесь
+    означал бы, что на экране одно число, а в отчёте другое, и расхождение
+    ничем себя не проявит (класс дефекта F-2).
+
+    Валюта без курса **не** приводится к 1.0 (Т-5): её строки честно уходят из
+    итога, а валюта называется в `unconvertible` — экран обязан её показать.
+    """
+    base = str(getattr(engine.reporting_currency, "value", "USD")).upper()
+
+    rates: dict[str, tuple[Optional[float], Optional[str]]] = {}
+
+    def _rate(ccy: str) -> tuple[Optional[float], Optional[str]]:
+        key = str(ccy or base).upper()
+        if key not in rates:
+            try:
+                rates[key] = engine.fx_quote_to_base(key)
+            except Exception:                            # pragma: no cover
+                rates[key] = (None, None)
+        return rates[key]
+
+    view = ConfirmationView(base_currency=base, excluded=list(report.errors),
+                            auto_resolved=list(report.auto_resolved),
+                            proxied=list(report.proxied))
+    proxy_by_resolved = dict(report.proxied)
+
+    rows: list[ConfirmRow] = []
+    for pos in report.positions:
+        rate, as_of = _rate(pos.currency)
+        value = (None if rate is None
+                 else float(pos.quantity) * float(pos.price) * float(rate))
+        resolved = pos.resolved or pos.ticker
+        rows.append(ConfirmRow(
+            raw_ticker=pos.raw_ticker, ticker=pos.ticker, resolved=resolved,
+            asset_type=("Кэш" if pos.is_cash else classify_instrument(pos.ticker)),
+            quantity=float(pos.quantity), price=float(pos.price),
+            currency=pos.currency, is_cash=pos.is_cash,
+            value_base=value, share=None,
+            proxy=proxy_by_resolved.get(resolved)))
+        if value is None:
+            if pos.currency not in view.unconvertible:
+                view.unconvertible.append(pos.currency)
+        elif rate is not None and pos.currency != base:
+            if not any(n.currency == pos.currency for n in view.fx_notes):
+                view.fx_notes.append(FxNote(pos.currency, float(rate), as_of))
+
+    view.total_base = sum(r.value_base for r in rows if r.value_base is not None)
+    if view.shares_are_meaningful:
+        for row in rows:
+            if row.value_base is not None:
+                row.share = row.value_base / view.total_base
+
+    # Сортировка по ВЕЛИЧИНЕ, а не по знаку: маржинальный заём — крупная строка
+    # книги, и прятать её в хвост списка было бы прямым обманом.
+    def _weight(row: ConfirmRow) -> float:
+        return abs(row.value_base) if row.value_base is not None else -1.0
+
+    view.positions = sorted((r for r in rows if not r.is_cash),
+                            key=_weight, reverse=True)
+    view.cash = sorted((r for r in rows if r.is_cash), key=_weight, reverse=True)
+    return view

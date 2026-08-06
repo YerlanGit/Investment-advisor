@@ -195,6 +195,19 @@ def _flag(name: str, default: str) -> str:
     return str(os.getenv(name, default) or default).strip().lower()
 
 
+def manual_provider_name() -> str:
+    """Имя провайдера цен для ручного портфеля («stooq», пока не сказано иное).
+
+    Публично, потому что имя нужно ВТОРОМУ потребителю — pre-flight-проверке
+    покрытия (`finance.manual_portfolio.preflight_coverage`): кэш Фазы 1
+    ключуется провайдером, и спросить его надо ИМЕННО о том провайдере, который
+    будет обслуживать этот отчёт.  Спросив кэш брокера, pre-flight отвечал бы
+    про данные, которые ручному портфелю показывать нельзя (I-12), — и отвечал
+    бы уверенно, что хуже всего.
+    """
+    return _flag("PRICE_PROVIDER_MANUAL", "stooq")
+
+
 def provider_for_source(source: str, *, client=None) -> PriceProvider:
     """Единственная точка, где источник портфеля превращается в провайдера.
 
@@ -224,7 +237,7 @@ def provider_for_source(source: str, *, client=None) -> PriceProvider:
         return DemoProvider()
 
     if src == "manual":
-        chosen = _flag("PRICE_PROVIDER_MANUAL", "stooq")
+        chosen = manual_provider_name()
         if chosen in _MANUAL_FORBIDDEN:
             raise ProviderUnavailable(
                 f"I-12: источник '{chosen}' недопустим для ручного портфеля — "
@@ -250,5 +263,6 @@ __all__ = [
     "ProviderResult",
     "ProviderUnavailable",
     "TradernetProvider",
+    "manual_provider_name",
     "provider_for_source",
 ]

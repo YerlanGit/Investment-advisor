@@ -628,6 +628,10 @@ class MAC3RiskEngine:
         # −37: кэш курсов «валюта → базовая» на один прогон отчёта (курс обязан
         # быть ОДИН для всех строк, иначе цена покупки и стоимость разъедутся).
         self._fx_rate_cache: dict = {}
+        # Даты наблюдения тех же курсов — для подписи под конверсией
+        # (`fx_quote_to_base`).  Живут рядом с кэшем курсов и заполняются в том
+        # же месте: разъехавшиеся курс и дата были бы хуже отсутствующей даты.
+        self._fx_rate_dates: dict = {}
         # C-6: заполняется в `calculate_structural_risk`, если PSD-проекция
         # реально чинила факторную ковариацию (вырожденный бленд).
         self._last_psd_repair = None
@@ -847,6 +851,85 @@ class MAC3RiskEngine:
                 'AIX_SPC', cls.INSTRUMENT_PROXY_MAP['AIX_DEFAULT'])
         return None
 
+    @classmethod
+    def _canon_name(cls, ticker) -> str | None:
+        """Шаг 1 нормализации: синоним → канон. `None` — это кэш.
+
+        Отдельный шаг нужен потому, что `proxy_for` спрашивается ИМЕННО на этом
+        имени: его первая ветка — точное совпадение с `BOND_CLASSIFICATION_MAP`
+        (`US_TREASURY`, `KZ_GOV_BOND`), а после форматирования шага 2 ключ стал
+        бы `US_TREASURY.US` и совпадение пропало бы — молча, с подменой на None
+        вместо `BIL.US`.
+        """
+        t_str = str(ticker).upper().strip()
+        if t_str in cls.NON_RISK_ASSETS:
+            return None
+        # Синоним → канонический тикер (B-1). Шаг идёт ПЕРВЫМ, и это не
+        # косметика: пока маппинг стоял ПОСЛЕ прокси, синоним минова́л
+        # проверку неликвидности, и одна и та же бумага резолвилась
+        # по-разному в зависимости от написания. Замерено на живом коде:
+        # синоним, ведущий на `FFSPC6.1028.AIX`, давал сам тикер, тогда
+        # как канон давал прокси `VWOB.US` — то есть в фактор-модель
+        # попадала бумага без ценовой истории. Сегодня ни одна запись
+        # `TICKER_MAP` на проксируемую бумагу не ведёт, поэтому разрыв
+        # был ЛАТЕНТНЫМ; ручной ввод (Фаза 4) его бы и активировал —
+        # именно там AIX-ноты приходят по имени. `AUDIT §−70`.
+        return cls.TICKER_MAP.get(t_str, t_str)
+
+    @classmethod
+    def _provider_format(cls, canon: str) -> str:
+        """Шаг 2 нормализации: канон → формат провайдера (`SYM.EXCHANGE`)."""
+        # Крипто (Tradernet их не торгует напрямую — оставляем *-USD формат
+        # как маркер; отсутствующие колонки пропускаются без падения).
+        #
+        # 2026-07-28: ветка ловила ТОЛЬКО голый символ, поэтому уже
+        # канонический `BTC-USD` (именно в таком виде он лежит в демо-
+        # портфеле и приходит из ручного ввода) проваливался в последнюю ветку
+        # и получал суффикс: `BTC-USD` → `BTC-USD.US`.  Такого инструмента нет
+        # ни у одного провайдера → цена не находилась → строка молча
+        # удалялась `dropna(subset=['Current_Price'])` в analyze_all, и
+        # демо-витрина из 3 позиций показывала 2.  Суффикс `-USD` — тот же
+        # маркер крипто, что использует `broker_api.classify_instrument`
+        # (`t.endswith("-USD")` → «Крипто»), поэтому проверки согласованы.
+        if canon.endswith('-USD'):
+            return canon                        # уже канонический вид
+        if canon in ('BTC', 'ETH', 'SOL', 'BNB'):
+            return f"{canon}-USD"
+        # Уже в формате SYM.EXCHANGE — оставляем.
+        if '.' in canon:
+            return canon
+        # Голый US-тикер → добавить .US
+        return f"{canon}.US"
+
+    @classmethod
+    def canonical_ticker(cls, ticker) -> str | None:
+        """Имя бумаги в формате провайдера — БЕЗ подмены на прокси.
+
+        Отделено от `resolve_tickers` для потребителя, которому нужна ТА ЖЕ
+        бумага, а не её факторный заменитель: слой ввода портфеля
+        (`finance/manual_portfolio.py`). Разница не косметическая — она
+        решает, ЧТО именно окажется в портфеле:
+
+          `canonical_ticker('FFSPC6.1028.AIX')` → `'FFSPC6.1028.AIX'`  (бумага)
+          `resolve_tickers(['FFSPC6.1028.AIX'])` → `['VWOB.US']`       (прокси)
+
+        Пока ручной ввод строил позицию по второму, нота ИСЧЕЗАЛА: в портфель
+        попадал `VWOB` с его рыночной ценой, `Asset_Type` становился «ETF», а
+        две разные ноты с одним прокси склеивались в одну позицию — то есть
+        ровно тот дефект `§−38`, который прокси-слой и был призван убрать
+        (инвариант «прокси влияет ТОЛЬКО на риск», `src/finance/CLAUDE.md`).
+
+        `None` — это кэш (`NON_RISK_ASSETS`): у валюты нет тикера, и вызывающий
+        обязан обработать её отдельно, а не получить строку-подделку.
+
+        Реализация ОДНА на обе функции: обе собраны из `_canon_name` и
+        `_provider_format`, и различаются ровно вопросом к `proxy_for` между
+        шагами. Второй экземпляр правил нормализации разъехался бы с этим при
+        первой же правке (ловушка Т-4).
+        """
+        canon = cls._canon_name(ticker)
+        return None if canon is None else cls._provider_format(canon)
+
     def resolve_tickers(self, tickers):
         """
         Преобразует пользовательский тикер в формат Tradernet ("SYMBOL.EXCHANGE").
@@ -859,29 +942,21 @@ class MAC3RiskEngine:
           - крипто → '*-USD' (исторический формат, для совместимости с
             форком CCXT/Yahoo, не Tradernet — но если тикер известен через
             Tradernet, его можно подменить позже)
+
+        Нормализация имени живёт в `_canon_name`/`_provider_format`; здесь
+        остаётся ровно одно решение — брать бумагу или её прокси.
         """
         resolved = []
         proxied: list[str] = []
         for t in tickers:
             t_raw = str(t).upper().strip()
-            t_str = t_raw
-            if t_str in self.NON_RISK_ASSETS:
+            canon = self._canon_name(t_raw)
+            if canon is None:
                 continue   # Cash отдельно
 
-            # 1. Синоним → канонический тикер (B-1). Шаг идёт ПЕРВЫМ, и это не
-            #    косметика: пока маппинг стоял ПОСЛЕ прокси, синоним минова́л
-            #    проверку неликвидности, и одна и та же бумага резолвилась
-            #    по-разному в зависимости от написания. Замерено на живом коде:
-            #    синоним, ведущий на `FFSPC6.1028.AIX`, давал сам тикер, тогда
-            #    как канон давал прокси `VWOB.US` — то есть в фактор-модель
-            #    попадала бумага без ценовой истории. Сегодня ни одна запись
-            #    `TICKER_MAP` на проксируемую бумагу не ведёт, поэтому разрыв
-            #    был ЛАТЕНТНЫМ; ручной ввод (Фаза 4) его бы и активировал —
-            #    именно там AIX-ноты приходят по имени. `AUDIT §−70`.
-            t_str = self.TICKER_MAP.get(t_str, t_str)
-
-            # 2-4. Неликвидная бумага → прокси (единая точка решения)
-            proxy = self.proxy_for(t_str)
+            # Неликвидная бумага → прокси (единая точка решения). Спрашиваем на
+            # ИМЕНИ, а не на отформатированном тикере: см. `_canon_name`.
+            proxy = self.proxy_for(canon)
             if proxy is not None:
                 # В лог идёт то, что НАПИСАЛ пользователь, а не канон: иначе
                 # провенанс подмены теряется на первом же синониме.
@@ -889,32 +964,7 @@ class MAC3RiskEngine:
                 resolved.append(proxy)
                 continue
 
-            # 5. Крипто (Tradernet их не торгует напрямую — оставляем *-USD формат
-            #    как маркер; отсутствующие колонки пропускаются без падения)
-            #
-            # 2026-07-28: ветка ловила ТОЛЬКО голый символ, поэтому уже
-            # канонический `BTC-USD` (именно в таком виде он лежит в демо-
-            # портфеле и приходит из ручного ввода) проваливался в ветку 7 и
-            # получал суффикс: `BTC-USD` → `BTC-USD.US`.  Такого инструмента нет
-            # ни у одного провайдера → цена не находилась → строка молча
-            # удалялась `dropna(subset=['Current_Price'])` в analyze_all, и
-            # демо-витрина из 3 позиций показывала 2.  Суффикс `-USD` — тот же
-            # маркер крипто, что использует `broker_api.classify_instrument`
-            # (`t.endswith("-USD")` → «Крипто»), поэтому проверки согласованы.
-            if t_str.endswith('-USD'):
-                resolved.append(t_str)          # уже канонический вид
-                continue
-            if t_str in ('BTC', 'ETH', 'SOL', 'BNB'):
-                resolved.append(f"{t_str}-USD")
-                continue
-
-            # 6. Если уже в формате SYM.EXCHANGE — оставляем
-            if '.' in t_str:
-                resolved.append(t_str)
-                continue
-
-            # 7. Голый US-тикер → добавить .US
-            resolved.append(f"{t_str}.US")
+            resolved.append(self._provider_format(canon))
         if proxied:
             logger.info("Illiquid instruments proxied for factor model only "
                         "(pricing stays on the real ticker): %s", ", ".join(proxied))
@@ -1023,14 +1073,36 @@ class MAC3RiskEngine:
         одних US-бумаг в матрицу не попадает, а конвертировать его обязательно —
         иначе 2 500 000 ₸ входят в портфель как $2 500 000 (замерено).
         """
+        return self.fx_quote_to_base(currency)[0]
+
+    def fx_quote_to_base(self, currency: str) -> tuple[Optional[float], Optional[str]]:
+        """Тот же курс и ДАТА наблюдения (ISO), либо `(None, None)`.
+
+        Дата нужна ровно одному потребителю — экрану подтверждения ручного
+        ввода (`PHASE_05 §4`): «2 500 000 KZT по курсу 520.0 на 2026-07-24».
+        Курс без даты не даёт читателю оценить лаг, а лаг здесь настоящий:
+        матрица цен намеренно берёт курс с задержкой в день (`lag_one_day`,
+        защита от look-ahead).
+
+        Реализация ОДНА на оба метода — `fx_rate_to_base` стал обёрткой.  Два
+        независимых прохода за курсом рано или поздно дали бы РАЗНЫЕ числа в
+        подписи и в расчёте, а это ровно тот класс расхождения, который
+        конверсия кэша уже однажды породила (F-2).
+
+        Дата известна не всегда: когда курс приходит из `_last_fx_records`
+        (валюта уже встречалась в матрице цен), у записи `FxConversion` даты
+        нет.  Тогда возвращается `(rate, None)` — и подпись обязана честно
+        обойтись без даты, а не подставить сегодняшнюю.
+        """
         ccy = str(currency or "").upper().strip()
         rep = self.reporting_currency.value
         if not ccy or ccy == rep:
-            return 1.0
+            return 1.0, None
         if ccy in self._fx_rate_cache:
-            return self._fx_rate_cache[ccy]
+            return self._fx_rate_cache[ccy], self._fx_rate_dates.get(ccy)
 
         rate: Optional[float] = None
+        as_of: Optional[str] = None
         # 1. Уже посчитано при конверсии матрицы цен — берём ровно то значение.
         for rec in (self._last_fx_records or []):
             if getattr(rec, "pair", "") == f"{ccy}{rep}":
@@ -1048,13 +1120,31 @@ class MAC3RiskEngine:
                 else:
                     series = self.fx_provider(lookup, rep)
                     if series is not None and len(series) > 0:
-                        last = float(pd.Series(series).dropna().iloc[-1])
+                        clean = pd.Series(series).dropna()
+                        last = float(clean.iloc[-1])
                         if np.isfinite(last) and last > 0:
                             rate = last * unit_scale
+                            as_of = self._observation_date(clean)
             except Exception as exc:
                 logger.warning("FX %s→%s недоступен: %s", ccy, rep, exc)
         self._fx_rate_cache[ccy] = rate
-        return rate
+        self._fx_rate_dates[ccy] = as_of
+        return rate, as_of
+
+    @staticmethod
+    def _observation_date(series) -> Optional[str]:
+        """Дата последнего наблюдения ряда в ISO, либо None.
+
+        Индекс FX-ряда — дата у FRED, но контракт `FxProvider` этого НЕ требует
+        (провайдер вправе отдать ряд с любым индексом).  Поэтому дата
+        извлекается защитно: непонятный индекс — это `None`, а не выдуманный
+        день в подписи под курсом.
+        """
+        try:
+            stamp = pd.Timestamp(series.index[-1])
+        except Exception:                                # pragma: no cover
+            return None
+        return None if pd.isna(stamp) else stamp.date().isoformat()
 
     def get_ticker_sector(self, ticker: str) -> str:
         """Возвращает сектор для тикера (или 'Other').
