@@ -684,6 +684,36 @@ def _fx_status(results: dict) -> dict:
 
 # ── Public API ───────────────────────────────────────────────────────────────
 
+
+def _manual_source_status(results: dict) -> Optional[dict]:
+    """Ручной ввод: состав книги задан ПОЛЬЗОВАТЕЛЕМ, а не брокером (`ЧК-04.5`).
+
+    Возвращает `None` для брокерского и демо-пути — строка условная, как и
+    строка прокси.
+
+    Почему это обязано быть в CoVe. Все прочие строки отвечают на вопрос
+    «откуда взялось число». Здесь ответ другой и он важнее: количество и цена
+    покупки НЕ подтверждены брокером — их ввёл человек, и ошибка ввода
+    неотличима от факта. Рыночные цены при этом настоящие, поэтому строка
+    называет ровно ту границу, где кончается проверяемое.
+    """
+    if str(results.get("portfolio_source") or "").lower() != "manual":
+        return None
+    rows = results.get("fx_converted_rows") or []
+    note = ("количество и цена покупки введены пользователем и брокером "
+            "не подтверждены; рыночные цены — от провайдера")
+    if rows:
+        note += (f"; позиций переведено в валюту отчёта: {len(rows)} "
+                 f"({', '.join(sorted({str(r.get('currency')) for r in rows}))})")
+    return _row(
+        name   = "Состав портфеля",
+        source = "Ручной ввод пользователя",
+        method = "Текстовый ввод → разбор → контракт движка",
+        status = "degrade",
+        note   = note,
+    )
+
+
 def build_lineage(results: dict,
                    ai_summary: Optional[dict] = None,
                    *, today: Optional[date] = None) -> list[dict]:
@@ -719,6 +749,12 @@ def build_lineage(results: dict,
     # сжат до 16 строк, добавлять всегда-включённую строку нельзя).  Стоит сразу
     # за источником цен: именно здесь читатель узнаёт, что бета его структурной
     # ноты посчитана по чужому индексу.
+    # Источник СОСТАВА книги идёт перед источником цен: читателю важнее сперва
+    # узнать, что позиции не подтверждены брокером, чем как свежи котировки.
+    _manual_row = _manual_source_status(results)
+    if _manual_row is not None:
+        rows.append(_manual_row)
+
     _proxy_row = _proxy_status(results)
     if _proxy_row is not None:
         rows.append(_proxy_row)

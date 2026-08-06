@@ -87,6 +87,7 @@ class _AnalysisCtx:
     df: Any
     _merged_rows: Any
     _dropped_rows: Any
+    _portfolio_source: Any
     # ── стадия 2: цены, валюта, веса ─────────────────────────────────────────
     total_portfolio_value: float
     weights_dict: Any
@@ -313,7 +314,9 @@ class UniversalPortfolioManager:
           НАЗВАНЫ пользователю, поэтому возвращаются реестры, а не молча
           применяются.
 
-        Возвращает `(df, merged_rows, dropped_rows)` — вход остальных стадий.
+        Возвращает `(df, merged_rows, dropped_rows, portfolio_source)` — вход
+        остальных стадий. Источник читается здесь и передаётся дальше значением:
+        `df.attrs` ниже по конвейеру не переживает `join`/`reset_index`.
         Самая изолированная стадия конвейера (вход 0 переменных), поэтому
         вынесена первой: на ней обкатан приём.
         """
@@ -327,6 +330,11 @@ class UniversalPortfolioManager:
         #   (no attrs)                                  → live broker data
         _is_fallback = raw_df.attrs.get('_ramp_is_fallback', False)
         _is_mock     = raw_df.attrs.get('_ramp_is_mock',     False)
+        # Источник СОСТАВА книги. Читается ЗДЕСЬ, на входе: `df.attrs` не
+        # переживает `join`/`reset_index` ниже по конвейеру, поэтому позже
+        # спрашивать уже некого.
+        _portfolio_source = str(raw_df.attrs.get('_ramp_source')
+                                or ('demo' if _is_mock else 'freedom'))
 
         # ── EMPTY-PORTFOLIO GUARD ────────────────────────────────────────────
         # 0-row frame → `total = df['Current_Value'].sum()` = 0 →
@@ -370,7 +378,7 @@ class UniversalPortfolioManager:
         df = self._standardize_columns(raw_df)
         df, _merged_rows, _dropped_rows = self._normalize_positions(df)
         df = df.set_index('Ticker')
-        return df, _merged_rows, _dropped_rows
+        return df, _merged_rows, _dropped_rows, _portfolio_source
 
     def _stage_data_quality(self, df, weights_dict, all_data, _fx_unconvertible):
         """Стадия 3: чекеры качества входных данных, блоки B и C (Арх-3.2→3.3).
@@ -1364,7 +1372,7 @@ class UniversalPortfolioManager:
     def _stage_overlay(self, df, all_data, weights_dict, actual_risky,
                        port_resolved, broker_priced_only, cov_matrix,
                        port_metrics, perf, asset_scores, technicals_map,
-                       total_portfolio_value, _agg_lev_ratio):
+                       total_portfolio_value, _agg_lev_ratio, _fx_rows):
         """Стадия 7: наложения поверх посчитанного портфеля (Арх-3.8).
 
         Последняя стадия конвейера и самая связная — она читает почти всё, что
@@ -1488,6 +1496,10 @@ class UniversalPortfolioManager:
                 # longer one-size-fits-all.
                 risk_mandate    = self.engine.risk_mandate,
                 uncovered       = _uncovered,
+                # A-2: курсы ФАКТИЧЕСКИ выполненных конверсий — по ним план
+                # повторит уровни в валюте торговли. Реестр, а не свежий запрос:
+                # уровни обязаны сходиться с ценой в той же карточке.
+                fx_rates        = {r["currency"]: r["rate"] for r in (_fx_rows or [])},
             )
             action_plan_rows = [r.as_dict() for r in rows]
             # 2026-08-03: доля книги ВНЕ факторной модели. Отчёт печатал
@@ -1652,7 +1664,8 @@ class UniversalPortfolioManager:
         if risk_mandate is not None:
             from finance.scoring import normalize_risk_mandate as _nrm
             self.engine.risk_mandate = _nrm(risk_mandate)
-        df, _merged_rows, _dropped_rows = self._stage_normalize(source)
+        (df, _merged_rows, _dropped_rows,
+         _portfolio_source) = self._stage_normalize(source)
 
         (df, all_data, history_result, broker_priced_only, priced_at_cost,
          _rep_ccy, _fx_rows, _fx_unconvertible, total_portfolio_value,
@@ -1681,7 +1694,7 @@ class UniversalPortfolioManager:
          expected_effect) = self._stage_overlay(
             df, all_data, weights_dict, actual_risky, port_resolved,
             broker_priced_only, cov_matrix, port_metrics, perf, asset_scores,
-            technicals_map, total_portfolio_value, _agg_lev_ratio)
+            technicals_map, total_portfolio_value, _agg_lev_ratio, _fx_rows)
 
 
         # ── Арх-3.1: состояние прогона собрано в один контекст ─────────────
@@ -1695,6 +1708,7 @@ class UniversalPortfolioManager:
             _dropped_rows=_dropped_rows,
             _fx_rows=_fx_rows,
             _merged_rows=_merged_rows,
+            _portfolio_source=_portfolio_source,
             _model_uncovered=_model_uncovered,
             _rep_ccy=_rep_ccy,
             action_plan_rows=action_plan_rows,
@@ -1821,6 +1835,7 @@ class UniversalPortfolioManager:
                 ],
             },
             "reporting_currency": ctx._rep_ccy,
+            "portfolio_source": ctx._portfolio_source,
             "merged_positions": [{"ticker": t, "rows": n} for t, n in ctx._merged_rows],
             "dropped_rows":     [{"ticker": t, "reason": r} for t, r in ctx._dropped_rows],
             "stress_scenarios": ctx.stress_scenarios,

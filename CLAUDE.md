@@ -15,7 +15,7 @@ GCP Cloud Run (long-polling) · Cloud Function (RAG-ингест) · ChromaDB ·
 ## Верификация (обязательна перед каждым пушем)
 
 ```bash
-PYTHONPATH=src python -m pytest tests/ -q          # → 1278 passed, 1 xfailed
+PYTHONPATH=src python -m pytest tests/ -q          # → 1300 passed, 1 xfailed
 ```
 
 - Префикс `PYTHONPATH=src` **ОБЯЗАТЕЛЕН** — без него `import finance…` не находится
@@ -23,7 +23,7 @@ PYTHONPATH=src python -m pytest tests/ -q          # → 1278 passed, 1 xfailed
 - **Прогонов ДВА.** Второй — зеркало деплой-образа, в нём НЕТ каталога `design/`:
   ```bash
   cp -r src tests SYSTEM_PROMPT.md requirements*.txt <tmp>/ && cd <tmp>
-  PYTHONPATH=src python -m pytest tests/ -q        # → 1262 passed, 16 skipped, 1 xfailed
+  PYTHONPATH=src python -m pytest tests/ -q        # → 1284 passed, 16 skipped, 1 xfailed
   ```
   Зелёный GitHub CI НЕ означает, что деплой пройдёт: CI видит полный чекаут,
   Cloud Build — только образ. Разница 16 тестов — ровно те, что читают
@@ -87,7 +87,7 @@ L1 Data      freedom_portfolio/* · services/{fx_feed,macro_data}.py · finance/
 L0 Cross     finance/contracts.py · finance/asset_taxonomy.py · finance/leveraged.py · env_config.py
 ```
 
-Три контрактные границы конвейера: `results{}` (35 ключей, `finance/contracts.py`) →
+Три контрактные границы конвейера: `results{}` (36 ключей, `finance/contracts.py`) →
 payload (`pdf_payload`) → design-data (DEEP/BASE, пин в `test_phase19_block_audit`).
 
 ## Числа и константы — где SSOT
