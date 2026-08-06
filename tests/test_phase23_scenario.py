@@ -285,10 +285,28 @@ class RegimeSurvival(unittest.TestCase):
 
 class DoNoHarmIsolation(unittest.TestCase):
     def test_core_engine_does_not_import_scenario(self):
-        """Do-No-Harm: базовый пайплайн не знает о сценарном модуле."""
-        for mod in ("finance/investment_logic.py", "finance/scoring_orchestrator.py"):
-            src = (SRC / mod).read_text(encoding="utf-8")
-            self.assertNotIn("scenario_engine", src, mod)
+        """Do-No-Harm: базовый пайплайн не знает о сценарном модуле.
+
+        🔴 Арх-3.10: раньше проверялся ОДИН файл `finance/investment_logic.py`.
+        После переезда ядра в пакет он стал фасадом на 60 строк, и проверка
+        продолжила бы ЗЕЛЕНЕТЬ — уже ничего не охраняя: отрицательное
+        утверждение про пустой файл всегда верно. Поэтому сканируется ВЕСЬ
+        пакет, а список файлов собирается перебором каталога, а не
+        перечислением — новый модуль ядра попадает под защиту сам.
+        """
+        targets = sorted((SRC / "finance" / "engine").glob("*.py"))
+        targets.append(SRC / "finance" / "investment_logic.py")
+        targets.append(SRC / "finance" / "scoring_orchestrator.py")
+        self.assertGreaterEqual(
+            len(targets), 5,
+            "ожидались модули пакета `finance/engine/` — проверка смотрит "
+            "не туда, а значит ничего не охраняет",
+        )
+        for path in targets:
+            self.assertNotIn(
+                "scenario_engine", path.read_text(encoding="utf-8"),
+                str(path.relative_to(SRC)),
+            )
 
     def test_scenario_lookback_is_separate_env(self):
         self.assertEqual(se.SCENARIO_LOOKBACK_DAYS, 1825)   # default 5 лет

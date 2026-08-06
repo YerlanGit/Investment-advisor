@@ -250,8 +250,8 @@ class DemoEndToEndTest(unittest.TestCase):
         from finance.demo_portfolio import build_demo_portfolio
         from finance.investment_logic import UniversalPortfolioManager
 
-        with patch("finance.investment_logic.TradernetClient") as client, \
-             patch("finance.investment_logic.get_history_frame") as fetch:
+        with patch("finance.engine.risk_engine.TradernetClient") as client, \
+             patch("finance.engine.risk_engine.get_history_frame") as fetch:
             UniversalPortfolioManager(price_source="demo").analyze_all(
                 build_demo_portfolio())
             client.assert_not_called()
@@ -275,7 +275,7 @@ class DemoIsolationTest(unittest.TestCase):
         eng = MAC3RiskEngine(price_source="freedom")
         with patch("finance.demo_portfolio.demo_price_matrix") as demo_matrix, \
              patch.object(eng, "_get_tradernet_client"), \
-             patch("finance.investment_logic.get_history_frame") as fetch:
+             patch("finance.engine.risk_engine.get_history_frame") as fetch:
             fetch.return_value = type("HR", (), {
                 "data": pd.DataFrame(), "loaded": [], "failed": {}, "retried": []})()
             eng.get_market_data(["AAPL"])

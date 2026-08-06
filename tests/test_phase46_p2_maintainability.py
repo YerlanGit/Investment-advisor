@@ -144,7 +144,7 @@ class NegativeEquityDiagnosticsTest(unittest.TestCase):
         self.assertIn("Проверьте подключение к брокеру", str(ctx.exception))
 
     def test_all_three_branches_exist(self):
-        src = Path("src/finance/investment_logic.py").read_text(encoding="utf-8")
+        src = Path("src/finance/engine/portfolio_manager.py").read_text(encoding="utf-8")
         self.assertIn("total_portfolio_value < 0", src)
         self.assertIn("total_portfolio_value == 0", src)
         self.assertIn("not np.isfinite(total_portfolio_value)", src)

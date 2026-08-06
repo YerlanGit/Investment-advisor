@@ -15,7 +15,7 @@ GCP Cloud Run (long-polling) · Cloud Function (RAG-ингест) · ChromaDB ·
 ## Верификация (обязательна перед каждым пушем)
 
 ```bash
-PYTHONPATH=src python -m pytest tests/ -q          # → 1268 passed, 1 xfailed
+PYTHONPATH=src python -m pytest tests/ -q          # → 1272 passed, 1 xfailed
 ```
 
 - Префикс `PYTHONPATH=src` **ОБЯЗАТЕЛЕН** — без него `import finance…` не находится
@@ -23,7 +23,7 @@ PYTHONPATH=src python -m pytest tests/ -q          # → 1268 passed, 1 xfailed
 - **Прогонов ДВА.** Второй — зеркало деплой-образа, в нём НЕТ каталога `design/`:
   ```bash
   cp -r src tests SYSTEM_PROMPT.md requirements*.txt <tmp>/ && cd <tmp>
-  PYTHONPATH=src python -m pytest tests/ -q        # → 1252 passed, 16 skipped, 1 xfailed
+  PYTHONPATH=src python -m pytest tests/ -q        # → 1256 passed, 16 skipped, 1 xfailed
   ```
   Зелёный GitHub CI НЕ означает, что деплой пройдёт: CI видит полный чекаут,
   Cloud Build — только образ. Разница 16 тестов — ровно те, что читают
@@ -53,6 +53,8 @@ PYTHONPATH=src python -m pytest tests/ -q          # → 1268 passed, 1 xfailed
 - Слой отчёта не импортирует `tg_bot`: это инверсия и затаскивание `aiogram` в рендер.
 - Меняешь `analyze_all` → golden-фикстура (`tests/test_contracts_golden.py`) обязана совпасть.
   Расхождение в фазе Арх-3 = ошибка разреза, а НЕ повод обновить эталон.
+- `analyze_all` — ОРКЕСТРАТОР: тело ≤ 150 строк, порядок стадий и их полнота пинятся
+  (`test_engine_orchestrator.py`). Новая логика = новая СТАДИЯ, а не блок в оркестраторе.
 - Эталон СЛЕП к порядку ключей словаря (`normalize` сортирует ради стабильности).
   Порядок, несущий смысл, пинится отдельным тестом — как `test_engine_benchmark_order.py`
   для профильного бенчмарка, чей первый ключ доезжает до подписи карточки (`§−64`).
@@ -77,7 +79,8 @@ L4 Delivery  tg_bot.py · entrypoint.py · db_tokenomics.py · services/report_s
 L3 Report    pdf_payload.py → premium_payload.py → premium_renderer.py · html_renderer.py
              ai_narrative.py · pdf_charts.py · report_charts.py · report_mocks.py
              finance/data_lineage.py · finance/scenario_report.py
-L2 Engine    finance/investment_logic.py (analyze_all) · scoring*.py · stress.py · simulate.py
+L2 Engine    finance/engine/{risk_engine,portfolio_manager,market_preview}.py
+             (finance/investment_logic.py — ФАСАД) · scoring*.py · stress.py · simulate.py
              black_litterman.py · regime.py · period_returns.py · scenario_engine.py · data_checks.py
 L1 Data      freedom_portfolio/* · services/{fx_feed,macro_data}.py · finance/{broker_api,
              price_providers,sec_edgar,cds_feed,currency,demo_portfolio}.py · agent/rag_engine.py

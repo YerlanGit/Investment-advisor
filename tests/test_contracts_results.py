@@ -40,14 +40,24 @@ from finance.contracts import (
 )
 
 _SRC = Path(__file__).resolve().parent.parent / "src"
-_ENGINE = _SRC / "finance" / "investment_logic.py"
+
+
+def _source_of(cls) -> Path:
+    """Файл, где РЕАЛЬНО определён класс.
+
+    Арх-3.10 разложил ядро по пакету `finance/engine/`, и путь, прибитый к
+    `investment_logic.py`, стал указывать на фасад. Поиск через класс следует
+    за кодом сам — при следующем переезде тест не придётся чинить.
+    """
+    import inspect
+    return Path(inspect.getsourcefile(cls))
 
 
 def _function_node(tree: ast.AST, name: str) -> ast.FunctionDef:
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
             return node
-    raise AssertionError(f"функция {name} не найдена в {_ENGINE}")
+    raise AssertionError(f"функция {name} не найдена")
 
 
 def _own_returns(fn: ast.FunctionDef) -> list[ast.Return]:
@@ -80,7 +90,14 @@ class AnalyzeResultsContractTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.tree = ast.parse(_ENGINE.read_text(encoding="utf-8"))
+        from finance.investment_logic import MAC3RiskEngine, UniversalPortfolioManager
+
+        cls.tree = ast.parse(
+            _source_of(UniversalPortfolioManager).read_text(encoding="utf-8"))
+        # `calculate_structural_risk` живёт у ДВИЖКА, а он с Арх-3.10 в другом
+        # модуле пакета — второй разбор нужен именно поэтому.
+        cls.engine_tree = ast.parse(
+            _source_of(MAC3RiskEngine).read_text(encoding="utf-8"))
         cls.fn = _function_node(cls.tree, "analyze_all")
         # Арх-3.1: словарь собирается в выделенном методе-стадии, а не в теле
         # `analyze_all`. Инвариант «сборка в ОДНОМ месте» сохранён — изменился
@@ -144,7 +161,7 @@ class AnalyzeResultsContractTest(unittest.TestCase):
 
     def test_portfolio_metrics_block_matches(self) -> None:
         """Вложенный блок собирается в другой функции — сверяем отдельно."""
-        risk_fn = _function_node(self.tree, "calculate_structural_risk")
+        risk_fn = _function_node(self.engine_tree, "calculate_structural_risk")
         literals = [
             n.value for n in ast.walk(risk_fn)
             if isinstance(n, ast.Assign) and isinstance(n.value, ast.Dict)

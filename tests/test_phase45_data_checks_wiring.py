@@ -68,7 +68,7 @@ class WiredIntoProductionTest(unittest.TestCase):
     """Раньше единственным импортёром был собственный тест модуля."""
 
     def test_engine_calls_the_checkers(self):
-        src = Path("src/finance/investment_logic.py").read_text(encoding="utf-8")
+        src = Path("src/finance/engine/portfolio_manager.py").read_text(encoding="utf-8")
         self.assertIn("data_checks", src)
         self.assertIn("check_portfolio_sufficiency", src)
         self.assertIn("check_price_matrix", src)
@@ -326,7 +326,7 @@ class LineageSurfaceTest(unittest.TestCase):
 
     def test_unconvertible_currency_reaches_c11(self):
         """−37 только писал в лог; теперь факт доезжает до чекера."""
-        src = Path("src/finance/investment_logic.py").read_text(encoding="utf-8")
+        src = Path("src/finance/engine/portfolio_manager.py").read_text(encoding="utf-8")
         self.assertIn("_fx_unconvertible", src)
         self.assertIn("unconvertible_currencies=_fx_unconvertible", src)
 
