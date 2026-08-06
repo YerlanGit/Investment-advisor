@@ -291,6 +291,21 @@ async def init_db() -> None:
             )
         """)
 
+        # Manual Portfolio Фаза 5 (§5): черновик ручного ввода.
+        # `MemoryStorage` в Dispatcher теряет состояние при КАЖДОМ передеплое
+        # Cloud Run, а ввод портфеля на 20 позиций — это минуты работы
+        # пользователя.  Черновик живёт в той же SQLite (новой инфраструктуры
+        # не заводим) и хранит СЫРОЙ ТЕКСТ: правила разбора между версиями
+        # меняются, исходный текст — нет.
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS manual_portfolio_draft (
+                telegram_id  INTEGER PRIMARY KEY,
+                payload_text TEXT    NOT NULL,
+                created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
         await db.commit()
 
     # Просроченные аренды прошлых инстансов — убрать на старте, чтобы таблица
@@ -675,6 +690,83 @@ async def save_benchmark_ticker(telegram_id: int, ticker: str) -> None:
         )
         await db.commit()
         logger.info("Бенчмарк пользователя %s: %s.", telegram_id, ticker)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Manual Portfolio Фаза 5 §5 · Черновик ручного ввода
+# ═════════════════════════════════════════════════════════════════════════════
+#: Потолок размера черновика.  200 строк × ~40 символов — это ~8 КБ, так что
+#: 64 КБ дают восьмикратный запас; всё, что больше, — уже не ручной ввод, а
+#: попытка положить в БД файл (загрузка файлом — отдельная Фаза 7 со своими
+#: проверками).  Проверяется ДО записи: отказ дешевле, чем распухшая база на
+#: gcsfuse.
+MANUAL_DRAFT_MAX_BYTES = 64 * 1024
+
+
+class ManualDraftTooLarge(ValueError):
+    """Черновик больше `MANUAL_DRAFT_MAX_BYTES` — в БД не пишем."""
+
+
+async def save_manual_draft(telegram_id: int, payload_text: str) -> bool:
+    """Сохранить СЫРОЙ текст ручного ввода. UPSERT, как `save_connection_mode`.
+
+    Хранится именно текст пользователя, а не разобранный результат: правила
+    разбора между версиями меняются (за одну Фазу 4 их поменяли трижды), а
+    исходный текст — нет.  Восстановление всегда идёт через актуальный парсер.
+
+    `created_at` при перезаписи СОХРАНЯЕТСЯ — по нему пользователю показывают
+    возраст черновика («найден черновик от 20.07»), и обновлять его на каждом
+    сохранении значило бы всегда показывать «сегодня».
+    """
+    text = str(payload_text or "")
+    size = len(text.encode("utf-8"))
+    if size > MANUAL_DRAFT_MAX_BYTES:
+        raise ManualDraftTooLarge(
+            f"черновик {size} байт при пределе {MANUAL_DRAFT_MAX_BYTES}")
+    async with _get_conn() as db:
+        cursor = await db.execute(
+            """
+            INSERT INTO manual_portfolio_draft
+                   (telegram_id, payload_text, created_at, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ON CONFLICT(telegram_id) DO UPDATE SET
+                payload_text = excluded.payload_text,
+                updated_at   = CURRENT_TIMESTAMP
+            """,
+            (telegram_id, text),
+        )
+        await db.commit()
+        return cursor.rowcount != 0
+
+
+async def get_manual_draft(telegram_id: int) -> dict | None:
+    """Черновик пользователя или `None`. Ключи: `text`, `created_at`, `updated_at`."""
+    async with _get_conn() as db:
+        cursor = await db.execute(
+            "SELECT payload_text, created_at, updated_at "
+            "FROM manual_portfolio_draft WHERE telegram_id = ?",
+            (telegram_id,),
+        )
+        row = await cursor.fetchone()
+        if row is None or row[0] is None:
+            return None
+        return {"text": row[0], "created_at": row[1], "updated_at": row[2]}
+
+
+async def delete_manual_draft(telegram_id: int) -> bool:
+    """Удалить черновик. True — строка действительно была.
+
+    Вызывается ТОЛЬКО после успешной доставки отчёта либо по явной отмене
+    пользователя: если отчёт упал, ввод обязан пережить падение — иначе
+    пользователь набирает двадцать позиций заново из-за нашего сбоя.
+    """
+    async with _get_conn() as db:
+        cursor = await db.execute(
+            "DELETE FROM manual_portfolio_draft WHERE telegram_id = ?",
+            (telegram_id,),
+        )
+        await db.commit()
+        return cursor.rowcount > 0
 
 
 async def save_report_snapshot(

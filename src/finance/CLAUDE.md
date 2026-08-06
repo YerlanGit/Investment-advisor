@@ -24,6 +24,10 @@
   фактор-модели. Выборку колонок в `calculate_structural_risk` дедуплицировать
   обязательно (`dict.fromkeys`) — иначе портфель, держащий факторный ETF, роняет
   отчёт; в `valid_resolved` дубликаты, наоборот, сохранять. `MATH_ENGINE.md §2.3a`.
+  **Слой ВВОДА портфеля обязан звать `canonical_ticker`, а не `resolve_tickers`**:
+  второй отдаёт прокси, и позиция становится прокси-бумагой (`AUDIT §−72`).
+  `proxy_for` спрашивается на ИМЕНИ (`_canon_name`), а не на `SYM.EXCHANGE`:
+  его первая ветка — точное совпадение с `BOND_CLASSIFICATION_MAP`.
 - **Классификация инструмента — `asset_taxonomy.py` (SSOT ФАКТОВ, A-5).** Перечни
   тикеров (`BOND_ETFS`, `ETF_BASES`, `CASH_CCYS`, …) и предикаты (`is_bond_like`,
   `is_etf`, …) живут ТОЛЬКО там; новый тикер добавляется туда и никуда больше.
@@ -45,5 +49,5 @@
 ## Обязательный цикл
 1. Правь `src/finance/*` и `tests/test_phase*.py` вместе.
 2. `PYTHONPATH=src python -m pytest tests/ -q` — префикс ОБЯЗАТЕЛЕН, без него
-   `import finance…` не находится (baseline: 1300 passed, 1 xfailed).
+   `import finance…` не находится (baseline: 1359 passed, 1 xfailed).
 3. Крупное изменение → строка Было/Стало в `docs/audit/AUDIT.md`.

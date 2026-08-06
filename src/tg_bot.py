@@ -22,6 +22,7 @@ import os
 import re
 import signal
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -51,23 +52,29 @@ from aiogram.types import (
     Message,
 )
 
+from env_config import env_int
 from db_tokenomics import (
     acquire_report_lock,
     approve_mandate,
     assert_persistent_state,
     credit_tokens,
     deduct_tokens,
+    delete_manual_draft,
     InsufficientFundsError,
     get_balance,
     get_benchmark_ticker,
     get_connection_mode_explicit,
+    get_manual_draft,
     get_profile,
     get_last_report_snapshot,
     init_db,
     init_user,
+    MANUAL_DRAFT_MAX_BYTES,
+    ManualDraftTooLarge,
     release_report_lock,
     save_benchmark_ticker,
     save_connection_mode,
+    save_manual_draft,
     save_profile,
     save_report_snapshot,
 )
@@ -139,6 +146,20 @@ class PortfolioConnection(StatesGroup):
 
 class AnalysisFlow(StatesGroup):
     awaiting_approval = State()
+
+
+class ManualPortfolio(StatesGroup):
+    """Ручной ввод портфеля (Manual Portfolio, Фаза 5).
+
+    Два состояния, потому что решений у пользователя ровно два: что ввести и
+    согласен ли он с тем, как мы это поняли. Экран подтверждения между ними
+    обязателен по §3.4 задания: опечатка в количестве (лишний ноль) не видна в
+    числах отчёта, но полностью искажает веса, TRC и CVaR — доля позиции на
+    экране делает её заметной глазом.
+    """
+
+    Input   = State()   # ждём текст (файл — Фаза 7)
+    Confirm = State()   # показан экран подтверждения
 
 
 class MandateEdit(StatesGroup):
@@ -234,6 +255,26 @@ SOURCE_GREETING: dict[str, str] = {
     "news_kaspi":  "новостей Kaspi",
 }
 
+# ── Manual Portfolio (Фаза 5) ────────────────────────────────────────────────
+MANUAL_PORTFOLIO_ENV = "MANUAL_PORTFOLIO_ENABLED"
+
+
+def manual_portfolio_enabled() -> bool:
+    """Флаг отката ручного ввода. По умолчанию — ВЫКЛЮЧЕН.
+
+    Значение читается ФУНКЦИЕЙ, а не константой модуля: константа защёлкнулась
+    бы на импорте, и ни один тест не смог бы проверить оба состояния бота
+    (правило §6.4 плана, образец — `factor_orthogonalize_enabled`).
+
+    Почему дефолт «off», хотя фаза сдана: ручной портфель обязан ходить в Stooq
+    (I-12 запрещает отдавать данные Tradernet не-клиентам Freedom), а
+    `StooqProvider` появится только в Фазе 9. Включённый флаг сегодня довёл бы
+    пользователя до экрана подтверждения и честно упал на загрузке цен —
+    поэтому включение остаётся за Фазой 9, а не за этой (`PHASE_04 §5b` A-1).
+    """
+    return str(os.getenv(MANUAL_PORTFOLIO_ENV, "off")).strip().lower() in (
+        "1", "true", "yes", "on")
+
 
 # ── Pure helpers ──────────────────────────────────────────────────────────────
 
@@ -289,6 +330,7 @@ async def _resolve_portfolio_source(user_id: int) -> tuple[str, str | None]:
 
     Returns ``(source, stored_mode)`` where source is one of:
       * ``'freedom'``      — live broker portfolio;
+      * ``'manual'``       — the user typed the portfolio in by hand (Фаза 5);
       * ``'demo'``         — the user EXPLICITLY chose the template portfolio;
       * ``'undetermined'`` — no explicit choice and no keys → the caller must
         refuse to build a (paid) report and ask the user to pick a source.
@@ -304,6 +346,18 @@ async def _resolve_portfolio_source(user_id: int) -> tuple[str, str | None]:
         # itself (re-link message / admin service keys when the vault is
         # empty), so we skip a vault open on the common path.
         return "freedom", stored
+    # F-4 (Фаза 5 §2.1): ветка manual стоит ДО проверки vault, и порядок здесь
+    # содержательный.  Само-лечение ниже трактует ключи в vault как
+    # доказательство привязки брокера — но пользователь, у которого ключи
+    # когда-то БЫЛИ, а сегодня он вводит портфель руками, получил бы молчаливый
+    # возврат в freedom и не смог бы построить ручной отчёт вообще.  Явный,
+    # только что сделанный выбор свежее, чем факт наличия ключей.
+    #
+    # Для 'template' и None само-лечение сохраняется в полной силе: его смысл
+    # («ключи = доказательство привязки») не нарушается, и регресс инцидента
+    # 2026-07-14 закрыт теми же тестами, что и раньше.
+    if stored == "manual":
+        return "manual", stored
     loop = asyncio.get_running_loop()
     if await loop.run_in_executor(None, _has_vault_keys_sync, user_id):
         logger.warning(
@@ -847,10 +901,18 @@ def kb_mandate_review() -> InlineKeyboardMarkup:
 
 
 def kb_connect_choice() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
+    rows = [
         [InlineKeyboardButton(text="📋 Демо-режим (Шаблон)", callback_data="connect:template")],
         [InlineKeyboardButton(text="🔗 Freedom Broker API",  callback_data="connect:freedom")],
-    ])
+    ]
+    # I-9: при выключенном флаге бот обязан вести себя РОВНО как до Фазы 5 —
+    # ни кнопки, ни обработчика (гард дублируется в `cb_connect_choice`, чтобы
+    # старое сообщение с кнопкой, отправленное при включённом флаге, не стало
+    # обходным путём после выключения).
+    if manual_portfolio_enabled():
+        rows.append([InlineKeyboardButton(text="✍️ Ввести портфель вручную",
+                                          callback_data="connect:manual")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def kb_analysis_choice() -> InlineKeyboardMarkup:
@@ -1500,6 +1562,36 @@ async def cb_connect_choice(callback: CallbackQuery, state: FSMContext) -> None:
         await state.clear()
         await _show_analysis_menu(callback.message, slug)
 
+    elif mode == "manual":
+        # I-9, второй гард: кнопки при выключенном флаге нет, но СТАРОЕ
+        # сообщение с кнопкой живёт в чате вечно.  Без проверки здесь выключение
+        # флага не выключало бы фичу — а флаг существует ровно ради отката.
+        if not manual_portfolio_enabled():
+            logger.info("MANUAL: нажата кнопка при выключенном флаге user=%s", user_id)
+            await callback.message.answer(
+                "ℹ️ Ручной ввод портфеля пока недоступен. "
+                "Выберите демо-режим или подключите брокера.",
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=kb_connect_choice(),
+            )
+            return
+        await save_connection_mode(user_id, "manual")
+        await state.update_data(slug=slug)
+        draft = await get_manual_draft(user_id)
+        if draft and str(draft.get("text") or "").strip():
+            # §9: пользователь мог уйти на середине и вернуться через неделю.
+            # Молча подставить недельный черновик нельзя — портфель с тех пор
+            # мог измениться; молча выбросить тоже нельзя — это минуты работы.
+            await state.set_state(ManualPortfolio.Input)
+            await callback.message.edit_text(
+                f"📝 *Найден черновик от {_fmt_draft_age(draft)}*\n\n"
+                "Продолжить с него или начать заново?",
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=kb_manual_draft(),
+            )
+            return
+        await _manual_ask_for_input(callback.message, state)
+
     elif mode == "freedom":
         await state.update_data(slug=slug)
         await state.set_state(PortfolioConnection.Login)
@@ -1588,6 +1680,424 @@ async def msg_secret_key(message: Message, state: FSMContext) -> None:
     )
     await message.answer(ack_text, parse_mode=ParseMode.MARKDOWN)
     await _show_analysis_menu(message, slug)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# MANUAL PORTFOLIO (Фаза 5) — ввод текстом, экран подтверждения, черновик
+# ══════════════════════════════════════════════════════════════════════════════
+
+#: Сколько позиций показываем в таблице подтверждения.  Лимит сообщения
+#: Telegram — 4096 символов, а строка таблицы ≈ 55; 200 позиций не поместятся
+#: физически.  Показываем самые ДОРОГИЕ: опечатка в количестве, ради которой
+#: экран и существует, всплывает именно наверху списка (§9).
+_MANUAL_PREVIEW_ROWS = 20
+#: Сколько отвергнутых строк перечисляем поимённо.
+_MANUAL_PREVIEW_ERRORS = 10
+
+_MANUAL_INPUT_HELP = (
+    "✍️ *Введите портфель одним сообщением*\n\n"
+    "Одна позиция — одна строка:\n"
+    "`ТИКЕР  КОЛИЧЕСТВО  ЦЕНА_ПОКУПКИ  [ВАЛЮТА]`\n\n"
+    "```\n"
+    "AAPL 10 150.50\n"
+    "KSPI 200 45000 KZT\n"
+    "CASH:USD 5000\n"
+    "CASH:KZT 2 500 000\n"
+    "```\n"
+    "• валюта — необязательна, обычно она видна по тикеру;\n"
+    "• кэш — два поля: `CASH:ВАЛЮТА СУММА`;\n"
+    "• десятичная запятая и разряды через пробел допустимы;\n"
+    "• строки с `#` игнорируются.\n\n"
+    "После ввода покажу, как я вас понял, — и только потом посчитаю."
+)
+
+
+def kb_manual_draft() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="▶️ Продолжить",   callback_data="manual:resume"),
+        InlineKeyboardButton(text="🆕 Начать заново", callback_data="manual:fresh"),
+    ]])
+
+
+def kb_manual_confirm() -> InlineKeyboardMarkup:
+    """Три кнопки, а не две (B-4): без «Отмены» пользователь, увидевший, что
+    распозналось не то, оставался бы заперт в FSM."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Рассчитать", callback_data="manual:confirm")],
+        [
+            InlineKeyboardButton(text="✏️ Исправить", callback_data="manual:edit"),
+            InlineKeyboardButton(text="❌ Отмена",    callback_data="manual:cancel"),
+        ],
+    ])
+
+
+def _md_safe(text: str) -> str:
+    """Убрать из ПОЛЬЗОВАТЕЛЬСКОГО фрагмента символы разметки Telegram.
+
+    Причины отказа парсера цитируют ввод («тикер «AAPL*» не распознан»), а
+    незакрытая `*` или `_` роняет всё сообщение целиком с
+    `TelegramBadRequest: can't parse entities` — то есть пользователь не увидит
+    НИ ОДНОЙ ошибки вместо одной непонятой строки.
+    """
+    return re.sub(r"[*_`\[\]]", "", str(text))
+
+
+def _fmt_amount(value: float | None, digits: int = 2) -> str:
+    """Число с пробелом-разделителем разрядов: `2 500 000.00`."""
+    if value is None:
+        return "—"
+    return f"{value:,.{digits}f}".replace(",", " ")
+
+
+def _fmt_fx_note(currency: str, base: str, rate: float) -> str:
+    """Курс в том виде, в каком его КОТИРУЮТ, а не в каком применяют.
+
+    Движок работает мультипликатором «цена × rate», и для тенге это
+    0.00222 — число арифметически верное и человечески нечитаемое: владелец
+    тенгового остатка знает свой курс как «450 ₸ за доллар». Поэтому пара
+    разворачивается так, чтобы показанное число было ≥ 1; смысл при этом не
+    меняется, обе записи — один и тот же курс.
+    """
+    if rate <= 0:                                      # pragma: no cover
+        return f"1 {currency} = {rate} {base}"
+    if rate >= 1:
+        return f"1 {currency} = {_fmt_amount(rate, 4)} {base}"
+    return f"1 {base} = {_fmt_amount(1.0 / rate, 4)} {currency}"
+
+
+def _fit(text: str, width: int) -> str:
+    """Обрезать до `width` с многоточием — обрезка молча искажает тикер.
+
+    `FFSPC6.1028.AIX`, урезанный до `FFSPC6.1028`, выглядит как ДРУГАЯ бумага
+    (и именно такая бумага в отчёте существует), поэтому факт обрезки обязан
+    быть виден.
+    """
+    s = str(text)
+    return s if len(s) <= width else s[:width - 1] + "…"
+
+
+def _fmt_draft_age(draft: dict) -> str:
+    """Дата создания черновика как «20.07», либо «неизвестной давности».
+
+    Формат `CURRENT_TIMESTAMP` у SQLite — `YYYY-MM-DD HH:MM:SS`, но полагаться
+    на него без проверки нельзя: строку могли записать миграцией или иным
+    клиентом, а падение ради подписи к кнопке недопустимо.
+    """
+    raw = str(draft.get("created_at") or "").strip()
+    try:
+        return datetime.strptime(raw[:10], "%Y-%m-%d").strftime("%d.%m")
+    except (ValueError, TypeError):
+        return "неизвестной давности"
+
+
+async def _manual_ask_for_input(message: Message, state: FSMContext,
+                                prefill: str = "") -> None:
+    """Экран ввода. `prefill` — прошлый текст для правки.
+
+    Telegram не умеет подставлять текст в поле ввода, поэтому «предзаполнение»
+    (§3, переход `manual:edit`) — это прошлый ввод отдельным сообщением-блоком:
+    его можно скопировать одним касанием, поправить строку и отправить обратно.
+    """
+    await state.set_state(ManualPortfolio.Input)
+    await message.answer(_MANUAL_INPUT_HELP, parse_mode=ParseMode.MARKDOWN)
+    if prefill.strip():
+        await message.answer(
+            "Ваш прошлый ввод — скопируйте, поправьте и пришлите снова:\n"
+            f"```\n{prefill.strip()[:3500]}\n```",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+
+
+def _manual_review_sync(text: str) -> tuple:
+    """Разбор + доли + pre-flight ОДНИМ блокирующим вызовом (для executor).
+
+    Почему в executor: `build_confirmation` спрашивает курс, а это сетевой
+    поход (FRED), и делать его прямо в обработчике сообщения — значит держать
+    long-poll aiogram и показывать пользователю зависший интерфейс (B-2).
+
+    Возвращает `(report, view, coverage)`.
+    """
+    from finance.manual_portfolio import (
+        build_confirmation, parse_portfolio_text, preflight_coverage,
+    )
+    engine = UniversalPortfolioManager(price_source="manual").engine
+    report = parse_portfolio_text(text, engine)
+    view = build_confirmation(report, engine)
+    days = env_int("HISTORY_LOOKBACK_DAYS", 1825, lo=90, hi=3650)
+    try:
+        coverage = preflight_coverage(report, engine, days=days)
+    except Exception as exc:                           # noqa: BLE001
+        # Pre-flight — подсказка, а не условие расчёта: сбой чтения кэша не
+        # имеет права отнять у пользователя разобранный портфель.
+        logger.warning("MANUAL pre-flight пропущен: %s", exc)
+        coverage = None
+    return report, view, coverage
+
+
+def _format_manual_confirmation(view, coverage=None) -> str:
+    """Экран подтверждения (`PHASE_05 §4`). Только ВИД — числа уже посчитаны.
+
+    Доля позиции здесь обязательна, а не желательна: опечатка в количестве
+    (лишний ноль) не видна ни в одном числе отчёта, но полностью искажает веса,
+    TRC и CVaR. Именно доля делает её заметной глазом.
+    """
+    lines = ["📋 *Ваш портфель — проверьте перед расчётом*", ""]
+    body: list[str] = []
+
+    shown = view.positions[:_MANUAL_PREVIEW_ROWS]
+    if shown:
+        body.append(f"{'Тикер':<12}{'Распознан':<16}{'Кол-во':>10}"
+                    f"{'Цена':>12}{'Доля':>8}")
+        body.append("─" * 58)
+    for row in shown:
+        share = "—" if row.share is None else f"{row.share * 100:.1f}%"
+        body.append(f"{_fit(_md_safe(row.raw_ticker), 11):<12}"
+                    f"{_fit(_md_safe(row.resolved), 15):<16}"
+                    f"{_fmt_amount(row.quantity, 2):>10}"
+                    f"{_fmt_amount(row.price, 2):>12}"
+                    f"{share:>8}")
+    hidden = view.positions[_MANUAL_PREVIEW_ROWS:]
+    if hidden:
+        rest = sum(r.value_base or 0.0 for r in hidden)
+        body.append(f"… и ещё {len(hidden)} позиций на "
+                    f"{_fmt_amount(rest)} {view.base_currency}")
+
+    if view.cash:
+        body.append("")
+        body.append("💵 Кэш")
+        for row in view.cash:
+            share = "—" if row.share is None else f"{row.share * 100:.1f}%"
+            label = (row.currency if row.currency == view.base_currency
+                     else f"{row.currency} → {view.base_currency}")
+            body.append(f"{label:<28}{_fmt_amount(row.quantity, 2):>14}{share:>8}")
+
+    body.append("")
+    body.append(f"Итого: {_fmt_amount(view.total_base)} {view.base_currency}")
+    lines.append("```\n" + "\n".join(body) + "\n```")
+
+    if not view.shares_are_meaningful:
+        lines.append("⚠️ Суммарная стоимость не положительна — доли не показаны.")
+
+    for note in view.fx_notes:
+        stamp = f" (на {note.as_of})" if note.as_of else ""
+        lines.append(f"💱 {note.currency} → {view.base_currency}: "
+                     f"{_fmt_fx_note(note.currency, view.base_currency, note.rate)}"
+                     f"{stamp}")
+    if view.unconvertible:
+        lines.append(
+            "⚠️ Нет курса для " + ", ".join(_md_safe(c) for c in view.unconvertible)
+            + " — позиции в этой валюте *не учтены* в итоге и в расчёт не пойдут.")
+    if view.proxied:
+        pairs = ", ".join(f"{_md_safe(a)} → {_md_safe(b)}" for a, b in view.proxied)
+        lines.append(
+            f"🔁 Для риск-модели заменены: {pairs}. "
+            "Это НЕ смена бумаги: стоимость и P&L считаются по вашей позиции, "
+            "заменитель нужен только там, где у бумаги нет своей истории цен.")
+    if view.auto_resolved:
+        pairs = ", ".join(f"{_md_safe(a)} → {_md_safe(b)}" for a, b in view.auto_resolved)
+        lines.append(f"🔎 Распознаны как: {pairs}")
+
+    note = _manual_coverage_note(coverage)
+    if note:
+        lines.append(note)
+
+    if view.excluded:
+        lines.append(f"⚠️ *Исключено строк: {len(view.excluded)}*")
+        for line_no, reason in view.excluded[:_MANUAL_PREVIEW_ERRORS]:
+            lines.append(f"  • строка {line_no}: {_md_safe(reason)}")
+        rest = len(view.excluded) - _MANUAL_PREVIEW_ERRORS
+        if rest > 0:
+            lines.append(f"  • … и ещё {rest}")
+
+    return "\n".join(lines)
+
+
+def _manual_coverage_note(coverage) -> str:
+    """Строка про ценовую историю — ТОЛЬКО когда кэшу есть что сказать.
+
+    `unknown` значит «не спрашивали», а не «истории нет» (`PHASE_04 §ЧК-04.4`).
+    На холодном кэше (а до Фазы 9 он у ручного провайдера холодный ВСЕГДА) в
+    `unknown` попадает весь портфель — и предупреждение «по 12 бумагам истории
+    нет» было бы ложью. Поэтому строка появляется, только когда часть книги в
+    кэше есть, а часть нет: тогда разница действительно о бумагах, а не о том,
+    что мы ещё ничего не качали.
+    """
+    if coverage is None or not coverage.covered or not coverage.unknown:
+        return ""
+    names = ", ".join(_md_safe(t) for t in coverage.unknown[:10])
+    return ("ℹ️ Ценовой истории пока не видел по: " + names +
+            ". Если её не окажется и у поставщика, позиции честно выпадут "
+            "из расчёта — отчёт об этом скажет.")
+
+
+@portfolio_router.message(StateFilter(ManualPortfolio.Input), F.text)
+async def msg_manual_input(message: Message, state: FSMContext) -> None:
+    """Текст портфеля → экран подтверждения. Разбор НИКОГДА не бросает."""
+    user_id = message.from_user.id
+    text = message.text or ""
+
+    if len(text.encode("utf-8")) > MANUAL_DRAFT_MAX_BYTES:
+        await message.answer(
+            "⚠️ Слишком длинный ввод. Пришлите портфель до "
+            f"{MANUAL_DRAFT_MAX_BYTES // 1024} КБ — "
+            "загрузка файлом появится отдельно.",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        return
+
+    try:
+        async with user_slot(user_id):
+            loop = asyncio.get_running_loop()
+            report, view, coverage = await loop.run_in_executor(
+                None, _manual_review_sync, text)
+
+            if not view.has_positions:
+                # Полный провал разбора: остаёмся в Input, черновик НЕ пишем —
+                # сохранять нечего, а перезапись стёрла бы прошлый рабочий ввод.
+                head = ("😕 Не удалось разобрать ни одной позиции.\n\n"
+                        if view.excluded else
+                        "😕 Не вижу ни одной позиции в этом сообщении.\n\n")
+                details = "\n".join(
+                    f"  • строка {n}: {_md_safe(r)}"
+                    for n, r in view.excluded[:_MANUAL_PREVIEW_ERRORS])
+                await message.answer(head + details + "\n\nПопробуйте ещё раз.",
+                                     parse_mode=ParseMode.MARKDOWN)
+                return
+
+            # §5: ОДНА запись за флоу, ровно на переходе Input → Confirm.
+            # SQLite лежит на gcsfuse — писать на каждое сообщение значило бы
+            # платить задержкой за то, что пользователю не нужно.
+            try:
+                await save_manual_draft(user_id, text)
+            except ManualDraftTooLarge as exc:         # уже проверено выше
+                logger.warning("MANUAL: черновик не сохранён user=%s: %s",
+                               user_id, exc)
+            except Exception as exc:                   # noqa: BLE001
+                # Черновик — удобство, а не условие расчёта: сбой БД не имеет
+                # права отнять у пользователя только что разобранный портфель.
+                logger.warning("MANUAL: черновик не сохранён user=%s: %s",
+                               user_id, exc)
+
+            await state.update_data(manual_text=text)
+            await state.set_state(ManualPortfolio.Confirm)
+            await message.answer(_format_manual_confirmation(view, coverage),
+                                 parse_mode=ParseMode.MARKDOWN,
+                                 reply_markup=kb_manual_confirm())
+    except SlotBusy:
+        # Слот общий с расчётом отчёта, поэтому занять его мог и предыдущий
+        # ввод, и идущий фоновый анализ — формулировка покрывает оба случая
+        # честно, вместо того чтобы угадывать.
+        await message.answer(
+            "⏳ *Секунду — у вас уже идёт обработка.*\n\n"
+            "Пришлите текст ещё раз, когда предыдущий запрос завершится.",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+    except Exception as exc:                           # noqa: BLE001
+        error_id = uuid.uuid4().hex[:12]
+        logger.exception("MANUAL: разбор упал [%s] user=%s: %s",
+                         error_id, user_id, exc)
+        await message.answer(
+            "😔 Не удалось обработать ввод.\n\n"
+            f"Код ошибки для поддержки: `{error_id}`\n"
+            "✅ Токен *не списан* — попробуйте ещё раз.",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+
+
+@portfolio_router.callback_query(F.data.startswith("manual:"))
+async def cb_manual_action(callback: CallbackQuery, state: FSMContext) -> None:
+    """Кнопки ручного флоу: черновик, подтверждение, правка, отмена."""
+    await callback.answer()
+    action = callback.data.split(":", 1)[1]
+    user_id = callback.from_user.id
+    data = await state.get_data()
+
+    if not manual_portfolio_enabled():
+        # Тот же гард, что и на входе: сообщение с кнопками переживает
+        # выключение флага.
+        await state.clear()
+        await callback.message.answer(
+            "ℹ️ Ручной ввод портфеля пока недоступен.",
+            reply_markup=kb_connect_choice(),
+        )
+        return
+
+    if action == "fresh":
+        await delete_manual_draft(user_id)
+        await _manual_ask_for_input(callback.message, state)
+        return
+
+    if action == "resume":
+        draft = await get_manual_draft(user_id)
+        text = str((draft or {}).get("text") or "")
+        if not text.strip():
+            await _manual_ask_for_input(callback.message, state)
+            return
+        # Черновик прогоняется через АКТУАЛЬНЫЙ парсер, а не восстанавливается
+        # разобранным: правила разбора между версиями меняются (за одну Фазу 4
+        # их поменяли трижды), и сохранённый результат прошлой версии был бы
+        # тихо неверным.
+        await callback.message.answer("⏳ Восстанавливаю черновик…")
+        try:
+            async with user_slot(user_id):
+                loop = asyncio.get_running_loop()
+                _report, view, coverage = await loop.run_in_executor(
+                    None, _manual_review_sync, text)
+        except SlotBusy:
+            await callback.message.answer(
+                "⏳ Секунду — идёт другая обработка. Нажмите ещё раз.")
+            return
+        except Exception as exc:                           # noqa: BLE001
+            error_id = uuid.uuid4().hex[:12]
+            logger.exception("MANUAL: восстановление черновика упало [%s] "
+                             "user=%s: %s", error_id, user_id, exc)
+            await callback.message.answer(
+                "😔 Не удалось восстановить черновик.\n\n"
+                f"Код ошибки для поддержки: `{error_id}`\n"
+                "Ваш ввод сохранён — попробуйте ещё раз.",
+                parse_mode=ParseMode.MARKDOWN,
+            )
+            return
+        if not view.has_positions:
+            await callback.message.answer(
+                "😕 Черновик больше не разбирается — начнём заново.")
+            await delete_manual_draft(user_id)
+            await _manual_ask_for_input(callback.message, state)
+            return
+        await state.update_data(manual_text=text)
+        await state.set_state(ManualPortfolio.Confirm)
+        await callback.message.answer(
+            _format_manual_confirmation(view, coverage),
+            parse_mode=ParseMode.MARKDOWN, reply_markup=kb_manual_confirm())
+        return
+
+    if action == "edit":
+        await _manual_ask_for_input(callback.message, state,
+                                    prefill=str(data.get("manual_text") or ""))
+        return
+
+    if action == "cancel":
+        # Отмена — это ЯВНОЕ решение пользователя выбросить ввод, поэтому
+        # черновик удаляется здесь и только здесь (сбой отчёта его сохраняет).
+        await delete_manual_draft(user_id)
+        await state.clear()
+        await callback.message.answer(
+            "❌ Ручной ввод отменён. Токены не списаны.\n\n"
+            "Выберите источник портфеля:",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=kb_connect_choice(),
+        )
+        return
+
+    if action == "confirm":
+        slug = str(data.get("slug") or "")
+        await state.clear()
+        await callback.message.answer(
+            "✅ *Портфель принят.*\n\n"
+            "Он сохранён — можно выбирать тип анализа.",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        await _show_analysis_menu(callback.message, slug)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1748,6 +2258,28 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
             "✅ Токен *не списан*.",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=kb_connect_choice(),
+        )
+        await state.clear()
+        return
+    if source == "manual":
+        # 🔴 ГРАНИЦА ФАЗЫ, а не заглушка «на потом».  Ниже по функции ровно две
+        # ветки — 'freedom' и всё остальное, а «всё остальное» подставляет
+        # ДЕМО-ключи.  Без явного отказа здесь ручной источник тихо провалился
+        # бы в демо: пользователь получил бы шаблонный портфель вместо своего,
+        # и заплатил бы за него полную цену (`_effective_cost` для manual — не
+        # ноль).  Проводка ручного источника в расчёт — Фаза 6, и она требует
+        # `StooqProvider` из Фазы 9: I-12 запрещает отдавать данные Tradernet
+        # не-клиентам Freedom, поэтому «пока подставим брокерский фид» —
+        # не вариант ни на один день.
+        logger.info("MANUAL: расчёт запрошен до Фазы 6/9 user=%s tier=%s",
+                    user_id, tier)
+        await _release_user_slot(user_id)
+        await callback.message.edit_text(
+            "🛠 *Расчёт по ручному портфелю ещё не включён.*\n\n"
+            "Ваш ввод сохранён — он не потеряется. Отчёт станет доступен, "
+            "как только подключим независимый источник цен.\n\n"
+            "✅ Токен *не списан*.",
+            parse_mode=ParseMode.MARKDOWN,
         )
         await state.clear()
         return
@@ -2010,8 +2542,14 @@ async def _run_analysis_background(
 
         # Источник ЦЕН: демо считается на локальной детерминированной витрине
         # (одинаково у всех, всегда, без сети); остальные — на живом фиде.
-        manager = UniversalPortfolioManager(
-            price_source="demo" if source == "demo" else "freedom")
+        #
+        # Источник передаётся КАК ЕСТЬ, а не сводится к паре demo/freedom.
+        # Прежняя запись `... else "freedom"` означала, что любой новый источник
+        # МОЛЧА поедет на брокерском фиде — то есть ручной портфель нарушил бы
+        # I-12 (данные Tradernet не-клиентам Freedom) без единого признака.
+        # `provider_for_source` — fail-closed: неизвестный ему источник честно
+        # отказывает ДО сетевых вызовов, и это правильный конец такой ветки.
+        manager = UniversalPortfolioManager(price_source=source)
 
         # Wrap the heavy parts to detect WHERE we fail.
         def _stage_market_data():
@@ -2185,6 +2723,17 @@ async def _run_analysis_background(
                 # but the report is already delivered — log and don't double-bill.
                 logger.error("Post-CP3 deduct failed for %s (report already sent).", user_id)
         balance_after = await get_balance(user_id)
+
+        # Черновик ручного ввода живёт до ДОСТАВЛЕННОГО отчёта и удаляется
+        # только здесь (§5).  Удалить его раньше — на подтверждении или на
+        # старте расчёта — значило бы: отчёт упал по нашей вине, а двадцать
+        # позиций пользователь набирает заново.
+        if source == "manual":
+            try:
+                await delete_manual_draft(user_id)
+            except Exception as draft_exc:             # noqa: BLE001
+                logger.warning("MANUAL: черновик не удалён для %s: %s",
+                               user_id, draft_exc)
 
         # Persist this report's key metrics for future MoM comparison
         metrics = results.get("portfolio_metrics") or {}
@@ -2747,6 +3296,35 @@ async def _release_user_slot(user_id: int) -> None:
         # Не роняем доставку отчёта из-за housekeeping: просроченную аренду
         # всё равно перехватит следующий `acquire_report_lock`.
         logger.warning("A-4: снятие аренды не удалось для %s: %s", user_id, exc)
+
+
+class SlotBusy(RuntimeError):
+    """Слот пользователя занят — расчёт уже идёт."""
+
+
+@asynccontextmanager
+async def user_slot(user_id: int, tier: str | None = None):
+    """Слот на тяжёлую работу пользователя, снимаемый ГАРАНТИРОВАННО (Т-9).
+
+    Зачем контекст-менеджер, если есть пара функций: в `cb_confirm` слот
+    освобождается ДЕВЯТЬЮ отдельными вызовами — по одному на каждую ветку
+    отказа.  Ручной флоу добавляет свои ветки (ошибка разбора, отмена на экране
+    подтверждения, недоступный курс), и повторять этот приём означает почти
+    наверняка однажды забыть вызов: забытый `release` запирает пользователя до
+    истечения аренды (30 минут), а видит он при этом «у вас уже выполняется
+    анализ» — то есть ошибку, которую сам исправить не может.
+
+    Существующие девять веток `cb_confirm` этой фазой НЕ переписываются: они
+    сегодня корректны, а их переписывание — отдельный рефакторинг с
+    собственным риском (`PHASE_05 §6`).  Новый код использует только этот
+    менеджер.
+    """
+    if not await _try_acquire_user_slot(user_id, tier=tier):
+        raise SlotBusy(str(user_id))
+    try:
+        yield
+    finally:
+        await _release_user_slot(user_id)
 
 
 # ── Per-user results cache for the one-tap Scenario button ───────────────────
