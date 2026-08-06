@@ -2,6 +2,14 @@
 
 <!-- nav | area:roadmap | code:src/finance/price_providers.py,src/finance/investment_logic.py | read-before:перед добавлением любого источника ценовых данных -->
 
+> ⚠️ **Ссылки вида `investment_logic.py:NNN` в этом файле устарели с Арх-3.10**
+> (2026-08-06): ядро разложено по пакету `finance/engine/`, а
+> `finance/investment_logic.py` стал фасадом на 61 строку. Соответствие:
+> `MAC3RiskEngine` → `engine/risk_engine.py`, `UniversalPortfolioManager` и
+> семь стадий `analyze_all` → `engine/portfolio_manager.py`. Номера строк не
+> перенумерованы намеренно — искать надо по ИМЕНИ функции: оно переезд
+> пережило, а номер строки не переживает и обычной правки (`AUDIT §−69`).
+
 | | |
 |---|---|
 | **Соответствие заданию** | Спринт 1 (§5.1) |
