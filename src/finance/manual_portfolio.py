@@ -645,9 +645,13 @@ def build_confirmation(report: ParseReport, engine) -> ConfirmationView:
                 rates[key] = (None, None)
         return rates[key]
 
+    # Пары «как ввели → как поняли» дедуплицируются: парсер пишет их ПО СТРОКАМ,
+    # и книга из двадцати лотов одной бумаги дала бы двадцать одинаковых записей.
+    # Читателю такой список ничего не добавляет, а место в сообщении съедает —
+    # у Telegram лимит 4096 символов на сообщение целиком.
     view = ConfirmationView(base_currency=base, excluded=list(report.errors),
-                            auto_resolved=list(report.auto_resolved),
-                            proxied=list(report.proxied))
+                            auto_resolved=list(dict.fromkeys(report.auto_resolved)),
+                            proxied=list(dict.fromkeys(report.proxied)))
     proxy_by_resolved = dict(report.proxied)
 
     rows: list[ConfirmRow] = []

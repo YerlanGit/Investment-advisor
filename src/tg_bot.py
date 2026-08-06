@@ -1693,6 +1693,12 @@ async def msg_secret_key(message: Message, state: FSMContext) -> None:
 _MANUAL_PREVIEW_ROWS = 20
 #: Сколько отвергнутых строк перечисляем поимённо.
 _MANUAL_PREVIEW_ERRORS = 10
+#: Сколько пар «как ввели → как поняли» показываем (синонимы, прокси).
+_MANUAL_PREVIEW_PAIRS = 10
+#: Жёсткий потолок сообщения Telegram. Сообщение длиннее API не примет —
+#: `TelegramBadRequest`, и пользователь не увидит СВОЙ ПОРТФЕЛЬ вообще, хотя
+#: разобран он корректно. Резерв в 96 символов — на маркер обрезки.
+_TELEGRAM_TEXT_LIMIT = 4096
 
 _MANUAL_INPUT_HELP = (
     "✍️ *Введите портфель одним сообщением*\n\n"
@@ -1747,6 +1753,43 @@ def _fmt_amount(value: float | None, digits: int = 2) -> str:
     if value is None:
         return "—"
     return f"{value:,.{digits}f}".replace(",", " ")
+
+
+def _fmt_pairs(pairs: list[tuple[str, str]]) -> str:
+    """«как ввели → как поняли», с ограничением количества.
+
+    Список растёт ЛИНЕЙНО по числу позиций: книга из 200 бумаг, введённых
+    синонимами, давала 200 пар и раздувала сообщение до 5 292 символов при
+    лимите Telegram 4 096 — API отвергал его целиком, и пользователь не видел
+    СВОЙ ПОРТФЕЛЬ вообще, хотя разобран тот был корректно (замерено).
+    """
+    shown = ", ".join(f"{_md_safe(a)} → {_md_safe(b)}"
+                      for a, b in pairs[:_MANUAL_PREVIEW_PAIRS])
+    rest = len(pairs) - _MANUAL_PREVIEW_PAIRS
+    return shown if rest <= 0 else f"{shown} и ещё {rest}"
+
+
+def _clip_to_telegram_limit(text: str) -> str:
+    """Последний рубеж перед `send_message`: сообщение обязано пройти.
+
+    Каждый блок экрана ограничен по отдельности, но блоков восемь, и их сумма
+    остаётся способом превысить лимит — особенно после того, как в экран
+    добавят девятый. Обрезка по границе строки уродлива, зато пользователь
+    видит портфель и кнопку «Рассчитать»; отвергнутое сообщение не даёт ему
+    ничего.
+    """
+    if len(text) <= _TELEGRAM_TEXT_LIMIT:
+        return text
+    marker = "\n… сообщение сокращено, чтобы уместиться в лимит Telegram"
+    body = text[:_TELEGRAM_TEXT_LIMIT - len(marker)]
+    cut = body.rfind("\n")
+    if cut > 0:
+        body = body[:cut]                    # режем по границе строки, не по букве
+    # Обрыв внутри кодового блока оставил бы непарный ``` — Telegram отвергнет
+    # такое сообщение по разметке, то есть обрезка сама себя обесценит.
+    if body.count("```") % 2:
+        body += "\n```"
+    return body + marker
 
 
 def _fmt_fx_note(currency: str, base: str, rate: float) -> str:
@@ -1888,14 +1931,12 @@ def _format_manual_confirmation(view, coverage=None) -> str:
             "⚠️ Нет курса для " + ", ".join(_md_safe(c) for c in view.unconvertible)
             + " — позиции в этой валюте *не учтены* в итоге и в расчёт не пойдут.")
     if view.proxied:
-        pairs = ", ".join(f"{_md_safe(a)} → {_md_safe(b)}" for a, b in view.proxied)
         lines.append(
-            f"🔁 Для риск-модели заменены: {pairs}. "
+            f"🔁 Для риск-модели заменены: {_fmt_pairs(view.proxied)}. "
             "Это НЕ смена бумаги: стоимость и P&L считаются по вашей позиции, "
             "заменитель нужен только там, где у бумаги нет своей истории цен.")
     if view.auto_resolved:
-        pairs = ", ".join(f"{_md_safe(a)} → {_md_safe(b)}" for a, b in view.auto_resolved)
-        lines.append(f"🔎 Распознаны как: {pairs}")
+        lines.append(f"🔎 Распознаны как: {_fmt_pairs(view.auto_resolved)}")
 
     note = _manual_coverage_note(coverage)
     if note:
@@ -1909,7 +1950,7 @@ def _format_manual_confirmation(view, coverage=None) -> str:
         if rest > 0:
             lines.append(f"  • … и ещё {rest}")
 
-    return "\n".join(lines)
+    return _clip_to_telegram_limit("\n".join(lines))
 
 
 def _manual_coverage_note(coverage) -> str:
@@ -1930,9 +1971,18 @@ def _manual_coverage_note(coverage) -> str:
             "из расчёта — отчёт об этом скажет.")
 
 
-@portfolio_router.message(StateFilter(ManualPortfolio.Input), F.text)
+@portfolio_router.message(
+    StateFilter(ManualPortfolio.Input, ManualPortfolio.Confirm), F.text)
 async def msg_manual_input(message: Message, state: FSMContext) -> None:
-    """Текст портфеля → экран подтверждения. Разбор НИКОГДА не бросает."""
+    """Текст портфеля → экран подтверждения. Разбор НИКОГДА не бросает.
+
+    Состояние `Confirm` обрабатывается ТЕМ ЖЕ хендлером намеренно. Увидев на
+    экране подтверждения ошибку, человек чаще всего просто присылает
+    исправленный список, не нажимая «Исправить». Без этого фильтра такое
+    сообщение не подходило ни под один хендлер (`msg_text_fallback` стоит под
+    `StateFilter(None)`) и ПРОПАДАЛО молча: пользователь набрал портфель
+    заново, а бот не ответил ничего.
+    """
     user_id = message.from_user.id
     text = message.text or ""
 
@@ -2274,12 +2324,18 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
         logger.info("MANUAL: расчёт запрошен до Фазы 6/9 user=%s tier=%s",
                     user_id, tier)
         await _release_user_slot(user_id)
+        # Клавиатура ОБЯЗАТЕЛЬНА: без неё пользователь в режиме `manual`
+        # заперт — `/start` ведёт его в меню тиров, меню приводит сюда, и
+        # выхода нет. Ровно та петля, которую закрыли 2026-07-16 для
+        # `undetermined`: восстановление должно быть в ОДИН тап.
         await callback.message.edit_text(
             "🛠 *Расчёт по ручному портфелю ещё не включён.*\n\n"
             "Ваш ввод сохранён — он не потеряется. Отчёт станет доступен, "
             "как только подключим независимый источник цен.\n\n"
+            "Можно поправить портфель или выбрать другой источник:\n\n"
             "✅ Токен *не списан*.",
             parse_mode=ParseMode.MARKDOWN,
+            reply_markup=kb_connect_choice(),
         )
         await state.clear()
         return
