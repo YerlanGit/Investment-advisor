@@ -399,13 +399,55 @@ class ConfirmationScreenTest(ManualFlowTestBase):
         self.assertLess(clean.positions[0].share, 0.3)
 
     async def test_screen_fits_the_telegram_limit_on_a_long_book(self) -> None:
-        """200 позиций физически не помещаются в 4096 символов (§9)."""
-        text = "\n".join(f"TICK{i} {i + 1} {100 + i}" for i in range(200))
-        message = await self._send_text(text)
-        screens = [t for t, _ in message.sent if "проверьте перед расчётом" in t]
-        self.assertTrue(screens, "экран подтверждения не показан")
-        self.assertLess(len(screens[0]), 4096)
-        self.assertIn("и ещё", screens[0])
+        """Сообщение длиннее 4096 API отвергает ЦЕЛИКОМ — портфель не виден.
+
+        Три формы длинной книги, потому что раздувают экран РАЗНЫЕ блоки, и
+        ограничение таблицы позиций спасает только от первой:
+
+        | Книга | Что растёт | Замер без защит |
+        |---|---|---|
+        | 200 обычных бумаг | таблица | в пределах лимита |
+        | 200 синонимов | список «распознаны как» | 5 292 |
+        | 200 неликвидных облигаций | список подмен прокси | 6 273 |
+
+        Вторая форма лечится дедупликацией пар (у синонимов их всего несколько
+        уникальных), третья — только ограничением списка и жёсткой обрезкой:
+        двести РАЗНЫХ облигаций дают двести РАЗНЫХ пар, и дедуп бессилен.
+        """
+        synonyms = [k for k in MAC3RiskEngine.TICKER_MAP if not k.isascii()]
+        books = {
+            "обычные бумаги":
+                [f"TICK{i} {i + 1} {100 + i}" for i in range(200)],
+            "синонимы":
+                [f"{synonyms[i % len(synonyms)]} {i + 1} 100 USD" for i in range(200)],
+            "неликвидные облигации":
+                [f"KZBOND{i} {i + 1} 100 USD" for i in range(200)],
+        }
+        for name, lines in books.items():
+            with self.subTest(book=name):
+                await self.state.set_state(self.tg.ManualPortfolio.Input)
+                message = await self._send_text("\n".join(lines))
+                screens = [t for t, _ in message.sent
+                           if "проверьте перед расчётом" in t]
+                self.assertTrue(screens, "экран подтверждения не показан")
+                self.assertLessEqual(len(screens[0]), self.tg._TELEGRAM_TEXT_LIMIT,
+                                     f"«{name}»: сообщение не пройдёт в Telegram")
+                self.assertEqual(
+                    screens[0].count("```") % 2, 0,
+                    "непарный кодовый блок — Telegram отвергнет сообщение по "
+                    "разметке, то есть обрезка сама себя обесценит")
+                self.assertIn("и ещё", screens[0],
+                              "усечение не названо — пользователь решит, что "
+                              "остальные позиции потеряны")
+
+    async def test_pairs_are_deduplicated_not_repeated_per_lot(self) -> None:
+        """Двадцать лотов одной бумаги — это ОДНА пара, а не двадцать."""
+        from finance.manual_portfolio import build_confirmation, parse_portfolio_text
+
+        engine = _StubManager().engine
+        text = "\n".join(f"каспи {i + 1} 100 KZT" for i in range(20))
+        view = build_confirmation(parse_portfolio_text(text, engine), engine)
+        self.assertEqual(view.auto_resolved, [("КАСПИ", "KSPI.KZ")])
 
     async def test_parse_failure_keeps_the_user_in_input(self) -> None:
         """Полный провал разбора — не тупик: остаёмся в вводе с перечнем ошибок."""
@@ -437,6 +479,46 @@ class FsmTransitionsTest(ManualFlowTestBase):
                          self.tg.ManualPortfolio.Input.state)
         self.assertIn("AAPL 10 150.50", callback.message.all_text,
                       "прошлый ввод не предложен для правки — набирать заново")
+
+    async def test_correction_sent_from_the_confirm_screen_is_processed(self) -> None:
+        """Присланный поверх экрана текст — исправление, а не мусор.
+
+        Без фильтра на состояние `Confirm` такое сообщение не подходило ни под
+        один хендлер (`msg_text_fallback` стоит под `StateFilter(None)`) и
+        ПРОПАДАЛО молча: человек набрал портфель заново, а бот промолчал.
+        """
+        await self._send_text(PORTFOLIO_TEXT)
+        self.assertEqual(await self.state.get_state(),
+                         self.tg.ManualPortfolio.Confirm.state)
+
+        corrected = "AAPL 11 150.50\nCASH:USD 5000\n"
+        message = _FakeMessage(corrected, user_id=self.USER_ID)
+        await self.tg.msg_manual_input(message, self.state)   # состояние — Confirm
+
+        self.assertIn("проверьте перед расчётом", message.all_text)
+        draft = await self.db.get_manual_draft(self.USER_ID)
+        self.assertEqual(draft["text"], corrected,
+                         "исправление не доехало до черновика")
+
+    async def test_text_handler_is_registered_for_both_states(self) -> None:
+        """Проверка САМОЙ РЕГИСТРАЦИИ, а не поведения функции.
+
+        Вызов хендлера напрямую (как в тесте выше) проходит МИМО фильтра
+        роутера и поэтому не может доказать, что сообщение вообще до него
+        дойдёт. Здесь читаются фильтры зарегистрированного хендлера — единст-
+        венное место, где решается, попадёт ли текст из состояния `Confirm`
+        в обработку или пропадёт.
+        """
+        handlers = [h for h in self.tg.portfolio_router.message.handlers
+                    if h.callback is self.tg.msg_manual_input]
+        self.assertEqual(len(handlers), 1, "хендлер ручного ввода не зарегистрирован")
+        states: set = set()
+        for flt in handlers[0].filters:
+            states |= set(getattr(flt.callback, "states", ()) or ())
+        self.assertIn(self.tg.ManualPortfolio.Input, states)
+        self.assertIn(self.tg.ManualPortfolio.Confirm, states,
+                      "текст из состояния Confirm не дойдёт ни до одного "
+                      "хендлера и пропадёт молча")
 
     async def test_confirm_leads_to_the_tier_menu(self) -> None:
         await self._send_text(PORTFOLIO_TEXT)
@@ -650,6 +732,25 @@ class ManualSourceBoundaryTest(ManualFlowTestBase):
         self.assertIn("не включён", screen)
         self.assertIn("не списан", screen)
         self.assertTrue(await self._slot_is_free())
+
+    async def test_refusal_offers_a_way_out(self) -> None:
+        """Иначе режим `manual` — ловушка: /start ведёт в меню, меню сюда.
+
+        Ровно ту же петлю закрыли 2026-07-16 для `undetermined` (второй
+        пользователь застрял): восстановление обязано быть в ОДИН тап.
+        """
+        callback = _FakeCallback("confirm:base:menu", user_id=self.USER_ID)
+
+        async def fake_source(_uid):
+            return "manual", "manual"
+
+        with patch.object(self.tg, "_resolve_portfolio_source", fake_source):
+            await self.tg.cb_confirm(callback, self.state)
+        markups = [kw.get("reply_markup") for _t, kw in callback.message.edited]
+        buttons = [b.callback_data for m in markups if m
+                   for row in m.inline_keyboard for b in row]
+        self.assertIn("connect:manual", buttons)
+        self.assertIn("connect:template", buttons)
 
     async def test_price_source_is_never_silently_freedom(self) -> None:
         """I-12: источник доезжает до движка КАК ЕСТЬ, а не сводится к freedom.
