@@ -90,14 +90,24 @@ def _coerce_float(value) -> float | None:
         return None
 
 
-def _strip_exchange_suffix(ticker: str) -> str:
-    """``AAPL.US`` → ``AAPL``; leaves compound tickers like ``BRK.B`` intact."""
+def strip_exchange_suffix(ticker: str) -> str:
+    """``AAPL.US`` → ``AAPL``; leaves compound tickers like ``BRK.B`` intact.
+
+    Имя ПУБЛИЧНОЕ: нормализация нужна и брокерскому пути, и ручному вводу
+    (`finance/manual_portfolio.py`), а приватное имя между модулями не ходит
+    (`tests/test_layering.py`). Приватный алиас ниже сохранён, чтобы не трогать
+    существующих потребителей — тот же приём, что в `§−55`.
+    """
     if "." not in ticker:
         return ticker
     base, _, suffix = ticker.rpartition(".")
     if suffix in _EXCHANGE_SUFFIXES:
         return base
     return ticker
+
+
+#: Приватный синоним ради существующих вызовов внутри модуля.
+_strip_exchange_suffix = strip_exchange_suffix
 
 
 _ISIN_PATTERN = re.compile(r"^[A-Z]{2}[A-Z0-9]{9}\d$")

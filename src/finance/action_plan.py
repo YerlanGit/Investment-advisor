@@ -60,6 +60,14 @@ class AssetActionRow:
     take_target:   Optional[float]
     stop_loss:     Optional[float]
     reason:        str                     # short justification
+    # A-2 (`PHASE_04 §5c.4`): уровни ПОВТОРЁННЫЕ в валюте торговли. Считаются
+    # здесь, а не в шаблоне: инвариант «числа считаются в finance/, слой отчёта
+    # не вычисляет» иначе расползётся обратной конвертацией по шаблонам.
+    # `None` — валюта позиции совпадает с базовой либо курса нет.
+    currency:      Optional[str] = None
+    price_local:   Optional[float] = None
+    take_target_local: Optional[float] = None
+    stop_loss_local:   Optional[float] = None
 
     def as_dict(self) -> dict:
         return {
@@ -75,7 +83,40 @@ class AssetActionRow:
             "take_target": None if self.take_target is None else round(self.take_target, 4),
             "stop_loss":   None if self.stop_loss   is None else round(self.stop_loss,   4),
             "reason":      self.reason,
+            "currency":    self.currency,
+            "price_local": None if self.price_local is None else round(self.price_local, 4),
+            "take_target_local": None if self.take_target_local is None
+                                 else round(self.take_target_local, 4),
+            "stop_loss_local":   None if self.stop_loss_local is None
+                                 else round(self.stop_loss_local, 4),
         }
+
+
+
+def _local_currency_and_rate(row, fx_rates: Optional[dict]):
+    """Валюта торговли бумаги и курс «локальная → базовая».
+
+    Валюта берётся из строки `perf_table`: её проставил источник портфеля
+    (брокер или ручной ввод), и это единственное место, где она достоверна.
+    Курс — из реестра ФАКТИЧЕСКИ выполненных конверсий, то есть ровно тот,
+    которым движок уже перевёл эту строку. Брать другой курс значило бы
+    показать уровни, не сходящиеся с ценой в той же карточке.
+
+    `(None, None)` — валюта совпадает с базовой либо курса не было: тогда
+    локальных уровней нет, и отчёт покажет только базовые.
+    """
+    if not fx_rates:
+        return None, None
+    try:
+        ccy = str(row.get("Currency") or "").upper().strip()
+    except Exception:                                    # pragma: no cover
+        return None, None
+    if not ccy:
+        return None, None
+    rate = fx_rates.get(ccy)
+    if rate is None or not isinstance(rate, (int, float)) or rate <= 0:
+        return None, None
+    return ccy, float(rate)
 
 
 # ── Level computation ────────────────────────────────────────────────────────
@@ -239,6 +280,7 @@ def build_action_plan(*,
                       portfolio_value: float = 0.0,
                       risk_mandate: str = "MODERATE",
                       uncovered: Optional[set] = None,
+                      fx_rates: Optional[dict] = None,
                       ) -> list[AssetActionRow]:
     """
     Stitch per-asset action with quantitative levels.
@@ -396,12 +438,23 @@ def build_action_plan(*,
         # а отбор кандидатов на реинвест читает `bl_records`, а не эти строки.
         delta_w_pp = action_signed_delta(action, delta_w_pp)
 
+        # A-2: уровни продублировать в валюте ТОРГОВЛИ. Показывать владельцу
+        # KASE-бумаги «$25», когда заявку он выставляет в тенге, — бесполезно.
+        # Курс из `fx_rates` — тот же, которым движок перевёл строку в базовую
+        # валюту, поэтому обратный пересчёт точен, а не «примерно».
+        _ccy, _rate = _local_currency_and_rate(row, fx_rates)
+        _loc = (lambda v: None if (v is None or _rate is None) else float(v) / _rate)
+
         rows.append(AssetActionRow(
             ticker=ticker, action=action, delta_w_pp=delta_w_pp,
             qty_delta=qty_delta, price=price,
             buy_zone=levels["buy_zone"], sell_zone=levels["sell_zone"],
             take_target=levels["take_target"], stop_loss=levels["stop_loss"],
             reason=reason,
+            currency=_ccy,
+            price_local=_loc(price),
+            take_target_local=_loc(levels["take_target"]),
+            stop_loss_local=_loc(levels["stop_loss"]),
         ))
 
     # Order: priority sells first, then buys, then holds.
@@ -425,6 +478,8 @@ def build_action_plan(*,
                 delta_w_pp=0.0, qty_delta=None, price=r.price,
                 buy_zone=None, sell_zone=None,
                 take_target=None, stop_loss=r.stop_loss,
+                currency=r.currency, price_local=r.price_local,
+                take_target_local=None, stop_loss_local=r.stop_loss_local,
                 # 2026-08-03: было английское «deferred (turnover cap)» в
                 # русском отчёте — жаргон вместо объяснения.
                 reason=r.reason + " · отложено: лимит оборота за период",

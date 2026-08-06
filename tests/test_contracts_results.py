@@ -153,11 +153,11 @@ class AnalyzeResultsContractTest(unittest.TestCase):
     def test_contract_size_is_pinned(self) -> None:
         """Замер зафиксирован числом: рост контракта должен быть ЗАМЕЧЕН.
 
-        35 — не магия, а измерение на 2026-08-04. Тест не запрещает менять
+        36 — не магия, а измерение: 35 на 2026-08-04 + `portfolio_source` (MP-04 ЧК-04.5). Тест не запрещает менять
         контракт, он требует делать это осознанно (и обновить
         `ARCHITECTURE_FOR_AGENTS.md §3.2`, где это число — аргумент).
         """
-        self.assertEqual(len(RESULTS_KEYS), 35)
+        self.assertEqual(len(RESULTS_KEYS), 36)
 
     def test_portfolio_metrics_block_matches(self) -> None:
         """Вложенный блок собирается в другой функции — сверяем отдельно."""

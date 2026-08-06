@@ -3,8 +3,10 @@
   {
    "action": "Trim",
    "buy_zone": null,
+   "currency": null,
    "delta_w_pp": -0.74,
    "price": 191.9673,
+   "price_local": null,
    "qty_delta": null,
    "reason": "Score +1.5 · 🔥 Hotspot TRC>20% · оптимизатор предлагает обратное (+0.7 пп) — количество не указываем",
    "sell_zone": [
@@ -12,14 +14,18 @@
     195.2374
    ],
    "stop_loss": 190.1098,
+   "stop_loss_local": null,
    "take_target": null,
+   "take_target_local": null,
    "ticker": "AAPL.US"
   },
   {
    "action": "Trim",
    "buy_zone": null,
+   "currency": null,
    "delta_w_pp": -0.7,
    "price": 141.0691,
+   "price_local": null,
    "qty_delta": null,
    "reason": "Score +1.5 · 🔥 Hotspot TRC>20% · оптимизатор предлагает обратное (+0.7 пп) — количество не указываем",
    "sell_zone": [
@@ -27,7 +33,9 @@
     143.1759
    ],
    "stop_loss": 139.7071,
+   "stop_loss_local": null,
    "take_target": null,
+   "take_target_local": null,
    "ticker": "TLT.US"
   },
   {
@@ -36,49 +44,65 @@
     220.7136,
     222.1132
    ],
+   "currency": null,
    "delta_w_pp": 3.31,
    "price": 226.6904,
+   "price_local": null,
    "qty_delta": null,
    "reason": "Score +1.5 · оптимизатор предлагает обратное (-3.3 пп) — количество не указываем",
    "sell_zone": null,
    "stop_loss": 223.8913,
+   "stop_loss_local": null,
    "take_target": 234.8974,
+   "take_target_local": null,
    "ticker": "MSFT.US"
   },
   {
    "action": "Hold",
    "buy_zone": null,
+   "currency": null,
    "delta_w_pp": 1.87,
    "price": 101.5,
+   "price_local": null,
    "qty_delta": 16,
    "reason": "Score +0.0",
    "sell_zone": null,
    "stop_loss": 99.4158,
+   "stop_loss_local": null,
    "take_target": null,
+   "take_target_local": null,
    "ticker": "FFSPC6.1028.AIX"
   },
   {
    "action": "Hold",
    "buy_zone": null,
+   "currency": null,
    "delta_w_pp": 0.0,
    "price": 142.1447,
+   "price_local": null,
    "qty_delta": null,
    "reason": "Score +0.0 · вне модели: история < 60 торг. дней",
    "sell_zone": null,
    "stop_loss": 140.3066,
+   "stop_loss_local": null,
    "take_target": null,
+   "take_target_local": null,
    "ticker": "YOUNG.US"
   },
   {
    "action": "Hold",
    "buy_zone": null,
+   "currency": null,
    "delta_w_pp": 0.0,
    "price": 1.0,
+   "price_local": null,
    "qty_delta": null,
    "reason": "Score +0.0",
    "sell_zone": null,
    "stop_loss": null,
+   "stop_loss_local": null,
    "take_target": null,
+   "take_target_local": null,
    "ticker": "USD"
   }
  ],
@@ -1683,6 +1707,7 @@
    "window_days": 1299
   }
  },
+ "portfolio_source": "freedom",
  "priced_at_cost": [
   "FFSPC6.1028.AIX"
  ],

@@ -606,6 +606,29 @@ def _read_cache(ticker: str, days: int,
         return None
 
 
+def cached_observations(tickers, days: int,
+                        provider: str = DEFAULT_PROVIDER,
+                        convention: str = DEFAULT_CONVENTION) -> dict[str, int | None]:
+    """Сколько наблюдений лежит В КЭШЕ по каждому тикеру. Сети НЕ трогает.
+
+    Публичный вход в кэш Фазы 1 — нужен pre-flight-проверке ручного ввода
+    (B-2, `PHASE_04`): покрытие обязано быть известно ДО того, как списан
+    токен, а значит и до единого сетевого запроса.
+
+    Возвращает `{тикер: число наблюдений}` либо `None`, если истории в кэше
+    нет (не скачивали, запись просрочена или файл повреждён). `None` и `0` —
+    РАЗНЫЕ ответы: первый значит «не знаем», второй «знаем, что пусто».
+
+    Имя публичное намеренно: приватное `_read_cache` осталось на месте, но
+    межмодульно ходить приватным именем нельзя (`tests/test_layering.py`).
+    """
+    out: dict[str, int | None] = {}
+    for ticker in tickers:
+        series = _read_cache(str(ticker), days, provider, convention)
+        out[str(ticker)] = None if series is None else int(series.dropna().shape[0])
+    return out
+
+
 def _evict_stale_cache() -> None:
     """Удалить записи старше ``2 × TTL``.
 

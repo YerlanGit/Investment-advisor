@@ -208,6 +208,40 @@ LEVERAGED_FX_TICKERS = ["AAPL.US", "CONL.US", "TLT.US", "SPY.US", "QQQ.US",
 #: что штатный путь ушёл бы в сеть за котировкой пары — недопустимо для эталона.
 LEVERAGED_FX_RATES = {"KZT": 1.0 / 450.0}
 
+
+#: Портфель СЦЕНАРИЯ «manual» — книга, собранная РУЧНЫМ ВВОДОМ (MP-04, ЧК-04.6).
+#: Задаётся ТЕКСТОМ, а не строками: смысл эталона именно в том, чтобы под
+#: защитой оказался весь путь «текст → парсер → фрейм → analyze_all», а не одна
+#: его половина. Подмени я здесь текст готовыми строками — парсер выпал бы из
+#: снимка, и Фаза 05 строилась бы на непроверенном основании.
+#:
+#: Текст намеренно содержит то, что в брокерской книге не встречается:
+#:
+#: | Приём | Что проверяет |
+#: |---|---|
+#: | синоним «каспи» кириллицей | `TICKER_MAP` + `auto_resolved` (§−70) |
+#: | цена с десятичной запятой | разбор числа |
+#: | `CASH:KZT` с разрядами через пробел | склейка разрядов + конверсия кэша −37 |
+#: | дубликат `AAPL` двумя строками | склейка в движке (§−41), а не в парсере |
+#: | `Broker_Current_Price = None` | цена берётся из матрицы, а не из цены покупки |
+MANUAL_TEXT = """
+# книга ручного ввода
+AAPL 60 150.0
+AAPL 40 160.0
+каспи 200 104,5 KZT
+TLT 150 95.0
+CASH:KZT 2 500 000
+CASH:USD 3000
+"""
+
+MANUAL_TICKERS = ["AAPL.US", "KSPI.KZ", "TLT.US", "SPY.US", "QQQ.US",
+                  "AGG.US", "IWM.US", "EEM.US", "EMB.US", "IEF.US",
+                  "HYG.US", "LQD.US", "BIL.US", "VWOB.US", "VWO.US",
+                  "GLD.US", "USO.US"]
+
+MANUAL_RATES = {"KZT": 1.0 / 450.0}
+
+
 SCENARIOS: dict[str, dict] = {
     "base": {
         "rows": PORTFOLIO_ROWS,
@@ -215,6 +249,14 @@ SCENARIOS: dict[str, dict] = {
         "fx_rates": None,
         "fixture": "results_golden.json",
         "doc": "здоровая книга: дубли, отброшенная строка, прокси, молодой листинг",
+    },
+    "manual": {
+        "text": MANUAL_TEXT,
+        "rows": None,
+        "tickers": MANUAL_TICKERS,
+        "fx_rates": MANUAL_RATES,
+        "fixture": "results_golden_manual.json",
+        "doc": "книга РУЧНОГО ВВОДА: текст → парсер → фрейм → analyze_all",
     },
     "leveraged_fx": {
         "rows": LEVERAGED_FX_ROWS,
@@ -345,7 +387,15 @@ def run_analyze_all(scenario: str = "base") -> dict:
             upm.engine.fx_rate_to_base = (            # type: ignore[assignment]
                 lambda ccy, _r=_rates: _r.get(str(ccy).upper()))
 
-        portfolio = pd.DataFrame(cfg["rows"])
+        if cfg.get("text") is not None:
+            # Ручной сценарий: фрейм строит ПАРСЕР, иначе он выпал бы из-под
+            # защиты снимка (ЧК-04.6).
+            from finance.manual_portfolio import parse_portfolio_text
+            _report = parse_portfolio_text(cfg["text"], upm.engine)
+            assert not _report.errors, f"фикстура ручного ввода не разобралась: {_report.errors}"
+            portfolio = _report.to_dataframe()
+        else:
+            portfolio = pd.DataFrame(cfg["rows"])
         with mock.patch("finance.sec_edgar.batch_fundamental_scan",
                         return_value=pd.DataFrame()), \
              mock.patch("finance.cds_feed.make_lookup", _fake_cds_lookup), \
