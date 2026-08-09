@@ -1,0 +1,51 @@
+# freedom-etl — локальный и прод-стенд: TimescaleDB + сервис сбора котировок.
+#
+#   docker compose up -d timescaledb     поднять только БД
+#   docker compose run --rm etl --once   один прогон синхронизации
+#   docker compose up -d                 демон с ежедневным кроном
+
+services:
+  timescaledb:
+    # Тег с явной версией PostgreSQL: `latest` однажды переедет на мажор,
+    # и восстановление тома из бэкапа перестанет совпадать с образом.
+    image: timescale/timescaledb:2.17.2-pg16
+    container_name: freedom-etl-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-quotes}
+    ports:
+      # Наружу открыт только localhost: без привязки к 127.0.0.1 Docker
+      # публикует порт на всех интерфейсах В ОБХОД firewall хоста.
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - timescale_data:/var/lib/postgresql/data
+    healthcheck:
+      # ETL стартует раньше, чем БД примет соединения, и без этой проверки
+      # первый запуск падал бы на apply_schema с ConnectionRefusedError.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-quotes}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  etl:
+    build: .
+    container_name: freedom-etl
+    restart: unless-stopped
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      # Хост БД внутри сети compose — имя сервиса, а не localhost. Значение
+      # из .env перебивается намеренно: тот же .env используется для запуска
+      # с хоста, где адрес другой.
+      DB_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@timescaledb:5432/${POSTGRES_DB:-quotes}
+    # Планировщик считает 03:00 по зоне из SCHEDULE_TIMEZONE, а не по TZ
+    # контейнера; TZ здесь только ради читаемых меток времени в логах.
+    stop_grace_period: 60s
+
+volumes:
+  timescale_data:
