@@ -30,6 +30,11 @@ PYTHONPATH=src python -m pytest tests/ -q          # → 1385 passed, 2 xfailed
   `design/`, `CLAUDE.md` и `scripts/`, то есть отсутствующее в образе.
 - Правил `design/*.jsx` → **обязательно** `bash design/premium_v2/build.sh`.
 - Смоук-рендер тиров: `html_renderer.render_report_html(None, <user_id>, ...)`.
+- `freedom-etl/` гоняется ОТДЕЛЬНО (свои зависимости, в основную сюиту не входит):
+  ```bash
+  cd freedom-etl && python -m pytest tests/ -q     # → 109 passed, 13 skipped
+  ```
+  13 skipped — интеграционные; их включает `ETL_TEST_DSN=<dsn живого PostgreSQL>`.
 
 ## Инварианты (не сломать)
 
@@ -62,6 +67,9 @@ PYTHONPATH=src python -m pytest tests/ -q          # → 1385 passed, 2 xfailed
 - Эталон СЛЕП к порядку ключей словаря (`normalize` сортирует ради стабильности).
   Порядок, несущий смысл, пинится отдельным тестом — как `test_engine_benchmark_order.py`
   для профильного бенчмарка, чей первый ключ доезжает до подписи карточки (`§−64`).
+- `freedom-etl/` — ОТДЕЛЬНАЯ единица поставки: свой образ и свои зависимости.
+  В `src/` он не импортируется, `src/` в него не копируется; дублирование
+  хелперов env здесь осознанно — тот же случай, что `cloud_function/rag_engine.py`.
 - Крупное изменение → строка «Было/Стало» в `docs/audit/AUDIT.md`.
 
 ## Зависимости

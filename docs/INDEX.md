@@ -56,6 +56,7 @@ Telegram /start
 | `.github/workflows/Check logs.yml` | Вспомогательный workflow выгрузки логов. |
 | `.github/FUNDING.yml` | GitHub funding-метаданные. |
 | `.port_sessions/*.json` | Служебные сессии инструмента (не код). |
+| `freedom-etl/` | **Отдельный сервис** сбора дневных котировок (T-1) Tradernet → TimescaleDB. Свой образ, свои зависимости, свой прогон тестов. В `src/` НЕ импортируется и от него не зависит. → `freedom-etl/README.md` |
 
 ---
 
@@ -323,6 +324,8 @@ grep -rl "area:math" docs/               # → все доки одной под
 | `src/finance/broker_api.py` (второй брокер) | `roadmap/ROADMAP_IBKR_INTEGRATION.md` |
 | `src/freedom_portfolio/history.py` (кэш, сплиты) · `src/finance/price_providers.py` · `data_checks.py` · `manual_portfolio.py` | `roadmap/manual_portfolio/README.md` (+ соответствующий `PHASE_*.md`) |
 | `cloud_function/` · инфра/сеть | `infra/INFRA_NETWORKING.md` |
+| `freedom-etl/**` (сбор котировок, батчинг, схема `daily_candles`) | `freedom-etl/README.md` — там же инварианты сервиса и три ловушки `getHloc` |
+| `src/finance/price_providers.py` (новый источник цен) | **`roadmap/manual_portfolio/PHASE_11_QUOTES_WAREHOUSE.md`** (старшая редакция, обе ветки + I-14) · `roadmap/ROADMAP_QUOTES_WAREHOUSE.md` (разбор текущего пути цен + пять находок стыковки) |
 
 ### 6.2 Обратно: где менять КОД для задачи
 
@@ -341,6 +344,8 @@ grep -rl "area:math" docs/               # → все доки одной под
 | Загрузку банковских PDF в RAG | `scripts/ingest_bank_report.py` (→ `rag/RAG_INGESTION.md`) |
 | Lookback / окно истории | `HISTORY_LOOKBACK_DAYS` env (default 1825) → `investment_logic.get_market_data` |
 | Источник цен / ручной ввод портфеля | `src/finance/price_providers.py` + `manual_portfolio.py` (→ `roadmap/manual_portfolio/`) |
+| Сбор истории котировок в свою БД | `freedom-etl/` (отдельный сервис, не путать с `freedom_portfolio/history.py` — тот тянет цены В ОТЧЁТ на лету) |
+| Подключить своё хранилище к движку | план — `roadmap/ROADMAP_QUOTES_WAREHOUSE.md`; шов — `finance/price_providers.py` (`_REGISTRY`), движок НЕ меняется |
 
 ---
 
