@@ -325,6 +325,7 @@ grep -rl "area:math" docs/               # → все доки одной под
 | `src/freedom_portfolio/history.py` (кэш, сплиты) · `src/finance/price_providers.py` · `data_checks.py` · `manual_portfolio.py` | `roadmap/manual_portfolio/README.md` (+ соответствующий `PHASE_*.md`) |
 | `cloud_function/` · инфра/сеть | `infra/INFRA_NETWORKING.md` |
 | `freedom-etl/**` (сбор котировок, батчинг, схема `daily_candles`) | `freedom-etl/README.md` — там же инварианты сервиса и три ловушки `getHloc` |
+| `src/finance/price_providers.py` (новый источник цен) | **`roadmap/ROADMAP_QUOTES_WAREHOUSE.md`** — пять блокирующих находок стыковки (I-12 наследуется данными, RAW↔SPLIT_ADJUSTED, CoVe врёт литералом) |
 
 ### 6.2 Обратно: где менять КОД для задачи
 
@@ -344,6 +345,7 @@ grep -rl "area:math" docs/               # → все доки одной под
 | Lookback / окно истории | `HISTORY_LOOKBACK_DAYS` env (default 1825) → `investment_logic.get_market_data` |
 | Источник цен / ручной ввод портфеля | `src/finance/price_providers.py` + `manual_portfolio.py` (→ `roadmap/manual_portfolio/`) |
 | Сбор истории котировок в свою БД | `freedom-etl/` (отдельный сервис, не путать с `freedom_portfolio/history.py` — тот тянет цены В ОТЧЁТ на лету) |
+| Подключить своё хранилище к движку | план — `roadmap/ROADMAP_QUOTES_WAREHOUSE.md`; шов — `finance/price_providers.py` (`_REGISTRY`), движок НЕ меняется |
 
 ---
 
