@@ -325,7 +325,7 @@ grep -rl "area:math" docs/               # → все доки одной под
 | `src/freedom_portfolio/history.py` (кэш, сплиты) · `src/finance/price_providers.py` · `data_checks.py` · `manual_portfolio.py` | `roadmap/manual_portfolio/README.md` (+ соответствующий `PHASE_*.md`) |
 | `cloud_function/` · инфра/сеть | `infra/INFRA_NETWORKING.md` |
 | `freedom-etl/**` (сбор котировок, батчинг, схема `daily_candles`) | `freedom-etl/README.md` — там же инварианты сервиса и три ловушки `getHloc` |
-| `src/finance/price_providers.py` (новый источник цен) | **`roadmap/ROADMAP_QUOTES_WAREHOUSE.md`** — пять блокирующих находок стыковки (I-12 наследуется данными, RAW↔SPLIT_ADJUSTED, CoVe врёт литералом) |
+| `src/finance/price_providers.py` (новый источник цен) | **`roadmap/manual_portfolio/PHASE_11_QUOTES_WAREHOUSE.md`** (старшая редакция, обе ветки + I-14) · `roadmap/ROADMAP_QUOTES_WAREHOUSE.md` (разбор текущего пути цен + пять находок стыковки) |
 
 ### 6.2 Обратно: где менять КОД для задачи
 
