@@ -16,9 +16,13 @@ import unittest
 
 from services.auth import TradernetAuth
 
-# Тестовые (не настоящие) ключи фиксированной длины.
-PUBLIC_KEY = "pub_0123456789abcdef0123456789abcd"
-SECRET_KEY = "sec_0123456789abcdef0123456789abcdef012345"
+# Заведомо ненастоящие ключи. Значения выбраны СЛОВАРНЫМИ намеренно: строка
+# вида `sec_0123456789abcdef…` выглядит как утёкший секрет и для человека, и для
+# сканера — gitleaks ловил её правилом `generic-api-key` по энтропии. Осмысленный
+# текст решает обе задачи разом: и читателю очевидно, что это фикстура, и
+# энтропийный порог не срабатывает.
+PUBLIC_KEY = "EXAMPLE-PUBLIC-KEY-FOR-UNIT-TESTS"
+SECRET_KEY = "EXAMPLE-SECRET-KEY-FOR-UNIT-TESTS"
 FROZEN_TS = 1785960000          # 2026-08-05 20:00:00 UTC
 
 
@@ -54,7 +58,7 @@ class SignatureVectorTest(unittest.TestCase):
         signed = self.auth.sign(self.params)
         self.assertEqual(
             signed.signature,
-            "7b1ce0096331f83998994b3bb8db4df6cf7e9c383eeb5d8dfc6cba407da13f8f",
+            "7f8983935b2ae960ad31fa2c6fdaa91d4fe48ecff9c5288a720328fd495caae1",
         )
 
     def test_second_frozen_vector(self) -> None:
@@ -64,7 +68,7 @@ class SignatureVectorTest(unittest.TestCase):
         self.assertEqual(signed.timestamp, str(FROZEN_TS))
         self.assertEqual(
             signed.signature,
-            "1272d11076f5d6fd45252a77e75ef6b4afa213f5a3ae3c30ebd300e0ab19af2d",
+            "23df4a495e2a2007c7c592009f316e8a3134e20f9753c347d44f77380ad20b13",
         )
         self.assertEqual(len(signed.signature), 64)
         self.assertTrue(all(c in "0123456789abcdef" for c in signed.signature))

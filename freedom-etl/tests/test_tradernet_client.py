@@ -22,8 +22,9 @@ from services.tradernet_client import (
     parse_hloc_response,
 )
 
-PUBLIC_KEY = "pub_0123456789abcdef0123456789abcd"
-SECRET_KEY = "sec_0123456789abcdef0123456789abcdef012345"
+# Заведомо ненастоящие ключи — словарные намеренно, см. `test_auth.py`.
+PUBLIC_KEY = "EXAMPLE-PUBLIC-KEY-FOR-UNIT-TESTS"
+SECRET_KEY = "EXAMPLE-SECRET-KEY-FOR-UNIT-TESTS"
 
 DATE_FROM = datetime(2026, 8, 1)
 DATE_TO = datetime(2026, 8, 9)
