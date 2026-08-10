@@ -70,6 +70,10 @@ PYTHONPATH=src python -m pytest tests/ -q          # → 1398 passed, 2 xfailed
 - `freedom-etl/` — ОТДЕЛЬНАЯ единица поставки: свой образ и свои зависимости.
   В `src/` он не импортируется, `src/` в него не копируется; дублирование
   хелперов env здесь осознанно — тот же случай, что `cloud_function/rag_engine.py`.
+- ДВА РАЗНЫХ ПРОЕКТА, не смешивать: `roadmap/manual_portfolio/` — ручной ввод и
+  Stooq как его источник; `roadmap/freedom_warehouse/` — Freedom API → своя БД.
+  У них разные юридические основания (I-12/I-14), поэтому `manual` не вправе
+  читать витрину с `origin='tradernet'` — как и сам Tradernet.
 - Крупное изменение → строка «Было/Стало» в `docs/audit/AUDIT.md`.
 
 ## Зависимости
