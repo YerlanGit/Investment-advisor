@@ -850,6 +850,39 @@ class OperatorCliTest(_TempDirMixin, unittest.TestCase):
     def test_parser_builds(self) -> None:
         self._cli().build_parser()
 
+    def test_output_survives_a_windows_console(self) -> None:
+        """🔴 На `cmd.exe` (cp866) вывод падал бы `UnicodeEncodeError`.
+
+        Замер: в тексте команд 14 символов `🔴`, 3 `✅`, 3 `⚠️`, плюс `→`, `≈`,
+        `—`, `§` — ни один не кодируется в cp866. Питон в этом случае не
+        рисует квадратики, а бросает исключение: оператор получил бы traceback
+        вместо результата и решил бы, что сломан загрузчик, а не консоль.
+
+        Проверяется СКВОЗЬ команду с потоком в cp866 — проверка одного лишь
+        `reconfigure` не доказала бы, что он вызывается на реальном пути.
+        """
+        import os
+        import subprocess
+        import sys
+
+        root = Path(__file__).resolve().parents[1]
+        code = (
+            "import io, sys, runpy\n"
+            "sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='cp866')\n"
+            f"sys.argv = ['stooq_ingest.py', '--db', r'{self.tmp / 'p.sqlite'}',"
+            f" 'apply', '--inbox', r'{self.tmp}']\n"
+            "try:\n"
+            "    runpy.run_path('scripts/stooq_ingest.py', run_name='__main__')\n"
+            "except SystemExit:\n"
+            "    pass\n"
+        )
+        proc = subprocess.run(
+            [sys.executable, "-c", code], cwd=str(root), capture_output=True,
+            text=True, timeout=120,
+            env={**os.environ, "PYTHONPATH": "src"})
+        self.assertNotIn("UnicodeEncodeError", proc.stderr)
+        self.assertEqual(proc.returncode, 0, proc.stderr[-400:])
+
     def test_universe_is_asked_in_engine_tickers(self) -> None:
         """🔴 Два списка, и путать их нельзя (`AUDIT §−80`).
 

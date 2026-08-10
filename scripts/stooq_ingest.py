@@ -329,7 +329,28 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _make_console_utf8_safe() -> None:
+    """Вывод не должен падать на консоли Windows.
+
+    🔴 Замерено: в тексте команд 14 символов `🔴`, 3 `✅`, 3 `⚠️`, а также `→`,
+    `≈`, `—`, `§`. Ни один из них не кодируется в `cp866` (кодировка `cmd.exe`
+    в русской Windows) и почти ни один — в `cp1251`. Питон в этом случае не
+    печатает «квадратики», а бросает `UnicodeEncodeError` — то есть оператор
+    получил бы traceback вместо результата замера, и решил бы, что сломан
+    загрузчик, а не консоль.
+
+    `errors="replace"` важнее самой кодировки: даже там, где терминал не умеет
+    рисовать эмодзи, команда обязана довести вывод до конца.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):   # pragma: no cover
+            pass                                        # перенаправленный поток
+
+
 def main(argv=None) -> int:
+    _make_console_utf8_safe()
     args = build_parser().parse_args(argv)
     return int(args.func(args) or 0)
 
