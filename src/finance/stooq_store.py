@@ -38,8 +38,7 @@ from typing import Iterable, Optional, Sequence
 import pandas as pd
 
 from finance import market_calendar as mc
-from finance.stooq_ingest import SOURCE_NAME, connect, database_path
-from finance.stooq_symbols import candidates_for
+from finance.stooq_ingest import connect, database_path, resolve_symbol
 
 logger = logging.getLogger(__name__)
 
@@ -139,21 +138,11 @@ class StooqStore:
         if key in self._resolved:
             return self._resolved[key]
 
-        row = self._conn.execute(
-            "SELECT i.id AS id, i.source_symbol AS sym, i.market AS market, "
-            "       i.currency AS ccy, m.match_kind AS kind "
-            "FROM symbol_map m JOIN instruments i ON i.id = m.instrument_id "
-            "WHERE m.engine_ticker = ?", (key,)).fetchone()
-        if row is None:
-            for candidate in candidates_for(key):
-                row = self._conn.execute(
-                    "SELECT id, source_symbol AS sym, market, currency AS ccy, "
-                    "       'exact' AS kind FROM instruments "
-                    "WHERE source=? AND source_symbol=?",
-                    (SOURCE_NAME, candidate)).fetchone()
-                if row is not None:
-                    break
-
+        # Сопоставление живёт в ОДНОМ месте (`stooq_ingest.resolve_symbol`).
+        # Вторая копия здесь однажды разошлась бы с той, по которой считается
+        # допуск C-1, и расхождение проявилось бы как «бот бумагу видит, а
+        # гейт оператора — нет» (`AUDIT §−80`).
+        row = resolve_symbol(self._conn, key)
         resolved = None if row is None else Resolved(
             engine_ticker=key, instrument_id=int(row["id"]),
             source_symbol=str(row["sym"]), market=str(row["market"]),
@@ -216,6 +205,12 @@ class StooqStore:
         `None` — бумаги в базе нет.  Ноль — бар за `as_of` есть.  Отличать эти
         два ответа обязательно: «нет данных» и «данные свежие» — разные исходы
         с разной реакцией.
+
+        🔴 **Чего этот метод не видит.**  Он отвечает на вопрос «сколько раз
+        рынок торговал без этой бумаги», и календарь рынка берёт из тех же
+        строк.  Поэтому остановка рынка ЦЕЛИКОМ (оператор перестал грузить
+        файлы) даёт ноль у всех бумаг сразу.  Для этого случая есть
+        `market_staleness_days` — он считает от часов, а не от базы.
         """
         found = self.resolve(engine_ticker)
         if found is None:
@@ -233,6 +228,29 @@ class StooqStore:
         """Самая свежая дата рынка в базе."""
         sessions = self.sessions(market)
         return sessions[-1] if sessions else None
+
+    def market_staleness_days(self, market: str, *,
+                              today: Optional[date] = None) -> Optional[int]:
+        """Возраст ВСЕГО рынка в КАЛЕНДАРНЫХ днях. `None` — рынка в базе нет.
+
+        🔴 Отдельный метод, потому что `staleness_trading_days` этот случай
+        поймать НЕ МОЖЕТ по построению (`AUDIT §−80`), и это ограничение надо
+        называть, а не прятать. Календарь рынка выводится из тех же строк, что
+        и бары: если рынок встал целиком — оператор неделю не грузил файлы, —
+        то сессий после последнего бара в базе просто нет, и КАЖДАЯ бумага
+        честно рапортует свежесть 0. Данные внутри себя непротиворечивы; врёт
+        только вывод «всё свежее».
+
+        Разорвать круг может лишь часы снаружи, поэтому здесь календарные дни
+        от `today`, а не торговые из базы. Потребитель обязан спросить ОБА:
+        потикерную свежесть — про бумагу, эту — про наполнение базы.
+        """
+        latest = self.latest_date(market)
+        if latest is None:
+            return None
+        text = str(latest)
+        last = date(int(text[:4]), int(text[4:6]), int(text[6:8]))
+        return max(0, ((today or date.today()) - last).days)
 
     # ── собственно цены ──────────────────────────────────────────────────
 

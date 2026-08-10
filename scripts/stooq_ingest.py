@@ -163,8 +163,15 @@ def cmd_backfill(args) -> int:
 
 
 def cmd_verify_seam(args) -> int:
+    if not Path(args.db).exists():
+        print(f"🔴 базы котировок нет по пути {args.db} — сначала bootstrap "
+              "(OPERATOR_STOOQ.md §5)")
+        return 1
     conn = si.connect(args.db, read_only=True)
     day = int(str(args.date).replace("-", ""))
+    # `symbols=None` в библиотеке означает «всё, что есть в базе» — сверять
+    # надо загруженное, а не весь архив: бумага вне рабочего набора это
+    # осознанный пропуск, а не расхождение (`AUDIT §−80`).
     mismatches = si.verify_seam(conn, args.archive, day)
     conn.close()
     if not mismatches:
@@ -179,14 +186,17 @@ def cmd_verify_seam(args) -> int:
 
 
 def cmd_verify_universe(args) -> int:
-    from finance.stooq_store import StooqStore, StoreUnavailable
-
+    try:
+        from finance.stooq_store import StooqStore, StoreUnavailable
+        universe = _engine_tickers()
+    except ImportError as exc:
+        print(f"🔴 нужен {_missing_name(exc)}: pip install pandas")
+        return 1
     try:
         store = StooqStore.open_readonly(args.db)
     except StoreUnavailable as exc:
         print(f"🔴 {exc}")
         return 1
-    universe = _working_set()
     missing = store.missing(universe)
     latest = store.latest_date("US")
     print(f"покрытие универсума: {len(universe) - len(missing)}/{len(universe)}")
@@ -200,19 +210,31 @@ def cmd_verify_universe(args) -> int:
     return 1 if missing else 0
 
 
-def _working_set() -> list[str]:
-    """Рабочий набор — ИЗ КОДА, а не списком в скрипте.
+def _engine_tickers() -> list[str]:
+    """Универсум в терминах ДВИЖКА — ИЗ КОДА, а не списком в скрипте.
 
     Тот же приём, что в `scripts/stooq_coverage_probe.py`: markdown-список уже
     трижды расходился с реальностью (`AUDIT §−73`), поэтому универсум берётся
     у тех модулей, которые его и определяют.
     """
+    factor_etfs, benchmark_etfs = _engine_universe()
+    return list(factor_etfs) + list(benchmark_etfs)
+
+
+def _working_set() -> list[str]:
+    """Тот же универсум в терминах ИСТОЧНИКА — для загрузки из архива.
+
+    🔴 Два разных списка, и путать их нельзя (`AUDIT §−80`). Загрузчик ищет
+    файлы по именам Stooq (`SPY.US`), а `store.missing()` спрашивают тикером
+    движка (`BTC-USD`). Прежняя редакция подавала в `verify-universe` символы
+    источника: для US они случайно совпадают, но бумага БЕЗ кандидатов
+    (`.AIX`, неизвестный суффикс) исчезала из списка молча — и команда
+    рапортовала полное покрытие ровно для тех бумаг, которых нет.
+    """
     from finance import stooq_symbols as sym
 
-    factor_etfs, benchmark_etfs = _engine_universe()
-    engine_tickers = list(factor_etfs) + list(benchmark_etfs)
     out: list[str] = []
-    for ticker in engine_tickers:
+    for ticker in _engine_tickers():
         for candidate in sym.candidates_for(ticker):
             if candidate not in out:
                 out.append(candidate)
@@ -221,7 +243,12 @@ def _working_set() -> list[str]:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument("--db", default=str(si.database_path()),
+    # Дефолт базы — ВНУТРИ рабочего корня оператора: один `STOOQ_ROOT`
+    # управляет и папками, и базой, иначе быстрый старт собирает базу в одном
+    # месте, а заливает в облако из другого (`AUDIT §−80`).
+    parser.add_argument("--db",
+                        default=os.getenv("STOOQ_DB_PATH",
+                                          str(DEFAULT_ROOT / "prices.sqlite")),
                         help="путь к prices.sqlite")
     sub = parser.add_subparsers(dest="command", required=True)
 

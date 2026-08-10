@@ -205,6 +205,21 @@ class SymbolFormsTest(unittest.TestCase):
         self.assertTrue(sym.would_change_venue("KSPI.KZ", "KSPI.US"))
         self.assertFalse(sym.would_change_venue("AAPL.US", "AAPL.US"))
 
+    def test_own_notation_is_never_called_venue_change(self) -> None:
+        """🔴 Две функции об одном обязаны отвечать одинаково (`AUDIT §−80`).
+
+        `candidates_for` отдаёт `KAP.IL → KAP.UK` как НОТАЦИЮ (Лондон и там, и
+        там) и сопоставляет с `match_kind='exact'`. Если `would_change_venue`
+        зовёт ту же пару подменой площадки, раскрытие подмен на экране
+        разойдётся с тем, что реально сделал перебор.
+        """
+        for engine_ticker in ("KAP.IL", "HSBK.IL", "AAPL", "BTC-USD", "BRK.B"):
+            for candidate in sym.candidates_for(engine_ticker):
+                with self.subTest(pair=(engine_ticker, candidate)):
+                    self.assertFalse(
+                        sym.would_change_venue(engine_ticker, candidate),
+                        f"{engine_ticker} → {candidate} — это наша форма записи")
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # ЧК-08.5-2 — девять правил ingest
@@ -253,6 +268,40 @@ class IngestRulesTest(_TempDirMixin, unittest.TestCase):
         batch = si.parse_daily_file(path, min_us_rows=0)
         self.assertEqual(batch.bars, [])
         self.assertEqual(batch.rejected.get("плоская заглушка"), 1)
+
+    def test_rule3_survives_missing_open(self) -> None:
+        """🔴 Регресс `AUDIT §−80`: пустой `<OPEN>` гасил ВСЮ проверку OHLC.
+
+        Условие было одно на три поля (`None not in (open_, high, low)`), и
+        строка без открытия проносила мимо гарда даже `high < low`. Каждое
+        условие обязано зависеть только от тех полей, которые в нём участвуют.
+        """
+        path = write_daily(self.tmp, 20260807,
+                           ["NOOPEN.US,D,20260807,000000,,5,9,7,100,0"])
+        batch = si.parse_daily_file(path, min_us_rows=0)
+        self.assertEqual(batch.bars, [], "бар с high=5 < low=9 попал в базу")
+        self.assertEqual(batch.rejected.get("нарушен OHLC"), 1)
+
+    def test_rule3_catches_low_above_the_body(self) -> None:
+        """Нижняя граница проверяется ОТДЕЛЬНО от верхней.
+
+        Без этого теста гард `low > min(open, close)` был бы прикрыт соседним:
+        мутация выключала его, а падал соседний тест — то есть сам гард
+        оставался непроверенным.
+        """
+        path = write_daily(self.tmp, 20260807,
+                           [row("LOWBAD.US", 20260807, o=10, h=11, lo=10.5,
+                                c=10)])
+        batch = si.parse_daily_file(path, min_us_rows=0)
+        self.assertEqual(batch.bars, [])
+        self.assertEqual(batch.rejected.get("нарушен OHLC"), 1)
+
+    def test_rule3_accepts_bar_with_only_close(self) -> None:
+        """Отсутствие OHLC — не брак: проверять нечего, цена закрытия есть."""
+        path = write_daily(self.tmp, 20260807,
+                           ["ONLYC.US,D,20260807,000000,,,,7.5,100,0"])
+        batch = si.parse_daily_file(path, min_us_rows=0)
+        self.assertEqual(len(batch.bars), 1)
 
     def test_rule4_keeps_flat_bar_with_volume(self) -> None:
         """Плоский бар С ОБЪЁМОМ — настоящий день торгов, не заглушка."""
@@ -518,6 +567,22 @@ class BootstrapAndSeamTest(_TempDirMixin, unittest.TestCase):
         self.assertEqual(si.verify_seam(conn, archive, 20260807,
                                         symbols=["VGIT.US"]), [])
 
+    def test_seam_ignores_archive_symbols_outside_the_database(self) -> None:
+        """🔴 Регресс `AUDIT §−80`, самая дорогая находка ревью.
+
+        `symbols=None` означало «весь архив», и каждая бумага, которую мы
+        сознательно НЕ грузили, приезжала как расхождение `архив=X база=None`.
+        На реальном архиве это ~11 800 ложных срабатываний при рабочем наборе
+        в 13 бумаг: пункт чек-листа «verify-seam совпал» не мог пройти никогда,
+        а команда переставала что-либо значить.
+        """
+        conn = self.fresh_db()
+        archive = self._archive()                # VGIT.US и AAPL.US
+        si.bootstrap(conn, archive, symbols=["VGIT.US"], window_days=1825,
+                     today=date(2026, 8, 10))
+        self.assertEqual(si.verify_seam(conn, archive, 20260807), [],
+                         "AAPL.US нет в базе осознанно — это не расхождение")
+
     def test_seam_mismatch_is_reported(self) -> None:
         conn = self.fresh_db()
         archive = self._archive()
@@ -627,6 +692,56 @@ class StoreReadTest(_TempDirMixin, unittest.TestCase):
         store = self.open_store()
         self.assertTrue(store.generation())
 
+    def test_symbol_map_wins_over_candidate_search(self) -> None:
+        """Ручное решение оператора старше автоматического перебора."""
+        conn = si.connect(self.db)
+        self.addCleanup(conn.close)
+        row = conn.execute("SELECT id FROM instruments WHERE source_symbol=?",
+                           ("BRK-B.US",)).fetchone()
+        conn.execute("INSERT INTO symbol_map(engine_ticker, instrument_id, "
+                     "match_kind, note) VALUES('KSPI.KZ', ?, "
+                     "'venue_substitution', 'ADR вместо KASE')", (row["id"],))
+        conn.commit()
+        store = self.open_store()
+        found = store.resolve("KSPI.KZ")
+        self.assertEqual(found.source_symbol, "BRK-B.US")
+        self.assertEqual(store.venue_substitutions(["KSPI.KZ"]),
+                         [("KSPI.KZ", "BRK-B.US")])
+
+    def test_coverage_and_store_resolve_identically(self) -> None:
+        """🔴 Регресс `AUDIT §−80`: допуск C-1 и бот обязаны видеть одно.
+
+        Раньше `coverage_report` не знал про `symbol_map`, а `resolve` знал.
+        Первая же ручная подмена площадки дала бы «C-1: нет истории» и код
+        возврата 1 для бумаги, которую бот находит прекрасно.
+        """
+        conn = si.connect(self.db)
+        self.addCleanup(conn.close)
+        row = conn.execute("SELECT id FROM instruments WHERE source_symbol=?",
+                           ("SPY.US",)).fetchone()
+        conn.execute("INSERT INTO symbol_map(engine_ticker, instrument_id, "
+                     "match_kind, note) VALUES('KZTK.KZ', ?, "
+                     "'venue_substitution', NULL)", (row["id"],))
+        conn.commit()
+        store = self.open_store()
+        self.assertIsNotNone(store.resolve("KZTK.KZ"))
+        self.assertIsNotNone(si.coverage_report(conn, ["KZTK.KZ"])["KZTK.KZ"])
+
+    def test_market_wide_stall_is_visible_only_by_the_clock(self) -> None:
+        """🔴 Ограничение потикерной свежести — названо и покрыто (`§−80`).
+
+        Календарь рынка выводится из тех же строк, что и бары: если рынок
+        встал целиком, сессий после последнего бара нет, и каждая бумага
+        честно рапортует 0. Разорвать круг могут только часы снаружи.
+        """
+        store = self.open_store()
+        self.assertEqual(store.staleness_trading_days("SPY.US",
+                                                      as_of=20260808), 0)
+        self.assertEqual(
+            store.market_staleness_days("US", today=date(2026, 9, 7)), 31)
+        self.assertIsNone(store.market_staleness_days("JP",
+                                                      today=date(2026, 9, 7)))
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # ЧК-08.5-5 — CLI оператора
@@ -681,6 +796,63 @@ class OperatorCliTest(_TempDirMixin, unittest.TestCase):
 
     def test_parser_builds(self) -> None:
         self._cli().build_parser()
+
+    def test_universe_is_asked_in_engine_tickers(self) -> None:
+        """🔴 Два списка, и путать их нельзя (`AUDIT §−80`).
+
+        Загрузчик ищет файлы по именам Stooq, а `store.missing()` спрашивают
+        тикером движка. Прежняя редакция подавала в `verify-universe` символы
+        источника: для нынешнего универсума (сплошь `.US`) они совпадают
+        СЛУЧАЙНО, а бумага БЕЗ кандидатов исчезала из списка молча — и команда
+        рапортовала полное покрытие ровно для тех бумаг, которых нет.
+
+        Поэтому universe подменяется на такой, где два списка РАСХОДЯТСЯ:
+        сравнение на реальном универсуме ничего бы не доказало (проверено
+        мутацией — тест на нём не падал).
+        """
+        cli = self._cli()
+        original = cli._engine_universe
+        cli._engine_universe = lambda: (("SPY.US", "FFSPC6.1028.AIX"), ())
+        self.addCleanup(setattr, cli, "_engine_universe", original)
+
+        self.assertIn("FFSPC6.1028.AIX", cli._engine_tickers(),
+                      "бумага без кандидатов обязана остаться в универсуме")
+        self.assertNotIn("FFSPC6.1028.AIX", cli._working_set(),
+                         "в загрузку она попасть не может — форм символа нет")
+
+        # И то же самое СКВОЗЬ команду: проверка одних функций не доказывает,
+        # что команда зовёт правильную (мутация это и показала — call site
+        # можно было подменить, а тест не падал).
+        import io
+        from contextlib import redirect_stdout
+
+        conn = self.fresh_db()
+        path = write_daily(self.tmp, 20260807, [row("SPY.US", 20260807)])
+        si.apply_batch(conn, si.parse_daily_file(path, min_us_rows=0))
+        conn.close()
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            code = cli.main(["--db", str(self.tmp / "prices.sqlite"),
+                             "verify-universe"])
+        self.assertEqual(code, 1, "непокрытая бумага обязана дать код 1")
+        self.assertIn("FFSPC6.1028.AIX", buffer.getvalue())
+
+    def test_verify_seam_without_database_says_so(self) -> None:
+        cli = self._cli()
+        code = cli.main(["--db", str(self.tmp / "нет.sqlite"), "verify-seam",
+                         "--date", "2026-08-07",
+                         "--archive", str(self.tmp)])
+        self.assertEqual(code, 1)
+
+    def test_db_default_follows_stooq_root(self) -> None:
+        """Один корень управляет и папками, и базой.
+
+        Иначе быстрый старт собирает базу в одном месте, а заливает в облако
+        из другого — и оператор публикует пустой файл.
+        """
+        cli = self._cli()
+        default_db = Path(cli.build_parser().get_default("db"))
+        self.assertEqual(default_db.parent, cli.DEFAULT_ROOT)
 
     def test_ingest_library_needs_no_third_party(self) -> None:
         """🔴 Оператор не обязан ставить окружение бота ради разбора текста.

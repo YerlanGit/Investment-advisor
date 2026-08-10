@@ -312,12 +312,24 @@ def _bar_from_row(row: dict, batch: IngestBatch) -> Optional[Bar]:
     # Правило 3: OHLC обязан быть непротиворечив.  Замер: ровно одна такая
     # строка на 11 999 (`^IPSA`, 2026-08-06) — 0.008 %, но молча пропускать её
     # нельзя: битый бар портит ATR и волатильность именно тем, что правдоподобен.
-    if None not in (open_, high, low):
-        lowest = min(open_, close)
-        highest = max(open_, close)
-        if not (low <= lowest and high >= highest and low <= high):
-            batch.reject("нарушен OHLC")
-            return None
+    #
+    # 🔴 Проверки РАЗДЕЛЕНЫ по доступности полей (`AUDIT §−80`).  Прежняя
+    # редакция гасила всю проверку одним `None not in (open_, high, low)`, и
+    # пустой `<OPEN>` пропускал заодно `low <= high` — то есть бар с
+    # `high=5, low=9` уезжал в базу.  Каждое условие обязано зависеть только
+    # от тех полей, которые в нём участвуют.
+    # Отдельной проверки `low <= high` НЕТ, и это не упущение: `close` к этому
+    # моменту гарантированно не `None` (правило 2 выше), поэтому `low > high`
+    # невозможно без нарушения одной из границ ниже — `low ≤ close ≤ high`.
+    # Мутационный прогон это и показал: такая проверка не падала ни на одном
+    # входе, то есть была мёртвым кодом, прикрытым живым (`AUDIT §−80`).
+    bounds = [v for v in (open_, close) if v is not None]
+    if low is not None and low > min(bounds):
+        batch.reject("нарушен OHLC")
+        return None
+    if high is not None and high < max(bounds):
+        batch.reject("нарушен OHLC")
+        return None
 
     # Правило 4: синтетическая заглушка до IPO — нулевой объём при полностью
     # плоском баре (`spsc.us`, 2010-04-21).  Настоящий день без сделок в
@@ -595,8 +607,16 @@ def verify_seam(conn: sqlite3.Connection, archive_dir, trade_date: int, *,
     Замер 2026-08-10: совпадение ТОЧНОЕ до последнего знака на всех живых
     бумагах.  Расхождение здесь означает, что источник пересчитал историю
     (ретроспективная корректировка) — и тогда нужен ре-бутстрап, а не патч.
+
+    🔴 `symbols=None` означает «всё, что ЕСТЬ В БАЗЕ», а не «весь архив»
+    (`AUDIT §−80`).  Прежняя редакция брала архив целиком, и каждая бумага вне
+    рабочего набора попадала в отчёт как расхождение `архив=9.9 база=None`.
+    На реальном архиве это ~11 800 ложных срабатываний и ненулевой код
+    возврата — то есть пункт чек-листа «verify-seam совпал» не мог пройти
+    НИКОГДА, а сама команда переставала что-либо значить.
     """
-    wanted = ({str(s).upper() for s in symbols} if symbols is not None else None)
+    wanted = ({str(s).upper() for s in symbols} if symbols is not None
+              else stored_symbols(conn))
     mismatches: list[SeamMismatch] = []
     for path in iter_archive_files(archive_dir):
         symbol = symbol_of_archive_file(path)
@@ -633,6 +653,44 @@ def _close_from_history(path, trade_date: int) -> Optional[float]:
 # Сводка для оператора
 # ═════════════════════════════════════════════════════════════════════════════
 
+def resolve_symbol(conn: sqlite3.Connection,
+                   engine_ticker: str) -> Optional[sqlite3.Row]:
+    """Тикер движка → строка справочника инструментов, либо `None`.
+
+    🔴 **ЕДИНСТВЕННАЯ реализация сопоставления** (`AUDIT §−80`).  Раньше их
+    было две: `StooqStore.resolve` спрашивала `symbol_map`, а `coverage_report`
+    — нет.  Разойтись они успели бы на первой же ручной подмене площадки:
+    допуск C-1 доложил бы «нет истории» и вернул ненулевой код, тогда как бот
+    ту же бумагу находил бы прекрасно.
+
+    Живёт здесь, а не в `stooq_store`, потому что этот модуль — чистый stdlib,
+    и его может звать загрузчик на голом Python.
+
+    Порядок обязателен: `symbol_map` — это РЕШЕНИЯ человека, включая
+    осознанные подмены площадки; автоматический перебор форм таких решений
+    принимать не вправе.  Поэтому карта всегда старше.
+    """
+    from finance.stooq_symbols import candidates_for
+
+    key = str(engine_ticker or "").strip().upper()
+    row = conn.execute(
+        "SELECT i.id AS id, i.source_symbol AS sym, i.market AS market, "
+        "       i.currency AS ccy, m.match_kind AS kind "
+        "FROM symbol_map m JOIN instruments i ON i.id = m.instrument_id "
+        "WHERE m.engine_ticker = ?", (key,)).fetchone()
+    if row is not None:
+        return row
+    for candidate in candidates_for(key):
+        row = conn.execute(
+            "SELECT id, source_symbol AS sym, market, currency AS ccy, "
+            "       'exact' AS kind FROM instruments "
+            "WHERE source=? AND source_symbol=?",
+            (SOURCE_NAME, candidate)).fetchone()
+        if row is not None:
+            return row
+    return None
+
+
 def coverage_report(conn: sqlite3.Connection,
                     tickers: Sequence[str]) -> dict[str, Optional[int]]:
     """`{тикер: дата последнего бара}`; `None` — бумаги в базе нет.
@@ -641,22 +699,29 @@ def coverage_report(conn: sqlite3.Connection,
     В профиле `STRICT` (ручной ввод) потеря ЛЮБОГО факторного ETF даёт `BLOCK`
     (`data_checks.check_portfolio_sufficiency`), поэтому «почти все» — не ответ.
     """
-    from finance.stooq_symbols import candidates_for
-
     out: dict[str, Optional[int]] = {}
     for ticker in tickers:
-        found: Optional[int] = None
-        for candidate in candidates_for(ticker):
+        found = resolve_symbol(conn, ticker)
+        last: Optional[int] = None
+        if found is not None:
             row = conn.execute(
-                "SELECT MAX(b.trade_date) AS d FROM daily_bars b "
-                "JOIN instruments i ON i.id = b.instrument_id "
-                "WHERE i.source=? AND i.source_symbol=?",
-                (SOURCE_NAME, candidate)).fetchone()
+                "SELECT MAX(trade_date) AS d FROM daily_bars "
+                "WHERE instrument_id=?", (int(found["id"]),)).fetchone()
             if row is not None and row["d"] is not None:
-                found = int(row["d"])
-                break
-        out[str(ticker)] = found
+                last = int(row["d"])
+        out[str(ticker)] = last
     return out
+
+
+def stored_symbols(conn: sqlite3.Connection) -> set[str]:
+    """Символы источника, которые в базе реально есть.
+
+    Нужен `verify_seam`: сверять надо то, что мы загрузили, а не весь архив.
+    Бумага, лежащая в архиве и НЕ входящая в рабочий набор, — это не
+    расхождение, а осознанный пропуск.
+    """
+    return {str(r["source_symbol"]).upper() for r in conn.execute(
+        "SELECT source_symbol FROM instruments WHERE source=?", (SOURCE_NAME,))}
 
 
 def database_path(default: Optional[str] = None) -> Path:

@@ -198,13 +198,10 @@ python scripts/stooq_ingest.py bootstrap --archive $STOOQ_ROOT/archive
 сейчас. Полная выгрузка (`--all`) даёт базу на **704 МБ**, которую Cloud Run
 не переживёт; рабочий набор — **14–40 МБ**.
 
-База по умолчанию создаётся в `data/stooq_prices.sqlite` внутри репозитория.
-Хотите в другом месте — флаг `--db`:
-
-```bash
-python scripts/stooq_ingest.py --db $STOOQ_ROOT/prices.sqlite \
-    bootstrap --archive $STOOQ_ROOT/archive
-```
+База создаётся в `$STOOQ_ROOT/prices.sqlite` — там же, где папки. Один корень
+управляет всем, поэтому собранный файл лежит ровно там, откуда вы его потом
+зальёте (§7). Переопределить путь можно флагом `--db` или переменной
+`STOOQ_DB_PATH`.
 
 ### 5.1 Как выглядит правильный результат
 
