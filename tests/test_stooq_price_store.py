@@ -583,6 +583,59 @@ class BootstrapAndSeamTest(_TempDirMixin, unittest.TestCase):
         self.assertEqual(si.verify_seam(conn, archive, 20260807), [],
                          "AAPL.US нет в базе осознанно — это не расхождение")
 
+    def _split_archive(self) -> Path:
+        """Архив с двумя бумагами из `KNOWN_SPLITS` и РАЗНЫМ поведением."""
+        archive = self.tmp / "splits"
+        archive.mkdir()
+        # NVDA 10:1 2024-06-10 — ступенька на месте, ряд сырой.
+        write_history(archive, "nvda.us.txt",
+                      [row("NVDA.US", 20240607, c=1200.0),
+                       row("NVDA.US", 20240610, c=120.0)])
+        # AMZN 20:1 2022-06-06 — ступеньки нет, ряд скорректирован.
+        write_history(archive, "amzn.us.txt",
+                      [row("AMZN.US", 20220603, c=124.0),
+                       row("AMZN.US", 20220606, c=122.0)])
+        return archive
+
+    def test_convention_detects_raw_series(self) -> None:
+        """Ступенька в дату сплита = ряд отдан СЫРЫМ.
+
+        От этого ответа зависит, вправе ли провайдер объявить конвенцию: если
+        ряд сырой, движок обязан корректировать сам; если уже
+        скорректированный — повторная корректировка удвоит её и испортит цены
+        правдоподобно (`PHASE_08B §7.6`).
+        """
+        probes = {p.ticker: p for p in si.measure_convention(
+            self._split_archive(), today=date(2026, 8, 10))}
+        self.assertAlmostEqual(probes["NVDA.US"].observed_ratio, 10.0, places=3)
+        self.assertIn("СЫРОЙ", probes["NVDA.US"].verdict)
+
+    def test_convention_detects_adjusted_series(self) -> None:
+        probes = {p.ticker: p for p in si.measure_convention(
+            self._split_archive(), today=date(2026, 8, 10))}
+        self.assertLess(probes["AMZN.US"].observed_ratio, 1.5)
+        self.assertIn("СКОРРЕКТИРОВАН", probes["AMZN.US"].verdict)
+
+    def test_convention_says_nothing_when_paper_is_absent(self) -> None:
+        """Отсутствие бумаги — не вердикт. Молчание честнее догадки."""
+        probes = {p.ticker: p for p in si.measure_convention(
+            self._split_archive(), today=date(2026, 8, 10))}
+        self.assertEqual(probes["TSLA.US"].verdict, "нет в архиве")
+        self.assertIsNone(probes["TSLA.US"].observed_ratio)
+
+    def test_convention_threshold_matches_the_engine(self) -> None:
+        """🔴 Порог «ступеньки» ОБЯЗАН совпадать с эвристикой движка.
+
+        Свой порог означал бы, что замер объявляет ряд сырым, а
+        `_detect_and_adjust_splits` ту же ступеньку не видит — и наоборот.
+        """
+        import math
+
+        from freedom_portfolio.history import _SPLIT_RETURN_THRESHOLD
+
+        self.assertAlmostEqual(math.log(si._SPLIT_STEP_THRESHOLD),
+                               _SPLIT_RETURN_THRESHOLD, places=9)
+
     def test_seam_mismatch_is_reported(self) -> None:
         conn = self.fresh_db()
         archive = self._archive()
