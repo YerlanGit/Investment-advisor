@@ -682,6 +682,60 @@ class OperatorCliTest(_TempDirMixin, unittest.TestCase):
     def test_parser_builds(self) -> None:
         self._cli().build_parser()
 
+    def test_ingest_library_needs_no_third_party(self) -> None:
+        """🔴 Оператор не обязан ставить окружение бота ради разбора текста.
+
+        `finance.stooq_ingest` — чистый stdlib, и это ПРОВЕРЯЕМОЕ свойство, а
+        не намерение: первый же `import pandas`, добавленный в модуль, уронит
+        этот тест. Без него `bootstrap`/`apply` однажды потребовали бы sklearn
+        и aiogram, и регламент оператора превратился бы в установку прода.
+        """
+        import subprocess
+        import sys
+
+        code = (
+            "import sys, importlib.abc\n"
+            "BLOCKED = {'pandas', 'numpy', 'sklearn', 'aiogram', 'anthropic'}\n"
+            "class B(importlib.abc.MetaPathFinder):\n"
+            "    def find_spec(self, name, path=None, target=None):\n"
+            "        if name.split('.')[0] in BLOCKED:\n"
+            "            raise ImportError(name)\n"
+            "        return None\n"
+            "sys.meta_path.insert(0, B())\n"
+            "import finance.stooq_ingest\n"
+            "print('ok')\n"
+        )
+        root = Path(__file__).resolve().parents[1]
+        proc = subprocess.run([sys.executable, "-c", code], cwd=str(root),
+                              env={"PYTHONPATH": "src", "PATH": "/usr/bin:/bin"},
+                              capture_output=True, text=True, timeout=120)
+        self.assertEqual(proc.returncode, 0,
+                         f"stooq_ingest потянул стороннее:\n{proc.stderr}")
+
+    def test_c1_is_reported_as_unchecked_without_pandas(self) -> None:
+        """Без pandas допуск не подтверждён — и об этом СКАЗАНО.
+
+        Молча пропустить C-1 нельзя: это и есть допуск оператора. Пропуск без
+        сообщения читался бы как «проверено и всё хорошо».
+        """
+        import io
+        from contextlib import redirect_stdout
+
+        cli = self._cli()
+        conn = self.fresh_db()
+
+        def boom():
+            raise ImportError("No module named 'pandas'", name="pandas")
+
+        original = cli._engine_universe
+        cli._engine_universe = boom
+        self.addCleanup(setattr, cli, "_engine_universe", original)
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            code = cli._print_c1(conn)
+        self.assertEqual(code, 0)
+        self.assertIn("C-1 НЕ ПРОВЕРЕН", buffer.getvalue())
+
 
 if __name__ == "__main__":                                  # pragma: no cover
     unittest.main()

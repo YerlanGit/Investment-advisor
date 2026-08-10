@@ -33,8 +33,29 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from finance import stooq_ingest as si                     # noqa: E402
-from finance.data_checks import BENCHMARK_ETFS, FACTOR_ETFS  # noqa: E402
-from finance.stooq_store import StooqStore, StoreUnavailable  # noqa: E402
+
+
+def _missing_name(exc: ImportError) -> str:
+    """Имя недостающего модуля. `ImportError.name` бывает пустым."""
+    return exc.name or str(exc) or "зависимость"
+
+
+def _engine_universe():
+    """`(факторы, бенчмарки)` из `data_checks` — SSOT, а не копия в скрипте.
+
+    Импорт ЛЕНИВЫЙ, и это ради оператора. `finance.stooq_ingest` — чистый
+    stdlib (замерено), поэтому `bootstrap` и `apply` работают на голом Python
+    без единой зависимости. `data_checks` тянет pandas и numpy, и требовать их
+    ради двух кортежей-констант значило бы заставить человека ставить
+    окружение бота, чтобы разобрать текстовый файл.
+
+    Без pandas команда не падает — она честно говорит, что C-1 не проверен.
+    Молча пропустить проверку нельзя: C-1 и есть допуск (§2.4 регламента).
+    """
+    from finance.data_checks import BENCHMARK_ETFS, FACTOR_ETFS
+
+    return FACTOR_ETFS, BENCHMARK_ETFS
+
 
 #: Корень рабочих каталогов оператора.  Дефолт РЕПО-ЛОКАЛЬНЫЙ, а не
 #: `/mnt/state/stooq`: этот путь существует только внутри контейнера Cloud Run,
@@ -66,16 +87,23 @@ def _print_c1(conn) -> int:
     в `data_checks.check_portfolio_sufficiency` — то есть пользователь получит
     отказ вместо отчёта. Поэтому «почти все» здесь не ответ.
     """
-    coverage = si.coverage_report(conn, list(FACTOR_ETFS) + list(BENCHMARK_ETFS))
-    factors = [t for t in FACTOR_ETFS if coverage.get(t)]
-    benches = [t for t in BENCHMARK_ETFS if coverage.get(t)]
-    mark = "✅" if len(factors) == len(FACTOR_ETFS) else "🔴"
-    print(f"  C-1 факторы ........... {len(factors)}/{len(FACTOR_ETFS)} {mark}")
-    print(f"  C-1 бенчмарки ......... {len(benches)}/{len(BENCHMARK_ETFS)}")
-    for ticker in FACTOR_ETFS:
+    try:
+        factor_etfs, benchmark_etfs = _engine_universe()
+    except ImportError as exc:
+        print(f"  ⚠️ C-1 НЕ ПРОВЕРЕН: {_missing_name(exc)} не установлен.")
+        print("     База наполнена, но допуск не подтверждён. "
+              "Поставьте pandas и повторите: pip install pandas")
+        return 0
+    coverage = si.coverage_report(conn, list(factor_etfs) + list(benchmark_etfs))
+    factors = [t for t in factor_etfs if coverage.get(t)]
+    benches = [t for t in benchmark_etfs if coverage.get(t)]
+    mark = "✅" if len(factors) == len(factor_etfs) else "🔴"
+    print(f"  C-1 факторы ........... {len(factors)}/{len(factor_etfs)} {mark}")
+    print(f"  C-1 бенчмарки ......... {len(benches)}/{len(benchmark_etfs)}")
+    for ticker in factor_etfs:
         if not coverage.get(ticker):
             print(f"    🔴 нет истории: {ticker}")
-    return 0 if len(factors) == len(FACTOR_ETFS) else 1
+    return 0 if len(factors) == len(factor_etfs) else 1
 
 
 def cmd_bootstrap(args) -> int:
@@ -85,7 +113,20 @@ def cmd_bootstrap(args) -> int:
     if args.symbols:
         symbols = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
     elif not args.all:
-        symbols = _working_set()
+        # Рабочий набор известен ТОЛЬКО движку, а `data_checks` тянет pandas.
+        # Отказ здесь внятный и с выходом: молча уйти в `--all` нельзя — это
+        # 704 МБ вместо 14, то есть OOM контейнера с лимитом 2 GiB.
+        try:
+            symbols = _working_set()
+        except ImportError as exc:
+            print("🔴 не могу определить рабочий набор: "
+                  f"{_missing_name(exc)} не установлен.")
+            print("   Варианты: `pip install pandas` — или задать бумаги явно, "
+                  "например --symbols SPY.US,QQQ.US")
+            print("   Флаг --all НЕ подходит как замена: полная выгрузка это "
+                  "≈704 МБ, а у Cloud Run /tmp — это RAM при лимите 2 GiB.")
+            conn.close()
+            return 1
         print(f"рабочий набор: {len(symbols)} бумаг "
               f"(полная выгрузка — флаг --all)")
     result = si.bootstrap(conn, args.archive, symbols=symbols,
@@ -138,6 +179,8 @@ def cmd_verify_seam(args) -> int:
 
 
 def cmd_verify_universe(args) -> int:
+    from finance.stooq_store import StooqStore, StoreUnavailable
+
     try:
         store = StooqStore.open_readonly(args.db)
     except StoreUnavailable as exc:
@@ -166,7 +209,8 @@ def _working_set() -> list[str]:
     """
     from finance import stooq_symbols as sym
 
-    engine_tickers = list(FACTOR_ETFS) + list(BENCHMARK_ETFS)
+    factor_etfs, benchmark_etfs = _engine_universe()
+    engine_tickers = list(factor_etfs) + list(benchmark_etfs)
     out: list[str] = []
     for ticker in engine_tickers:
         for candidate in sym.candidates_for(ticker):
