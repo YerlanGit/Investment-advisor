@@ -264,6 +264,221 @@ class ConventionProbeTest(unittest.TestCase):
         self.assertIn("BRK-B.US", tickers, "нет контрольной бездивидендной бумаги")
 
 
+class BulkDumpTest(unittest.TestCase):
+    """Замер по bulk-выгрузке `stooq.com/db/` — БЕЗ сети и без ключа.
+
+    Находка владельца 2026-08-09: всю историю можно скачать одним архивом, без
+    API. Это снимает ОБА препятствия `PHASE_08 §0` разом — капчу и сетевую
+    политику, — потому что после скачивания замер идёт по локальному файлу.
+
+    🔴 Формат архива живьём не проверялся, поэтому здесь проверяется НЕ
+    «читаем известный формат», а «формат ОПРЕДЕЛЯЕТСЯ и переживает оба
+    известных варианта шапки». Захардкодить одну из них означало бы повторить
+    E-4: процедура дала бы уверенный ответ, не зависящий от данных.
+    """
+
+    #: «Человеческий» CSV — как у эндпоинта выгрузки по тикеру.
+    HEADER_PLAIN = "Date,Open,High,Low,Close,Volume"
+    #: ASCII-экспорт — второй известный вариант шапки Stooq.
+    HEADER_ASCII = "<TICKER>,<PER>,<DATE>,<TIME>,<OPEN>,<HIGH>,<LOW>,<CLOSE>,<VOL>,<OPENINT>"
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.probe = _load_probe_module()
+
+    def _rows_plain(self, n: int = 5, start: float = 100.0) -> str:
+        out = [self.HEADER_PLAIN]
+        for i in range(n):
+            price = start + i
+            out.append(f"2024-01-{i + 1:02d},{price},{price},{price},{price},1000")
+        return "\n".join(out)
+
+    def _rows_ascii(self, n: int = 5, start: float = 100.0) -> str:
+        out = [self.HEADER_ASCII]
+        for i in range(n):
+            price = start + i
+            out.append(f"AAPL.US,D,2024010{i + 1},000000,"
+                       f"{price},{price},{price},{price},1000,0")
+        return "\n".join(out)
+
+    def _make_dir_dump(self, files: dict) -> Path:
+        import tempfile
+
+        root = Path(tempfile.mkdtemp(prefix="stooq-dump-"))
+        for rel, body in files.items():
+            target = root / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(body, encoding="utf-8")
+        return root
+
+    def _make_zip_dump(self, files: dict) -> Path:
+        import tempfile
+        import zipfile
+
+        path = Path(tempfile.mkdtemp(prefix="stooq-zip-")) / "d_us_txt.zip"
+        with zipfile.ZipFile(path, "w") as zf:
+            for rel, body in files.items():
+                zf.writestr(rel, body)
+        return path
+
+    def test_index_finds_ticker_regardless_of_directory_layout(self) -> None:
+        """Раскладка каталогов у выгрузки своя — индексируем ИМЯ ФАЙЛА."""
+        for layout in ("data/daily/us/nasdaq stocks/1/aapl.us.txt",
+                       "d_us_txt/data/daily/us/aapl.us.txt",
+                       "aapl.us.txt"):
+            with self.subTest(layout=layout):
+                root = self._make_dir_dump({layout: self._rows_plain()})
+                index = self.probe.DumpIndex(root)
+                self.assertIn("aapl.us", index)
+                self.assertIsNotNone(index.member_for("aapl.us"))
+
+    def test_zip_and_directory_are_equivalent(self) -> None:
+        """Оператор не обязан решать, распаковывать ли архив."""
+        files = {"data/daily/us/aapl.us.txt": self._rows_plain()}
+        for maker in (self._make_dir_dump, self._make_zip_dump):
+            with self.subTest(kind=maker.__name__):
+                index = self.probe.DumpIndex(maker(files))
+                self.assertEqual(len(index), 1)
+                self.assertIn("aapl.us", index)
+
+    def test_format_is_discovered_for_both_known_headers(self) -> None:
+        """🔴 Формат ОПРЕДЕЛЯЕТСЯ, а не утверждается."""
+        cases = {
+            "плоский CSV": (self._rows_plain(), "date", "close", "YYYY-MM-DD"),
+            "ASCII-экспорт": (self._rows_ascii(), "<date>", "<close>", "YYYYMMDD"),
+        }
+        for name, (body, date_col, close_col, pattern) in cases.items():
+            with self.subTest(header=name):
+                index = self.probe.DumpIndex(
+                    self._make_dir_dump({"x/aapl.us.txt": body}))
+                fmt = self.probe.sniff_format(index)
+                self.assertEqual(fmt.date_column, date_col)
+                self.assertEqual(fmt.close_column, close_col)
+                self.assertEqual(fmt.date_pattern, pattern)
+                self.assertEqual(fmt.members_seen, 1)
+
+    def test_series_parses_under_both_headers_identically(self) -> None:
+        """Разные шапки — один и тот же ряд: иначе конвенция считалась бы по-разному."""
+        parsed = []
+        for body in (self._rows_plain(), self._rows_ascii()):
+            index = self.probe.DumpIndex(self._make_dir_dump({"a/aapl.us.txt": body}))
+            fmt = self.probe.sniff_format(index)
+            parsed.append(self.probe.parse_dump_series(body, fmt))
+        self.assertEqual(parsed[0], parsed[1])
+        self.assertEqual(parsed[0][0], ("2024-01-01", 100.0))
+
+    def test_coverage_probe_reports_observations_and_period(self) -> None:
+        index = self.probe.DumpIndex(self._make_dir_dump(
+            {"a/aapl.us.txt": self._rows_plain(n=4)}))
+        fmt = self.probe.sniff_format(index)
+        p = self.probe.Probe(group="F. Демо", ticker="AAPL.US", purpose="",
+                             candidates=self.probe.stooq_candidates("AAPL.US"))
+        result = self.probe.probe_one_dump(p, [index], fmt)
+        self.assertEqual(result.found_as, "aapl.us")
+        self.assertEqual(result.observations, 4)
+        self.assertEqual(result.first_date, "2024-01-01")
+        self.assertEqual(result.member, "a/aapl.us.txt")
+
+    def test_short_series_is_not_counted_as_covered(self) -> None:
+        """Ряд короче окна движка бесполезен для ковариации — это не «есть»."""
+        index = self.probe.DumpIndex(self._make_dir_dump(
+            {"a/aapl.us.txt": self._rows_plain(n=3)}))
+        fmt = self.probe.sniff_format(index)
+        p = self.probe.Probe(group="A. Факторы", ticker="AAPL.US", purpose="",
+                             candidates=["aapl.us"])
+        self.assertFalse(self.probe.probe_one_dump(p, [index], fmt).ok)
+
+    def test_missing_ticker_is_reported_not_crashed(self) -> None:
+        index = self.probe.DumpIndex(self._make_dir_dump(
+            {"a/aapl.us.txt": self._rows_plain()}))
+        fmt = self.probe.sniff_format(index)
+        p = self.probe.Probe(group="C. KZ / IL", ticker="KSPI.KZ", purpose="",
+                             candidates=self.probe.stooq_candidates("KSPI.KZ"))
+        result = self.probe.probe_one_dump(p, [index], fmt)
+        self.assertIsNone(result.found_as)
+        self.assertIn("не найден", result.error)
+
+    def test_several_dumps_are_searched_in_order(self) -> None:
+        """US и world — разные пакеты; бумага может лежать в любом."""
+        us = self.probe.DumpIndex(self._make_dir_dump(
+            {"a/aapl.us.txt": self._rows_plain()}))
+        world = self.probe.DumpIndex(self._make_dir_dump(
+            {"b/kspi.kz.txt": self._rows_plain()}))
+        fmt = self.probe.sniff_format(us)
+        p = self.probe.Probe(group="C. KZ / IL", ticker="KSPI.KZ", purpose="",
+                             candidates=self.probe.stooq_candidates("KSPI.KZ"))
+        self.assertEqual(self.probe.probe_one_dump(p, [us, world], fmt).found_as,
+                         "kspi.kz")
+
+    def test_split_step_is_detected_as_raw_series(self) -> None:
+        """Ступенька в дату сплита → ряд СЫРОЙ. Даты — из `KNOWN_SPLITS`."""
+        from datetime import date, timedelta
+
+        rows = ["Date,Open,High,Low,Close,Volume"]
+        split_day = date(2024, 6, 10)                 # NVDA 10:1, из кода
+        for i in range(-4, 0):
+            d = split_day + timedelta(days=i)
+            rows.append(f"{d.isoformat()},1000,1000,1000,1000,1")
+        for i in range(0, 4):
+            d = split_day + timedelta(days=i)
+            rows.append(f"{d.isoformat()},100,100,100,100,1")
+        index = self.probe.DumpIndex(self._make_dir_dump(
+            {"a/nvda.us.txt": "\n".join(rows)}))
+        fmt = self.probe.sniff_format(index)
+        nvda = [e for e in self.probe.check_convention([index], fmt)
+                if e["ticker"] == "NVDA.US"]
+        self.assertEqual(len(nvda), 1)
+        self.assertAlmostEqual(nvda[0]["ratio"], 10.0, places=1)
+        self.assertIn("RAW", nvda[0]["verdict"])
+
+    def test_absent_step_is_reported_as_adjusted(self) -> None:
+        """Ровный ряд через дату сплита → ряд уже скорректирован."""
+        from datetime import date, timedelta
+
+        rows = ["Date,Open,High,Low,Close,Volume"]
+        split_day = date(2024, 6, 10)
+        for i in range(-4, 4):
+            d = split_day + timedelta(days=i)
+            rows.append(f"{d.isoformat()},100,100,100,100,1")
+        index = self.probe.DumpIndex(self._make_dir_dump(
+            {"a/nvda.us.txt": "\n".join(rows)}))
+        fmt = self.probe.sniff_format(index)
+        nvda = [e for e in self.probe.check_convention([index], fmt)
+                if e["ticker"] == "NVDA.US"][0]
+        self.assertIn("скорректирован", nvda["verdict"])
+
+    def test_garbage_lines_are_skipped_not_fatal(self) -> None:
+        body = (self._rows_plain(n=3) + "\n"
+                "2024-01-09,,,,,\n"           # пустая цена
+                "мусор\n"
+                "2024-01-10,1,1,1,7.5,1\n")
+        index = self.probe.DumpIndex(self._make_dir_dump({"a/aapl.us.txt": body}))
+        fmt = self.probe.sniff_format(index)
+        rows = self.probe.parse_dump_series(body, fmt)
+        self.assertEqual(rows[-1], ("2024-01-10", 7.5))
+        self.assertEqual(len(rows), 4)
+
+    def test_empty_dump_does_not_crash_format_sniffing(self) -> None:
+        index = self.probe.DumpIndex(self._make_dir_dump({}))
+        fmt = self.probe.sniff_format(index)
+        self.assertIsNone(fmt.header)
+        self.assertIn("определить не удалось", self.probe.render_format_note(fmt))
+
+    def test_no_network_call_is_possible_in_dump_mode(self) -> None:
+        """Гарантия офлайна: путь выгрузки не трогает `_http_get` вовсе."""
+        from unittest.mock import patch
+
+        index = self.probe.DumpIndex(self._make_dir_dump(
+            {"a/aapl.us.txt": self._rows_plain()}))
+        fmt = self.probe.sniff_format(index)
+        p = self.probe.Probe(group="F. Демо", ticker="AAPL.US", purpose="",
+                             candidates=["aapl.us"])
+        with patch.object(self.probe, "_http_get",
+                          side_effect=AssertionError("сетевой вызов в режиме --dump")):
+            self.probe.probe_one_dump(p, [index], fmt)
+            self.probe.check_convention([index], fmt)
+
+
 class ManualPositionWithoutPricesTest(unittest.TestCase):
     """🔴 ЧК-08.2 — ИЗМЕРЕНО: бумага без ряда исчезает из портфеля МОЛЧА.
 

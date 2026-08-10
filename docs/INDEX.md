@@ -276,7 +276,8 @@ Telegram /start
 | [`roadmap/ROADMAP_SCENARIO_TIER.md`](roadmap/ROADMAP_SCENARIO_TIER.md) | 🗺 | Тир Scenario Analysis. **Ядро + UI/тир реализованы (2026-07-07).** |
 | [`roadmap/ROADMAP_DATA_RESILIENCE.md`](roadmap/ROADMAP_DATA_RESILIENCE.md) | 🗺 | Устойчивость данных. **§4-б lookback 730→1825 ВКЛЮЧЁН (2026-07-07).** |
 | [`roadmap/ROADMAP_IBKR_INTEGRATION.md`](roadmap/ROADMAP_IBKR_INTEGRATION.md) | 🗺 | Второй брокер Interactive Brokers. Абстракция `BrokerConnector`, read-only, OAuth. **Спроектирован, не начат (2026-07-16).** |
-| [`roadmap/manual_portfolio/`](roadmap/manual_portfolio/README.md) | 🗺 | **Ручной ввод портфеля + смена источника цен (2026-07-27).** Разбор задания против кода (6 фактических ошибок, 5 внутренних противоречий, 6 находок сверх задания) + 11 фаз, по md-файлу на фазу. Начинать с `README.md`, затем `PHASE_00_CONTRACT.md` — он снимает противоречия до первой строки кода. **Юридический инвариант I-12: данные Tradernet не-клиентам запрещены → `manual` работает ТОЛЬКО на Stooq, без резерва; ключ Stooq добывается в день 1 (капча), Фазы 8–9 на критическом пути запуска.** Спроектирован, не начат. |
+| [`roadmap/manual_portfolio/`](roadmap/manual_portfolio/README.md) | 🗺 | **Ручной ввод портфеля + смена источника цен (2026-07-27).** Разбор задания против кода (6 фактических ошибок, 5 внутренних противоречий, 6 находок сверх задания) + 11 фаз, по md-файлу на фазу. Начинать с `README.md`, затем `PHASE_00_CONTRACT.md` — он снимает противоречия до первой строки кода. **Юридический инвариант I-12: данные Tradernet не-клиентам запрещены → `manual` работает ТОЛЬКО на Stooq, без резерва.** С 2026-08-09 источник Stooq — **bulk-выгрузка** `stooq.com/db/` (ключ и капча не нужны), а витрина котировок из Freedom API выделена в отдельный проект → `roadmap/freedom_warehouse/`. Доставлено 6 фаз из 11. |
+| [`roadmap/freedom_warehouse/`](roadmap/freedom_warehouse/README.md) | 🗺 | **Freedom API → собственная БД котировок (2026-08-09).** Отдельный проект, выделен из `manual_portfolio/`: тянет дневные котировки Tradernet в свой PostgreSQL и отдаёт их отчёту вместо похода в брокерский API. Обслуживает **только ветку `freedom`** — ручной ввод к нему не привязан и работает без него. Код сбора доставлен (`freedom-etl/`, 109+13 тестов), в `src/` не внедрён. Общая с Manual Portfolio граница — **I-14**: происхождение едет с данными через хранилище. |
 
 ### `bot/` · `infra/` · `business/`
 | Файл | Статус | Назначение |
@@ -325,7 +326,7 @@ grep -rl "area:math" docs/               # → все доки одной под
 | `src/freedom_portfolio/history.py` (кэш, сплиты) · `src/finance/price_providers.py` · `data_checks.py` · `manual_portfolio.py` | `roadmap/manual_portfolio/README.md` (+ соответствующий `PHASE_*.md`) |
 | `cloud_function/` · инфра/сеть | `infra/INFRA_NETWORKING.md` |
 | `freedom-etl/**` (сбор котировок, батчинг, схема `daily_candles`) | `freedom-etl/README.md` — там же инварианты сервиса и три ловушки `getHloc` |
-| `src/finance/price_providers.py` (новый источник цен) | **`roadmap/manual_portfolio/PHASE_11_QUOTES_WAREHOUSE.md`** (старшая редакция, обе ветки + I-14) · `roadmap/ROADMAP_QUOTES_WAREHOUSE.md` (разбор текущего пути цен + пять находок стыковки) |
+| `src/finance/price_providers.py` (новый источник цен) | для `manual` → `roadmap/manual_portfolio/PHASE_08`/`PHASE_09` (Stooq, bulk-выгрузка) · для `freedom` → **`roadmap/freedom_warehouse/PHASE_11_QUOTES_WAREHOUSE.md`** (собственная БД + I-14) |
 
 ### 6.2 Обратно: где менять КОД для задачи
 
@@ -345,7 +346,7 @@ grep -rl "area:math" docs/               # → все доки одной под
 | Lookback / окно истории | `HISTORY_LOOKBACK_DAYS` env (default 1825) → `investment_logic.get_market_data` |
 | Источник цен / ручной ввод портфеля | `src/finance/price_providers.py` + `manual_portfolio.py` (→ `roadmap/manual_portfolio/`) |
 | Сбор истории котировок в свою БД | `freedom-etl/` (отдельный сервис, не путать с `freedom_portfolio/history.py` — тот тянет цены В ОТЧЁТ на лету) |
-| Подключить своё хранилище к движку | план — `roadmap/ROADMAP_QUOTES_WAREHOUSE.md`; шов — `finance/price_providers.py` (`_REGISTRY`), движок НЕ меняется |
+| Подключить своё хранилище к движку | план — `roadmap/freedom_warehouse/` (ОТДЕЛЬНЫЙ проект: Freedom API → своя БД); шов — `finance/price_providers.py` (`_REGISTRY`), движок НЕ меняется |
 
 ---
 

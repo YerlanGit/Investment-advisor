@@ -15,7 +15,7 @@ GCP Cloud Run (long-polling) · Cloud Function (RAG-ингест) · ChromaDB ·
 ## Верификация (обязательна перед каждым пушем)
 
 ```bash
-PYTHONPATH=src python -m pytest tests/ -q          # → 1385 passed, 2 xfailed
+PYTHONPATH=src python -m pytest tests/ -q          # → 1398 passed, 2 xfailed
 ```
 
 - Префикс `PYTHONPATH=src` **ОБЯЗАТЕЛЕН** — без него `import finance…` не находится
@@ -23,10 +23,10 @@ PYTHONPATH=src python -m pytest tests/ -q          # → 1385 passed, 2 xfailed
 - **Прогонов ДВА.** Второй — зеркало деплой-образа, в нём НЕТ каталога `design/`:
   ```bash
   cp -r src tests SYSTEM_PROMPT.md requirements*.txt <tmp>/ && cd <tmp>
-  PYTHONPATH=src python -m pytest tests/ -q        # → 1350 passed, 35 skipped, 2 xfailed
+  PYTHONPATH=src python -m pytest tests/ -q        # → 1350 passed, 48 skipped, 2 xfailed
   ```
   Зелёный GitHub CI НЕ означает, что деплой пройдёт: CI видит полный чекаут,
-  Cloud Build — только образ. Разница 35 тестов — ровно те, что читают
+  Cloud Build — только образ. Разница 48 тестов — ровно те, что читают
   `design/`, `CLAUDE.md` и `scripts/`, то есть отсутствующее в образе.
 - Правил `design/*.jsx` → **обязательно** `bash design/premium_v2/build.sh`.
 - Смоук-рендер тиров: `html_renderer.render_report_html(None, <user_id>, ...)`.
@@ -70,6 +70,10 @@ PYTHONPATH=src python -m pytest tests/ -q          # → 1385 passed, 2 xfailed
 - `freedom-etl/` — ОТДЕЛЬНАЯ единица поставки: свой образ и свои зависимости.
   В `src/` он не импортируется, `src/` в него не копируется; дублирование
   хелперов env здесь осознанно — тот же случай, что `cloud_function/rag_engine.py`.
+- ДВА РАЗНЫХ ПРОЕКТА, не смешивать: `roadmap/manual_portfolio/` — ручной ввод и
+  Stooq как его источник; `roadmap/freedom_warehouse/` — Freedom API → своя БД.
+  У них разные юридические основания (I-12/I-14), поэтому `manual` не вправе
+  читать витрину с `origin='tradernet'` — как и сам Tradernet.
 - Крупное изменение → строка «Было/Стало» в `docs/audit/AUDIT.md`.
 
 ## Зависимости
