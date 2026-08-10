@@ -278,8 +278,18 @@ I-7 запрещает смешивать конвенции, а «витрин�
 | `test_manual_forbidden_provider_raises` | `PRICE_PROVIDER_MANUAL=tradernet` → отказ на старте, до сетевых вызовов (§4.2) |
 | `test_no_tradernet_client_constructed_for_manual` | За сборку ручного отчёта `TradernetClient.__init__` не вызывается ни разу (I-12, проверка на уровне поведения, а не конфигурации) |
 
-Снапшот хранится как JSON-фикстура в `tests/fixtures/phase35_snapshot_freedom.json`;
-сравнение — точное (`==` по float), а не по допуску: провайдер обязан быть 1:1.
+🔴 **Сверено с кодом 2026-08-10** (`AUDIT §−76`) — таблица выше называла
+будущие имена, и три из них не совпали с реализацией. Как есть на самом деле
+(`grep -n 'def test_' tests/test_phase35_price_providers.py`, 40 тестов):
+
+| Названо в плане | Что реально |
+|---|---|
+| `test_snapshot_numbers_unchanged` + фикстура `tests/fixtures/phase35_snapshot_freedom.json` | **файла нет.** Роль гейта «числа не изменились» исполняет golden-фикстура движка `tests/fixtures/results_golden.json` + `test_contracts_golden.py` — она шире и сравнивает так же точно |
+| `test_manual_chain_has_no_tradernet` | есть под именем **`test_manual_never_returns_tradernet`** ✅ |
+| `test_no_tradernet_client_constructed_for_manual` | 🔴 **отсутствует.** Есть только его демо-близнец `test_demo_never_builds_tradernet_client`. Поведение реализовано (`risk_engine._get_price_provider`: клиент не создаётся при `src in ('demo','manual')`), но для `manual` НЕ ЗАПИНЕНО. Заведено требованием ЧК-08.5-4 (`PHASE_08B §7`) |
+
+Сравнение чисел — точное (`==` по float), а не по допуску: провайдер обязан
+быть 1:1.
 
 ---
 

@@ -224,7 +224,9 @@ async def user_slot(user_id: int):
 
 ## 7. Тесты
 
-Дополняют `tests/test_phase35_manual_portfolio.py`.
+Живут в `tests/test_manual_fsm_flow.py` (46 тестов) и дополняют четыре файла
+Фазы 04 — их список в `PHASE_04 §6`. Имя `tests/test_phase35_manual_portfolio.py`,
+стоявшее здесь до 2026-08-10, **не существует** (`AUDIT §−76`).
 
 | Тест | Проверяет |
 |---|---|
