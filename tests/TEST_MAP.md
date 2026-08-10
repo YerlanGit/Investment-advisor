@@ -71,7 +71,7 @@
 | `freedom_portfolio` | 2 | `test_freedom_history.py` · `test_phase35_price_providers.py` |
 | `freedom_portfolio.auth` | 1 | `test_freedom_auth.py` |
 | `freedom_portfolio.client` | 3 | `test_freedom_client.py` · `test_freedom_history.py` · `test_phase34_broker_outage_honesty.py` |
-| `freedom_portfolio.history` | 1 | `test_freedom_history.py` |
+| `freedom_portfolio.history` | 2 | `test_freedom_history.py` · `test_stooq_price_store.py` |
 | `freedom_portfolio.models` | 1 | `test_freedom_models.py` |
 | `html_renderer` | 4 | `test_phase18_sprint5.py` · `test_phase19_block_audit.py` · `test_phase21_recos.py` · `test_phase24_scenario_report.py` |
 | `pdf_charts` | 2 | `test_phase4_reporting.py` · `test_phase5_rag_quality.py` |

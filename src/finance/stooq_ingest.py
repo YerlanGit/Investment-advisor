@@ -713,6 +713,86 @@ def coverage_report(conn: sqlite3.Connection,
     return out
 
 
+@dataclass(frozen=True)
+class ConventionProbe:
+    """Одно событие сплита, проверенное по архиву истории."""
+
+    ticker: str
+    event_date: str                    # ISO
+    expected_ratio: float
+    close_before: Optional[float]
+    close_on_after: Optional[float]
+    verdict: str
+
+    @property
+    def observed_ratio(self) -> Optional[float]:
+        if not self.close_before or not self.close_on_after:
+            return None
+        return self.close_before / self.close_on_after
+
+
+#: Порог «ступеньки» — ТОТ ЖЕ, что у эвристики движка
+#: (`history._SPLIT_RETURN_THRESHOLD` = log(1.5)), чтобы слово «ступенька»
+#: здесь и там значило одно и то же.  Свой порог означал бы, что замер
+#: объявляет ряд сырым, а движок ту же ступеньку не видит.
+_SPLIT_STEP_THRESHOLD = 1.5
+
+
+def measure_convention(archive_dir, *,
+                       today: Optional[date] = None) -> list[ConventionProbe]:
+    """Измерить конвенцию корректировок Stooq по известным сплитам.
+
+    Вопрос, ради которого всё: отдаёт ли Stooq ряд СЫРЫМ или уже
+    скорректированным на сплиты.  Ответ решает, вправе ли провайдер объявить
+    `PriceConvention` — а без объявленной конвенции инвариант I-7 непроверяем
+    (`PHASE_08B §7.6`).
+
+    Метод прямой: цена закрытия ДО события против цены В день события.
+      • отношение ≈ ratio сплита → ступенька на месте, ряд **RAW**;
+      • отношение ≈ 1 → ступеньки нет, ряд **скорректирован**.
+
+    🔴 Дивидендную половину вопроса (`SPLIT_ADJUSTED` против `TOTAL_RETURN`)
+    так НЕ решить: она требует сверки накопленной доходности с известной
+    total-return и остаётся отдельным шагом (`STOOQ_CONVENTION §4`).
+    Функция отвечает ровно на то, на что может.
+
+    События берутся из `KNOWN_SPLITS` — единственного места, где они у нас
+    записаны.  Свой список здесь был бы вторым справочником фактов о мире, а
+    план уже трижды расходился с реальностью именно на таких списках
+    (`AUDIT §−73`).
+    """
+    from freedom_portfolio.history import KNOWN_SPLITS
+
+    by_symbol = {symbol_of_archive_file(p): p
+                 for p in iter_archive_files(archive_dir)}
+    out: list[ConventionProbe] = []
+    for ticker, events in sorted(KNOWN_SPLITS.items()):
+        path = by_symbol.get(str(ticker).upper())
+        for when, ratio in events:
+            stamp = when.strftime("%Y%m%d")
+            if path is None:
+                out.append(ConventionProbe(ticker, when.isoformat(),
+                                           float(ratio), None, None,
+                                           "нет в архиве"))
+                continue
+            # Окно берём заведомо шире события: замер не про свежесть.
+            batch = parse_history_file(path, window_days=20 * 365, today=today)
+            before = [b.close for b in batch.bars if b.trade_date < int(stamp)]
+            after = [b.close for b in batch.bars if b.trade_date >= int(stamp)]
+            if not before or not after:
+                out.append(ConventionProbe(ticker, when.isoformat(),
+                                           float(ratio), None, None,
+                                           "событие вне окна ряда"))
+                continue
+            observed = before[-1] / after[0] if after[0] else 0.0
+            verdict = ("ступенька ЕСТЬ → ряд СЫРОЙ (RAW)"
+                       if observed > _SPLIT_STEP_THRESHOLD
+                       else "ступеньки нет → ряд СКОРРЕКТИРОВАН")
+            out.append(ConventionProbe(ticker, when.isoformat(), float(ratio),
+                                       before[-1], after[0], verdict))
+    return out
+
+
 def stored_symbols(conn: sqlite3.Connection) -> set[str]:
     """Символы источника, которые в базе реально есть.
 

@@ -210,6 +210,47 @@ def cmd_verify_universe(args) -> int:
     return 1 if missing else 0
 
 
+def cmd_measure_convention(args) -> int:
+    """Замер конвенции корректировок — то, что блокирует провайдера MP-09."""
+    try:
+        probes = si.measure_convention(args.archive)
+    except ImportError as exc:
+        print(f"🔴 нужен {_missing_name(exc)}: pip install pydantic")
+        return 1
+    if not probes:
+        print("в KNOWN_SPLITS нет событий — мерить нечего")
+        return 1
+    print(f"{'бумага':10s} {'дата':12s} {'ожид.':>6s} {'до':>10s} "
+          f"{'после':>10s} {'факт':>7s}  вердикт")
+    raw = adjusted = unknown = 0
+    for probe in probes:
+        observed = probe.observed_ratio
+        print(f"{probe.ticker:10s} {probe.event_date:12s} "
+              f"{probe.expected_ratio:6.0f} "
+              f"{(f'{probe.close_before:.4f}' if probe.close_before else '—'):>10s} "
+              f"{(f'{probe.close_on_after:.4f}' if probe.close_on_after else '—'):>10s} "
+              f"{(f'{observed:.3f}' if observed else '—'):>7s}  {probe.verdict}")
+        if "СЫРОЙ" in probe.verdict:
+            raw += 1
+        elif "СКОРРЕКТИРОВАН" in probe.verdict:
+            adjusted += 1
+        else:
+            unknown += 1
+    print()
+    print(f"итог: сырых {raw} · скорректированных {adjusted} · без ответа {unknown}")
+    if raw and adjusted:
+        print("🔴 ОТВЕТ ПРОТИВОРЕЧИВ — конвенция не едина по бумагам. "
+              "Провайдер объявлять её НЕ вправе: покажите вывод разработке.")
+        return 1
+    if raw or adjusted:
+        print("✅ ответ однозначен. Скопируйте вывод целиком — он попадёт в "
+              "docs/audit/STOOQ_CONVENTION.md §4 как ЗАМЕР.")
+        return 0
+    print("⚠️ ни одного события измерить не удалось — нужен полный архив "
+          "(бумаги NVDA, AMZN, GOOGL, TSLA, SHOP, DXCM).")
+    return 1
+
+
 def _engine_tickers() -> list[str]:
     """Универсум в терминах ДВИЖКА — ИЗ КОДА, а не списком в скрипте.
 
@@ -280,10 +321,36 @@ def build_parser() -> argparse.ArgumentParser:
 
     uni = sub.add_parser("verify-universe", help="покрытие универсума движка")
     uni.set_defaults(func=cmd_verify_universe)
+
+    conv = sub.add_parser("measure-convention",
+                          help="сырой ряд или скорректированный (блокер MP-09)")
+    conv.add_argument("--archive", default=str(DEFAULT_ROOT / "archive"))
+    conv.set_defaults(func=cmd_measure_convention)
     return parser
 
 
+def _make_console_utf8_safe() -> None:
+    """Вывод не должен падать на консоли Windows.
+
+    🔴 Замерено: в тексте команд 14 символов `🔴`, 3 `✅`, 3 `⚠️`, а также `→`,
+    `≈`, `—`, `§`. Ни один из них не кодируется в `cp866` (кодировка `cmd.exe`
+    в русской Windows) и почти ни один — в `cp1251`. Питон в этом случае не
+    печатает «квадратики», а бросает `UnicodeEncodeError` — то есть оператор
+    получил бы traceback вместо результата замера, и решил бы, что сломан
+    загрузчик, а не консоль.
+
+    `errors="replace"` важнее самой кодировки: даже там, где терминал не умеет
+    рисовать эмодзи, команда обязана довести вывод до конца.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):   # pragma: no cover
+            pass                                        # перенаправленный поток
+
+
 def main(argv=None) -> int:
+    _make_console_utf8_safe()
     args = build_parser().parse_args(argv)
     return int(args.func(args) or 0)
 

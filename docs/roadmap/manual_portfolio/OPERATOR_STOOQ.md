@@ -152,8 +152,43 @@ mkdir -p ~/ramp-stooq/{archive,inbox,applied,rejected}
 export STOOQ_ROOT=~/ramp-stooq
 ```
 
-`STOOQ_ROOT` избавляет от длинных путей в каждой команде. В Windows
-PowerShell: `$env:STOOQ_ROOT = "$HOME\ramp-stooq"`.
+`STOOQ_ROOT` избавляет от длинных путей в каждой команде.
+
+### 3.3 Windows — то же самое, четыре отличия
+
+Все команды регламента работают на Windows без изменений; меняется только
+запись путей и переменных.
+
+```powershell
+# PowerShell
+$env:STOOQ_ROOT = "C:\Users\User\ramp-stooq"
+cd C:\Users\User\ramp-fresh
+python scripts\stooq_ingest.py bootstrap --archive $env:STOOQ_ROOT\archive
+```
+
+```bat
+:: cmd.exe
+set STOOQ_ROOT=C:\Users\User\ramp-stooq
+cd C:\Users\User\ramp-fresh
+python scripts\stooq_ingest.py bootstrap --archive %STOOQ_ROOT%\archive
+```
+
+| Отличие | Что делать |
+|---|---|
+| `python3` → **`python`** | в Windows команда называется так |
+| `$STOOQ_ROOT` → `$env:STOOQ_ROOT` (PS) или `%STOOQ_ROOT%` (cmd) | синтаксис оболочки |
+| `source venv/bin/activate` → `.\ramp-venv\Scripts\activate` | путь активации venv |
+| Пути с пробелами (`nasdaq etfs`) | кавычки: `--archive "C:\Users\User\ramp-stooq\archive"` |
+
+🔴 **Про «кракозябры» и падения вывода.** Консоль `cmd.exe` в русской Windows
+работает в `cp866`, PowerShell 5.1 — в `cp1251`. Ни одна из них не кодирует
+символы `🔴`, `✅`, `⚠️`, `→`, `≈`, `—`, которых в выводе команд десятки;
+Python в такой ситуации **не рисует квадратики, а падает**
+с `UnicodeEncodeError`. Загрузчик это обходит сам — переключает свой вывод в
+UTF-8 при старте (`_make_console_utf8_safe`, покрыто тестом на потоке cp866),
+поэтому команда доходит до конца в любой консоли. Если значки всё же
+отображаются квадратиками, текст от этого не портится; хотите красиво —
+Windows Terminal или PowerShell 7.
 
 ---
 
@@ -500,6 +535,15 @@ python scripts/stooq_ingest.py verify-seam --date <последний торго
 - [ ] `verify-universe` без пропусков
 - [ ] три дня подряд `apply` отработал, папка `rejected/` пуста
 - [ ] база залита в `gs://ramp-bot-state/stooq/prices.sqlite`
+- [ ] **замер конвенции сделан** — одна команда, и она снимает блокер MP-09:
+      ```bash
+      python scripts/stooq_ingest.py measure-convention --archive $STOOQ_ROOT/archive
+      ```
+      Вывод скопируйте целиком: он попадёт в `STOOQ_CONVENTION §4` как ЗАМЕР.
+      Команда отвечает на единственный вопрос — отдаёт Stooq ряд СЫРЫМ или уже
+      скорректированным на сплиты. Без ответа провайдер объявить конвенцию не
+      вправе, а угадать нельзя: ошибка в любую сторону даёт двойную
+      корректировку, и цены остаются правдоподобными
 - [ ] условия использования `stooq.com/db/` прочитаны и записаны в
       `STOOQ_CONVENTION §3.2` — bulk-выгрузка регулируется иначе, чем разовый
       запрос, и техническая доступность файла не заменяет правового основания
