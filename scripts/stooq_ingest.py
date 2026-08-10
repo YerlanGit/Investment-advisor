@@ -10,10 +10,17 @@
 
 Регламент оператора — `docs/roadmap/manual_portfolio/OPERATOR_STOOQ.md`.
 
-    python scripts/stooq_ingest.py bootstrap --archive /mnt/state/stooq/archive
+    export STOOQ_ROOT=~/ramp-stooq
+    python scripts/stooq_ingest.py bootstrap --archive $STOOQ_ROOT/archive
     python scripts/stooq_ingest.py apply
     python scripts/stooq_ingest.py verify-seam --date 2026-08-07
     python scripts/stooq_ingest.py verify-universe
+    gcloud storage cp $STOOQ_ROOT/prices.sqlite gs://ramp-bot-state/stooq/prices.sqlite
+
+🔴 Скрипт запускается НА КОМПЬЮТЕРЕ ОПЕРАТОРА, а не в облаке. `/mnt/state` в
+Cloud Run — это gcsfuse-монтирование бакета, писать в него SQLite нельзя
+(блокировки на объектном хранилище не работают), да и оператора с шеллом там
+нет. В облако едет один готовый файл базы; см. `PHASE_08B §3.1a`.
 """
 
 from __future__ import annotations
@@ -29,7 +36,12 @@ from finance import stooq_ingest as si                     # noqa: E402
 from finance.data_checks import BENCHMARK_ETFS, FACTOR_ETFS  # noqa: E402
 from finance.stooq_store import StooqStore, StoreUnavailable  # noqa: E402
 
-DEFAULT_ROOT = Path(os.getenv("STOOQ_ROOT", "/mnt/state/stooq"))
+#: Корень рабочих каталогов оператора.  Дефолт РЕПО-ЛОКАЛЬНЫЙ, а не
+#: `/mnt/state/stooq`: этот путь существует только внутри контейнера Cloud Run,
+#: где запускать загрузчик и незачем, и нечем.  Тот же приём, что у
+#: `db_tokenomics.DB_PATH`: в проде путь задаёт env, локально — каталог рядом.
+DEFAULT_ROOT = Path(os.getenv(
+    "STOOQ_ROOT", str(Path(__file__).resolve().parents[1] / "data" / "stooq")))
 
 
 def _print_result(title: str, result: si.IngestResult) -> None:
