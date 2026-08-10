@@ -15,7 +15,7 @@ GCP Cloud Run (long-polling) · Cloud Function (RAG-ингест) · ChromaDB ·
 ## Верификация (обязательна перед каждым пушем)
 
 ```bash
-PYTHONPATH=src python -m pytest tests/ -q          # → 1398 passed, 2 xfailed
+PYTHONPATH=src python -m pytest tests/ -q          # → 1461 passed, 2 xfailed
 ```
 
 - Префикс `PYTHONPATH=src` **ОБЯЗАТЕЛЕН** — без него `import finance…` не находится
@@ -23,10 +23,10 @@ PYTHONPATH=src python -m pytest tests/ -q          # → 1398 passed, 2 xfailed
 - **Прогонов ДВА.** Второй — зеркало деплой-образа, в нём НЕТ каталога `design/`:
   ```bash
   cp -r src tests SYSTEM_PROMPT.md requirements*.txt <tmp>/ && cd <tmp>
-  PYTHONPATH=src python -m pytest tests/ -q        # → 1350 passed, 48 skipped, 2 xfailed
+  PYTHONPATH=src python -m pytest tests/ -q        # → 1410 passed, 51 skipped, 2 xfailed
   ```
   Зелёный GitHub CI НЕ означает, что деплой пройдёт: CI видит полный чекаут,
-  Cloud Build — только образ. Разница 48 тестов — ровно те, что читают
+  Cloud Build — только образ. Разница 51 тест — ровно те, что читают
   `design/`, `CLAUDE.md` и `scripts/`, то есть отсутствующее в образе.
 - Правил `design/*.jsx` → **обязательно** `bash design/premium_v2/build.sh`.
 - Смоук-рендер тиров: `html_renderer.render_report_html(None, <user_id>, ...)`.
@@ -74,6 +74,10 @@ PYTHONPATH=src python -m pytest tests/ -q          # → 1398 passed, 2 xfailed
   Stooq как его источник; `roadmap/freedom_warehouse/` — Freedom API → своя БД.
   У них разные юридические основания (I-12/I-14), поэтому `manual` не вправе
   читать витрину с `origin='tradernet'` — как и сам Tradernet.
+- База котировок Stooq: пишет ТОЛЬКО `stooq_ingest` из процесса оператора, бот
+  открывает `mode=ro`. Формы символа меняют НОТАЦИЮ, но не ПЛОЩАДКУ: кандидат
+  `{base}.US` для иностранной бумаги подсунет ADR вместо листинга (`§−77`).
+  Свежесть считается в ТОРГОВЫХ днях рынка бумаги, а не в календарных.
 - Крупное изменение → строка «Было/Стало» в `docs/audit/AUDIT.md`.
 
 ## Зависимости
@@ -100,7 +104,9 @@ L2 Engine    finance/engine/{risk_engine,portfolio_manager,market_preview}.py
              black_litterman.py · regime.py · period_returns.py · scenario_engine.py · data_checks.py
 L1 Data      freedom_portfolio/* · services/{fx_feed,macro_data}.py · finance/{broker_api,
              price_providers,sec_edgar,cds_feed,currency,demo_portfolio}.py · agent/rag_engine.py
+             finance/{stooq_ingest,stooq_store}.py — локальная база котировок Stooq
 L0 Cross     finance/contracts.py · finance/asset_taxonomy.py · finance/leveraged.py · env_config.py
+             finance/market_calendar.py (рынок·валюта·календарь) · finance/stooq_symbols.py
 ```
 
 Три контрактные границы конвейера: `results{}` (36 ключей, `finance/contracts.py`) →

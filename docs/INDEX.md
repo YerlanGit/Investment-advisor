@@ -327,7 +327,7 @@ grep -rl "area:math" docs/               # → все доки одной под
 | `cloud_function/` · инфра/сеть | `infra/INFRA_NETWORKING.md` |
 | `freedom-etl/**` (сбор котировок, батчинг, схема `daily_candles`) | `freedom-etl/README.md` — там же инварианты сервиса и три ловушки `getHloc` |
 | `src/finance/price_providers.py` (новый источник цен) | для `manual` → `roadmap/manual_portfolio/PHASE_08`/`PHASE_08B`/`PHASE_09` (Stooq, bulk-выгрузка) · для `freedom` → **`roadmap/freedom_warehouse/PHASE_11_QUOTES_WAREHOUSE.md`** (собственная БД + I-14) |
-| `src/finance/stooq_store.py` · `stooq_ingest.py` · `market_calendar.py` (база котировок) | **`roadmap/manual_portfolio/PHASE_08B_PRICE_STORE.md`** — схема, 9 правил ingest, масштабирование на KZT/JPY/EUR/crypto, задание по коду и предпусковой гейт |
+| `src/finance/stooq_store.py` · `stooq_ingest.py` · `market_calendar.py` · `stooq_symbols.py` (база котировок) | **`roadmap/manual_portfolio/PHASE_08B_PRICE_STORE.md`** — схема, 9 правил ingest, масштабирование на KZT/JPY/EUR/crypto, задание по коду и предпусковой гейт. Слой данных доставлен 2026-08-10 (`AUDIT §−77`) |
 | Наполнение базы котировок руками (роль оператора, не кода) | **`roadmap/manual_portfolio/OPERATOR_STOOQ.md`** — что скачать, куда положить, ежедневный цикл, что считать нормой, чек-лист «можно включать» |
 
 ### 6.2 Обратно: где менять КОД для задачи
