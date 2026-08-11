@@ -790,6 +790,100 @@ class UniverseSelectionTest(_TempDirMixin, unittest.TestCase):
                                     limit=2)
         self.assertEqual(picked, ["BIG.US", "MID.US"])
 
+    def test_absolute_history_threshold_can_empty_the_universe(self) -> None:
+        """🔴 Регресс `AUDIT §−87`, найден оператором на живой выгрузке.
+
+        Порог по умолчанию был АБСОЛЮТНЫМ — 1260 баров, — и сравнивался со
+        счётчиком, который окно в 1825 календарных дней физически не выдаёт:
+        1825 дней это 1304 будних минус праздники ≈ 1252. Замер оператора на
+        своём архиве: ровно 1252 бара на бумагу. Отсеивались ВСЕ кандидаты, а
+        команда печатала «рабочий набор: 13 бумаг» — не соврав ни словом.
+        Тринадцать уцелевших это ядро, которое добавляется безусловно, и
+        именно поэтому дефект выглядел как «сканер не видит папок».
+        """
+        real = [si.UniverseCandidate(f"P{i}.US", "US", 1252, 20260807, 5e6)
+                for i in range(20)]
+        self.assertEqual(
+            si.select_universe(real, min_bars=1260, stale_after_days=10,
+                               min_turnover=1e6, limit=800), [])
+        self.assertEqual(
+            len(si.select_universe(real, stale_after_days=10,
+                                   min_turnover=1e6, limit=800)), 20,
+            "порог по умолчанию обязан браться из данных, а не из константы")
+
+    def test_history_threshold_is_derived_from_the_archive(self) -> None:
+        """Эталон — самая полная бумага архива, а не арифметика по календарю.
+
+        Сколько торговых дней в окне на самом деле, знает только рынок: там
+        праздники, полудни и разные биржи. Считать это в коде значит заводить
+        второй календарь, который разойдётся с данными молча.
+        """
+        report = si.explain_universe(
+            [si.UniverseCandidate("FULL.US", "US", 1252, 20260807, 5e6),
+             si.UniverseCandidate("HALF.US", "US", 600, 20260807, 5e6)],
+            stale_after_days=10, min_turnover=1e6, limit=800)
+        self.assertEqual(report.busiest_bars, 1252)
+        self.assertEqual(report.min_bars_used, int(1252 * 0.9))
+        self.assertEqual(report.symbols, ["FULL.US"])
+        self.assertEqual(report.too_short, 1)
+
+    def test_every_rejection_is_counted_by_reason(self) -> None:
+        """Отказ обязан называть причину — иначе «13 бумаг» неопровержимо.
+
+        Правило «статус называет то, чем его можно опровергнуть» относится и к
+        выводу команды: без счётчиков оператор потратил день на гипотезы про
+        слэши Windows, тогда как виноват был один порог.
+        """
+        report = si.explain_universe(
+            [si.UniverseCandidate("OK.US", "US", 1252, 20260807, 9e9),
+             si.UniverseCandidate("SHORT.US", "US", 10, 20260807, 9e9),
+             si.UniverseCandidate("THIN.US", "US", 1252, 20260807, 1.0),
+             si.UniverseCandidate("DEAD.US", "US", 1252, 20240101, 9e9),
+             si.UniverseCandidate("EXTRA.US", "US", 1252, 20260807, 8e9)],
+            stale_after_days=10, min_turnover=1e6, limit=1)
+        self.assertEqual(report.measured, 5)
+        self.assertEqual(report.too_short, 1)
+        self.assertEqual(report.too_thin, 1)
+        self.assertEqual(report.too_stale, 1)
+        self.assertEqual(report.over_limit, 1)
+        self.assertEqual(report.symbols, ["OK.US"])
+
+    def test_scan_walks_nested_windows_style_layout(self) -> None:
+        """🔴 Гипотеза оператора «сканер не видит подпапок» — проверена.
+
+        Архив раскладывает бумаги на четыре уровня
+        (`data/daily/us/nasdaq stocks/1/aapl.us.txt`). Обход идёт `rglob` по
+        `pathlib`, то есть разделитель пути в нём не участвует вовсе; проверка
+        нужна, чтобы это утверждение осталось верным и после правок.
+        """
+        deep = self.tmp / "archive" / "data" / "daily" / "us"
+        (deep / "nasdaq stocks" / "1").mkdir(parents=True)
+        (deep / "nyse etfs").mkdir(parents=True)
+        days = self._business_days(1300)
+        self._write(deep / "nasdaq stocks" / "1", "AAPL.US", days,
+                    volume=500_000)
+        self._write(deep / "nyse etfs", "SPY.US", days, volume=500_000)
+        found = {c.symbol for c in si.scan_archive(self.tmp / "archive",
+                                                   window_days=1825,
+                                                   today=date(2026, 8, 10))}
+        self.assertEqual(found, {"AAPL.US", "SPY.US"})
+
+    def test_progress_is_reported_to_the_operator(self) -> None:
+        """Проход по 11 842 файлам без признаков жизни выглядит зависанием.
+
+        Callback, а не `print`: библиотека в `src/` печатать не вправе.
+        """
+        archive = self.tmp / "many"
+        archive.mkdir()
+        days = self._business_days(3)
+        for i in range(1200):
+            self._write(archive, f"T{i:04d}.US", days, volume=1000)
+        seen: list[tuple] = []
+        si.scan_archive(archive, window_days=1825, today=date(2026, 8, 10),
+                        on_progress=lambda f, m: seen.append((f, m)))
+        self.assertTrue(seen, "оператор обязан видеть, что работа идёт")
+        self.assertEqual(seen[0][0], 1000)
+
     def test_selection_is_pure_and_needs_no_files(self) -> None:
         """Выбор отделён от сканирования НАМЕРЕННО.
 

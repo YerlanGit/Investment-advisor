@@ -864,7 +864,8 @@ class UniverseCandidate:
 
 
 def scan_archive(archive_dir, *, window_days: Optional[int] = None,
-                 today: Optional[date] = None) -> list[UniverseCandidate]:
+                 today: Optional[date] = None,
+                 on_progress=None) -> list[UniverseCandidate]:
     """Померить КАЖДУЮ бумагу архива: длина истории, свежесть, оборот.
 
     Дорогой проход (около 12 000 файлов), поэтому он отделён от выбора: сам
@@ -874,13 +875,22 @@ def scan_archive(archive_dir, *, window_days: Optional[int] = None,
     решают, класть ли БАР, а этот проход решает, класть ли БУМАГУ.  Гонять
     полный фильтр ради трёх агрегатов значило бы платить минутами за число,
     которое от него не изменится.
+
+    `on_progress(файлов_пройдено, бумаг_померено)` — необязательный callback для
+    оператора.  Именно callback, а не `print`: библиотека в `src/` печатать не
+    вправе (протокол провайдера, «только logger»), а проход по 11 842 файлам без
+    единого признака жизни выглядит как зависание.
     """
     window = int(window_days if window_days is not None
                  else env_int("HISTORY_LOOKBACK_DAYS", 1825, lo=90, hi=3650))
     cutoff = int(((today or date.today())
                   - timedelta(days=window)).strftime("%Y%m%d"))
     out: list[UniverseCandidate] = []
+    seen = 0
     for path in iter_archive_files(archive_dir):
+        seen += 1
+        if on_progress is not None and seen % 1000 == 0:
+            on_progress(seen, len(out))
         symbol = symbol_of_archive_file(path)
         market = mc.market_of(symbol)
         if market in (mc.NON_INSTRUMENT, mc.UNKNOWN_MARKET):
@@ -915,10 +925,51 @@ def _median(values: list[float]) -> float:
     return (ordered[middle - 1] + ordered[middle]) / 2.0
 
 
+@dataclass
+class UniverseSelection:
+    """Отобранное — и ПОЧЕМУ остальное не отобрано.
+
+    🔴 Счётчики существуют не для красоты (`AUDIT §−87`).  Первая редакция
+    возвращала голый список, и когда порог оказался недостижимым, команда
+    честно печатала «рабочий набор: 13 бумаг» — не соврав ни словом и не дав
+    ни одной зацепки.  Правило проекта «статус обязан называть то, чем его
+    можно опровергнуть» относится и к выводу команды, а не только к докам.
+    """
+
+    symbols: list[str] = field(default_factory=list)
+    measured: int = 0                  # сколько бумаг вообще померено
+    too_short: int = 0                 # не хватило истории
+    too_stale: int = 0                 # давно не торгуется
+    too_thin: int = 0                  # мало оборота
+    over_limit: int = 0                # прошли фильтры, но не влезли в потолок
+    min_bars_used: int = 0             # порог истории, ФАКТИЧЕСКИ применённый
+    busiest_bars: int = 0              # у самой полной бумаги архива
+
+
 def select_universe(candidates: Iterable[UniverseCandidate], *,
-                    min_bars: int, stale_after_days: int,
+                    min_bars: Optional[int] = None, stale_after_days: int,
                     min_turnover: float, limit: int,
                     as_of: Optional[int] = None) -> list[str]:
+    """Совместимый вход: только символы. Разбор причин — `explain_universe`."""
+    return explain_universe(candidates, min_bars=min_bars,
+                            stale_after_days=stale_after_days,
+                            min_turnover=min_turnover, limit=limit,
+                            as_of=as_of).symbols
+
+
+#: Доля от истории САМОЙ ПОЛНОЙ бумаги архива, ниже которой бумага считается
+#: молодой.  Доля, а не абсолютное число баров, — потому что абсолютное число
+#: уже один раз обнулило универсум: порог 1260 сравнивался со счётчиком, который
+#: окно в 1825 календарных дней физически не выдаёт (замер оператора: 1252 бара
+#: на бумагу).  Календарь рынка со всеми его праздниками и полуднями знает
+#: только сам архив, поэтому эталон берётся оттуда (`AUDIT §−87`).
+_MIN_HISTORY_FRACTION = 0.9
+
+
+def explain_universe(candidates: Iterable[UniverseCandidate], *,
+                     min_bars: Optional[int] = None, stale_after_days: int,
+                     min_turnover: float, limit: int,
+                     as_of: Optional[int] = None) -> UniverseSelection:
     """Отобрать бумаги в базу по ИЗМЕРЕННЫМ признакам, а не по списку.
 
     🔴 Списка тикеров здесь нет и быть не должно.  Захардкоженный «топ-500
@@ -939,16 +990,43 @@ def select_universe(candidates: Iterable[UniverseCandidate], *,
     контейнера с лимитом 2 GiB и `/tmp` в оперативной памяти уже опасно
     (`PHASE_08B §3.1`).  Отсекается наименее ликвидное — то есть то, чьё
     отсутствие пользователь заметит с наименьшей вероятностью.
+
+    🔴 `min_bars=None` означает «спросить у архива» — и это ДЕФОЛТ.  Абсолютное
+    число здесь уже стоило универсума: 1260 сравнивалось со счётчиком, который
+    окно в 1825 календарных дней не выдаёт никогда (замер: 1252).  Сколько
+    торговых дней в окне на самом деле, знает только сам рынок, поэтому
+    эталоном берётся самая полная бумага архива.
     """
-    pool = [c for c in candidates if c.bars >= int(min_bars)
-            and c.median_turnover >= float(min_turnover)]
+    pool = list(candidates)
+    out = UniverseSelection(measured=len(pool))
+    if not pool:
+        return out
+
+    out.busiest_bars = max(c.bars for c in pool)
+    out.min_bars_used = (int(min_bars) if min_bars
+                         else int(out.busiest_bars * _MIN_HISTORY_FRACTION))
+
+    survivors = []
+    for candidate in pool:
+        if candidate.bars < out.min_bars_used:
+            out.too_short += 1
+        elif candidate.median_turnover < float(min_turnover):
+            out.too_thin += 1
+        else:
+            survivors.append(candidate)
+
     newest = int(as_of) if as_of is not None else max(
         (c.last_date for c in pool), default=0)
     if newest:
         horizon = _shift_yyyymmdd(newest, -int(stale_after_days))
-        pool = [c for c in pool if c.last_date >= horizon]
-    pool.sort(key=lambda c: (-c.median_turnover, c.symbol))
-    return [c.symbol for c in pool[:int(limit)]]
+        fresh = [c for c in survivors if c.last_date >= horizon]
+        out.too_stale = len(survivors) - len(fresh)
+        survivors = fresh
+
+    survivors.sort(key=lambda c: (-c.median_turnover, c.symbol))
+    out.over_limit = max(0, len(survivors) - int(limit))
+    out.symbols = [c.symbol for c in survivors[:int(limit)]]
+    return out
 
 
 def _shift_yyyymmdd(yyyymmdd: int, delta_days: int) -> int:
