@@ -15,7 +15,7 @@ GCP Cloud Run (long-polling) · Cloud Function (RAG-ингест) · ChromaDB ·
 ## Верификация (обязательна перед каждым пушем)
 
 ```bash
-PYTHONPATH=src python -m pytest tests/ -q          # → 1485 passed, 2 xfailed
+PYTHONPATH=src python -m pytest tests/ -q          # → 1515 passed, 2 xfailed
 ```
 
 - Префикс `PYTHONPATH=src` **ОБЯЗАТЕЛЕН** — без него `import finance…` не находится
@@ -23,7 +23,7 @@ PYTHONPATH=src python -m pytest tests/ -q          # → 1485 passed, 2 xfailed
 - **Прогонов ДВА.** Второй — зеркало деплой-образа, в нём НЕТ каталога `design/`:
   ```bash
   cp -r src tests SYSTEM_PROMPT.md requirements*.txt <tmp>/ && cd <tmp>
-  PYTHONPATH=src python -m pytest tests/ -q        # → 1425 passed, 60 skipped, 2 xfailed
+  PYTHONPATH=src python -m pytest tests/ -q        # → 1455 passed, 60 skipped, 2 xfailed
   ```
   Зелёный GitHub CI НЕ означает, что деплой пройдёт: CI видит полный чекаут,
   Cloud Build — только образ. Разница 60 тестов — ровно те, что читают
@@ -104,7 +104,7 @@ L2 Engine    finance/engine/{risk_engine,portfolio_manager,market_preview}.py
              black_litterman.py · regime.py · period_returns.py · scenario_engine.py · data_checks.py
 L1 Data      freedom_portfolio/* · services/{fx_feed,macro_data}.py · finance/{broker_api,
              price_providers,sec_edgar,cds_feed,currency,demo_portfolio}.py · agent/rag_engine.py
-             finance/{stooq_ingest,stooq_store}.py — локальная база котировок Stooq
+             finance/{stooq_ingest,stooq_store,stooq_provider}.py — база котировок Stooq
 L0 Cross     finance/contracts.py · finance/asset_taxonomy.py · finance/leveraged.py · env_config.py
              finance/market_calendar.py (рынок·валюта·календарь) · finance/stooq_symbols.py
 ```

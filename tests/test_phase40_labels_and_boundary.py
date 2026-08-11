@@ -149,11 +149,23 @@ class ProviderAllowlistFailsClosedTest(unittest.TestCase):
         self.assertEqual(type(self._resolve("freedom")).__name__, "TradernetProvider")
         self.assertEqual(type(self._resolve("demo")).__name__, "DemoProvider")
 
-    def test_manual_still_guarded_separately(self):
-        """Ручной ввод отвергается своей веткой (провайдер не реализован)."""
+    def test_manual_is_served_by_its_own_branch_never_the_broker(self):
+        """Ручной ввод идёт СВОЕЙ веткой и получает не брокера (I-12).
+
+        Прежняя редакция проверяла отказ «провайдер не реализован» — то есть
+        состояние ДО MP-09, а не правило. Провайдер написан; правило прежнее.
+        """
+        got = self._resolve("manual")
+        self.assertEqual(type(got).__name__, "StooqProvider")
+
+    def test_manual_refuses_an_unknown_provider_name(self):
+        """Ветка `manual` остаётся fail-closed для незнакомого имени."""
+        from unittest.mock import patch
+
         from finance.price_providers import ProviderUnavailable
-        with self.assertRaises(ProviderUnavailable):
-            self._resolve("manual")
+        with patch.dict("os.environ", {"PRICE_PROVIDER_MANUAL": "eodhd"}):
+            with self.assertRaises(ProviderUnavailable):
+                self._resolve("manual")
 
     def test_empty_source_defaults_to_freedom(self):
         """Пустое значение — исторический дефолт, не «неизвестный источник»."""

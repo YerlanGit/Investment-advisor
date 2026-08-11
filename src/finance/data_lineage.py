@@ -94,14 +94,50 @@ def _row(name: str, source: str, method: str, status: str, *,
 
 # ── Per-source checkers ──────────────────────────────────────────────────────
 
+#: Человеческое имя источника цен для строки CoVe.
+#:
+#: 🔴 Подпись берётся из `ProviderResult.source`, а не зашита константой
+#: (F-6, `AUDIT §−84`).  Пока источник был один, константа была верна; с
+#: приходом `StooqProvider` она стала ЛОЖНЫМ УТВЕРЖДЕНИЕМ в тексте отчёта:
+#: ручной портфель подписывался бы «Tradernet (Freedom Broker)», то есть отчёт
+#: заявлял бы пользователю связь с брокером, которой у него нет.  Это тот же
+#: инвариант I-12, только на слое текста, а не данных.
+_PRICE_SOURCE_LABELS = {
+    "tradernet": "Tradernet (Freedom Broker)",
+    "stooq":     "Stooq (публичные котировки)",
+    "demo":      "Витрина (синтетические ряды)",
+}
+
+
+def _price_source_label(results: dict) -> str:
+    """Кто на самом деле дал цены этого отчёта.
+
+    Неизвестное имя НЕ подменяется брокером: показывается как есть.  Молчаливая
+    подстановка знакомого имени здесь — ровно та ошибка, которую чинит F-6.
+    """
+    history = results.get("history_result")
+    single = getattr(history, "single_source", None)
+    name = single() if callable(single) else None
+    if not name:
+        # Смешанного источника быть не должно (I-13); если он всё же случился,
+        # отчёт обязан это ПОКАЗАТЬ, а не выбрать одно из имён.
+        sources = getattr(history, "source", None) or {}
+        distinct = sorted({str(v) for v in sources.values()})
+        if len(distinct) > 1:
+            return "🔴 несколько источников: " + ", ".join(distinct)
+        return "источник цен не объявлен"
+    return _PRICE_SOURCE_LABELS.get(str(name).lower(), str(name))
+
+
 def _tradernet_status(results: dict, today: date) -> dict:
     """Last close-date freshness from history_result.data."""
     history = results.get("history_result")
     data    = getattr(history, "data", None) if history is not None else None
+    source  = _price_source_label(results)
     if data is None or len(data) == 0:
         return _row(
             name   = "Цены и история активов",
-            source = "Tradernet (Freedom Broker)",
+            source = source,
             method = f"Daily CLOSE · {_lookback_days()}d window",
             status = "error",
             note   = "no price data loaded",
@@ -114,7 +150,7 @@ def _tradernet_status(results: dict, today: date) -> dict:
         status, note = "ok", ""
     return _row(
         name   = "Цены и история активов",
-        source = "Tradernet (Freedom Broker)",
+        source = source,
         method = f"Daily CLOSE · {_lookback_days()}d window · ATR via OHLC (fallback |ΔClose|)",
         status = status,
         as_of  = last_dt.isoformat(),

@@ -35,6 +35,10 @@ import numpy as np
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field
 
+# L0 Cross: `asset_taxonomy` — SSOT ФАКТОВ о классе инструмента и сам не тянет
+# ничего.  Своя проверка «это крипта?» здесь была бы вторым справочником (Т-4).
+from finance.asset_taxonomy import is_crypto
+
 logger = logging.getLogger(__name__)
 
 # ── Cache (per-process, on /tmp so Cloud Run can write) ──────────────────────
@@ -122,11 +126,8 @@ def get_candles(
         logger.warning("Tradernet getHloc вернул пустую серию для %s", ticker)
         return series
 
-    # 3. Apply known-splits table (authoritative)
-    series = _apply_known_splits(ticker, series)
-
-    # 4. Heuristic split detector (catches anything KNOWN_SPLITS missed)
-    series = _detect_and_adjust_splits(ticker, series)
+    # 3-4. Known-splits table (authoritative) + heuristic detector
+    series = apply_split_conventions(ticker, series)
 
     # 5. Persist to cache
     if use_cache:
@@ -500,6 +501,24 @@ def _apply_known_splits(ticker: str, series: pd.Series) -> pd.Series:
 _SPLIT_RETURN_THRESHOLD = math.log(1.5)   # |log return| > 0.405 ≈ 33% jump
 
 
+def apply_split_conventions(ticker: str, series: pd.Series) -> pd.Series:
+    """Привести ряд к конвенции `SPLIT_ADJUSTED`. Идемпотентна (I-6).
+
+    Публичный вход к двум слоям коррекции: таблица `KNOWN_SPLITS` (авторитет) и
+    эвристический детектор (ловит то, чего в таблице нет).  Существует потому,
+    что слои нужны ВТОРОМУ модулю — `finance.stooq_provider`, — а приватное имя
+    между модулями не ходит (`tests/test_layering.py`).
+
+    🔴 **Оба слоя сами ищут ступеньку и без неё молчат**, поэтому функция
+    идемпотентна, а сырой и уже скорректированный ряд дают на выходе один и тот
+    же результат.  Именно это делает законным объявление `SPLIT_ADJUSTED`
+    провайдером, чей источник конвенцию не документирует: конвенция объявляется
+    про ВЫХОД, а не про вход (`AUDIT §−83`, `PHASE_08B §7.6`).
+    """
+    series = _apply_known_splits(ticker, series)
+    return _detect_and_adjust_splits(ticker, series)
+
+
 def _detect_and_adjust_splits(ticker: str, series: pd.Series) -> pd.Series:
     """
     Detect single-day price jumps that look like splits and back-adjust.
@@ -512,7 +531,18 @@ def _detect_and_adjust_splits(ticker: str, series: pd.Series) -> pd.Series:
     rare for liquid US equities (>200 sigmas for SPY), and even when it does
     happen (e.g. earnings shock), no integer split ratio fits cleanly so the
     heuristic skips it.
+
+    🔴 **Крипта исключена (Т-3, `PHASE_09 §6.1`).**  Довод «33 % за день бывает
+    только при сплите» верен для ликвидных акций США и ЛОЖЕН для криптоактивов,
+    где такие движения штатны.  Замер на воспроизведении: ряд
+    `[40000, 39000, 38000, 19000]` (падение вдвое за сессию) эвристика читает
+    как сплит 2:1 и делит всю предысторию пополам — падение ИСЧЕЗАЕТ из
+    доходностей, а с ним волатильность и ковариация крипто-колонки.  Причём
+    удвоение снапится на `1/2` идеально, то есть защита «отношение не похоже на
+    целое» здесь не срабатывает вовсе.  `BTC-USD` есть в демо-портфеле.
     """
+    if is_crypto(ticker):
+        return series
     if len(series) < 2:
         return series
 

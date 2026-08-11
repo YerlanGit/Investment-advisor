@@ -779,10 +779,17 @@ class ManualSourceBoundaryTest(ManualFlowTestBase):
                 self.assertEqual(seen, [source])
 
     async def test_provider_for_manual_is_not_the_broker(self) -> None:
-        """Гард юридической границы жив и без бота."""
-        from finance.price_providers import ProviderUnavailable, provider_for_source
-        with self.assertRaises(ProviderUnavailable):
-            provider_for_source("manual")
+        """Гард юридической границы жив и без бота.
+
+        До MP-09 тест проверял ОТКАЗ («провайдер не реализован») — это пинило
+        границу фазы, а не инвариант. Провайдер написан, отказа больше нет, и
+        проверять надо то, что переживёт следующую фазу: чем бы `manual` ни
+        обслуживался, это не брокерский фид (I-12).
+        """
+        from finance.price_providers import TradernetProvider, provider_for_source
+        got = provider_for_source("manual", client=object())
+        self.assertNotIsInstance(got, TradernetProvider)
+        self.assertEqual(got.name, "stooq")
 
 
 # ═════════════════════════════════════════════════════════════════════════════

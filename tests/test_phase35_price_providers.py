@@ -348,10 +348,24 @@ class ProviderSelectionTest(unittest.TestCase):
                 provider_for_source("manual", client=object())
             self.assertIn("I-12", str(ctx.exception))
 
-    def test_manual_stooq_not_implemented_yet(self):
-        """До Фазы 9 ручной портфель честно отказывает, а не молча падает."""
-        from finance.price_providers import ProviderUnavailable, provider_for_source
+    def test_manual_selects_stooq_provider(self):
+        """MP-09: ручной портфель обслуживает Stooq — и больше никто.
+
+        Тест-предшественник (`test_manual_stooq_not_implemented_yet`) пинил
+        ГРАНИЦУ ФАЗЫ: до Фазы 09 `manual` обязан был честно отказать. Граница
+        сдвинулась, поэтому тест заменён на свою противоположность, а не удалён:
+        утверждение «ручной ввод обслуживается ровно одним провайдером»
+        продолжает проверяться.
+        """
+        from finance.price_providers import provider_for_source
+        from finance.stooq_provider import StooqProvider
         with patch.dict("os.environ", {"PRICE_PROVIDER_MANUAL": "stooq"}):
+            self.assertIsInstance(provider_for_source("manual"), StooqProvider)
+
+    def test_manual_unknown_provider_still_refuses(self):
+        """Незнакомое имя провайдера — отказ, а не подстановка чего попало."""
+        from finance.price_providers import ProviderUnavailable, provider_for_source
+        with patch.dict("os.environ", {"PRICE_PROVIDER_MANUAL": "eodhd"}):
             with self.assertRaises(ProviderUnavailable):
                 provider_for_source("manual")
 
