@@ -15,7 +15,7 @@ GCP Cloud Run (long-polling) · Cloud Function (RAG-ингест) · ChromaDB ·
 ## Верификация (обязательна перед каждым пушем)
 
 ```bash
-PYTHONPATH=src python -m pytest tests/ -q          # → 1528 passed, 2 xfailed
+PYTHONPATH=src python -m pytest tests/ -q          # → 1547 passed, 2 xfailed
 ```
 
 - Префикс `PYTHONPATH=src` **ОБЯЗАТЕЛЕН** — без него `import finance…` не находится
@@ -23,7 +23,7 @@ PYTHONPATH=src python -m pytest tests/ -q          # → 1528 passed, 2 xfailed
 - **Прогонов ДВА.** Второй — зеркало деплой-образа, в нём НЕТ каталога `design/`:
   ```bash
   cp -r src tests SYSTEM_PROMPT.md requirements*.txt <tmp>/ && cd <tmp>
-  PYTHONPATH=src python -m pytest tests/ -q        # → 1468 passed, 60 skipped, 2 xfailed
+  PYTHONPATH=src python -m pytest tests/ -q        # → 1488 passed, 60 skipped, 2 xfailed
   ```
   Зелёный GitHub CI НЕ означает, что деплой пройдёт: CI видит полный чекаут,
   Cloud Build — только образ. Разница 60 тестов — ровно те, что читают
@@ -75,7 +75,8 @@ PYTHONPATH=src python -m pytest tests/ -q          # → 1528 passed, 2 xfailed
   У них разные юридические основания (I-12/I-14), поэтому `manual` не вправе
   читать витрину с `origin='tradernet'` — как и сам Tradernet.
 - База котировок Stooq: пишет ТОЛЬКО `stooq_ingest` из процесса оператора, бот
-  открывает `mode=ro`. Формы символа меняют НОТАЦИЮ, но не ПЛОЩАДКУ: кандидат
+  открывает `mode=ro` и читает ЛОКАЛЬНУЮ КОПИЮ (`stooq_store._local_copy`):
+  SQLite поверх gcsfuse — это range-запрос на страницу, сотни на отчёт. Формы символа меняют НОТАЦИЮ, но не ПЛОЩАДКУ: кандидат
   `{base}.US` для иностранной бумаги подсунет ADR вместо листинга (`§−77`).
   Свежесть считается в ТОРГОВЫХ днях рынка бумаги, а не в календарных.
 - Крупное изменение → строка «Было/Стало» в `docs/audit/AUDIT.md`.

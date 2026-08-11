@@ -23,7 +23,7 @@ from finance.price_providers import (PriceConvention, PriceProvider,
                                      ProviderResult, provider_for_source)
 from finance.stooq_provider import (MAX_MARKET_STALE_DAYS,
                                     MAX_STALE_TRADING_DAYS, StooqProvider)
-from finance.stooq_store import StooqStore
+from finance.stooq_store import StooqStore, _local_copy
 
 HEADER = ("<TICKER>,<PER>,<DATE>,<TIME>,<OPEN>,<HIGH>,<LOW>,<CLOSE>,"
           "<VOL>,<OPENINT>")
@@ -430,6 +430,110 @@ class MixedConventionTest(unittest.TestCase):
         from finance.price_providers import TradernetProvider
 
         self.assertEqual(StooqProvider.convention, TradernetProvider.convention)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Локальная копия базы (`AUDIT §−86`)
+# ═════════════════════════════════════════════════════════════════════════════
+
+class LocalCopyTest(_StoreFixture):
+    """🔴 В проде база лежит на gcsfuse, а SQLite читает случайным доступом.
+
+    Каждая страница превращается в отдельный range-запрос к объектному
+    хранилищу, а один отчёт делает их сотни. Механизм копии был спроектирован
+    (`PHASE_08B §3.2`) и описан в docstring `_bump_generation` — но написан не
+    был: бот честно читал SQLite прямо с сетевого тома.
+    """
+
+    def _with_limits(self, **env):
+        """Переопределить пороги на время теста.
+
+        Без перезагрузки модуля: пороги читаются функцией на КАЖДЫЙ вызов, и
+        перезагрузка оставила бы у `stooq_provider` ссылку на старый класс.
+        """
+        import os
+        from unittest.mock import patch
+
+        patcher = patch.dict(os.environ, env)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_small_database_is_read_in_place(self) -> None:
+        """Ниже порога копия только тратит память: файл и так читается разом."""
+        self.build({"SPY.US": self.flat("SPY.US")})
+        self.assertEqual(_local_copy(self.db), self.db)
+
+    def test_large_database_is_copied_once_and_reused(self) -> None:
+        self._with_limits(STOOQ_LOCAL_COPY_MIN_MB="0",
+                          STOOQ_LOCAL_COPY_DIR=str(self.tmp / "cache"))
+        self.build({"SPY.US": self.flat("SPY.US")})
+        first = _local_copy(self.db)
+        self.assertNotEqual(first, self.db)
+        self.assertTrue(first.exists())
+        marker = first.stat().st_mtime_ns
+        second = _local_copy(self.db)
+        self.assertEqual(second, first)
+        self.assertEqual(second.stat().st_mtime_ns, marker,
+                         "вторая копия не должна перезаписывать первую")
+
+    def test_new_publication_replaces_the_copy(self) -> None:
+        """Оператор залил новую базу — контейнер обязан это заметить.
+
+        Иначе инстанс, проживший неделю, отдавал бы недельные цены и не знал бы
+        об этом. Признак берётся `stat`-ом: открывать удалённую базу ради
+        версии значило бы платить сетью за проверку, которая должна быть
+        дешёвой.
+        """
+        import os
+        import time
+
+        self._with_limits(STOOQ_LOCAL_COPY_MIN_MB="0",
+                          STOOQ_LOCAL_COPY_DIR=str(self.tmp / "cache"))
+        self.build({"SPY.US": self.flat("SPY.US")})
+        copied = _local_copy(self.db)
+
+        def instruments(path) -> set[str]:
+            with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as conn:
+                return {r[0] for r in conn.execute(
+                    "SELECT source_symbol FROM instruments")}
+
+        self.assertEqual(instruments(copied), {"SPY.US"})
+
+        self.build({"SPY.US": self.flat("SPY.US"),
+                    "QQQ.US": self.flat("QQQ.US", price=300.0)})
+        os.utime(self.db, (time.time() + 10, time.time() + 10))
+        again = _local_copy(self.db)
+        # Сверяется СОДЕРЖИМОЕ, а не размер файла: SQLite переиспользует
+        # страницы, и вторая бумага может уместиться без роста файла — тест на
+        # размер прошёл бы на неработающем обновлении.
+        self.assertEqual(instruments(again), {"SPY.US", "QQQ.US"},
+                         "копия обязана обновиться вслед за исходником")
+
+    def test_oversized_database_is_not_pulled_into_ram(self) -> None:
+        """`/tmp` в Cloud Run — оперативная память при лимите 2 GiB.
+
+        Оператор, собравший базу флагом `--all` (≈900 МБ), обязан получить
+        предупреждение и чтение на месте, а не OOM контейнера.
+        """
+        # Потолок 0 МБ: любой непустой файл его превышает, и ветка
+        # проверяется без фикстуры на сотни мегабайт.
+        self._with_limits(STOOQ_LOCAL_COPY_MIN_MB="0",
+                          STOOQ_LOCAL_COPY_MAX_MB="0",
+                          STOOQ_LOCAL_COPY_DIR=str(self.tmp / "cache"))
+        self.build({"SPY.US": self.flat("SPY.US")})
+        with self.assertLogs("finance.stooq_store", level="WARNING") as logs:
+            self.assertEqual(_local_copy(self.db), self.db)
+        self.assertIn("потолк", "\n".join(logs.output))
+
+    def test_copy_failure_never_costs_the_report(self) -> None:
+        """Сбой копирования — не ошибка: читаем исходник и пишем в лог."""
+        self._with_limits(STOOQ_LOCAL_COPY_MIN_MB="0",
+                          STOOQ_LOCAL_COPY_DIR="/proc/недоступно")
+        self.build({"SPY.US": self.flat("SPY.US")})
+        self.assertEqual(_local_copy(self.db), self.db)
+        result = StooqProvider(self.db, today=self.last_day).fetch(["SPY.US"],
+                                                                   days=1825)
+        self.assertEqual(result.loaded, ["SPY.US"])
 
 
 # ═════════════════════════════════════════════════════════════════════════════

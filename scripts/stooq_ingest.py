@@ -143,6 +143,35 @@ def _core_symbols(conn) -> list[str] | None:
         return None
 
 
+def _print_universe(report, args) -> None:
+    """Почему бумаг отобрано именно столько — по каждому критерию.
+
+    🔴 Без этой сводки команда однажды напечатала «рабочий набор: 13 бумаг», не
+    соврав ни словом и не дав ни одной зацепки: порог истории оказался выше
+    того, что окно физически выдаёт, и молча отсеял ВСЁ (`AUDIT §−87`).
+    Правило «статус обязан называть то, чем его можно опровергнуть» относится и
+    к выводу команды.
+    """
+    print(f"  померено бумаг ........ {report.measured}")
+    print(f"  порог истории ......... {report.min_bars_used} баров "
+          f"(у самой полной бумаги архива — {report.busiest_bars})")
+    print(f"    короткая история .... {report.too_short}")
+    print(f"    давно не торгуются .. {report.too_stale}")
+    print(f"    мало оборота ........ {report.too_thin}")
+    print(f"    не влезли в потолок . {report.over_limit}")
+    print(f"  ОТОБРАНО .............. {len(report.symbols)}")
+    if report.symbols:
+        return
+    if not report.measured:
+        print("  🔴 архив не дал НИ ОДНОЙ бумаги — проверьте путь --archive: "
+              "внутри должны лежать папки вида «nasdaq stocks».")
+        return
+    print("  🔴 фильтры отсеяли ВСЁ. Самый частый виновник назван выше по "
+          "счётчику; ослабьте соответствующий порог:")
+    print(f"     --min-bars (сейчас {args.min_bars or 'авто'}) · "
+          f"--stale-days {args.stale_days} · --min-turnover {args.min_turnover:g}")
+
+
 def cmd_bootstrap(args) -> int:
     if not _require_archive(args.archive):
         return 1
@@ -165,11 +194,18 @@ def cmd_bootstrap(args) -> int:
         else:
             print(f"ядро: {len(symbols)} бумаг · сканирую архив, чтобы добрать "
                   f"ликвидные (потолок {args.universe_limit})…")
-            picked = si.select_universe(
-                si.scan_archive(args.archive, window_days=args.window),
+
+            def progress(files: int, measured: int) -> None:
+                print(f"   … прочитано файлов {files}, померено бумаг {measured}",
+                      flush=True)
+
+            report = si.explain_universe(
+                si.scan_archive(args.archive, window_days=args.window,
+                                on_progress=progress),
                 min_bars=args.min_bars, stale_after_days=args.stale_days,
                 min_turnover=args.min_turnover, limit=args.universe_limit)
-            for symbol in picked:
+            _print_universe(report, args)
+            for symbol in report.symbols:
                 if symbol not in symbols:
                     symbols.append(symbol)
             print(f"рабочий набор: {len(symbols)} бумаг "
@@ -194,6 +230,42 @@ def cmd_apply(args) -> int:
     code = _print_c1(conn)
     conn.close()
     return 1 if result.fatal_files else code
+
+
+def cmd_prune(args) -> int:
+    """Вычистить бумаги с обрывочной историей — ремонт после `AUDIT §−88`."""
+    if not Path(args.db).exists():
+        print(f"🔴 базы котировок нет по пути {args.db}")
+        return 1
+    conn = si.connect(args.db)
+    si.ensure_schema(conn)
+    try:
+        keep = _core_symbols(conn)
+        if keep is None:
+            return 1
+    except Exception as exc:                           # noqa: BLE001
+        print(f"🔴 не могу определить ядро: {exc}")
+        conn.close()
+        return 1
+    report = si.prune_thin_instruments(conn, min_bars=args.min_bars,
+                                       keep=keep, dry_run=args.dry_run)
+    conn.close()
+    print(f"  порог истории ......... {report.min_bars_used} баров "
+          f"(у самой полной бумаги базы — {report.busiest_bars})")
+    print(f"  под нож ............... {len(report.removed)} бумаг, "
+          f"{report.bars_removed} баров")
+    print(f"  остаётся .............. {report.kept} бумаг")
+    for symbol in report.removed[:15]:
+        print(f"    − {symbol}")
+    if len(report.removed) > 15:
+        print(f"    … и ещё {len(report.removed) - 15}")
+    if args.dry_run:
+        print("режим --dry-run: база НЕ изменена. Уберите флаг, чтобы удалить.")
+    elif report.removed:
+        print("✅ база вычищена и сжата. Перезалейте её в облако (§7).")
+    else:
+        print("✅ чистить нечего.")
+    return 0
 
 
 def cmd_backfill(args) -> int:
@@ -377,9 +449,11 @@ def build_parser() -> argparse.ArgumentParser:
                            "C-1, но отчёт по портфелю НЕ построится")
     boot.add_argument("--universe-limit", type=int, default=800,
                       help="потолок числа бумаг сверх ядра (≈75 КБ на бумагу)")
-    boot.add_argument("--min-bars", type=int, default=1260,
-                      help="минимум баров в окне: короткая история схлопывает "
-                           "окно регрессии всей панели")
+    boot.add_argument("--min-bars", type=int, default=0,
+                      help="минимум баров в окне; 0 — АВТО: 90%% от самой "
+                           "полной бумаги архива. Абсолютное число уже один раз "
+                           "обнулило универсум (порог 1260 против физических "
+                           "1252), поэтому эталон берётся из данных")
     boot.add_argument("--stale-days", type=int, default=10,
                       help="сколько дней бумага вправе молчать, считаясь живой")
     boot.add_argument("--min-turnover", type=float, default=1_000_000.0,
@@ -392,6 +466,14 @@ def build_parser() -> argparse.ArgumentParser:
     app.add_argument("--applied", default=str(DEFAULT_ROOT / "applied"))
     app.add_argument("--rejected", default=str(DEFAULT_ROOT / "rejected"))
     app.set_defaults(func=cmd_apply)
+
+    prune = sub.add_parser("prune",
+                           help="вычистить бумаги с обрывочной историей")
+    prune.add_argument("--min-bars", type=int, default=0,
+                       help="0 — АВТО: 90%% от самой полной бумаги базы")
+    prune.add_argument("--dry-run", action="store_true",
+                       help="показать, что удалилось бы, ничего не меняя")
+    prune.set_defaults(func=cmd_prune)
 
     back = sub.add_parser("backfill", help="догрузить историю по бумаге")
     back.add_argument("--ticker", required=True)

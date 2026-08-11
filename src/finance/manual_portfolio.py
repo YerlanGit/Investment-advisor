@@ -50,6 +50,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass, field
 from typing import Optional
@@ -58,6 +59,8 @@ import pandas as pd
 
 from finance.broker_api import classify_instrument, strip_exchange_suffix
 from finance.currency import infer_asset_currency
+
+logger = logging.getLogger(__name__)
 
 #: Колонки контрактного фрейма — РОВНО как у `FreedomConnector._to_dataframe`,
 #: включая порядок. Расхождение здесь означает, что ручной путь пойдёт по
@@ -461,10 +464,15 @@ class PreflightCoverage:
     трети позиций нет истории, — худший из вариантов.
     """
 
-    #: Тикеры, по которым история В КЭШЕ есть (в разрешённом виде движка).
+    #: Тикеры, по которым история у источника ЕСТЬ (в виде движка).
     covered: list[str] = field(default_factory=list)
-    #: Тикеры без кэша: их придётся качать, и они МОГУТ не найтись у провайдера.
+    #: Тикеры, истории по которым не нашлось.
     unknown: list[str] = field(default_factory=list)
+    #: 🔴 Ответил ли источник вообще. Различать обязательно: «в базе этой бумаги
+    #: нет» и «базы нет» — разные утверждения, и второе не даёт права говорить
+    #: пользователю про его бумаги ничего. Без этого флага отсутствующая база
+    #: выглядела бы как «ни одной вашей бумаги мы не знаем».
+    answered: bool = False
     #: Доля стоимости покупки, покрытая кэшем, ОТДЕЛЬНО ПО ВАЛЮТАМ.
     #: Разные валюты не складываются: на этом шаге курса ещё нет (он потребовал
     #: бы сети), а сложить тенге с долларами «как есть» — ровно тот дефект F-2,
@@ -477,12 +485,41 @@ class PreflightCoverage:
 
     def as_dict(self) -> dict:
         return {
+            "answered": bool(self.answered),
             "covered": sorted(self.covered),
             "unknown": sorted(self.unknown),
             "cost_share_by_currency": {
                 k: round(v, 4) for k, v in sorted(self.cost_share_by_currency.items())
             },
         }
+
+
+def _default_coverage_lookup():
+    """Кто отвечает на вопрос «есть ли история у этой бумаги».
+
+    Порядок: своя база провайдера, если она у него есть; иначе кэш Фазы 1.
+    Отказ базы (её ещё не собрали) НЕ роняет экран подтверждения — pre-flight
+    подсказка, а не условие расчёта, и молчание здесь честнее исключения.
+    """
+    from finance.price_providers import manual_provider_name
+
+    if manual_provider_name() == "stooq":
+        def store_lookup(tickers, _days):
+            from finance.stooq_store import StooqStore, StoreUnavailable
+            try:
+                with StooqStore.open_readonly() as store:
+                    return {t: (0 if store.resolve(t) is None else 1)
+                            for t in tickers}
+            except StoreUnavailable as exc:
+                logger.info("pre-flight без базы котировок: %s", exc)
+                return {}
+        return store_lookup
+
+    from freedom_portfolio.history import cached_observations as _cached
+
+    def cache_lookup(tickers, days_):
+        return _cached(tickers, days_, provider=manual_provider_name())
+    return cache_lookup
 
 
 def preflight_coverage(report: ParseReport, engine, *,
@@ -497,20 +534,25 @@ def preflight_coverage(report: ParseReport, engine, *,
     категория называется `unknown`, а не `missing`: обещать пользователю, что
     бумага не найдётся, мы не вправе.
 
-    Спрашивается кэш ИМЕННО того провайдера, который будет обслуживать ручной
-    отчёт (`manual_provider_name`), а не провайдера по умолчанию: кэш Фазы 1
-    ключуется провайдером, и ответ брокерского кэша здесь был бы ответом про
-    данные, которые ручному портфелю показывать нельзя (I-12). Следствие,
-    которое надо принять честно: до Фазы 9 этот кэш пуст всегда, поэтому
-    pre-flight отвечает «не знаю» по каждой бумаге — и молчит, вместо того
-    чтобы придумывать.
+    Спрашивается источник ИМЕННО того провайдера, который будет обслуживать
+    ручной отчёт (`manual_provider_name`), а не провайдер по умолчанию: ответ
+    брокерского кэша здесь был бы ответом про данные, которые ручному портфелю
+    показывать нельзя (I-12).
+
+    🔴 **Источник ответа сменился с кэша на БАЗУ** (`AUDIT §−86`). Прежняя
+    редакция спрашивала кэш Фазы 1 и честно предупреждала: «до Фазы 9 этот кэш
+    пуст всегда, поэтому pre-flight отвечает „не знаю“ по каждой бумаге».
+    Фаза 9 закрыта — но `StooqProvider` читает локальную SQLite и кэш Фазы 1 НЕ
+    ЗАПОЛНЯЕТ, поэтому «не знаю» осталось бы навсегда, а экран подтверждения
+    молчал бы про непокрытые бумаги вечно.
+
+    База отвечает лучше кэша по существу: она знает не «спрашивали ли мы эту
+    бумагу раньше», а **есть ли она вообще** — то есть даёт `covered`/`missing`
+    вместо `covered`/`unknown`, и делает это без сети и без задержки.  Кэш
+    остаётся запасным ответом для провайдера, у которого своей базы нет.
     """
     if cached_lookup is None:                            # pragma: no cover
-        from finance.price_providers import manual_provider_name
-        from freedom_portfolio.history import cached_observations as _cached
-
-        def cached_lookup(tickers, days_):
-            return _cached(tickers, days_, provider=manual_provider_name())
+        cached_lookup = _default_coverage_lookup()
 
     risky = [p for p in report.positions if not p.is_cash]
     resolved_by_ticker: dict[str, str] = {}
@@ -519,9 +561,13 @@ def preflight_coverage(report: ParseReport, engine, *,
         if resolved_list:
             resolved_by_ticker[pos.ticker] = resolved_list[0]
 
-    observations = cached_lookup(sorted(set(resolved_by_ticker.values())), days)
+    asked = sorted(set(resolved_by_ticker.values()))
+    observations = cached_lookup(asked, days) or {}
 
     result = PreflightCoverage()
+    # Пустой ответ при непустом вопросе означает «источник недоступен», а не
+    # «ни одной бумаги нет»: разница в том, вправе ли экран что-то утверждать.
+    result.answered = bool(observations) or not asked
     cost_total: dict[str, float] = {}
     cost_covered: dict[str, float] = {}
     for pos in risky:
