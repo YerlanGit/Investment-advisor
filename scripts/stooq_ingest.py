@@ -232,6 +232,42 @@ def cmd_apply(args) -> int:
     return 1 if result.fatal_files else code
 
 
+def cmd_prune(args) -> int:
+    """Вычистить бумаги с обрывочной историей — ремонт после `AUDIT §−88`."""
+    if not Path(args.db).exists():
+        print(f"🔴 базы котировок нет по пути {args.db}")
+        return 1
+    conn = si.connect(args.db)
+    si.ensure_schema(conn)
+    try:
+        keep = _core_symbols(conn)
+        if keep is None:
+            return 1
+    except Exception as exc:                           # noqa: BLE001
+        print(f"🔴 не могу определить ядро: {exc}")
+        conn.close()
+        return 1
+    report = si.prune_thin_instruments(conn, min_bars=args.min_bars,
+                                       keep=keep, dry_run=args.dry_run)
+    conn.close()
+    print(f"  порог истории ......... {report.min_bars_used} баров "
+          f"(у самой полной бумаги базы — {report.busiest_bars})")
+    print(f"  под нож ............... {len(report.removed)} бумаг, "
+          f"{report.bars_removed} баров")
+    print(f"  остаётся .............. {report.kept} бумаг")
+    for symbol in report.removed[:15]:
+        print(f"    − {symbol}")
+    if len(report.removed) > 15:
+        print(f"    … и ещё {len(report.removed) - 15}")
+    if args.dry_run:
+        print("режим --dry-run: база НЕ изменена. Уберите флаг, чтобы удалить.")
+    elif report.removed:
+        print("✅ база вычищена и сжата. Перезалейте её в облако (§7).")
+    else:
+        print("✅ чистить нечего.")
+    return 0
+
+
 def cmd_backfill(args) -> int:
     if not _require_archive(args.archive):
         return 1
@@ -430,6 +466,14 @@ def build_parser() -> argparse.ArgumentParser:
     app.add_argument("--applied", default=str(DEFAULT_ROOT / "applied"))
     app.add_argument("--rejected", default=str(DEFAULT_ROOT / "rejected"))
     app.set_defaults(func=cmd_apply)
+
+    prune = sub.add_parser("prune",
+                           help="вычистить бумаги с обрывочной историей")
+    prune.add_argument("--min-bars", type=int, default=0,
+                       help="0 — АВТО: 90%% от самой полной бумаги базы")
+    prune.add_argument("--dry-run", action="store_true",
+                       help="показать, что удалилось бы, ничего не меняя")
+    prune.set_defaults(func=cmd_prune)
 
     back = sub.add_parser("backfill", help="догрузить историю по бумаге")
     back.add_argument("--ticker", required=True)

@@ -52,9 +52,24 @@ SCHEMA_VERSION = 1
 #: требует именно из-за соседства двух происхождений).
 SOURCE_NAME = "stooq"
 
-#: Конвенция корректировок Stooq **НЕ ИЗМЕРЕНА** (`STOOQ_CONVENTION §4`).
-#: Хранится строкой в справочнике, а не подставляется в отчёт: пока замера нет,
-#: провайдер обязан отказаться объявлять конвенцию, а не выдумать её.
+#: Конвенция корректировок ряда, как он лежит В ФАЙЛЕ.
+#:
+#: ✅ **ИЗМЕРЕНО 2026-08-11 оператором** на полном архиве (`STOOQ_CONVENTION §4`):
+#: все семь событий `KNOWN_SPLITS` прошли без ступеньки, отношения 0.98–1.08 при
+#: ожидаемых 3–20.  Значит Stooq отдаёт ряд УЖЕ скорректированным на сплиты.
+#:
+#: 🔴 Это про ОСЬ СПЛИТОВ и только про неё.  Ось дивидендов
+#: (`SPLIT_ADJUSTED` против `TOTAL_RETURN`) не измерена ни здесь, ни у
+#: Tradernet — там она объявлена рассуждением «дивиденды не корректируются
+#: нигде в коде».  Мы принимаем то же основание и записываем его как
+#: ограничение, а не как замер.
+#:
+#: Базы, собранные ДО замера, несут прежнее значение `unmeasured`, пока их не
+#: пересоберут; колонка ничем не читается (провайдер объявляет конвенцию своего
+#: ВЫХОДА), поэтому миграция не нужна — достаточно квартального ре-бутстрапа.
+CONVENTION_SPLIT_ADJUSTED = "split_adjusted"
+
+#: Прежнее значение — оставлено ради баз, собранных до замера.
 CONVENTION_UNMEASURED = "unmeasured"
 
 #: Ниже этого числа принятых US-баров будний файл считается НЕДОКАЧАННЫМ.
@@ -430,34 +445,51 @@ def parse_history_file(path, *, window_days: int,
 # ═════════════════════════════════════════════════════════════════════════════
 
 def _instrument_id(conn: sqlite3.Connection, symbol: str,
-                   cache: dict[str, int]) -> int:
-    """id инструмента, создавая справочную запись при первой встрече."""
+                   cache: dict[str, Optional[int]], *,
+                   allow_new: bool) -> Optional[int]:
+    """id инструмента; `None` — бумаги нет в базе и заводить её нельзя.
+
+    🔴 `allow_new` разделяет два РАЗНЫХ действия, которые раньше делались одним
+    кодом (`AUDIT §−88`).  Состав базы определяет БУТСТРАП — он отбирает
+    ликвидный универсум по измеренным признакам.  Ежедневная дельта обязана
+    лишь ДОПИСЫВАТЬ бары уже отобранным бумагам: дневной срез содержит все
+    ~12 000 тикеров США, и без этого различия первый же `apply` затаскивал в
+    базу 11 196 бумаг с историей в один день.
+    """
     if symbol in cache:
         return cache[symbol]
-    market = mc.market_of(symbol)
     row = conn.execute(
         "SELECT id FROM instruments WHERE source=? AND source_symbol=?",
         (SOURCE_NAME, symbol)).fetchone()
-    if row is None:
-        cursor = conn.execute(
-            "INSERT INTO instruments(source, source_symbol, market, currency, "
-            "convention) VALUES (?,?,?,?,?)",
-            (SOURCE_NAME, symbol, market, mc.currency_of(market),
-             CONVENTION_UNMEASURED))
-        instrument_id = int(cursor.lastrowid)
-    else:
-        instrument_id = int(row["id"])
-    cache[symbol] = instrument_id
-    return instrument_id
+    if row is not None:
+        cache[symbol] = int(row["id"])
+        return cache[symbol]
+    if not allow_new:
+        cache[symbol] = None
+        return None
+    market = mc.market_of(symbol)
+    cursor = conn.execute(
+        "INSERT INTO instruments(source, source_symbol, market, currency, "
+        "convention) VALUES (?,?,?,?,?)",
+        (SOURCE_NAME, symbol, market, mc.currency_of(market),
+         CONVENTION_SPLIT_ADJUSTED))
+    cache[symbol] = int(cursor.lastrowid)
+    return cache[symbol]
 
 
 def apply_batch(conn: sqlite3.Connection, batch: IngestBatch, *,
-                kind: str = "apply") -> IngestResult:
+                kind: str = "apply",
+                allow_new: bool = False) -> IngestResult:
     """Записать батч ОДНОЙ транзакцией. Идемпотентно по `(инструмент, дата)`.
 
     Повторное применение того же файла не меняет базу: `UPSERT` перезаписывает
     бар самим собой.  Порядок применения файлов тоже не важен — операция
     коммутативна по разным датам.
+
+    🔴 `allow_new=False` по умолчанию, и это ГЛАВНОЕ свойство ежедневной
+    дельты: состав базы определяет бутстрап, а `apply` только дописывает бары
+    (`AUDIT §−88`).  Бары бумаг вне базы не теряются молча — они попадают в
+    счётчик «вне рабочего набора», и оператор видит их число в сводке.
     """
     result = IngestResult(files=1, rows_read=batch.rows_read)
     result.merge_rejected(batch.rejected)
@@ -467,11 +499,19 @@ def apply_batch(conn: sqlite3.Connection, batch: IngestBatch, *,
         return result
 
     before = conn.execute("SELECT COUNT(*) AS n FROM instruments").fetchone()["n"]
-    cache: dict[str, int] = {}
+    cache: dict[str, Optional[int]] = {}
     rows = []
+    skipped = 0
     for bar in batch.bars:
-        rows.append((_instrument_id(conn, bar.symbol, cache), bar.trade_date,
+        instrument_id = _instrument_id(conn, bar.symbol, cache,
+                                       allow_new=allow_new)
+        if instrument_id is None:
+            skipped += 1
+            continue
+        rows.append((instrument_id, bar.trade_date,
                      bar.open, bar.high, bar.low, bar.close, bar.volume))
+    if skipped:
+        result.merge_rejected({"вне рабочего набора": skipped})
     conn.executemany(
         "INSERT INTO daily_bars(instrument_id, trade_date, open, high, low, "
         "close, volume) VALUES (?,?,?,?,?,?,?) "
@@ -592,7 +632,8 @@ def bootstrap(conn: sqlite3.Connection, archive_dir, *,
             total.rows_read += batch.rows_read
             total.merge_rejected(batch.rejected)
             continue
-        outcome = apply_batch(conn, batch, kind="bootstrap")
+        outcome = apply_batch(conn, batch, kind="bootstrap",
+                              allow_new=True)
         total.files += outcome.files
         total.rows_read += outcome.rows_read
         total.rows_written += outcome.rows_written
@@ -1033,6 +1074,71 @@ def _shift_yyyymmdd(yyyymmdd: int, delta_days: int) -> int:
     text = str(int(yyyymmdd))
     anchor = date(int(text[:4]), int(text[4:6]), int(text[6:8]))
     return int((anchor + timedelta(days=int(delta_days))).strftime("%Y%m%d"))
+
+
+@dataclass
+class PruneResult:
+    """Что вычищено из базы и сколько осталось."""
+
+    removed: list[str] = field(default_factory=list)
+    kept: int = 0
+    bars_removed: int = 0
+    min_bars_used: int = 0
+    busiest_bars: int = 0
+
+
+def prune_thin_instruments(conn: sqlite3.Connection, *,
+                           min_bars: Optional[int] = None,
+                           keep: Iterable[str] = (),
+                           dry_run: bool = False) -> PruneResult:
+    """Убрать из базы бумаги с обрывочной историей.
+
+    🔴 Существует, чтобы чинить базу, отравленную дневной дельтой
+    (`AUDIT §−88`).  До правки `apply` заводил инструмент на КАЖДЫЙ символ
+    дневного среза — а там все ~12 000 тикеров США, — и база за один запуск
+    получала 11 196 бумаг с историей в один день.  Полный ре-бутстрап такое
+    чинит, но стоит нескольких минут скана; здесь чистка идёт по тому, что уже
+    в базе, и архив не нужен вовсе.
+
+    Порог тот же и по той же причине, что при отборе универсума: доля от самой
+    полной бумаги, а не абсолютное число (`§−87`).
+
+    `keep` — бумаги, которые не удаляются ни при каком пороге.  Туда идёт ядро:
+    фактор с обрезанной историей лучше вычистить ре-бутстрапом, чем потерять
+    молча вместе с допуском C-1.
+    """
+    counts = {int(r["id"]): (str(r["sym"]), int(r["n"])) for r in conn.execute(
+        "SELECT i.id AS id, i.source_symbol AS sym, "
+        "       COUNT(b.trade_date) AS n "
+        "FROM instruments i LEFT JOIN daily_bars b ON b.instrument_id = i.id "
+        "WHERE i.source = ? GROUP BY i.id", (SOURCE_NAME,))}
+    out = PruneResult()
+    if not counts:
+        return out
+
+    out.busiest_bars = max(n for _sym, n in counts.values())
+    out.min_bars_used = (int(min_bars) if min_bars
+                         else int(out.busiest_bars * _MIN_HISTORY_FRACTION))
+    protected = {str(s).upper() for s in keep}
+
+    doomed = [(iid, sym, n) for iid, (sym, n) in counts.items()
+              if n < out.min_bars_used and sym.upper() not in protected]
+    out.kept = len(counts) - len(doomed)
+    out.removed = sorted(sym for _iid, sym, _n in doomed)
+    out.bars_removed = sum(n for _iid, _sym, n in doomed)
+    if dry_run or not doomed:
+        return out
+
+    ids = [(iid,) for iid, _sym, _n in doomed]
+    conn.executemany("DELETE FROM daily_bars WHERE instrument_id = ?", ids)
+    conn.executemany("DELETE FROM symbol_map WHERE instrument_id = ?", ids)
+    conn.executemany("DELETE FROM instruments WHERE id = ?", ids)
+    _bump_generation(conn)
+    conn.commit()
+    # Файл не сжимается сам: без VACUUM освободившиеся страницы остаются в
+    # файле, и «почищенная» база уедет в облако прежнего размера.
+    conn.execute("VACUUM")
+    return out
 
 
 def stored_symbols(conn: sqlite3.Connection) -> set[str]:

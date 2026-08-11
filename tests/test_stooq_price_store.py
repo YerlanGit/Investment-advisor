@@ -55,6 +55,17 @@ def write_history(directory: Path, name: str, rows: list[str]) -> Path:
     return path
 
 
+def seed(conn, batch) -> si.IngestResult:
+    """Наполнить пустую базу дневным срезом — ТОЛЬКО для фикстур.
+
+    `allow_new=True` здесь сказано ЯВНО, и это часть проверки: в проде
+    ежедневная дельта заводить инструменты не вправе (`AUDIT §−88`), состав
+    базы определяет бутстрап. Тест, которому нужен посев, обязан признаться в
+    этом вслух, а не получить его молча по умолчанию.
+    """
+    return si.apply_batch(conn, batch, allow_new=True)
+
+
 class _TempDirMixin:
     def setUp(self) -> None:                                # noqa: N802
         super().setUp()
@@ -390,7 +401,7 @@ class IngestWriteTest(_TempDirMixin, unittest.TestCase):
         conn = self.fresh_db()
         path = write_daily(self.tmp, 20260807,
                            [row("VGIT.US", 20260807, vol=1824.5238176263)])
-        si.apply_batch(conn, si.parse_daily_file(path, min_us_rows=0))
+        seed(conn, si.parse_daily_file(path, min_us_rows=0))
         stored = conn.execute("SELECT volume FROM daily_bars").fetchone()[0]
         self.assertEqual(stored, 1824.5238176263)
 
@@ -398,10 +409,10 @@ class IngestWriteTest(_TempDirMixin, unittest.TestCase):
         """Оператор — человек: он применит файл дважды."""
         conn = self.fresh_db()
         path = write_daily(self.tmp, 20260807, [row("AAPL.US", 20260807)])
-        si.apply_batch(conn, si.parse_daily_file(path, min_us_rows=0))
+        seed(conn, si.parse_daily_file(path, min_us_rows=0))
         snapshot = conn.execute(
             "SELECT * FROM daily_bars ORDER BY instrument_id").fetchall()
-        si.apply_batch(conn, si.parse_daily_file(path, min_us_rows=0))
+        seed(conn, si.parse_daily_file(path, min_us_rows=0))
         again = conn.execute(
             "SELECT * FROM daily_bars ORDER BY instrument_id").fetchall()
         self.assertEqual([tuple(r) for r in snapshot], [tuple(r) for r in again])
@@ -411,7 +422,7 @@ class IngestWriteTest(_TempDirMixin, unittest.TestCase):
         forward = self.fresh_db()
         for day in (20260806, 20260807):
             path = write_daily(self.tmp, day, [row("AAPL.US", day, c=day / 1e7)])
-            si.apply_batch(forward, si.parse_daily_file(path, min_us_rows=0))
+            seed(forward, si.parse_daily_file(path, min_us_rows=0))
         got_forward = forward.execute(
             "SELECT trade_date, close FROM daily_bars ORDER BY trade_date"
         ).fetchall()
@@ -421,7 +432,7 @@ class IngestWriteTest(_TempDirMixin, unittest.TestCase):
         self.addCleanup(backward.close)
         for day in (20260807, 20260806):
             path = write_daily(self.tmp, day, [row("AAPL.US", day, c=day / 1e7)])
-            si.apply_batch(backward, si.parse_daily_file(path, min_us_rows=0))
+            seed(backward, si.parse_daily_file(path, min_us_rows=0))
         got_backward = backward.execute(
             "SELECT trade_date, close FROM daily_bars ORDER BY trade_date"
         ).fetchall()
@@ -432,12 +443,12 @@ class IngestWriteTest(_TempDirMixin, unittest.TestCase):
         """Правило 9 обязано быть «всё или ничего»."""
         conn = self.fresh_db()
         good = write_daily(self.tmp, 20260806, [row("AAPL.US", 20260806)])
-        si.apply_batch(conn, si.parse_daily_file(good, min_us_rows=0))
+        seed(conn, si.parse_daily_file(good, min_us_rows=0))
         before = conn.execute("SELECT COUNT(*) FROM daily_bars").fetchone()[0]
 
         truncated = write_daily(self.tmp, 20260807,
                                 [row(f"T{i}.US", 20260807) for i in range(3)])
-        result = si.apply_batch(conn,
+        result = seed(conn,
                                 si.parse_daily_file(truncated, min_us_rows=5000))
         after = conn.execute("SELECT COUNT(*) FROM daily_bars").fetchone()[0]
         self.assertEqual(before, after)
@@ -447,29 +458,47 @@ class IngestWriteTest(_TempDirMixin, unittest.TestCase):
         conn = self.fresh_db()
         path = write_daily(self.tmp, 20260807,
                            [row("AAPL.US", 20260807), row("BTC.V", 20260807)])
-        si.apply_batch(conn, si.parse_daily_file(path, min_us_rows=0))
+        seed(conn, si.parse_daily_file(path, min_us_rows=0))
         rows = {r["source_symbol"]: (r["market"], r["currency"])
                 for r in conn.execute("SELECT * FROM instruments")}
         self.assertEqual(rows["AAPL.US"], ("US", "USD"))
         self.assertEqual(rows["BTC.V"], ("CRYPTO", "USD"))
 
-    def test_convention_is_stored_as_unmeasured(self) -> None:
-        """🔴 Конвенция Stooq НЕ измерена — и база обязана это признавать.
+    def test_convention_stored_is_the_measured_one(self) -> None:
+        """✅ Конвенция ИЗМЕРЕНА оператором 2026-08-11 (`STOOQ_CONVENTION §4`).
 
-        Записать `split_adjusted` «для порядка» значило бы дать провайдеру
-        основание применить корректировку к уже скорректированному ряду.
+        Все семь событий `KNOWN_SPLITS` прошли без ступеньки: отношения
+        0.98–1.08 при ожидаемых 3–20. Ряд приходит скорректированным, и база
+        обязана записывать измеренный факт, а не прежнее «не знаю» — иначе
+        документ и данные разойдутся, что в этом проекте уже стоило фазы.
+
+        Прежняя редакция теста требовала `unmeasured` и была права РОВНО ДО
+        замера: записать `split_adjusted` до него значило бы выдумать факт.
         """
         conn = self.fresh_db()
         path = write_daily(self.tmp, 20260807, [row("AAPL.US", 20260807)])
-        si.apply_batch(conn, si.parse_daily_file(path, min_us_rows=0))
+        seed(conn, si.parse_daily_file(path, min_us_rows=0))
         value = conn.execute("SELECT convention FROM instruments").fetchone()[0]
-        self.assertEqual(value, si.CONVENTION_UNMEASURED)
+        self.assertEqual(value, si.CONVENTION_SPLIT_ADJUSTED)
+
+    def test_provider_declares_what_the_database_records(self) -> None:
+        """Конвенция файла и конвенция выхода провайдера обязаны совпасть.
+
+        Совпадение НЕ автоматическое: провайдер объявляет конвенцию своего
+        ВЫХОДА (`AUDIT §−83`), а колонка описывает ВХОД. До замера они законно
+        расходились. Теперь совпали — и расхождение снова стало бы сигналом,
+        что кто-то из двоих устарел.
+        """
+        from finance.price_providers import PriceConvention
+
+        self.assertEqual(si.CONVENTION_SPLIT_ADJUSTED,
+                         PriceConvention.SPLIT_ADJUSTED.value)
 
     def test_generation_changes_on_write(self) -> None:
         """Иначе контейнер недельной давности отдаёт недельные цены молча."""
         conn = self.fresh_db()
         path = write_daily(self.tmp, 20260807, [row("AAPL.US", 20260807)])
-        si.apply_batch(conn, si.parse_daily_file(path, min_us_rows=0))
+        seed(conn, si.parse_daily_file(path, min_us_rows=0))
         first = conn.execute(
             "SELECT value FROM meta WHERE key='generation'").fetchone()[0]
         self.assertTrue(first)
@@ -478,7 +507,7 @@ class IngestWriteTest(_TempDirMixin, unittest.TestCase):
         """Провенанс: по любому бару можно спросить, каким файлом он приехал."""
         conn = self.fresh_db()
         path = write_daily(self.tmp, 20260807, [row("AAPL.US", 20260807)])
-        si.apply_batch(conn, si.parse_daily_file(path, min_us_rows=0))
+        seed(conn, si.parse_daily_file(path, min_us_rows=0))
         run = conn.execute("SELECT * FROM ingest_runs").fetchone()
         self.assertEqual(run["file_name"], "20260807_d.txt")
         self.assertEqual(run["rows_written"], 1)
@@ -563,7 +592,7 @@ class BootstrapAndSeamTest(_TempDirMixin, unittest.TestCase):
         archive = self._archive()
         delta = write_daily(self.tmp, 20260807, [row("VGIT.US", 20260807,
                                                      c=58.42)])
-        si.apply_batch(conn, si.parse_daily_file(delta, min_us_rows=0))
+        seed(conn, si.parse_daily_file(delta, min_us_rows=0))
         self.assertEqual(si.verify_seam(conn, archive, 20260807,
                                         symbols=["VGIT.US"]), [])
 
@@ -692,11 +721,109 @@ class BootstrapAndSeamTest(_TempDirMixin, unittest.TestCase):
         archive = self._archive()
         delta = write_daily(self.tmp, 20260807, [row("VGIT.US", 20260807,
                                                      c=99.99)])
-        si.apply_batch(conn, si.parse_daily_file(delta, min_us_rows=0))
+        seed(conn, si.parse_daily_file(delta, min_us_rows=0))
         mismatches = si.verify_seam(conn, archive, 20260807, symbols=["VGIT.US"])
         self.assertEqual(len(mismatches), 1)
         self.assertEqual(mismatches[0].archive_close, 58.42)
         self.assertEqual(mismatches[0].stored_close, 99.99)
+
+
+class DailyDeltaScopeTest(_TempDirMixin, unittest.TestCase):
+    """🔴 Дневная дельта НЕ определяет состав базы (`AUDIT §−88`).
+
+    Найдено оператором на живом прогоне: `bootstrap` кропотливо отобрал 803
+    ликвидные бумаги, а первый же `apply` завёл ещё **11 196** — потому что
+    дневной срез содержит ВСЕ ~12 000 тикеров США, а `_instrument_id` создавал
+    справочную запись на каждый незнакомый символ. У новичков история в один
+    день, и такая колонка схлопывает окно регрессии всей панели (F-15/F-21) —
+    то есть ровно то, ради чего отбор универсума и писался.
+    """
+
+    def _seeded_db(self):
+        conn = self.fresh_db()
+        archive = self.tmp / "archive"
+        archive.mkdir()
+        write_history(archive, "spy.us.txt",
+                      [row("SPY.US", 20260806, c=58.0),
+                       row("SPY.US", 20260807, c=58.4)])
+        si.bootstrap(conn, archive, window_days=1825, today=date(2026, 8, 10))
+        return conn
+
+    def test_apply_does_not_enrol_new_instruments(self) -> None:
+        conn = self._seeded_db()
+        path = write_daily(self.tmp, 20260810,
+                           [row("SPY.US", 20260810, c=59.0),
+                            row("JUNK1.US", 20260810, c=1.0),
+                            row("JUNK2.US", 20260810, c=2.0)])
+        result = si.apply_batch(conn, si.parse_daily_file(path, min_us_rows=0))
+        symbols = {r[0] for r in conn.execute(
+            "SELECT source_symbol FROM instruments")}
+        self.assertEqual(symbols, {"SPY.US"})
+        self.assertEqual(result.instruments_added, 0)
+        self.assertEqual(result.rows_written, 1)
+
+    def test_skipped_bars_are_counted_not_lost_silently(self) -> None:
+        """Оператор обязан видеть, сколько строк дельты прошло мимо базы.
+
+        Молчаливый пропуск неотличим от «файл пустой», и первый же день с
+        неверным универсумом выглядел бы как нормальный.
+        """
+        conn = self._seeded_db()
+        path = write_daily(self.tmp, 20260810,
+                           [row("SPY.US", 20260810, c=59.0),
+                            row("JUNK1.US", 20260810, c=1.0)])
+        result = si.apply_batch(conn, si.parse_daily_file(path, min_us_rows=0))
+        self.assertEqual(result.rejected.get("вне рабочего набора"), 1)
+
+    def test_bootstrap_still_enrols_instruments(self) -> None:
+        """Состав базы определяет бутстрап — иначе она никогда не наполнится."""
+        conn = self.fresh_db()
+        archive = self.tmp / "archive"
+        archive.mkdir()
+        write_history(archive, "aapl.us.txt", [row("AAPL.US", 20260807, c=200.0)])
+        result = si.bootstrap(conn, archive, window_days=1825,
+                              today=date(2026, 8, 10))
+        self.assertEqual(result.instruments_added, 1)
+
+    def test_prune_removes_the_pollution_and_keeps_the_core(self) -> None:
+        """Ремонт уже отравленной базы без ре-бутстрапа.
+
+        Ядро защищено списком `keep`: фактор с обрезанной историей лучше
+        чинить ре-бутстрапом, чем потерять молча вместе с допуском C-1.
+        """
+        conn = self.fresh_db()
+        archive = self.tmp / "archive"
+        archive.mkdir()
+        write_history(archive, "spy.us.txt",
+                      [row("SPY.US", 20260800 + d, c=58.0) for d in range(1, 9)])
+        si.bootstrap(conn, archive, window_days=1825, today=date(2026, 8, 10))
+        path = write_daily(self.tmp, 20260810,
+                           [row("SPY.US", 20260810, c=59.0),
+                            row("JUNK.US", 20260810, c=1.0),
+                            row("QQQ.US", 20260810, c=300.0)])
+        si.apply_batch(conn, si.parse_daily_file(path, min_us_rows=0),
+                       allow_new=True)          # воспроизводим прежний дефект
+
+        report = si.prune_thin_instruments(conn, keep=["QQQ.US"])
+        left = {r[0] for r in conn.execute(
+            "SELECT source_symbol FROM instruments")}
+        self.assertEqual(report.removed, ["JUNK.US"])
+        self.assertEqual(left, {"SPY.US", "QQQ.US"},
+                         "ядро не удаляется даже с обрывочной историей")
+
+    def test_prune_dry_run_changes_nothing(self) -> None:
+        conn = self.fresh_db()
+        archive = self.tmp / "archive"
+        archive.mkdir()
+        write_history(archive, "spy.us.txt",
+                      [row("SPY.US", 20260800 + d, c=58.0) for d in range(1, 9)])
+        write_history(archive, "junk.us.txt", [row("JUNK.US", 20260807, c=1.0)])
+        si.bootstrap(conn, archive, window_days=1825, today=date(2026, 8, 10))
+        before = conn.execute("SELECT COUNT(*) FROM instruments").fetchone()[0]
+        report = si.prune_thin_instruments(conn, dry_run=True)
+        after = conn.execute("SELECT COUNT(*) FROM instruments").fetchone()[0]
+        self.assertEqual(report.removed, ["JUNK.US"])
+        self.assertEqual(before, after)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -910,14 +1037,14 @@ class StoreReadTest(_TempDirMixin, unittest.TestCase):
                 row("BRK-B.US", day, c=500.0),
                 row("BTC.V", day, c=64000.0),
             ])
-            si.apply_batch(conn, si.parse_daily_file(path, min_us_rows=0))
+            seed(conn, si.parse_daily_file(path, min_us_rows=0))
         # Суббота: только крипта — ровно как в замеренном файле на 258 строк.
         saturday = write_daily(self.tmp, 20260808, [row("BTC.V", 20260808,
                                                         c=64973.28)])
-        si.apply_batch(conn, si.parse_daily_file(saturday, min_us_rows=0))
+        seed(conn, si.parse_daily_file(saturday, min_us_rows=0))
         # Мёртвая бумага: последний бар задолго до конца базы (`tph.us`).
         dead = write_daily(self.tmp, 20260513, [row("TPH.US", 20260513, c=46.95)])
-        si.apply_batch(conn, si.parse_daily_file(dead, min_us_rows=0))
+        seed(conn, si.parse_daily_file(dead, min_us_rows=0))
         conn.close()
         self.db = self.tmp / "prices.sqlite"
 
@@ -1160,7 +1287,7 @@ class OperatorCliTest(_TempDirMixin, unittest.TestCase):
 
         conn = self.fresh_db()
         path = write_daily(self.tmp, 20260807, [row("SPY.US", 20260807)])
-        si.apply_batch(conn, si.parse_daily_file(path, min_us_rows=0))
+        seed(conn, si.parse_daily_file(path, min_us_rows=0))
         conn.close()
         buffer = io.StringIO()
         with redirect_stdout(buffer):
