@@ -65,6 +65,28 @@ DEFAULT_ROOT = Path(os.getenv(
     "STOOQ_ROOT", str(Path(__file__).resolve().parents[1] / "data" / "stooq")))
 
 
+def _require_archive(path) -> bool:
+    """Каталог архива обязан существовать — иначе команда врёт про Stooq.
+
+    🔴 Без этой проверки опечатка в пути читается как вывод о ПОСТАВЩИКЕ:
+    `bootstrap` на несуществующем каталоге печатает «файлов обработано 0» и
+    следом «🔴 нет истории: SPY.US», то есть буквально утверждает, что в Stooq
+    нет SPY. Проект уже трижды делал ложный вывод такого рода из пустого
+    перебора (`AUDIT §−76`), и цена у него — отменённая фаза.
+
+    Особенно вероятна опечатка на Windows: путь с пробелами
+    (`C:\\Users\\User\\ramp-stooq\\archive`) без кавычек рвётся argparse'ом.
+    """
+    if Path(path).is_dir():
+        return True
+    print(f"🔴 каталога архива нет: {path}")
+    print("   Ожидается РАСПАКОВАННЫЙ d_us_txt — внутри лежат папки вида")
+    print("   «nasdaq stocks», «nyse etfs». Путь задаётся --archive или")
+    print("   переменной STOOQ_ROOT (OPERATOR_STOOQ.md §3.2).")
+    print("   Windows: путь с пробелами обязателен в кавычках.")
+    return False
+
+
 def _print_result(title: str, result: si.IngestResult) -> None:
     print(f"{title} завершён")
     print(f"  файлов обработано ..... {result.files}")
@@ -107,6 +129,8 @@ def _print_c1(conn) -> int:
 
 
 def cmd_bootstrap(args) -> int:
+    if not _require_archive(args.archive):
+        return 1
     conn = si.connect(args.db)
     si.ensure_schema(conn)
     symbols = None
@@ -152,6 +176,8 @@ def cmd_apply(args) -> int:
 
 
 def cmd_backfill(args) -> int:
+    if not _require_archive(args.archive):
+        return 1
     conn = si.connect(args.db)
     si.ensure_schema(conn)
     symbols = [s.strip().upper() for s in args.ticker.split(",") if s.strip()]
@@ -167,15 +193,25 @@ def cmd_verify_seam(args) -> int:
         print(f"🔴 базы котировок нет по пути {args.db} — сначала bootstrap "
               "(OPERATOR_STOOQ.md §5)")
         return 1
+    if not _require_archive(args.archive):
+        return 1
     conn = si.connect(args.db, read_only=True)
     day = int(str(args.date).replace("-", ""))
     # `symbols=None` в библиотеке означает «всё, что есть в базе» — сверять
     # надо загруженное, а не весь архив: бумага вне рабочего набора это
     # осознанный пропуск, а не расхождение (`AUDIT §−80`).
+    compared = len(si.stored_symbols(conn))
+    if not compared:
+        # 🔴 Пустая база даёт «расхождений нет» — гейт проходит ВХОЛОСТУЮ.
+        # Проверка, которая не может провалиться, ничего не подтверждает.
+        conn.close()
+        print("🔴 в базе нет ни одного инструмента — сверять нечего. "
+              "Сначала bootstrap (OPERATOR_STOOQ.md §5)")
+        return 1
     mismatches = si.verify_seam(conn, args.archive, day)
     conn.close()
     if not mismatches:
-        print(f"шов на {day}: расхождений нет ✅")
+        print(f"шов на {day}: сверено бумаг {compared}, расхождений нет ✅")
         return 0
     print(f"🔴 шов на {day}: расхождений {len(mismatches)}")
     for item in mismatches[:20]:
@@ -211,7 +247,9 @@ def cmd_verify_universe(args) -> int:
 
 
 def cmd_measure_convention(args) -> int:
-    """Замер конвенции корректировок — то, что блокирует провайдера MP-09."""
+    """Замер конвенции корректировок — вход для `STOOQ_CONVENTION §4`."""
+    if not _require_archive(args.archive):
+        return 1
     try:
         probes = si.measure_convention(args.archive)
     except ImportError as exc:
@@ -220,35 +258,49 @@ def cmd_measure_convention(args) -> int:
     if not probes:
         print("в KNOWN_SPLITS нет событий — мерить нечего")
         return 1
-    print(f"{'бумага':10s} {'дата':12s} {'ожид.':>6s} {'до':>10s} "
-          f"{'после':>10s} {'факт':>7s}  вердикт")
-    raw = adjusted = unknown = 0
+
+    def cell(value, fmt: str) -> str:
+        return format(value, fmt) if value else "—"
+
+    print(f"{'бумага':10s} {'событие':12s} {'ожид.':>6s} "
+          f"{'бар до':>9s} {'цена до':>10s} {'бар после':>10s} {'цена после':>11s} "
+          f"{'факт':>7s}  вердикт")
+    counts: dict[str, int] = {}
     for probe in probes:
-        observed = probe.observed_ratio
+        counts[probe.verdict] = counts.get(probe.verdict, 0) + 1
         print(f"{probe.ticker:10s} {probe.event_date:12s} "
-              f"{probe.expected_ratio:6.0f} "
-              f"{(f'{probe.close_before:.4f}' if probe.close_before else '—'):>10s} "
-              f"{(f'{probe.close_on_after:.4f}' if probe.close_on_after else '—'):>10s} "
-              f"{(f'{observed:.3f}' if observed else '—'):>7s}  {probe.verdict}")
-        if "СЫРОЙ" in probe.verdict:
-            raw += 1
-        elif "СКОРРЕКТИРОВАН" in probe.verdict:
-            adjusted += 1
-        else:
-            unknown += 1
+              f"{probe.expected_ratio:>6g} "
+              f"{cell(probe.date_before, 'd'):>9s} "
+              f"{cell(probe.close_before, '.4f'):>10s} "
+              f"{cell(probe.date_after, 'd'):>10s} "
+              f"{cell(probe.close_on_after, '.4f'):>11s} "
+              f"{cell(probe.observed_ratio, '.3f'):>7s}  {probe.verdict}")
+
+    raw = counts.get(si.VERDICT_RAW, 0)
+    adjusted = counts.get(si.VERDICT_ADJUSTED, 0)
+    unclear = counts.get(si.VERDICT_UNCLEAR, 0)
+    no_answer = sum(n for v, n in counts.items() if v in si.NO_ANSWER_VERDICTS)
     print()
-    print(f"итог: сырых {raw} · скорректированных {adjusted} · без ответа {unknown}")
+    print(f"итог: сырых {raw} · скорректированных {adjusted} · "
+          f"неясных {unclear} · не измерено {no_answer}")
+
     if raw and adjusted:
         print("🔴 ОТВЕТ ПРОТИВОРЕЧИВ — конвенция не едина по бумагам. "
               "Провайдер объявлять её НЕ вправе: покажите вывод разработке.")
         return 1
-    if raw or adjusted:
-        print("✅ ответ однозначен. Скопируйте вывод целиком — он попадёт в "
-              "docs/audit/STOOQ_CONVENTION.md §4 как ЗАМЕР.")
-        return 0
-    print("⚠️ ни одного события измерить не удалось — нужен полный архив "
-          "(бумаги NVDA, AMZN, GOOGL, TSLA, SHOP, DXCM).")
-    return 1
+    if not raw and not adjusted:
+        print("⚠️ ни одного события измерить не удалось — нужен ПОЛНЫЙ архив "
+              "истории (бумаги NVDA, AMZN, GOOGL, GOOG, TSLA, SHOP, DXCM).")
+        return 1
+    if unclear:
+        # Не отказ: ответ односторонний. Но «неясно» — это событие, где ряд не
+        # похож НИ на сырой, НИ на скорректированный, и потерять его нельзя.
+        print(f"🔴 не читаются ни как сырые, ни как скорректированные: "
+              f"{unclear} шт. — впишите их в §4 отдельной строкой, "
+              "молча отбрасывать нельзя.")
+    print("✅ ответ односторонний. Скопируйте вывод целиком — он попадёт в "
+          "docs/audit/STOOQ_CONVENTION.md §4 как ЗАМЕР.")
+    return 0
 
 
 def _engine_tickers() -> list[str]:
