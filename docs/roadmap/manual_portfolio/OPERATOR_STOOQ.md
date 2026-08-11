@@ -127,7 +127,17 @@ python3 --version
 
 ```bash
 python3 -m venv ~/ramp-venv
-source ~/ramp-venv/bin/activate        # Windows: ~\ramp-venv\Scripts\activate
+source ~/ramp-venv/bin/activate
+pip install pandas
+```
+
+🔴 **Windows — другая команда, а не другой слэш** (§3.3): окружение создаётся
+**рядом с домашним каталогом, а не внутри репозитория**, и PowerShell требует
+файл с расширением:
+
+```powershell
+python -m venv C:\Users\User\ramp-venv
+C:\Users\User\ramp-venv\Scripts\Activate.ps1
 pip install pandas
 ```
 
@@ -161,24 +171,47 @@ export STOOQ_ROOT=~/ramp-stooq
 
 ```powershell
 # PowerShell
+C:\Users\User\ramp-venv\Scripts\Activate.ps1
 $env:STOOQ_ROOT = "C:\Users\User\ramp-stooq"
 cd C:\Users\User\ramp-fresh
-python scripts\stooq_ingest.py bootstrap --archive $env:STOOQ_ROOT\archive
+python scripts\stooq_ingest.py bootstrap --archive "$env:STOOQ_ROOT\archive"
 ```
 
 ```bat
 :: cmd.exe
+C:\Users\User\ramp-venv\Scripts\activate.bat
 set STOOQ_ROOT=C:\Users\User\ramp-stooq
 cd C:\Users\User\ramp-fresh
-python scripts\stooq_ingest.py bootstrap --archive %STOOQ_ROOT%\archive
+python scripts\stooq_ingest.py bootstrap --archive "%STOOQ_ROOT%\archive"
 ```
 
 | Отличие | Что делать |
 |---|---|
 | `python3` → **`python`** | в Windows команда называется так |
 | `$STOOQ_ROOT` → `$env:STOOQ_ROOT` (PS) или `%STOOQ_ROOT%` (cmd) | синтаксис оболочки |
-| `source venv/bin/activate` → `.\ramp-venv\Scripts\activate` | путь активации venv |
+| `source ~/ramp-venv/bin/activate` → `C:\Users\User\ramp-venv\Scripts\Activate.ps1` | путь активации venv |
 | Пути с пробелами (`nasdaq etfs`) | кавычки: `--archive "C:\Users\User\ramp-stooq\archive"` |
+
+🔴 **Про активацию venv — две ошибки, обе стоили времени оператору.**
+
+1. **Окружение НЕ внутри репозитория.** `~/ramp-venv` разворачивается в
+   `C:\Users\User\ramp-venv` — уровнем ВЫШЕ `ramp-fresh`. Относительная запись
+   `.\ramp-venv\Scripts\…` из каталога проекта не найдёт ничего: репозиторий и
+   рабочее окружение оператора живут раздельно намеренно (§2.2 — репозиторий
+   переклонируется, окружение остаётся).
+2. **PowerShell не запускает `activate` без расширения.** Ему нужен
+   `Activate.ps1`; `activate` без расширения — это скрипт для bash, а
+   `activate.bat` — для `cmd.exe`. Три разных файла в одной папке, и оболочка
+   молча не найдёт чужой.
+
+Если PowerShell откажет с `выполнение сценариев отключено в этой системе`,
+политика запуска разрешается для текущего пользователя один раз:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
+```
+
+Признак, что окружение активно, — префикс `(ramp-venv)` в приглашении строки.
 
 🔴 **Про «кракозябры» и падения вывода.** Консоль `cmd.exe` в русской Windows
 работает в `cp866`, PowerShell 5.1 — в `cp1251`. Ни одна из них не кодирует
@@ -615,6 +648,15 @@ ls scripts/stooq_ingest.py src/finance/stooq_ingest.py src/finance/stooq_provide
 Четвёртый файл (`stooq_provider.py`) — новый; если его нет, вы на старой ветке
 и дальше идти нельзя (§2.1).
 
+**Обновление уже склонированной копии** — из каталога проекта, окружение
+активируется отдельно и НЕ отсюда (§3.1):
+
+```powershell
+cd C:\Users\User\ramp-fresh
+git pull
+C:\Users\User\ramp-venv\Scripts\Activate.ps1
+```
+
 ### Ш2 · Окружение
 
 ```bash
@@ -624,7 +666,20 @@ mkdir -p ~/ramp-stooq/{archive,inbox,applied,rejected}
 export STOOQ_ROOT=~/ramp-stooq
 ```
 
-Windows — то же самое, четыре отличия в §3.3.
+Windows (PowerShell) — то же самое, отличия в §3.3:
+
+```powershell
+python -m venv C:\Users\User\ramp-venv
+C:\Users\User\ramp-venv\Scripts\Activate.ps1
+pip install pandas
+mkdir C:\Users\User\ramp-stooq\archive, C:\Users\User\ramp-stooq\inbox, `
+      C:\Users\User\ramp-stooq\applied, C:\Users\User\ramp-stooq\rejected
+$env:STOOQ_ROOT = "C:\Users\User\ramp-stooq"
+```
+
+🔴 Два места, где регламент до 2026-08-11 сбивал с толку (`AUDIT §−89`):
+окружение лежит **рядом с домашним каталогом, а не внутри `ramp-fresh`**, и
+PowerShell не запускает `activate` без расширения — ему нужен `Activate.ps1`.
 
 ### Ш3 · Выгрузка Stooq
 
