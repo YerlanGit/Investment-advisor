@@ -1877,6 +1877,38 @@ def _manual_review_sync(text: str) -> tuple:
     return report, view, coverage
 
 
+class ManualInputUnusable(RuntimeError):
+    """Ручной портфель не из чего собрать: черновика нет или он не разобрался.
+
+    Отдельный тип, а не общий `Exception`: путь расчёта ловит его РЯДОМ с
+    брокерскими отказами и обязан отличать «нам нечего считать» от «сломалось».
+    Первое — вина ввода и лечится подсказкой, второе — наша, и там код ошибки
+    для поддержки.
+    """
+
+
+def _manual_frame_sync(text: str):
+    """Текст черновика → DataFrame позиций (для executor).
+
+    🔴 Разбор повторяется, а не переиспользуется с экрана подтверждения, и это
+    осознанно: между подтверждением и расчётом мог быть рестарт контейнера,
+    после которого FSM-состояние пусто, а черновик в SQLite жив (`PHASE_05 §5`).
+    Источник правды — черновик, поэтому считаем от него.
+
+    Сеть не трогается: `build_confirmation` (курс через FRED) здесь не нужен —
+    экран уже показан, а расчёту нужен только фрейм.
+    """
+    from finance.manual_portfolio import parse_portfolio_text
+
+    engine = UniversalPortfolioManager(price_source="manual").engine
+    report = parse_portfolio_text(text, engine)
+    if not report.valid:
+        raise ManualInputUnusable(
+            "ни одной позиции не распознано" if not report.failed
+            else f"не распознано ни одной позиции из {len(report.failed)}")
+    return report.to_dataframe()
+
+
 def _format_manual_confirmation(view, coverage=None) -> str:
     """Экран подтверждения (`PHASE_05 §4`). Только ВИД — числа уже посчитаны.
 
@@ -2311,28 +2343,20 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
         )
         await state.clear()
         return
-    if source == "manual":
-        # 🔴 ГРАНИЦА ФАЗЫ, а не заглушка «на потом».  Ниже по функции ровно две
-        # ветки — 'freedom' и всё остальное, а «всё остальное» подставляет
-        # ДЕМО-ключи.  Без явного отказа здесь ручной источник тихо провалился
-        # бы в демо: пользователь получил бы шаблонный портфель вместо своего,
-        # и заплатил бы за него полную цену (`_effective_cost` для manual — не
-        # ноль).  Проводка ручного источника в расчёт — Фаза 6, и она требует
-        # `StooqProvider` из Фазы 9: I-12 запрещает отдавать данные Tradernet
-        # не-клиентам Freedom, поэтому «пока подставим брокерский фид» —
-        # не вариант ни на один день.
-        logger.info("MANUAL: расчёт запрошен до Фазы 6/9 user=%s tier=%s",
-                    user_id, tier)
+    if source == "manual" and not manual_portfolio_enabled():
+        # 🔴 ФЛАГ ОТКАТА, и проверяться он обязан ЗДЕСЬ, а не только на входе
+        # в ручной ввод. Режим `manual` хранится в профиле: пользователь, уже
+        # выбравший его, приходит сюда напрямую из меню тиров — мимо
+        # `cb_manual_action`, где флаг проверяется. Без этой ветки выключение
+        # фичи в проде не остановило бы расчёты у тех, кто её уже включил, то
+        # есть откат перестал бы быть откатом (`PHASE_06 §1`).
+        logger.info("MANUAL: расчёт запрошен при выключенном флаге user=%s",
+                    user_id)
         await _release_user_slot(user_id)
-        # Клавиатура ОБЯЗАТЕЛЬНА: без неё пользователь в режиме `manual`
-        # заперт — `/start` ведёт его в меню тиров, меню приводит сюда, и
-        # выхода нет. Ровно та петля, которую закрыли 2026-07-16 для
-        # `undetermined`: восстановление должно быть в ОДИН тап.
         await callback.message.edit_text(
-            "🛠 *Расчёт по ручному портфелю ещё не включён.*\n\n"
-            "Ваш ввод сохранён — он не потеряется. Отчёт станет доступен, "
-            "как только подключим независимый источник цен.\n\n"
-            "Можно поправить портфель или выбрать другой источник:\n\n"
+            "🛠 *Расчёт по ручному портфелю временно недоступен.*\n\n"
+            "Ваш ввод сохранён — он не потеряется.\n\n"
+            "Можно выбрать другой источник:\n\n"
             "✅ Токен *не списан*.",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=kb_connect_choice(),
@@ -2363,8 +2387,14 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
             parse_mode=ParseMode.MARKDOWN,
         )
     else:
+        # 🔴 Текст про Freedom Broker для ручного ввода — ЛОЖЬ, и не безобидная
+        # (`PHASE_06 §3`): пользователь ручного портфеля может не быть клиентом
+        # брокера вовсе, а строка утверждала бы обратное. Тот же I-12 на слое
+        # текста, что и подпись CoVe (F-6).
+        what = ("Собираю ваш портфель" if source == "manual"
+                else "Подключаюсь к Freedom Broker и загружаю портфель")
         await callback.message.edit_text(
-            f"⏳ Подключаюсь к Freedom Broker и загружаю портфель…\n\n"
+            f"⏳ {what}…\n\n"
             f"💳 Токен спишется *только после готового отчёта* "
             f"(сейчас на балансе: *{balance}*).",
             parse_mode=ParseMode.MARKDOWN,
@@ -2428,6 +2458,14 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
                 "KEY SOURCE: vault  user=%s  api_key_present=%s  secret_present=%s",
                 user_id, bool(api_key), bool(secret_key),
             )
+    elif source == "manual":
+        # Брокер не спрашивается вовсе — ни ключей, ни клиента (I-12).
+        # Демо-ключи здесь подставлять НЕЛЬЗЯ: ниже они привели бы к
+        # шаблонному портфелю вместо портфеля пользователя, причём за полную
+        # цену тарифа.
+        api_key, secret_key, login = "", "", ""
+        logger.info("PORTFOLIO SOURCE: manual  user=%s (ввод пользователя; "
+                    "цены — независимый источник).", user_id)
     else:
         # source == "demo": the user EXPLICITLY chose the template portfolio
         # (an accidental/default demo is impossible — _resolve_portfolio_source
@@ -2439,9 +2477,42 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
         api_key, secret_key, login = "demo", "", ""
 
     try:
-        df = await loop.run_in_executor(
-            None, _fetch_portfolio_sync, api_key, secret_key, login
+        if source == "manual":
+            # Черновик старше FSM-состояния: он переживает рестарт контейнера,
+            # а состояние — нет (`PHASE_05 §5`).
+            manual_text = str((await state.get_data()).get("manual_text") or "")
+            if not manual_text.strip():
+                # `get_manual_draft` отдаёт СЛОВАРЬ (`text`/`created_at`/
+                # `updated_at`), а не строку: `str()` от него дал бы
+                # правдоподобный непустой текст, который парсер честно не
+                # разберёт, — и отказ выглядел бы как «пользователь ввёл чушь».
+                draft = await get_manual_draft(user_id)
+                manual_text = str((draft or {}).get("text") or "")
+            if not manual_text.strip():
+                raise ManualInputUnusable("черновик не найден")
+            df = await loop.run_in_executor(
+                None, _manual_frame_sync, manual_text
+            )
+        else:
+            df = await loop.run_in_executor(
+                None, _fetch_portfolio_sync, api_key, secret_key, login
+            )
+    except ManualInputUnusable as exc:
+        logger.info("MANUAL: расчёт невозможен user=%s: %s", user_id, exc)
+        await _release_user_slot(user_id)
+        # Клавиатура ОБЯЗАТЕЛЬНА: без неё пользователь в режиме `manual`
+        # заперт — `/start` ведёт в меню тиров, меню приводит сюда, и выхода
+        # нет. Ровно та петля, которую закрыли 2026-07-16 для `undetermined`.
+        await callback.message.answer(
+            "📝 *Портфель не найден.*\n\n"
+            "Похоже, ввод не сохранился. Наберите позиции заново — это займёт "
+            "минуту.\n\n"
+            "✅ Токен *не списан*.",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=kb_connect_choice(),
         )
+        await state.clear()
+        return
     except BrokerAuthError as exc:
         logger.error("Freedom Broker auth failed for %s: %s", user_id, exc)
         await _release_user_slot(user_id)          # H1: free slot — bg task never spawned
@@ -2508,11 +2579,24 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
 
     # ── Шаг 2 — концьерж-уведомление + превью портфеля ──────────────────
     preview_md = _format_portfolio_preview(df)
-    demo_line = ("📋 *Источник: ДЕМО-портфель (шаблон) — отчёт бесплатный.*\n\n"
-                 if source == "demo" else "")
+    source_line = ""
+    if source == "demo":
+        source_line = ("📋 *Источник: ДЕМО-портфель (шаблон) — отчёт "
+                       "бесплатный.*\n\n")
+    elif source == "manual":
+        # Названо прямо: состав — от пользователя, цены — НЕ от брокера.
+        # Умолчание здесь читалось бы как «всё как обычно, через Freedom».
+        source_line = ("📝 *Источник: ваш ручной ввод; котировки — "
+                       "независимый публичный источник.*\n\n")
+    # Заголовок брокерского пути ПИНИТСЯ дословно двумя тестами: он же служит
+    # маркером «превью показано» для проверки порядка гейта fallback-мока
+    # (`test_phase34_broker_outage_honesty`).  Для ручного ввода «получен»
+    # неуместно — портфель не получали, его прислал сам пользователь.
+    header = ("✅ *Портфель принят в обработку.*" if source == "manual"
+              else "✅ *Портфель успешно получен и принят в обработку.*")
     await callback.message.answer(
-        "✅ *Портфель успешно получен и принят в обработку.*\n\n"
-        f"{demo_line}"
+        f"{header}\n\n"
+        f"{source_line}"
         f"{preview_md}\n\n"
         f"Запускаю *{TIER_LABEL[tier]}* — пришлю ссылку на отчёт через "
         "*5–10 минут*. Можно продолжать пользоваться ботом.",

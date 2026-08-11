@@ -700,6 +700,107 @@ class BootstrapAndSeamTest(_TempDirMixin, unittest.TestCase):
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# Рабочий набор — какие бумаги кладутся в базу
+# ═════════════════════════════════════════════════════════════════════════════
+
+class UniverseSelectionTest(_TempDirMixin, unittest.TestCase):
+    """🔴 Какие бумаги вообще класть в базу (`AUDIT §−85`).
+
+    Прежний «рабочий набор» был равен факторам и бенчмаркам — 13 бумаг, 1 МБ.
+    Допуск C-1 такая база проходит, а отчёт по портфелю пользователя не строит
+    НИ ОДИН: бумаг пользователя в ней нет, и C-8 блокирует по доле непокрытой
+    стоимости. План (`PHASE_08B §3.1`) закладывал 0.6–1.0 млн баров, то есть
+    500–800 бумаг, и прямо отмечал «нужен механизм добора» — механизма не было.
+    """
+
+    def _archive(self) -> Path:
+        archive = self.tmp / "archive"
+        archive.mkdir()
+        days = self._business_days(1300)
+        self._write(archive, "LIQUID.US", days, volume=500_000)
+        self._write(archive, "THIN.US", days, volume=100)
+        self._write(archive, "YOUNG.US", days[-100:], volume=500_000)
+        self._write(archive, "DEAD.US", days[:-40], volume=500_000)
+        self._write(archive, "^SPX", days, volume=500_000)
+        return archive
+
+    @staticmethod
+    def _business_days(count: int) -> list[int]:
+        out: list[int] = []
+        cursor = date(2026, 8, 7)
+        while len(out) < count:
+            if cursor.weekday() < 5:
+                out.append(int(cursor.strftime("%Y%m%d")))
+            cursor -= pd.Timedelta(days=1).to_pytimedelta()
+        return sorted(out)
+
+    @staticmethod
+    def _write(directory: Path, symbol: str, days, *, volume: float) -> None:
+        write_history(directory, f"{symbol.lower()}.txt",
+                      [row(symbol, day, c=100.0, vol=volume) for day in days])
+
+    def _picked(self, **overrides) -> list[str]:
+        options = dict(min_bars=1260, stale_after_days=10,
+                       min_turnover=1_000_000.0, limit=800)
+        options.update(overrides)
+        candidates = si.scan_archive(self._archive(), window_days=1825,
+                                     today=date(2026, 8, 10))
+        return si.select_universe(candidates, **options)
+
+    def test_liquid_paper_with_full_history_is_taken(self) -> None:
+        self.assertIn("LIQUID.US", self._picked())
+
+    def test_illiquid_paper_is_dropped(self) -> None:
+        """Неликвид даёт ряд из повторов и ложно НИЗКУЮ волатильность.
+
+        Опаснее пропуска: пропущенную бумагу видно в отчёте, а заниженный риск
+        выглядит как хорошая новость.
+        """
+        self.assertNotIn("THIN.US", self._picked())
+
+    def test_young_listing_is_dropped(self) -> None:
+        """Короткая история схлопывает окно регрессии ВСЕЙ панели (F-15/F-21).
+
+        То есть одна молодая бумага портит числа у чужих позиций.
+        """
+        self.assertNotIn("YOUNG.US", self._picked())
+
+    def test_delisted_paper_is_dropped(self) -> None:
+        """Замер `tph.us`: последняя цена мёртвой бумаги — не сегодняшняя."""
+        self.assertNotIn("DEAD.US", self._picked())
+
+    def test_index_never_enters_the_universe(self) -> None:
+        """Индекс — не инструмент: держать его позицией нельзя."""
+        self.assertNotIn("^SPX", self._picked())
+
+    def test_limit_is_a_size_ceiling_and_cuts_the_least_liquid(self) -> None:
+        """Потолок — про размер базы, а не про качество бумаги.
+
+        Замер: 75 КБ на бумагу, значит 800 бумаг ≈ 60 МБ против ≈900 МБ полной
+        выгрузки. Отсекать надо наименее ликвидное — его отсутствие пользователь
+        заметит с наименьшей вероятностью.
+        """
+        candidates = [
+            si.UniverseCandidate("BIG.US", "US", 1300, 20260807, 9e9),
+            si.UniverseCandidate("MID.US", "US", 1300, 20260807, 5e6),
+            si.UniverseCandidate("SMALL.US", "US", 1300, 20260807, 2e6),
+        ]
+        picked = si.select_universe(candidates, min_bars=1260,
+                                    stale_after_days=10, min_turnover=1e6,
+                                    limit=2)
+        self.assertEqual(picked, ["BIG.US", "MID.US"])
+
+    def test_selection_is_pure_and_needs_no_files(self) -> None:
+        """Выбор отделён от сканирования НАМЕРЕННО.
+
+        Дорогой проход по 12 000 файлов и правило отбора — разные вещи; слитые
+        вместе, они сделали бы правило непроверяемым без выгрузки на диске.
+        """
+        self.assertEqual(
+            si.select_universe([], min_bars=1, stale_after_days=1,
+                               min_turnover=0.0, limit=10), [])
+
+# ═════════════════════════════════════════════════════════════════════════════
 # ЧК-08.5-3 — чтение
 # ═════════════════════════════════════════════════════════════════════════════
 

@@ -717,19 +717,73 @@ class SlotReleaseTest(ManualFlowTestBase):
 
 class ManualSourceBoundaryTest(ManualFlowTestBase):
 
-    async def test_manual_never_falls_through_to_demo(self) -> None:
-        """🔴 Молчаливое демо было бы ПЛАТНЫМ: `_effective_cost` тут не ноль."""
-        callback = _FakeCallback("confirm:deep:menu", user_id=self.USER_ID)
+    @staticmethod
+    def _buttons(message) -> list[str]:
+        """Кнопки со ВСЕХ экранов — и правленых, и новых.
+
+        Смотреть только `edited` нельзя: отказы после строки «⏳ Собираю…»
+        приходят новым сообщением, как и брокерские, — иначе пользователь
+        потеряет статус из виду.
+        """
+        markups = [kw.get("reply_markup")
+                   for _t, kw in message.sent + message.edited]
+        return [b.callback_data for m in markups if m
+                for row in m.inline_keyboard for b in row]
+
+    async def _confirm_as_manual(self, callback) -> None:
+        """Нажатие «Рассчитать» пользователем, чей источник — ручной ввод.
+
+        Баланс пополняется намеренно: проверка средств стоит РАНЬШЕ разбора
+        портфеля (как и для брокерского пути — не работаем для того, кто не
+        может заплатить), и на нулевом балансе тесты ниже проверяли бы
+        сообщение о токенах, а не ручную ветку.
+        """
+        await self.db.init_user(self.USER_ID)
+        await self.db.credit_tokens(self.USER_ID, 5, reason="test")
 
         async def fake_source(_uid):
             return "manual", "manual"
 
-        with patch.object(self.tg, "_resolve_portfolio_source", fake_source), \
-             patch.object(self.tg, "_fetch_portfolio_sync") as fetch:
+        with patch.object(self.tg, "_resolve_portfolio_source", fake_source):
             await self.tg.cb_confirm(callback, self.state)
+
+    async def test_manual_never_falls_through_to_demo(self) -> None:
+        """🔴 Молчаливое демо было бы ПЛАТНЫМ: `_effective_cost` тут не ноль.
+
+        До MP-06 инвариант держался отказом («фаза не готова»). Расчёт
+        включён, инвариант прежний: ручной источник НЕ ходит к брокеру и НЕ
+        подставляет демо-ключи. Проверяется по факту вызова, а не по тексту.
+        """
+        callback = _FakeCallback("confirm:deep:menu", user_id=self.USER_ID)
+        await self.tg.save_manual_draft(self.USER_ID, "AAPL 10 150")
+
+        started: list[str] = []
+
+        async def fake_background(**kwargs):
+            started.append(kwargs.get("source"))
+
+        with patch.object(self.tg, "_fetch_portfolio_sync") as fetch, \
+             patch.object(self.tg, "_run_analysis_background", fake_background):
+            await self._confirm_as_manual(callback)
+            # Анализ уходит в `asyncio.create_task` — без уступки циклу задача
+            # не успеет стартовать, и тест проверял бы планировщик, а не ветку.
+            await asyncio.sleep(0)
+
+        fetch.assert_not_called()
+        self.assertEqual(started, ["manual"],
+                         "расчёт обязан стартовать именно ручным источником:\n"
+                         + callback.message.all_text)
+
+    async def test_missing_draft_refuses_without_charging(self) -> None:
+        """Черновика нет — честный отказ, а не пустой отчёт за полную цену."""
+        callback = _FakeCallback("confirm:deep:menu", user_id=self.USER_ID)
+        await self.tg.delete_manual_draft(self.USER_ID)
+
+        with patch.object(self.tg, "_fetch_portfolio_sync") as fetch:
+            await self._confirm_as_manual(callback)
+
         fetch.assert_not_called()
         screen = callback.message.all_text
-        self.assertIn("не включён", screen)
         self.assertIn("не списан", screen)
         self.assertTrue(await self._slot_is_free())
 
@@ -740,17 +794,33 @@ class ManualSourceBoundaryTest(ManualFlowTestBase):
         пользователь застрял): восстановление обязано быть в ОДИН тап.
         """
         callback = _FakeCallback("confirm:base:menu", user_id=self.USER_ID)
-
-        async def fake_source(_uid):
-            return "manual", "manual"
-
-        with patch.object(self.tg, "_resolve_portfolio_source", fake_source):
-            await self.tg.cb_confirm(callback, self.state)
-        markups = [kw.get("reply_markup") for _t, kw in callback.message.edited]
-        buttons = [b.callback_data for m in markups if m
-                   for row in m.inline_keyboard for b in row]
+        await self.tg.delete_manual_draft(self.USER_ID)
+        await self._confirm_as_manual(callback)
+        buttons = self._buttons(callback.message)
         self.assertIn("connect:manual", buttons)
         self.assertIn("connect:template", buttons)
+
+    async def test_disabled_flag_stops_the_calculation(self) -> None:
+        """🔴 Флаг отката обязан работать и для УЖЕ выбравших ручной режим.
+
+        Режим хранится в профиле: такой пользователь приходит к расчёту прямо
+        из меню тиров, мимо `cb_manual_action`, где флаг проверяется. Без
+        проверки здесь выключение фичи в проде не остановило бы ничего — то
+        есть откат перестал бы быть откатом.
+        """
+        callback = _FakeCallback("confirm:deep:menu", user_id=self.USER_ID)
+        await self.tg.save_manual_draft(self.USER_ID, "AAPL 10 150")
+
+        with patch.dict("os.environ", {"MANUAL_PORTFOLIO_ENABLED": "0"}), \
+             patch.object(self.tg, "_fetch_portfolio_sync") as fetch, \
+             patch.object(self.tg, "_manual_frame_sync") as frame:
+            await self._confirm_as_manual(callback)
+
+        fetch.assert_not_called()
+        frame.assert_not_called()
+        self.assertIn("не списан", callback.message.all_text)
+        self.assertIn("connect:template", self._buttons(callback.message))
+        self.assertTrue(await self._slot_is_free())
 
     async def test_price_source_is_never_silently_freedom(self) -> None:
         """I-12: источник доезжает до движка КАК ЕСТЬ, а не сводится к freedom.

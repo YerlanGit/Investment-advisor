@@ -20,7 +20,10 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-os.environ.setdefault("RAMP_BOT_TOKEN", "test-token-collection")
+# формат 'id:secret' обязателен: `tg_bot` валидирует токен на ИМПОРТЕ,
+# и `setdefault` с невалидным значением ломает импорт в любом файле,
+# который запустится ПОСЛЕ этого (`AUDIT §−85`).
+os.environ.setdefault("RAMP_BOT_TOKEN", "0000000000:TEST-TOKEN-unit")
 
 SRC = Path(__file__).resolve().parent.parent / "src"
 REPO = SRC.parent

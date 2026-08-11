@@ -128,6 +128,21 @@ def _print_c1(conn) -> int:
     return 0 if len(factors) == len(factor_etfs) else 1
 
 
+def _core_symbols(conn) -> list[str] | None:
+    """Факторы и бенчмарки в формах источника. `None` — pandas не установлен."""
+    try:
+        return _working_set()
+    except ImportError as exc:
+        print("🔴 не могу определить обязательный набор: "
+              f"{_missing_name(exc)} не установлен.")
+        print("   Варианты: `pip install pandas` — или задать бумаги явно, "
+              "например --symbols SPY.US,QQQ.US")
+        print("   Флаг --all НЕ подходит как замена: полная выгрузка это "
+              "≈900 МБ, а у Cloud Run /tmp — это RAM при лимите 2 GiB.")
+        conn.close()
+        return None
+
+
 def cmd_bootstrap(args) -> int:
     if not _require_archive(args.archive):
         return 1
@@ -137,22 +152,28 @@ def cmd_bootstrap(args) -> int:
     if args.symbols:
         symbols = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
     elif not args.all:
-        # Рабочий набор известен ТОЛЬКО движку, а `data_checks` тянет pandas.
-        # Отказ здесь внятный и с выходом: молча уйти в `--all` нельзя — это
-        # 704 МБ вместо 14, то есть OOM контейнера с лимитом 2 GiB.
-        try:
-            symbols = _working_set()
-        except ImportError as exc:
-            print("🔴 не могу определить рабочий набор: "
-                  f"{_missing_name(exc)} не установлен.")
-            print("   Варианты: `pip install pandas` — или задать бумаги явно, "
-                  "например --symbols SPY.US,QQQ.US")
-            print("   Флаг --all НЕ подходит как замена: полная выгрузка это "
-                  "≈704 МБ, а у Cloud Run /tmp — это RAM при лимите 2 GiB.")
-            conn.close()
+        core = _core_symbols(conn)
+        if core is None:
             return 1
-        print(f"рабочий набор: {len(symbols)} бумаг "
-              f"(полная выгрузка — флаг --all)")
+        symbols = list(core)
+        if args.core_only:
+            # 🔴 Осознанный выбор оператора, а не дефолт: такой базой можно
+            # проверить допуск C-1, но НЕЛЬЗЯ построить ни одного отчёта —
+            # бумаг пользователя в ней нет.
+            print(f"ТОЛЬКО ядро: {len(symbols)} бумаг (факторы и бенчмарки). "
+                  "Отчёт по портфелю пользователя такой базой не построится.")
+        else:
+            print(f"ядро: {len(symbols)} бумаг · сканирую архив, чтобы добрать "
+                  f"ликвидные (потолок {args.universe_limit})…")
+            picked = si.select_universe(
+                si.scan_archive(args.archive, window_days=args.window),
+                min_bars=args.min_bars, stale_after_days=args.stale_days,
+                min_turnover=args.min_turnover, limit=args.universe_limit)
+            for symbol in picked:
+                if symbol not in symbols:
+                    symbols.append(symbol)
+            print(f"рабочий набор: {len(symbols)} бумаг "
+                  f"(≈{len(symbols) * 75 / 1024:.0f} МБ базы)")
     result = si.bootstrap(conn, args.archive, symbols=symbols,
                           window_days=args.window)
     _print_result("bootstrap", result)
@@ -350,7 +371,19 @@ def build_parser() -> argparse.ArgumentParser:
     boot.add_argument("--symbols", default="",
                       help="список символов источника через запятую")
     boot.add_argument("--all", action="store_true",
-                      help="грузить весь архив, а не рабочий набор")
+                      help="грузить весь архив (≈900 МБ — для прода не годится)")
+    boot.add_argument("--core-only", action="store_true",
+                      help="только факторы и бенчмарки: годится для проверки "
+                           "C-1, но отчёт по портфелю НЕ построится")
+    boot.add_argument("--universe-limit", type=int, default=800,
+                      help="потолок числа бумаг сверх ядра (≈75 КБ на бумагу)")
+    boot.add_argument("--min-bars", type=int, default=1260,
+                      help="минимум баров в окне: короткая история схлопывает "
+                           "окно регрессии всей панели")
+    boot.add_argument("--stale-days", type=int, default=10,
+                      help="сколько дней бумага вправе молчать, считаясь живой")
+    boot.add_argument("--min-turnover", type=float, default=1_000_000.0,
+                      help="медианный дневной оборот, close × volume")
     boot.add_argument("--window", type=int, default=1825)
     boot.set_defaults(func=cmd_bootstrap)
 
