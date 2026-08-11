@@ -31,7 +31,7 @@ from __future__ import annotations
 import logging
 import os
 from enum import Enum
-from typing import NamedTuple, Protocol, runtime_checkable
+from typing import Callable, NamedTuple, Protocol, runtime_checkable
 
 import pandas as pd
 
@@ -180,9 +180,29 @@ _MANUAL_FORBIDDEN = frozenset({"tradernet"})
 # эффект опечатки в `connection_mode`.
 _KNOWN_SOURCES = frozenset({"freedom", "demo", "manual"})
 
-_REGISTRY: dict[str, type] = {
-    "tradernet": TradernetProvider,
+def _make_stooq() -> PriceProvider:
+    """Импорт ЛЕНИВЫЙ — иначе цикл.
+
+    `stooq_provider` импортирует ЭТОТ модуль ради `PriceConvention` и
+    `ProviderResult`; импорт в обратную сторону на уровне модуля замкнул бы
+    кольцо. Заодно оператор, у которого база не настроена, не платит за импорт
+    `stooq_store` в каждом отчёте `freedom`.
+    """
+    from finance.stooq_provider import StooqProvider
+
+    return StooqProvider()
+
+
+#: Провайдеры, которые можно назначить источнику портфеля ПО ИМЕНИ.
+#:
+#: 🔴 `tradernet` здесь ОТСУТСТВУЕТ намеренно. Единственный путь сюда — ветка
+#: `manual`, а для неё брокерский фид запрещён (`_MANUAL_FORBIDDEN`, I-12), то
+#: есть запись была бы недостижимой. Её отсутствие ещё и страхует: если гард
+#: когда-нибудь ослабят, `manual` получит внятное «провайдер не реализован», а
+#: не молча брокерские данные — тот же класс отказа, что A-3.
+_REGISTRY: dict[str, Callable[[], PriceProvider]] = {
     "demo": DemoProvider,
+    "stooq": _make_stooq,
 }
 
 
@@ -243,14 +263,13 @@ def provider_for_source(source: str, *, client=None) -> PriceProvider:
                 f"I-12: источник '{chosen}' недопустим для ручного портфеля — "
                 "рыночные данные брокера нельзя показывать не-клиентам."
             )
-        impl = _REGISTRY.get(chosen)
-        if impl is None:
-            # StooqProvider появится в Фазе 9; до этого ручной ввод в проде
-            # выключен флагом MANUAL_PORTFOLIO_ENABLED.
+        factory = _REGISTRY.get(chosen)
+        if factory is None:
             raise ProviderUnavailable(
-                f"Провайдер '{chosen}' для ручного портфеля ещё не реализован."
+                f"Провайдер '{chosen}' для ручного портфеля не реализован. "
+                f"Доступны: {', '.join(sorted(_REGISTRY))}."
             )
-        return impl() if impl is not TradernetProvider else impl(client)
+        return factory()
 
     # freedom / всё остальное — живой брокерский фид
     return TradernetProvider(client)

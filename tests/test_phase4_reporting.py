@@ -1572,7 +1572,7 @@ class DataLineageTest(unittest.TestCase):
         # Fix a "today" that's right after the synthetic data — 5-day window.
         rows = build_lineage(self._full_results(), None,
                               today=date(2026, 5, 27))
-        tradernet = next(r for r in rows if r["source"] == "Tradernet (Freedom Broker)")
+        tradernet = next(r for r in rows if r["name"] == "Цены и история активов")
         self.assertEqual(tradernet["status"], "ok")
         self.assertIsNotNone(tradernet["as_of"])
         self.assertLessEqual(tradernet["freshness_days"], 5)
@@ -1582,15 +1582,67 @@ class DataLineageTest(unittest.TestCase):
         # Move "today" far ahead so last close is > 5 cal days old.
         rows = build_lineage(self._full_results(), None,
                               today=date(2026, 7, 1))
-        tradernet = next(r for r in rows if r["source"] == "Tradernet (Freedom Broker)")
+        tradernet = next(r for r in rows if r["name"] == "Цены и история активов")
         self.assertEqual(tradernet["status"], "stale")
         self.assertGreater(tradernet["freshness_days"], 5)
 
     def test_tradernet_status_error_when_no_data(self) -> None:
         from finance.data_lineage import build_lineage
         rows = build_lineage({}, None, today=date(2026, 5, 17))
-        tradernet = next(r for r in rows if r["source"] == "Tradernet (Freedom Broker)")
+        tradernet = next(r for r in rows if r["name"] == "Цены и история активов")
         self.assertEqual(tradernet["status"], "error")
+
+    # ─── F-6: подпись источника цен ─────────────────────────────────────
+
+    def _lineage_source(self, provider_result) -> str:
+        from finance.data_lineage import build_lineage
+        results = self._full_results()
+        results["history_result"] = provider_result
+        rows = build_lineage(results, None, today=date(2026, 5, 27))
+        return next(r for r in rows
+                    if r["name"] == "Цены и история активов")["source"]
+
+    def _provider_result(self, source_map):
+        from finance.price_providers import PriceConvention, ProviderResult
+        dates = pd.date_range("2026-04-15", periods=30, freq="B")
+        data = pd.DataFrame({t: np.linspace(180, 195, 30) for t in source_map},
+                            index=dates)
+        return ProviderResult(
+            data=data, loaded=list(source_map), failed={}, retried=[],
+            convention={t: PriceConvention.SPLIT_ADJUSTED for t in source_map},
+            source=dict(source_map))
+
+    def test_price_row_is_signed_by_the_actual_provider(self) -> None:
+        """🔴 F-6: подпись строки CoVe идёт из `ProviderResult.source`.
+
+        Пока источник был один, константа «Tradernet (Freedom Broker)» была
+        верна. С приходом `StooqProvider` она стала ЛОЖНЫМ УТВЕРЖДЕНИЕМ в
+        тексте отчёта: ручной портфель заявлял бы пользователю связь с
+        брокером, которой у него нет. Это инвариант I-12 на слое текста.
+        """
+        self.assertEqual(self._lineage_source(self._provider_result(
+            {"AAPL": "tradernet"})), "Tradernet (Freedom Broker)")
+        self.assertIn("Stooq", self._lineage_source(self._provider_result(
+            {"AAPL": "stooq"})))
+        self.assertNotIn("Freedom", self._lineage_source(self._provider_result(
+            {"AAPL": "stooq"})), "ручной отчёт не вправе упоминать брокера")
+
+    def test_mixed_sources_are_shown_not_silently_picked(self) -> None:
+        """I-13: смешанного источника быть не должно — но если он есть, видно.
+
+        Выбрать одно из двух имён значило бы скрыть нарушение инварианта ровно
+        в том месте, которое существует ради его раскрытия.
+        """
+        signature = self._lineage_source(
+            self._provider_result({"AAPL": "stooq", "MSFT": "tradernet"}))
+        self.assertIn("несколько источников", signature)
+        self.assertIn("stooq", signature)
+        self.assertIn("tradernet", signature)
+
+    def test_unknown_provider_is_not_relabelled_as_the_broker(self) -> None:
+        """Незнакомое имя показывается как есть, а не подменяется знакомым."""
+        signature = self._lineage_source(self._provider_result({"AAPL": "eodhd"}))
+        self.assertEqual(signature, "eodhd")
 
     def test_sec_warn_when_tickers_missing_coverage(self) -> None:
         """Two tickers with default/EM_Proxy sector → status='warn'."""

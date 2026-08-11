@@ -848,6 +848,115 @@ def measure_convention(archive_dir, *,
     return out
 
 
+# ═════════════════════════════════════════════════════════════════════════════
+# Рабочий набор: какие бумаги вообще класть в базу
+# ═════════════════════════════════════════════════════════════════════════════
+
+@dataclass(frozen=True)
+class UniverseCandidate:
+    """Бумага архива, измеренная по трём признакам пригодности."""
+
+    symbol: str
+    market: str
+    bars: int                          # баров в окне движка
+    last_date: int                     # YYYYMMDD последнего бара
+    median_turnover: float             # медианный оборот, close × volume
+
+
+def scan_archive(archive_dir, *, window_days: Optional[int] = None,
+                 today: Optional[date] = None) -> list[UniverseCandidate]:
+    """Померить КАЖДУЮ бумагу архива: длина истории, свежесть, оборот.
+
+    Дорогой проход (около 12 000 файлов), поэтому он отделён от выбора: сам
+    выбор — чистая функция и проверяется без файлов вовсе.
+
+    Разбор здесь НАМЕРЕННО легче, чем в `parse_history_file`: правила OHLC
+    решают, класть ли БАР, а этот проход решает, класть ли БУМАГУ.  Гонять
+    полный фильтр ради трёх агрегатов значило бы платить минутами за число,
+    которое от него не изменится.
+    """
+    window = int(window_days if window_days is not None
+                 else env_int("HISTORY_LOOKBACK_DAYS", 1825, lo=90, hi=3650))
+    cutoff = int(((today or date.today())
+                  - timedelta(days=window)).strftime("%Y%m%d"))
+    out: list[UniverseCandidate] = []
+    for path in iter_archive_files(archive_dir):
+        symbol = symbol_of_archive_file(path)
+        market = mc.market_of(symbol)
+        if market in (mc.NON_INSTRUMENT, mc.UNKNOWN_MARKET):
+            continue
+        last = 0
+        turnovers: list[float] = []
+        try:
+            for row in _read_rows(path):
+                day = _to_float(row.get("<DATE>"))
+                if day is None or int(day) < cutoff:
+                    continue
+                close = _to_float(row.get("<CLOSE>"))
+                if close is None or close <= 0:
+                    continue
+                last = max(last, int(day))
+                turnovers.append(close * (_to_float(row.get("<VOL>")) or 0.0))
+        except IngestError as exc:
+            logger.info("STOOQ: %s пропущен при сканировании: %s", symbol, exc)
+            continue
+        if not turnovers:
+            continue
+        out.append(UniverseCandidate(symbol, market, len(turnovers), last,
+                                     _median(turnovers)))
+    return out
+
+
+def _median(values: list[float]) -> float:
+    ordered = sorted(values)
+    middle = len(ordered) // 2
+    if len(ordered) % 2:
+        return ordered[middle]
+    return (ordered[middle - 1] + ordered[middle]) / 2.0
+
+
+def select_universe(candidates: Iterable[UniverseCandidate], *,
+                    min_bars: int, stale_after_days: int,
+                    min_turnover: float, limit: int,
+                    as_of: Optional[int] = None) -> list[str]:
+    """Отобрать бумаги в базу по ИЗМЕРЕННЫМ признакам, а не по списку.
+
+    🔴 Списка тикеров здесь нет и быть не должно.  Захардкоженный «топ-500
+    ликвидных» — это второй справочник фактов о мире (ловушка Т-4): он устареет
+    молча, первым же делистингом или IPO, и узнáем мы об этом из отчёта
+    пользователя.  Признаки же пересчитываются на каждом ре-бутстрапе сами.
+
+    Три критерия, и каждый отвечает за свой способ сломать отчёт:
+
+    * `min_bars` — короткая история схлопывает окно регрессии для ВСЕЙ панели
+      (F-15/F-21), то есть одна молодая бумага портит чужие числа;
+    * `stale_after_days` — делистингованная бумага отдала бы последнюю цену как
+      сегодняшнюю (замер `tph.us`);
+    * `min_turnover` — неликвид даёт ряд из повторов и ложно низкую волатильность.
+
+    `limit` — не критерий качества, а ПОТОЛОК РАЗМЕРА: замер даёт 75 КБ на
+    бумагу, значит 800 бумаг ≈ 60 МБ, а полная выгрузка US ≈ 900 МБ, что для
+    контейнера с лимитом 2 GiB и `/tmp` в оперативной памяти уже опасно
+    (`PHASE_08B §3.1`).  Отсекается наименее ликвидное — то есть то, чьё
+    отсутствие пользователь заметит с наименьшей вероятностью.
+    """
+    pool = [c for c in candidates if c.bars >= int(min_bars)
+            and c.median_turnover >= float(min_turnover)]
+    newest = int(as_of) if as_of is not None else max(
+        (c.last_date for c in pool), default=0)
+    if newest:
+        horizon = _shift_yyyymmdd(newest, -int(stale_after_days))
+        pool = [c for c in pool if c.last_date >= horizon]
+    pool.sort(key=lambda c: (-c.median_turnover, c.symbol))
+    return [c.symbol for c in pool[:int(limit)]]
+
+
+def _shift_yyyymmdd(yyyymmdd: int, delta_days: int) -> int:
+    text = str(int(yyyymmdd))
+    anchor = date(int(text[:4]), int(text[4:6]), int(text[6:8]))
+    return int((anchor + timedelta(days=int(delta_days))).strftime("%Y%m%d"))
+
+
 def stored_symbols(conn: sqlite3.Connection) -> set[str]:
     """Символы источника, которые в базе реально есть.
 
