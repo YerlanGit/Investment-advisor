@@ -30,6 +30,7 @@ from __future__ import annotations
 import csv
 import json
 import logging
+import math
 import os
 import re
 import sqlite3
@@ -713,6 +714,20 @@ def coverage_report(conn: sqlite3.Connection,
     return out
 
 
+#: Вердикты замера.  Константы, а не литералы у потребителя: сводка CLI считает
+#: их СРАВНЕНИЕМ, а не поиском подстроки — «СКОРРЕКТИРОВАН» является подстрокой
+#: «НЕ СКОРРЕКТИРОВАН», и на такой классификации сводка однажды соврала бы молча.
+VERDICT_RAW = "ступенька ЕСТЬ → ряд СЫРОЙ (RAW)"
+VERDICT_ADJUSTED = "ступеньки нет → ряд СКОРРЕКТИРОВАН"
+VERDICT_UNCLEAR = "ступенька есть, но НЕ равна сплиту → НЕЯСНО"
+VERDICT_ABSENT = "нет в архиве"
+VERDICT_OUT_OF_RANGE = "событие вне окна ряда"
+
+#: Вердикты, которые НЕ являются измерением: их нельзя ни складывать с
+#: ответом, ни считать противоречием ему.
+NO_ANSWER_VERDICTS = frozenset({VERDICT_ABSENT, VERDICT_OUT_OF_RANGE})
+
+
 @dataclass(frozen=True)
 class ConventionProbe:
     """Одно событие сплита, проверенное по архиву истории."""
@@ -723,6 +738,11 @@ class ConventionProbe:
     close_before: Optional[float]
     close_on_after: Optional[float]
     verdict: str
+    #: Даты баров, между которыми считалось отношение.  Печатаются оператору:
+    #: разрыв ряда у события (бары через месяц друг от друга) делает отношение
+    #: бессмысленным, и увидеть это можно только по датам.
+    date_before: Optional[int] = None
+    date_after: Optional[int] = None
 
     @property
     def observed_ratio(self) -> Optional[float]:
@@ -730,12 +750,40 @@ class ConventionProbe:
             return None
         return self.close_before / self.close_on_after
 
+    @property
+    def measured(self) -> bool:
+        """Было ли событие вообще измерено (в отличие от «бумаги нет»)."""
+        return self.verdict not in NO_ANSWER_VERDICTS
+
 
 #: Порог «ступеньки» — ТОТ ЖЕ, что у эвристики движка
 #: (`history._SPLIT_RETURN_THRESHOLD` = log(1.5)), чтобы слово «ступенька»
 #: здесь и там значило одно и то же.  Свой порог означал бы, что замер
 #: объявляет ряд сырым, а движок ту же ступеньку не видит.
 _SPLIT_STEP_THRESHOLD = 1.5
+
+
+def _verdict_for(observed: float, expected: float) -> str:
+    """Вердикт по отношению цен: СЫРОЙ, СКОРРЕКТИРОВАН или НЕЯСНО.
+
+    🔴 Ответов ТРИ, а не два, и третий — главный.  Отношение сравнивается с
+    ДВУМЯ гипотезами: «ступенька размером со сплит» (ряд сырой) и «ступеньки
+    нет» (ряд скорректирован).  Если оно не близко ни к одной — например, 2.0
+    при сплите 10:1, — то верного ответа среди двух нет, и объявить сырым
+    только потому, что «больше порога», значит выдать догадку за замер.
+    Именно такую ошибку фаза и обязана исключить (`PHASE_08B §7.6`).
+
+    Близость меряется в ЛОГАРИФМАХ и одним порогом — тем же, которым движок
+    отличает ступеньку от новостного движения.  Логарифм здесь не украшение:
+    он делает зоны симметричными и снимает вопрос о пересечении, которое при
+    сравнении «в разах» возникло бы у сплита 2:1.
+    """
+    band = math.log(_SPLIT_STEP_THRESHOLD)
+    to_raw = abs(math.log(observed) - math.log(expected))
+    to_adjusted = abs(math.log(observed))
+    if min(to_raw, to_adjusted) > band:
+        return VERDICT_UNCLEAR
+    return VERDICT_RAW if to_raw <= to_adjusted else VERDICT_ADJUSTED
 
 
 def measure_convention(archive_dir, *,
@@ -768,28 +816,35 @@ def measure_convention(archive_dir, *,
     out: list[ConventionProbe] = []
     for ticker, events in sorted(KNOWN_SPLITS.items()):
         path = by_symbol.get(str(ticker).upper())
+        if path is None:
+            out.extend(ConventionProbe(ticker, when.isoformat(), float(ratio),
+                                       None, None, VERDICT_ABSENT)
+                       for when, ratio in events)
+            continue
+        # Окно берём заведомо шире события: замер не про свежесть.  Файл
+        # читается ОДИН раз на бумагу, а не на событие.
+        batch = parse_history_file(path, window_days=20 * 365, today=today)
+        # Сортировка ЯВНАЯ.  Порядок строк в файле — свойство поставщика, а не
+        # наше знание; «последний до события» обязан значить «самый поздний по
+        # ДАТЕ», иначе перестановка строк тихо меняет ответ замера.
+        ordered = sorted(batch.bars, key=lambda b: b.trade_date)
         for when, ratio in events:
-            stamp = when.strftime("%Y%m%d")
-            if path is None:
-                out.append(ConventionProbe(ticker, when.isoformat(),
-                                           float(ratio), None, None,
-                                           "нет в архиве"))
-                continue
-            # Окно берём заведомо шире события: замер не про свежесть.
-            batch = parse_history_file(path, window_days=20 * 365, today=today)
-            before = [b.close for b in batch.bars if b.trade_date < int(stamp)]
-            after = [b.close for b in batch.bars if b.trade_date >= int(stamp)]
+            stamp = int(when.strftime("%Y%m%d"))
+            before = [b for b in ordered if b.trade_date < stamp]
+            after = [b for b in ordered if b.trade_date >= stamp]
             if not before or not after:
                 out.append(ConventionProbe(ticker, when.isoformat(),
                                            float(ratio), None, None,
-                                           "событие вне окна ряда"))
+                                           VERDICT_OUT_OF_RANGE))
                 continue
-            observed = before[-1] / after[0] if after[0] else 0.0
-            verdict = ("ступенька ЕСТЬ → ряд СЫРОЙ (RAW)"
-                       if observed > _SPLIT_STEP_THRESHOLD
-                       else "ступеньки нет → ряд СКОРРЕКТИРОВАН")
-            out.append(ConventionProbe(ticker, when.isoformat(), float(ratio),
-                                       before[-1], after[0], verdict))
+            # Деление безопасно: цена ≤ 0 отбракована правилом 2 при разборе.
+            observed = before[-1].close / after[0].close
+            out.append(ConventionProbe(
+                ticker, when.isoformat(), float(ratio),
+                before[-1].close, after[0].close,
+                _verdict_for(observed, float(ratio)),
+                date_before=before[-1].trade_date,
+                date_after=after[0].trade_date))
     return out
 
 

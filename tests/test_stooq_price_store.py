@@ -608,20 +608,71 @@ class BootstrapAndSeamTest(_TempDirMixin, unittest.TestCase):
         probes = {p.ticker: p for p in si.measure_convention(
             self._split_archive(), today=date(2026, 8, 10))}
         self.assertAlmostEqual(probes["NVDA.US"].observed_ratio, 10.0, places=3)
-        self.assertIn("СЫРОЙ", probes["NVDA.US"].verdict)
+        self.assertEqual(probes["NVDA.US"].verdict, si.VERDICT_RAW)
 
     def test_convention_detects_adjusted_series(self) -> None:
         probes = {p.ticker: p for p in si.measure_convention(
             self._split_archive(), today=date(2026, 8, 10))}
         self.assertLess(probes["AMZN.US"].observed_ratio, 1.5)
-        self.assertIn("СКОРРЕКТИРОВАН", probes["AMZN.US"].verdict)
+        self.assertEqual(probes["AMZN.US"].verdict, si.VERDICT_ADJUSTED)
 
     def test_convention_says_nothing_when_paper_is_absent(self) -> None:
         """Отсутствие бумаги — не вердикт. Молчание честнее догадки."""
         probes = {p.ticker: p for p in si.measure_convention(
             self._split_archive(), today=date(2026, 8, 10))}
-        self.assertEqual(probes["TSLA.US"].verdict, "нет в архиве")
+        self.assertEqual(probes["TSLA.US"].verdict, si.VERDICT_ABSENT)
         self.assertIsNone(probes["TSLA.US"].observed_ratio)
+        self.assertFalse(probes["TSLA.US"].measured)
+
+    def test_convention_refuses_to_call_a_wrong_step_raw(self) -> None:
+        """🔴 Ступенька, не равная сплиту, — это НЕ «ряд сырой».
+
+        Прежняя редакция отвечала двумя вердиктами: «больше порога → СЫРОЙ»,
+        иначе «СКОРРЕКТИРОВАН». Отношение 2.0 при сплите 10:1 не описывается
+        ни одной из гипотез — там происходит что-то третье, — но объявлялось
+        сырым УВЕРЕННО. Ровно этот класс ошибки фаза и обязана исключить:
+        неверно объявленная конвенция оставляет цены правдоподобными.
+        """
+        archive = self.tmp / "half"
+        archive.mkdir()
+        write_history(archive, "nvda.us.txt",
+                      [row("NVDA.US", 20240607, c=240.0),
+                       row("NVDA.US", 20240610, c=120.0)])   # ступенька 2, не 10
+        probes = {p.ticker: p for p in si.measure_convention(
+            archive, today=date(2026, 8, 10))}
+        self.assertEqual(probes["NVDA.US"].verdict, si.VERDICT_UNCLEAR)
+        self.assertTrue(probes["NVDA.US"].measured,
+                        "событие измерено — просто ответ не читается")
+
+    def test_convention_names_the_bars_it_compared(self) -> None:
+        """Даты сравненных баров печатаются: разрыв ряда виден только по ним.
+
+        Отношение цен через месяц молчания у события — это не замер сплита, а
+        замер месячного движения. Отличить одно от другого без дат нельзя.
+        """
+        probes = {p.ticker: p for p in si.measure_convention(
+            self._split_archive(), today=date(2026, 8, 10))}
+        self.assertEqual(probes["NVDA.US"].date_before, 20240607)
+        self.assertEqual(probes["NVDA.US"].date_after, 20240610)
+
+    def test_convention_does_not_trust_the_order_of_rows(self) -> None:
+        """«Последний бар до события» — самый поздний по ДАТЕ, а не по строке.
+
+        Живые файлы Stooq отсортированы по возрастанию, и замер на них верен
+        при любой реализации — то есть порядок здесь является НЕПРОВЕРЕННЫМ
+        допущением о поставщике. Фикстура его нарушает намеренно: с опорой на
+        порядок строк тот же архив даёт «СКОРРЕКТИРОВАН» вместо «СЫРОЙ».
+        """
+        archive = self.tmp / "shuffled"
+        archive.mkdir()
+        write_history(archive, "nvda.us.txt",
+                      [row("NVDA.US", 20240607, c=1200.0),
+                       row("NVDA.US", 20240605, c=130.0),
+                       row("NVDA.US", 20240610, c=120.0)])
+        probes = {p.ticker: p for p in si.measure_convention(
+            archive, today=date(2026, 8, 10))}
+        self.assertEqual(probes["NVDA.US"].date_before, 20240607)
+        self.assertEqual(probes["NVDA.US"].verdict, si.VERDICT_RAW)
 
     def test_convention_threshold_matches_the_engine(self) -> None:
         """🔴 Порог «ступеньки» ОБЯЗАН совпадать с эвристикой движка.
@@ -929,6 +980,79 @@ class OperatorCliTest(_TempDirMixin, unittest.TestCase):
                          "--date", "2026-08-07",
                          "--archive", str(self.tmp)])
         self.assertEqual(code, 1)
+
+    def test_missing_archive_is_named_instead_of_blamed_on_stooq(self) -> None:
+        """🔴 Опечатка в пути НЕ должна читаться как вывод о поставщике.
+
+        Без гарда `bootstrap` на несуществующем каталоге печатал «файлов
+        обработано 0», а следом «🔴 нет истории: SPY.US» — то есть буквально
+        утверждал, что в Stooq нет SPY. Проект уже трижды делал ложный вывод
+        такого рода из пустого перебора (`AUDIT §−76`), и стоил он отменённой
+        фазы. На Windows опечатка вероятнее всего: путь с пробелами без
+        кавычек рвётся argparse'ом.
+        """
+        import io
+        from contextlib import redirect_stdout
+
+        cli = self._cli()
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            code = cli.main(["--db", str(self.tmp / "p.sqlite"), "bootstrap",
+                             "--archive", str(self.tmp / "опечатка"),
+                             "--symbols", "SPY.US"])
+        self.assertEqual(code, 1)
+        self.assertIn("каталога архива нет", buffer.getvalue())
+        self.assertNotIn("нет истории", buffer.getvalue(),
+                         "отсутствие каталога — не утверждение о Stooq")
+
+    def test_seam_on_an_empty_database_cannot_report_success(self) -> None:
+        """🔴 Проверка, которая не может провалиться, ничего не подтверждает.
+
+        `verify_seam` сверяет то, что ЕСТЬ В БАЗЕ (`AUDIT §−80`). На пустой
+        базе сверять нечего, и прежняя редакция честно печатала «расхождений
+        нет ✅» с кодом 0 — пункт гейта «verify-seam совпал» проходил
+        ВХОЛОСТУЮ, до всякого бутстрапа.
+        """
+        import io
+        from contextlib import redirect_stdout
+
+        cli = self._cli()
+        self.fresh_db().close()               # схема есть, инструментов нет
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            code = cli.main(["--db", str(self.tmp / "prices.sqlite"),
+                             "verify-seam", "--date", "2026-08-07",
+                             "--archive", str(self.tmp)])
+        self.assertEqual(code, 1)
+        self.assertIn("нет ни одного инструмента", buffer.getvalue())
+
+    def test_measure_convention_counts_unclear_events_apart(self) -> None:
+        """Неясные события считаются ОТДЕЛЬНО и называются в сводке.
+
+        Смешать их с «нет в архиве» значит потерять единственный сигнал о том,
+        что у бумаги происходит что-то третье; смешать с ответом — объявить
+        конвенцию по данным, которые её не подтверждают.
+        """
+        import io
+        from contextlib import redirect_stdout
+
+        cli = self._cli()
+        archive = self.tmp / "arch"
+        archive.mkdir()
+        write_history(archive, "nvda.us.txt",           # ступенька 10 — сырой
+                      [row("NVDA.US", 20240607, c=1200.0),
+                       row("NVDA.US", 20240610, c=120.0)])
+        write_history(archive, "tsla.us.txt",           # ступенька 1.8 при 3:1
+                      [row("TSLA.US", 20220824, c=270.0),
+                       row("TSLA.US", 20220825, c=150.0)])
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            code = cli.main(["measure-convention", "--archive", str(archive)])
+        out = buffer.getvalue()
+        self.assertEqual(code, 0, "односторонний ответ — не отказ")
+        self.assertIn("сырых 1", out)
+        self.assertIn("неясных 1", out)
+        self.assertIn("не читаются ни как сырые", out)
 
     def test_db_default_follows_stooq_root(self) -> None:
         """Один корень управляет и папками, и базой.
