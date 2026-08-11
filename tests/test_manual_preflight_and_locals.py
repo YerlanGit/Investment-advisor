@@ -61,6 +61,73 @@ class PreflightCoverageTest(unittest.TestCase):
                                  days=1825, cached_lookup=lookup)
         return cov, calls
 
+    def test_silent_source_is_not_an_answer_about_papers(self) -> None:
+        """🔴 «Базы нет» и «вашей бумаги нет» — разные утверждения.
+
+        Пустой ответ источника раньше был неотличим от «ни одной бумаги не
+        нашлось», и экран подтверждения сказал бы пользователю, что его
+        портфель непокрываем, — по причине, к его портфелю не относящейся.
+        """
+        cov = preflight_coverage(self.report, self.engine, days=1825,
+                                 cached_lookup=lambda _t, _d: {})
+        self.assertFalse(cov.answered)
+        self.assertEqual(cov.covered, [])
+
+    def test_answered_source_marks_itself_as_answered(self) -> None:
+        cov, _ = self._coverage({"AAPL.US": 1200})
+        self.assertTrue(cov.answered)
+
+    def test_default_lookup_asks_the_store_for_stooq(self) -> None:
+        """🔴 Источник ответа — БАЗА, а не кэш Фазы 1 (`AUDIT §−86`).
+
+        `StooqProvider` читает локальную SQLite и кэш Фазы 1 не заполняет,
+        поэтому прежний ответ «не знаю» остался бы навсегда, а экран
+        подтверждения молчал бы про непокрытые бумаги вечно. База при этом
+        отвечает по существу лучше: она знает не «спрашивали ли раньше», а
+        есть ли бумага вообще.
+        """
+        import os
+        import sqlite3
+        import tempfile
+        from unittest.mock import patch
+
+        from finance import stooq_ingest as si
+        from finance.manual_portfolio import _default_coverage_lookup
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = Path(tmp.name) / "prices.sqlite"
+        conn = si.connect(db)
+        si.ensure_schema(conn)
+        conn.execute("INSERT INTO instruments(source, source_symbol, market, "
+                     "currency, convention) VALUES ('stooq','AAPL.US','US',"
+                     "'USD','unmeasured')")
+        conn.commit()
+        conn.close()
+
+        with patch.dict(os.environ, {"PRICE_PROVIDER_MANUAL": "stooq",
+                                     "STOOQ_DB_PATH": str(db)}):
+            lookup = _default_coverage_lookup()
+            answer = lookup(["AAPL.US", "NOSUCH.US"], 1825)
+        self.assertTrue(answer["AAPL.US"])
+        self.assertFalse(answer["NOSUCH.US"])
+        self.assertIsInstance(sqlite3.connect(db), sqlite3.Connection)
+
+    def test_default_lookup_survives_a_missing_store(self) -> None:
+        """Базы ещё нет — pre-flight молчит, а не роняет экран.
+
+        Он подсказка, а не условие расчёта: сбой чтения не имеет права отнять
+        у пользователя разобранный портфель.
+        """
+        import os
+        from unittest.mock import patch
+
+        from finance.manual_portfolio import _default_coverage_lookup
+
+        with patch.dict(os.environ, {"PRICE_PROVIDER_MANUAL": "stooq",
+                                     "STOOQ_DB_PATH": "/nonexistent/x.sqlite"}):
+            self.assertEqual(_default_coverage_lookup()(["AAPL.US"], 1825), {})
+
     def test_known_and_unknown_are_separated(self) -> None:
         cov, _ = self._coverage({"AAPL.US": 1200, "TLT.US": 1200,
                                  "KSPI.KZ": 900, "NOHIST.US": None})

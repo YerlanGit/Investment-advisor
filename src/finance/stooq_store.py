@@ -29,6 +29,8 @@ URI `mode=ro`, поэтому любая попытка записи подни�
 from __future__ import annotations
 
 import logging
+import os
+import shutil
 import sqlite3
 from dataclasses import dataclass
 from datetime import date
@@ -37,6 +39,7 @@ from typing import Iterable, Optional, Sequence
 
 import pandas as pd
 
+from env_config import env_int
 from finance import market_calendar as mc
 from finance.stooq_ingest import connect, database_path, resolve_symbol
 
@@ -45,6 +48,73 @@ logger = logging.getLogger(__name__)
 
 class StoreUnavailable(RuntimeError):
     """Базы нет или она непригодна для чтения."""
+
+
+def local_copy_limits() -> tuple[str, int, int]:
+    """`(каталог, нижний порог МБ, верхний порог МБ)` для локальной копии.
+
+    🔴 Читается ФУНКЦИЕЙ, а не константами модуля — тот же приём, что у
+    `price_providers._flag`: константа защёлкнулась бы на импорте, и тест не
+    смог бы её переопределить, а перезагрузка модуля оставила бы у соседей
+    ссылки на старый класс.
+
+    * **нижний порог** — ниже него копия только тратит память: файл целиком
+      укладывается в один-два range-запроса;
+    * **верхний порог** — выше него копировать ОПАСНО: `/tmp` в Cloud Run это
+      оперативная память при лимите 2 GiB, и база, собранная флагом `--all`
+      (≈900 МБ), уронила бы контейнер.
+    """
+    return (os.getenv("STOOQ_LOCAL_COPY_DIR", "/tmp/ramp-stooq"),
+            env_int("STOOQ_LOCAL_COPY_MIN_MB", 5, lo=0, hi=8000),
+            env_int("STOOQ_LOCAL_COPY_MAX_MB", 400, lo=0, hi=8000))
+
+
+def _local_copy(source: Path) -> Path:
+    """Путь, с которого читать: локальная копия либо сам файл.
+
+    Копия обновляется, когда у исходника изменились размер или время правки —
+    то есть после каждой публикации новой базы оператором.  Признак берётся
+    `stat`-ом, без открытия SQLite: открыть удалённую базу только ради версии
+    значило бы платить сетью за проверку, которая должна быть дешёвой.
+
+    Любой сбой копирования — НЕ ошибка: читаем исходник и говорим об этом в
+    лог.  Отчёт важнее оптимизации.
+    """
+    directory, min_mb, max_mb = local_copy_limits()
+    try:
+        stat = source.stat()
+        size_mb = stat.st_size / (1024 * 1024)
+        if size_mb < min_mb:
+            return source
+        if size_mb > max_mb:
+            logger.warning(
+                "STOOQ: база %.0f МБ больше потолка копирования %d МБ — читаю "
+                "с исходного тома. Если это gcsfuse, отчёт будет медленным; "
+                "пересоберите базу без --all (OPERATOR_STOOQ.md §5).",
+                size_mb, max_mb)
+            return source
+
+        target = Path(directory) / source.name
+        stamp = target.with_name(target.name + ".stamp")
+        key = f"{stat.st_size}:{int(stat.st_mtime)}"
+        if target.exists() and stamp.exists():
+            if stamp.read_text(encoding="utf-8").strip() == key:
+                return target
+
+        target.parent.mkdir(parents=True, exist_ok=True)
+        # Через временный файл и `os.replace`: иначе второй отчёт в том же
+        # контейнере может открыть копию на середине записи.
+        scratch = target.with_name(target.name + ".part")
+        shutil.copyfile(source, scratch)
+        os.replace(scratch, target)
+        stamp.write_text(key, encoding="utf-8")
+        logger.info("STOOQ: база скопирована локально (%.0f МБ) → %s",
+                    size_mb, target)
+        return target
+    except OSError as exc:
+        logger.warning("STOOQ: локальная копия не сделана (%s) — читаю с тома",
+                       exc)
+        return source
 
 
 @dataclass(frozen=True)
@@ -89,6 +159,7 @@ class StooqStore:
             raise StoreUnavailable(
                 f"базы котировок нет по пути {target} — сначала бутстрап "
                 "(см. docs/roadmap/manual_portfolio/OPERATOR_STOOQ.md §2)")
+        target = _local_copy(target)
         try:
             conn = connect(target, read_only=True)
             conn.execute("SELECT 1 FROM daily_bars LIMIT 1").fetchone()
