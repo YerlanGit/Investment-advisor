@@ -16,20 +16,30 @@ const PerfSummaryCard = ({ label, value, sub, accent, IconC }) => (
   </div>
 );
 
+// Аудит 2026-08-12 (замер в headless-браузере): на телефоне числа этой строки
+// НАКЛАДЫВАЛИСЬ друг на друга — «+25.2%» печаталось поверх «−32.1 пп» на всех
+// ширинах 320…414.  Причина каноническая: у трека `1fr` минимум равен
+// `auto` (min-content), а содержимое несёт `whitespace-nowrap`, поэтому треки
+// отказывались сжиматься и вылезали на соседа.  Лечится двумя вещами сразу:
+//   • `min-w-0` на КАЖДОЙ ячейке — трек получает право сжаться (`minmax(0,1fr)`);
+//   • на узком экране колонок ДВЕ, а Δ уезжает на свою строку во всю ширину —
+//     три nowrap-числа с подписями физически не помещаются в 320px, и любое
+//     «ужимание» шрифтом только отодвинуло бы столкновение.
+// С `sm:` вверх раскладка прежняя, в три колонки.
 const PeriodRow = ({ p, isMax }) => (
   <div className={`flex items-center gap-3 sm:gap-4 px-3 sm:px-5 py-3 rounded-2xl transition-colors hover:bg-cream-50
                    ${isMax?'bg-cream-50':''}`}>
-    <div className="w-12 sm:w-16 text-[12px] font-medium text-ink-500 flex-shrink-0">{p.label}</div>
-    <div className="flex-1 grid grid-cols-3 gap-2 min-w-0">
-      <div className="flex items-center gap-2">
+    <div className="w-10 sm:w-16 text-[12px] font-medium text-ink-500 flex-shrink-0">{p.label}</div>
+    <div className="flex-1 grid grid-cols-2 sm:grid-cols-3 gap-x-2 gap-y-1 min-w-0">
+      <div className="flex items-center gap-2 min-w-0">
         <span className="w-2 h-2 rounded-full bg-gold-400 flex-shrink-0"/>
         <span className="text-[14px] font-semibold num text-ink-900 whitespace-nowrap">{p.p>=0?'+':'−'}{Math.abs(p.p).toFixed(1)}%</span>
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 min-w-0">
         <span className="w-2 h-2 rounded-full bg-ink-900 flex-shrink-0"/>
         <span className="text-[14px] num text-ink-700 whitespace-nowrap">{p.s>=0?'+':'−'}{Math.abs(p.s).toFixed(1)}%</span>
       </div>
-      <div className="flex items-center gap-1.5 justify-end">
+      <div className="col-span-2 sm:col-span-1 flex items-center gap-1.5 justify-end min-w-0">
         <span className="text-[12px] text-ink-500">Δ</span>
         <span className={`text-[14px] font-semibold num whitespace-nowrap ${p.d>=0?'text-sage-600':'text-rust-600'}`}>{p.d>=0?'+':'−'}{Math.abs(p.d).toFixed(1)} пп</span>
       </div>

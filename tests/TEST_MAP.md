@@ -25,7 +25,7 @@
 > импорт), то есть когда карта действительно врёт.
 
 
-**Замер:** 71 тест-файлов · 52 модулей `src/` имеют хотя бы один адресный тест-импорт.
+**Замер:** 72 тест-файлов · 52 модулей `src/` имеют хотя бы один адресный тест-импорт.
 
 ## Модуль → тесты
 
@@ -33,12 +33,12 @@
 |---|---|---|
 | `agent.gatekeeper` | 5 | `test_phase18_sprint5.py` · `test_phase32_report_logic_fixes.py` · `test_phase33_effect_reinvest_quality.py` · `test_phase42_instrument_ssot.py` · `test_phase44_live_report_fixes.py` |
 | `agent.rag_engine` | 2 | `test_phase21_recos.py` · `test_phase22_rag_boot.py` |
-| `ai_narrative` | 17 | `test_factor_decomposition.py` · `test_phase13_security.py` · `test_phase15_phase3.py` · `test_phase18_sprint5.py` · `test_phase19_block_audit.py` · `test_phase31_benchmark_factor_propagation.py` · `test_phase32_report_logic_fixes.py` · `test_phase33_effect_reinvest_quality.py` · `test_phase36_report_audit_fixes.py` · `test_phase40_labels_and_boundary.py` · `test_phase44_live_report_fixes.py` · `test_phase46_p2_maintainability.py` · `test_phase4_reporting.py` · `test_phase5_rag_quality.py` · `test_phase7_logic_wiring.py` · `test_phase8_report_fixes.py` · `test_phase9_fpillar_stress.py` |
+| `ai_narrative` | 18 | `test_factor_decomposition.py` · `test_phase13_security.py` · `test_phase15_phase3.py` · `test_phase18_sprint5.py` · `test_phase19_block_audit.py` · `test_phase31_benchmark_factor_propagation.py` · `test_phase32_report_logic_fixes.py` · `test_phase33_effect_reinvest_quality.py` · `test_phase36_report_audit_fixes.py` · `test_phase40_labels_and_boundary.py` · `test_phase44_live_report_fixes.py` · `test_phase46_p2_maintainability.py` · `test_phase48_report_verdict_audit.py` · `test_phase4_reporting.py` · `test_phase5_rag_quality.py` · `test_phase7_logic_wiring.py` · `test_phase8_report_fixes.py` · `test_phase9_fpillar_stress.py` |
 | `db_tokenomics` | 5 | `test_manual_fsm_flow.py` · `test_phase12_beta_safety.py` · `test_phase20_sprint_refactor.py` · `test_phase29_multiuser_connection.py` · `test_phase43_report_lock.py` |
 | `entrypoint` | 1 | `test_phase22_rag_boot.py` |
 | `env_config` | 1 | `test_phase46_p2_maintainability.py` |
-| `finance` | 11 | `test_manual_freedom_parity.py` · `test_manual_preflight_and_locals.py` · `test_phase23_scenario.py` · `test_phase35_data_checks.py` · `test_phase39_report_consistency.py` · `test_phase42_instrument_ssot.py` · `test_phase45_data_checks_wiring.py` · `test_phase46_p2_maintainability.py` · `test_phase47_cove_and_fx_honesty.py` · `test_stooq_price_store.py` · `test_stooq_provider.py` |
-| `finance.action_plan` | 5 | `test_phase18_sprint5.py` · `test_phase27_composite_metrics.py` · `test_phase36_report_audit_fixes.py` · `test_phase39_report_consistency.py` · `test_phase3_modules.py` |
+| `finance` | 12 | `test_manual_freedom_parity.py` · `test_manual_preflight_and_locals.py` · `test_phase23_scenario.py` · `test_phase35_data_checks.py` · `test_phase39_report_consistency.py` · `test_phase42_instrument_ssot.py` · `test_phase45_data_checks_wiring.py` · `test_phase46_p2_maintainability.py` · `test_phase47_cove_and_fx_honesty.py` · `test_phase48_report_verdict_audit.py` · `test_stooq_price_store.py` · `test_stooq_provider.py` |
+| `finance.action_plan` | 6 | `test_phase18_sprint5.py` · `test_phase27_composite_metrics.py` · `test_phase36_report_audit_fixes.py` · `test_phase39_report_consistency.py` · `test_phase3_modules.py` · `test_phase48_report_verdict_audit.py` |
 | `finance.asset_taxonomy` | 3 | `test_phase15_phase3.py` · `test_phase32_report_logic_fixes.py` · `test_phase42_instrument_ssot.py` |
 | `finance.black_litterman` | 3 | `test_phase18_sprint5.py` · `test_phase20_sprint_refactor.py` · `test_phase3_modules.py` |
 | `finance.broker_api` | 6 | `test_phase13_security.py` · `test_phase34_broker_outage_honesty.py` · `test_phase41_fx_base_currency.py` · `test_phase42_instrument_ssot.py` · `test_phase46_p2_maintainability.py` · `test_stooq_provider.py` |
@@ -56,14 +56,14 @@
 | `finance.period_returns` | 3 | `test_phase26_report_fixes.py` · `test_phase28_risk_methodology_audit.py` · `test_phase4_reporting.py` |
 | `finance.portfolio_series` | 3 | `test_phase20_sprint_refactor.py` · `test_phase27_composite_metrics.py` · `test_phase30_benchmark_equity_curve.py` |
 | `finance.price_providers` | 6 | `test_manual_fsm_flow.py` · `test_phase35_price_providers.py` · `test_phase40_labels_and_boundary.py` · `test_phase4_reporting.py` · `test_stooq_price_store.py` · `test_stooq_provider.py` |
-| `finance.regime` | 7 | `test_phase10_pillar_chip.py` · `test_phase19_block_audit.py` · `test_phase21_recos.py` · `test_phase2_modules.py` · `test_phase36_report_audit_fixes.py` · `test_phase7_logic_wiring.py` · `test_phase8_report_fixes.py` |
+| `finance.regime` | 8 | `test_phase10_pillar_chip.py` · `test_phase19_block_audit.py` · `test_phase21_recos.py` · `test_phase2_modules.py` · `test_phase36_report_audit_fixes.py` · `test_phase48_report_verdict_audit.py` · `test_phase7_logic_wiring.py` · `test_phase8_report_fixes.py` |
 | `finance.scenario_engine` | 1 | `test_phase46_p2_maintainability.py` |
 | `finance.scenario_report` | 1 | `test_phase24_scenario_report.py` |
-| `finance.scoring` | 11 | `test_phase14_refactor.py` · `test_phase15_phase3.py` · `test_phase16_sprint2.py` · `test_phase18_sprint5.py` · `test_phase19_block_audit.py` · `test_phase21_recos.py` · `test_phase2_modules.py` · `test_phase32_report_logic_fixes.py` · `test_phase39_report_consistency.py` · `test_phase42_instrument_ssot.py` · `test_phase4_reporting.py` |
+| `finance.scoring` | 12 | `test_phase14_refactor.py` · `test_phase15_phase3.py` · `test_phase16_sprint2.py` · `test_phase18_sprint5.py` · `test_phase19_block_audit.py` · `test_phase21_recos.py` · `test_phase2_modules.py` · `test_phase32_report_logic_fixes.py` · `test_phase39_report_consistency.py` · `test_phase42_instrument_ssot.py` · `test_phase48_report_verdict_audit.py` · `test_phase4_reporting.py` |
 | `finance.scoring_orchestrator` | 7 | `test_phase10_pillar_chip.py` · `test_phase18_sprint5.py` · `test_phase28_risk_methodology_audit.py` · `test_phase42_instrument_ssot.py` · `test_phase7_logic_wiring.py` · `test_phase8_report_fixes.py` · `test_phase9_fpillar_stress.py` |
 | `finance.sec_edgar` | 2 | `test_phase42_instrument_ssot.py` · `test_phase4_reporting.py` |
 | `finance.security` | 1 | `test_phase29_multiuser_connection.py` |
-| `finance.simulate` | 11 | `test_phase14_refactor.py` · `test_phase18_sprint5.py` · `test_phase19_block_audit.py` · `test_phase32_report_logic_fixes.py` · `test_phase33_effect_reinvest_quality.py` · `test_phase36_report_audit_fixes.py` · `test_phase42_instrument_ssot.py` · `test_phase44_live_report_fixes.py` · `test_phase46_p2_maintainability.py` · `test_phase4_reporting.py` · `test_phase7_logic_wiring.py` |
+| `finance.simulate` | 12 | `test_phase14_refactor.py` · `test_phase18_sprint5.py` · `test_phase19_block_audit.py` · `test_phase32_report_logic_fixes.py` · `test_phase33_effect_reinvest_quality.py` · `test_phase36_report_audit_fixes.py` · `test_phase42_instrument_ssot.py` · `test_phase44_live_report_fixes.py` · `test_phase46_p2_maintainability.py` · `test_phase48_report_verdict_audit.py` · `test_phase4_reporting.py` · `test_phase7_logic_wiring.py` |
 | `finance.smart_money` | 1 | `test_phase19_block_audit.py` |
 | `finance.stooq_provider` | 3 | `test_manual_freedom_parity.py` · `test_phase35_price_providers.py` · `test_stooq_provider.py` |
 | `finance.stooq_store` | 2 | `test_stooq_price_store.py` · `test_stooq_provider.py` |
@@ -77,7 +77,7 @@
 | `html_renderer` | 4 | `test_phase18_sprint5.py` · `test_phase19_block_audit.py` · `test_phase21_recos.py` · `test_phase24_scenario_report.py` |
 | `pdf_charts` | 2 | `test_phase4_reporting.py` · `test_phase5_rag_quality.py` |
 | `pdf_payload` | 23 | `test_factor_decomposition.py` · `test_phase10_pillar_chip.py` · `test_phase14_refactor.py` · `test_phase16_sprint2.py` · `test_phase18_sprint5.py` · `test_phase19_block_audit.py` · `test_phase25_math_sprint1.py` · `test_phase28_risk_methodology_audit.py` · `test_phase31_benchmark_factor_propagation.py` · `test_phase33_effect_reinvest_quality.py` · `test_phase36_illiquid_proxy.py` · `test_phase36_report_audit_fixes.py` · `test_phase37_position_contract.py` · `test_phase39_report_consistency.py` · `test_phase40_labels_and_boundary.py` · `test_phase41_fx_base_currency.py` · `test_phase44_live_report_fixes.py` · `test_phase47_cove_and_fx_honesty.py` · `test_phase4_reporting.py` · `test_phase5_rag_quality.py` · `test_phase7_logic_wiring.py` · `test_phase8_report_fixes.py` · `test_phase9_fpillar_stress.py` |
-| `premium_payload` | 11 | `test_factor_decomposition.py` · `test_phase19_block_audit.py` · `test_phase21_recos.py` · `test_phase26_report_fixes.py` · `test_phase31_benchmark_factor_propagation.py` · `test_phase36_illiquid_proxy.py` · `test_phase37_base_holdings_ai.py` · `test_phase39_report_consistency.py` · `test_phase40_labels_and_boundary.py` · `test_phase44_live_report_fixes.py` · `test_phase47_cove_and_fx_honesty.py` |
+| `premium_payload` | 12 | `test_factor_decomposition.py` · `test_phase19_block_audit.py` · `test_phase21_recos.py` · `test_phase26_report_fixes.py` · `test_phase31_benchmark_factor_propagation.py` · `test_phase36_illiquid_proxy.py` · `test_phase37_base_holdings_ai.py` · `test_phase39_report_consistency.py` · `test_phase40_labels_and_boundary.py` · `test_phase44_live_report_fixes.py` · `test_phase47_cove_and_fx_honesty.py` · `test_phase48_report_verdict_audit.py` |
 | `profile_manager` | 1 | `test_phase18_sprint5.py` |
 | `services.fx_feed` | 2 | `test_phase25_math_sprint1.py` · `test_phase6_fx_feed.py` |
 | `services.macro_data` | 2 | `test_phase21_recos.py` · `test_phase4_reporting.py` |

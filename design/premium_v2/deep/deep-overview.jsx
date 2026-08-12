@@ -23,8 +23,10 @@ const HeroGaugeCard = ({ v }) => (
         {(v.riskTier && v.riskTier !== '–') &&
           <span className="px-2 py-0.5 rounded-full bg-gold-400/25 text-gold-700 text-[9px] font-mono font-bold tracking-wider uppercase">{v.riskTier}</span>}
       </div>
+      {/* Замер 2026-08-12: на 320px пара «Ожид. дох. + Фвд-Sharpe» не помещалась
+          в колонку и вылезала за экран — ряду нужен перенос. */}
       {(v.expReturn && v.expReturn !== '–') && (
-        <div className="flex items-center gap-4">
+        <div className="flex items-center flex-wrap gap-x-4 gap-y-2 min-w-0">
           <div>
             <div className="text-[9px] text-ink-500 font-medium uppercase tracking-wider">Ожид. дох. (год.)</div>
             <div className="num text-lg font-light text-sage-600 leading-none mt-0.5">{v.expReturn}</div>
@@ -78,8 +80,8 @@ const _plural = (n, one, few, many) => {
 // Mandate compliance card
 const MandateCard = ({ m }) => (
   <div className="glass-strong rounded-4xl p-6 shadow-card lift flex flex-col">
-    <div className="flex items-start justify-between mb-1 gap-2">
-      <div>
+    <div className="flex items-start justify-between flex-wrap mb-1 gap-2">
+      <div className="min-w-0">
         <div className="text-ink-500 text-[12px] font-medium">Соответствие мандату</div>
         <h3 className="text-xl font-semibold tracking-tight text-ink-900 leading-tight">{m.profile}</h3>
       </div>
@@ -150,8 +152,18 @@ const _KPI_METHOD = {
 // как противоречие в отчёте.
 const _SPARK_NOTE = '12 срезов за год · каждый по скользящему окну 60 дней (число выше — по полному окну истории)';
 
+// Аудит 2026-08-12: `k.status` теперь ВЕРДИКТ ПО ЗНАЧЕНИЮ из движка
+// (`finance.scoring.kpi_status` → ok/warn/bad), а не литерал дизайн-макета.
+// Прежде Sharpe всегда получал золотой бейдж «good» — даже когда ИИ-заметка
+// на той же карточке говорила «отдача на единицу риска слабая».  Старые ключи
+// (normal/good/watch) оставлены для payload'ов, собранных до этой правки.
+const _KPI_BORDER = {
+  ok:'#5d7c5c', warn:'#caa01a', bad:'#c47358',
+  normal:'#5d7c5c', good:'#caa01a', watch:'#c47358',
+};
+
 const KpiCard = ({ k }) => {
-  const border = { normal:'#5d7c5c', good:'#caa01a', watch:'#c47358' }[k.status];
+  const border = _KPI_BORDER[k.status] || '#a8a293';
   const hasPts = Array.isArray(k.pts) && k.pts.length >= 2;
   return (
     <div className="glass-strong rounded-4xl p-6 shadow-card lift flex flex-col"

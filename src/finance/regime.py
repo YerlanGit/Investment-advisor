@@ -127,6 +127,56 @@ def macro_trend_lookback(cadence) -> tuple[int, str]:
     return MACRO_TREND_LOOKBACK.get(str(cadence or "daily"), _MACRO_TREND_DEFAULT)
 
 
+# 🔴 Аудит 2026-08-12: ЗНАК ряда — SSOT, и он уже дважды закодирован выше.
+#
+# Панель «Сигналы-драйверы» красила ЗНАЧЕНИЕ индикатора по его СВЕЖЕСТИ
+# (`status == "ok"` → зелёный), а не по экономическому смыслу движения.  В живом
+# отчёте 12.08 это дало прямое противоречие ВНУТРИ одной секции: строка
+# «Real GDP growth ▼ −2.13 пп за 3кв» светилась зелёным, а пунктом ниже, в
+# подтверждении режима, тот же факт стоял с ✗ «ВВП замедляется — против фазы
+# роста».  Три драйвера из шести были зелёными при ухудшающемся тренде.
+#
+# Таблица НИЧЕГО НЕ ИЗОБРЕТАЕТ — она называет знаки, которые движок уже
+# применяет: `_macro_nudges` берёт `gdp_tr` со знаком «+», а `une_tr` и `be_tr`
+# с «−»; пороги `_build_regime_consistency` трактуют расширение HY-спреда,
+# рост VIX и инверсию кривой как риск-офф.  Здесь они собраны в одном месте,
+# чтобы панель и подтверждение режима не могли разойтись снова.
+#
+# +1 — РОСТ ряда поддерживает риск-он; −1 — рост ряда против него.
+MACRO_DRIVER_DIRECTION: dict[str, int] = {
+    "yield_curve_10y2y":   +1,   # круче кривая → уходит инверсия → риск-он
+    "hy_oas":              -1,   # шире кредитный спред → риск-офф
+    "vix":                 -1,   # выше страх → риск-офф
+    "breakeven_inflation": -1,   # перезаякорение ожиданий ВВЕРХ → ужесточение
+    "unemployment":        -1,   # растёт безработица → охлаждение цикла
+    "gdp_growth":          +1,   # ускоряется ВВП → фаза роста
+}
+
+#: Ниже этого модуля изменения тренд считается плоским (шум округления панели,
+#: которая печатает две значащие цифры).
+_STANCE_FLAT_EPS = 1e-9
+
+
+def macro_trend_stance(key: str, delta) -> str:
+    """
+    Экономический тон ТРЕНДА одного макро-ряда: ``'pos' | 'neg' | 'flat'``.
+
+    `delta` — изменение за окно (то же число, что печатается чипом). Ряд без
+    известного направления или без тренда → ``'flat'``: молчание честнее
+    выдуманного знака.
+    """
+    sign = MACRO_DRIVER_DIRECTION.get(str(key or "").strip())
+    if not sign:
+        return "flat"
+    try:
+        d = float(delta)
+    except (TypeError, ValueError):
+        return "flat"
+    if not np.isfinite(d) or abs(d) <= _STANCE_FLAT_EPS:
+        return "flat"
+    return "pos" if (d * sign) > 0 else "neg"
+
+
 def series_trend(values, lag: int, *, min_points: int = _TREND_MIN_POINTS
                  ) -> tuple[Optional[float], Optional[float], int]:
     """
@@ -455,4 +505,6 @@ __all__ = [
     "REGIME_FAVOURED_SECTORS",
     "REGIME_PENALISED_SECTORS",
     "series_trend",
+    "MACRO_DRIVER_DIRECTION",
+    "macro_trend_stance",
 ]

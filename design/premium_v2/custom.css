@@ -50,10 +50,40 @@
            forced clipping).  This is the canonical flexbox overflow fix. */
     #root [class*="min-w-["], #root .flex-1 { min-width: 0 !important; }
 
-    /* 3 — oversized hero headline + big numeric displays → fluid clamp. */
+    /* 2b — SECTION-level grid items must be allowed to shrink.
+           Замер 2026-08-12 (headless, 320px): у `col-span-*` элемента действует
+           `min-width: auto`, то есть минимум = ширина СОДЕРЖИМОГО.  Факторная
+           секция DEEP держит внутри широкую таблицу и радар, поэтому элемент
+           раздувался до 308px в треке 216px и вылезал за экран на 40px —
+           13 переполнений на 320px, все из этой одной причины.  `min-width:0`
+           возвращает элементу право сжаться до трека, а широкая таблица внутри
+           уже имеет свой горизонтальный скролл (правило 6 / .mob-scroll-x).
+           🔴 Целимся ИМЕННО в `col-span-*` (разметка секций), а НЕ в ячейки
+           строк данных: у тех `min-width:0` схлопывает треки и nowrap-числа
+           начинают налезать друг на друга — см. предостережение в правиле 8. */
+    #root [class*="col-span-"] { min-width: 0 !important; }
+
+    /* 2c — 🔴 ГЛАВНАЯ причина переполнения DEEP на 320px, и она не в колонках,
+           а в ПРОМЕЖУТКАХ.  Замер: секционная сетка `grid-cols-12 gap-7`
+           внутри карточки шириной 216px даёт 11 межколоночных зазоров по 28px
+           = 308px ОДНИХ ТОЛЬКО ГУТТЕРОВ.  Они не помещаются, поэтому все 12
+           треков схлопываются в 0px, а сама сетка всё равно занимает 308px и
+           вылезает за экран на 92px — отсюда 13 переполнений (радар, таблица
+           факторов, пояснения, чипы).  `min-width:0` выше этого НЕ лечит:
+           элемент уже 0-широкий, разносит именно сумма зазоров.
+           На телефоне все секционные блоки всё равно идут в одну колонку
+           (`col-span-12`), поэтому межколоночный зазор там не нужен вовсе;
+           вертикальный ритм сохраняем — трогаем ТОЛЬКО column-gap. */
+    #root [class*="grid-cols-12"] { column-gap: 0 !important; }
+
+    /* 3 — oversized hero headline + big numeric displays → fluid clamp.
+           `text-[36px]` добавлен 2026-08-12: карточки «Доходность/Отставание»
+           в BASE печатали «−32.1пп» и «+25.2%» шире карточки, и текст
+           ОБРЕЗАЛСЯ её `overflow:hidden` (замер на 360px). */
     #root h1 { font-size: clamp(27px, 7.6vw, 40px) !important;
                line-height: 1.08 !important; word-break: break-word; }
     #root .text-5xl,
+    #root [class*="text-[36px]"],
     #root [class*="text-[40px]"], #root [class*="text-[44px]"],
     #root [class*="text-[48px]"], #root [class*="text-[54px]"],
     #root [class*="text-[58px]"] { font-size: clamp(24px, 7.4vw, 38px) !important;

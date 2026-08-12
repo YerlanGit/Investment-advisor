@@ -560,6 +560,22 @@ def _summarise_for_prompt(results: dict) -> dict:
         # this verdict in `ai_effect_comment` instead of inventing its own.
         "rebalance_verdict": ((results.get("expected_effect") or {}).get("verdict")
                               if isinstance(results.get("expected_effect"), dict) else None),
+        # 🔴 Аудит 2026-08-12: ПОГАШЕНА ЛИ ДЕЛЬТА SHARPE.  При отрицательной
+        # премии (er < rf) Sharpe перестаёт упорядочивать портфели, движок
+        # обнуляет дельту и печатает причину — а промпт `ai_effect_comment`
+        # при этом ПРОДОЛЖАЛ требовать «…нестабильность (Vol), Sharpe».
+        # Модель добросовестно исполняла требование: живой отчёт 12.08 писал
+        # «отдача на риск улучшается» ровно рядом с карточкой «Sharpe 0.56 →
+        # 0.56 · дельта не показана — смотрите на волатильность, CVaR и
+        # просадку».  Промпт сам провоцировал ложь — тот же класс, что литерал
+        # «8%» (`§−48`).  Факт обязан доехать до модели, иначе запрет ниже ей
+        # не на чем исполнить.
+        "sharpe_delta_suppressed": bool(
+            (results.get("expected_effect") or {}).get("sharpe_note")
+            if isinstance(results.get("expected_effect"), dict) else False),
+        "sharpe_suppressed_reason": str(
+            (results.get("expected_effect") or {}).get("sharpe_note") or ""
+            if isinstance(results.get("expected_effect"), dict) else ""),
         # L-18/L-19: сами сделки ребаланса (Продать/Купить/В кэш, Δпп, имена
         # внешних ETF) — чтобы ai_effect_comment называл направления по имени,
         # а не пересказывал одни метрики.
@@ -1458,6 +1474,10 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
         'Ожидаемый эффект на долю в риске (TRC) позиций [Quant Engine]",\n'
         '  "ai_effect_comment": "≤220 знаков — чего ожидать после ребалансировки: '
         'средний убыток в редкий плохой день (CVaR) до→после, нестабильность (Vol), Sharpe. '
+        '🔴 ЕСЛИ sharpe_delta_suppressed=true — про Sharpe и «отдачу на риск» НЕ ПИШИ ВООБЩЕ: '
+        'при отрицательной премии коэффициент не упорядочивает портфели, движок дельту погасил, '
+        'и карточка прямо говорит «дельта не показана». Заявить улучшение — прямое противоречие '
+        'соседней карточке. Опирайся на волатильность, CVaR и просадку. '
         'ОБЯЗАТЕЛЬНО согласуй с rebalance_verdict из данных: если kind=tradeoff/degradation — '
         'ЯВНО назови ухудшившуюся метрику (напр. рост концентрации Max TRC при урезании топ-позиции) '
         'и НЕ заявляй об одностороннем снижении риска. КУДА уходит высвобожденный вес — '

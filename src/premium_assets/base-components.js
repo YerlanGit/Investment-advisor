@@ -903,6 +903,90 @@ const HeroRiskGauge = ({
   stroke: 2
 }), " Пересчитать")));
 
+// ── Risk KPI strip (BASE)
+//
+// 🔴 Аудит 2026-08-12: ключ `kpis` (CVaR 95% · Sharpe · Max Drawdown ·
+// волатильность) приезжал в BASE-payload с самого начала, но в бандле
+// `base-components.js` слова `kpis` не было НИ РАЗУ — четыре главные
+// риск-метрики считались движком и не показывались никому.  То же с
+// `verdict.expReturn` / `verdict.expSharpe` (BLOCK 5): в DEEP они на обложке,
+// в BASE их не рендерил никто.  Платный тир не показывал свой основной
+// результат.  Полоса ниже возвращает всё это на обложку BASE.
+//
+// Тон карточки — из движка (`finance.scoring.kpi_status`), а не из макета:
+// «ok» зелёный, «warn» золотой, «bad» терракота.  Пустой/незнакомый тон →
+// нейтральные чернила, никогда не «всё хорошо».
+const _KPI_TONE = {
+  ok: {
+    bar: '#5d7c5c',
+    text: 'text-sage-600'
+  },
+  warn: {
+    bar: '#caa01a',
+    text: 'text-gold-700'
+  },
+  bad: {
+    bar: '#c47358',
+    text: 'text-rust-600'
+  }
+};
+const RiskKpiCard = ({
+  k
+}) => {
+  const tone = _KPI_TONE[k.tone] || {
+    bar: '#a8a293',
+    text: 'text-ink-900'
+  };
+  const v = k.value === null || k.value === undefined || Number.isNaN(Number(k.value)) ? '—' : `${Number(k.value).toFixed(k.unit === '%' ? 1 : 2)}${k.unit || ''}`;
+  return /*#__PURE__*/React.createElement("div", {
+    className: "glass-strong rounded-3xl p-4 sm:p-5 shadow-card lift flex flex-col min-w-0",
+    style: {
+      borderTop: `2px solid ${tone.bar}`
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "text-[10px] tracking-widest uppercase text-ink-500 font-mono truncate"
+  }, k.label), /*#__PURE__*/React.createElement("div", {
+    className: `mt-1.5 num font-light leading-none tracking-tight break-words ${tone.text}`,
+    style: {
+      fontSize: 'clamp(22px, 6.4vw, 34px)'
+    }
+  }, v), k.frame && k.frame !== '–' && /*#__PURE__*/React.createElement("div", {
+    className: "mt-1.5 text-[11px] text-ink-500 font-mono truncate"
+  }, k.frame));
+};
+const RiskKpiStrip = ({
+  kpis,
+  verdict
+}) => {
+  const order = ['cvar', 'sharpe', 'dd', 'vol'];
+  const cards = order.map(key => kpis && kpis[key]).filter(Boolean);
+  if (!cards.length) return null;
+  const fwd = [verdict.expReturn && verdict.expReturn !== '–' ? {
+    label: 'Ожид. доходность (год.)',
+    value: verdict.expReturn
+  } : null, verdict.expSharpe && verdict.expSharpe !== '–' ? {
+    label: 'Ожид. Sharpe',
+    value: verdict.expSharpe
+  } : null].filter(Boolean);
+  return /*#__PURE__*/React.createElement("div", {
+    className: "mb-10"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4"
+  }, cards.map((k, i) => /*#__PURE__*/React.createElement(RiskKpiCard, {
+    key: i,
+    k: k
+  }))), fwd.length > 0 && /*#__PURE__*/React.createElement("div", {
+    className: "mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-2xl bg-cream-50/80 border border-ink-900/5 px-4 py-2.5"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "text-[10px] tracking-widest uppercase text-ink-400 font-mono"
+  }, "Прогноз модели"), fwd.map((f, i) => /*#__PURE__*/React.createElement("span", {
+    key: i,
+    className: "text-[11.5px] text-ink-600 min-w-0"
+  }, f.label, ": ", /*#__PURE__*/React.createElement("span", {
+    className: "num font-semibold text-ink-900"
+  }, f.value)))));
+};
+
 // ── Risk decomposition card
 const RiskDecompCard = ({
   data
@@ -1061,7 +1145,10 @@ const Hero = () => {
     stroke: 2
   }), /*#__PURE__*/React.createElement("span", {
     className: "text-[11.5px] text-rust-600 font-medium"
-  }, "Маржинальный долг ", p.leverage.marginPct > 0 ? `≈${p.leverage.marginPct}% NAV` : 'обнаружен', " — часть позиций куплена в долг")))), /*#__PURE__*/React.createElement("div", {
+  }, "Маржинальный долг ", p.leverage.marginPct > 0 ? `≈${p.leverage.marginPct}% NAV` : 'обнаружен', " — часть позиций куплена в долг")))), /*#__PURE__*/React.createElement(RiskKpiStrip, {
+    kpis: p.kpis,
+    verdict: v
+  }), /*#__PURE__*/React.createElement("div", {
     className: "grid grid-cols-2 sm:flex sm:flex-wrap items-end gap-x-8 gap-y-5 mb-10"
   }, p.factorPills.map((f, i) => /*#__PURE__*/React.createElement(FactorPill, {
     key: i,
@@ -1269,6 +1356,16 @@ const FundCell = ({
 // compared `cls` against SECTOR names → never matched (bug: "Ничего не подходит
 // под фильтр «Технологии»").  These matchers read `sector` first and fall back
 // to `cls`, tolerant of English/Russian, so they work on real + sample data.
+// Русское склонение «позиция» по числу — счётчик секции строится по данным,
+// а не литералом, поэтому число может быть любым.
+const _plural = n => {
+  const a = Math.abs(Number(n) || 0),
+    d10 = a % 10,
+    d100 = a % 100;
+  if (d10 === 1 && d100 !== 11) return 'позиция';
+  if (d10 >= 2 && d10 <= 4 && (d100 < 12 || d100 > 14)) return 'позиции';
+  return 'позиций';
+};
 const _blob = h => `${h.sector || ''} ${h.cls || ''}`.toLowerCase();
 const _isTech = h => /tech|semicond|communicat|software|internet|технолог|полупровод|коммуникац|софт/.test(_blob(h));
 const _isDefensive = h => /health|staple|utilit|consumer defensive|bond|treasur|gold|silver|precious|здрав|потреб|коммунал|облигац|золот|серебр|драгмет/.test(_blob(h)) || ['Облигации', 'Ден. средства', 'Сырьё'].includes(h.cls);
@@ -1298,7 +1395,7 @@ const Holdings = () => {
     className: "flex items-center gap-2 text-[11px] tracking-widest uppercase text-ink-500 font-mono mb-2"
   }, /*#__PURE__*/React.createElement("span", {
     className: "w-1.5 h-1.5 rounded-full bg-gold-400"
-  }), " Holdings · 9 позиций"), /*#__PURE__*/React.createElement("h2", {
+  }), " Holdings · ", rows.length !== all.length ? `${rows.length} из ${all.length}` : all.length, " ", _plural(rows.length !== all.length ? all.length : rows.length)), /*#__PURE__*/React.createElement("h2", {
     className: "text-[40px] leading-[1.05] tracking-[-0.02em] font-light text-ink-900"
   }, "Что вы держите", /*#__PURE__*/React.createElement("span", {
     className: "text-ink-400"
@@ -1371,6 +1468,17 @@ const PerfSummaryCard = ({
 }, value), /*#__PURE__*/React.createElement("div", {
   className: `text-[12px] ${accent === 'dark' ? 'text-white/55' : 'text-ink-500'} mt-1`
 }, sub));
+
+// Аудит 2026-08-12 (замер в headless-браузере): на телефоне числа этой строки
+// НАКЛАДЫВАЛИСЬ друг на друга — «+25.2%» печаталось поверх «−32.1 пп» на всех
+// ширинах 320…414.  Причина каноническая: у трека `1fr` минимум равен
+// `auto` (min-content), а содержимое несёт `whitespace-nowrap`, поэтому треки
+// отказывались сжиматься и вылезали на соседа.  Лечится двумя вещами сразу:
+//   • `min-w-0` на КАЖДОЙ ячейке — трек получает право сжаться (`minmax(0,1fr)`);
+//   • на узком экране колонок ДВЕ, а Δ уезжает на свою строку во всю ширину —
+//     три nowrap-числа с подписями физически не помещаются в 320px, и любое
+//     «ужимание» шрифтом только отодвинуло бы столкновение.
+// С `sm:` вверх раскладка прежняя, в три колонки.
 const PeriodRow = ({
   p,
   isMax
@@ -1378,23 +1486,23 @@ const PeriodRow = ({
   className: `flex items-center gap-3 sm:gap-4 px-3 sm:px-5 py-3 rounded-2xl transition-colors hover:bg-cream-50
                    ${isMax ? 'bg-cream-50' : ''}`
 }, /*#__PURE__*/React.createElement("div", {
-  className: "w-12 sm:w-16 text-[12px] font-medium text-ink-500 flex-shrink-0"
+  className: "w-10 sm:w-16 text-[12px] font-medium text-ink-500 flex-shrink-0"
 }, p.label), /*#__PURE__*/React.createElement("div", {
-  className: "flex-1 grid grid-cols-3 gap-2 min-w-0"
+  className: "flex-1 grid grid-cols-2 sm:grid-cols-3 gap-x-2 gap-y-1 min-w-0"
 }, /*#__PURE__*/React.createElement("div", {
-  className: "flex items-center gap-2"
+  className: "flex items-center gap-2 min-w-0"
 }, /*#__PURE__*/React.createElement("span", {
   className: "w-2 h-2 rounded-full bg-gold-400 flex-shrink-0"
 }), /*#__PURE__*/React.createElement("span", {
   className: "text-[14px] font-semibold num text-ink-900 whitespace-nowrap"
 }, p.p >= 0 ? '+' : '−', Math.abs(p.p).toFixed(1), "%")), /*#__PURE__*/React.createElement("div", {
-  className: "flex items-center gap-2"
+  className: "flex items-center gap-2 min-w-0"
 }, /*#__PURE__*/React.createElement("span", {
   className: "w-2 h-2 rounded-full bg-ink-900 flex-shrink-0"
 }), /*#__PURE__*/React.createElement("span", {
   className: "text-[14px] num text-ink-700 whitespace-nowrap"
 }, p.s >= 0 ? '+' : '−', Math.abs(p.s).toFixed(1), "%")), /*#__PURE__*/React.createElement("div", {
-  className: "flex items-center gap-1.5 justify-end"
+  className: "col-span-2 sm:col-span-1 flex items-center gap-1.5 justify-end min-w-0"
 }, /*#__PURE__*/React.createElement("span", {
   className: "text-[12px] text-ink-500"
 }, "Δ"), /*#__PURE__*/React.createElement("span", {
