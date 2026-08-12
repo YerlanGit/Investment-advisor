@@ -1644,6 +1644,61 @@ class DataLineageTest(unittest.TestCase):
         signature = self._lineage_source(self._provider_result({"AAPL": "eodhd"}))
         self.assertEqual(signature, "eodhd")
 
+    # ─── подвал Premium V2: источник цен из данных, не литералом ────────
+
+    def _design_meta(self, source_name: str, tier: str) -> dict:
+        import premium_payload
+        from finance.data_lineage import build_lineage
+
+        results = self._full_results()
+        results["history_result"] = self._provider_result({"AAPL": source_name})
+        payload = {"cove_lineage": build_lineage(results, None,
+                                                 today=date(2026, 5, 27))}
+        return premium_payload.build_design_data(payload, tier=tier,
+                                                 user_id=1)["meta"]
+
+    def test_premium_footer_names_the_real_price_source(self) -> None:
+        """🔴 Подвал Premium V2 печатал источники ЛИТЕРАЛОМ (`AUDIT §−90`).
+
+        В списке всегда стоял брокерский фид, поэтому отчёт по ручному
+        портфелю заявлял пользователю связь с брокером, которой у него нет.
+        Это I-12 на слое ТЕКСТА — тот же дефект, что F-6, но одним слоем
+        глубже: F-6 чинил строку CoVe в payload, а React-бандл имел свой
+        независимый список и о payload не знал.
+
+        🔴 Проверять надо ОБА тира. У Базового блока CoVe нет вовсе (он есть
+        только в DEEP), поэтому подвал — ЕДИНСТВЕННОЕ место, где базовый отчёт
+        вообще называет происхождение цен.
+        """
+        for tier in ("base", "deep"):
+            with self.subTest(tier=tier):
+                self.assertIn("Stooq",
+                              self._design_meta("stooq", tier)["priceSource"])
+                self.assertNotIn(
+                    "Freedom", self._design_meta("stooq", tier)["priceSource"],
+                    "ручной отчёт не вправе упоминать брокера")
+                self.assertIn(
+                    "Tradernet",
+                    self._design_meta("tradernet", tier)["priceSource"])
+
+    def test_premium_bundles_carry_no_hardcoded_price_source(self) -> None:
+        """Бандл обязан брать источник из payload, а не знать его сам.
+
+        Пинится ПОСТАВЛЯЕМЫЙ артефакт (`src/premium_assets/*.js`), а не
+        исходник: в деплой-образе `design/` отсутствует, и проверка исходника
+        там ничего бы не значила.
+        """
+        from pathlib import Path
+
+        assets = Path(__file__).resolve().parents[1] / "src" / "premium_assets"
+        for name in ("base-components.js", "deep-components.js"):
+            with self.subTest(bundle=name):
+                text = (assets / name).read_text(encoding="utf-8")
+                self.assertIn("priceSource", text,
+                              "подвал обязан читать источник из payload")
+                self.assertNotIn("Tradernet", text,
+                                 "имя брокера в бандле — это I-12 на слое текста")
+
     def test_sec_warn_when_tickers_missing_coverage(self) -> None:
         """Two tickers with default/EM_Proxy sector → status='warn'."""
         from finance.data_lineage import build_lineage

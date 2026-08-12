@@ -72,7 +72,14 @@ const Footer = () => {
   // RAG источник не заявляется (футер был статичным — вводил в заблуждение).
   const ragOn = (p.quality || []).some(q =>
     typeof q === 'string' && q.includes('✓') && /rag/i.test(q));
-  const sources = ['Tradernet', 'SEC EDGAR', 'FRED', 'Quant Engine MAC3']
+  // 🔴 Источник цен НЕ зашивается литералом (`AUDIT §−90`).  Здесь стояло имя
+  // брокерского фида, и отчёт по ручному портфелю заявлял пользователю связь с
+  // брокером, которой у него нет — I-12 на слое текста.  Имя приходит из
+  // payload, где его заполняет data_lineage по ProviderResult.source; пустое
+  // значение означает «не определили», и тогда подвал молчит, а не гадает.
+  const priceSource = (p.meta && p.meta.priceSource) || '';
+  const sources = (priceSource ? [priceSource] : [])
+    .concat(['SEC EDGAR', 'FRED', 'Quant Engine MAC3'])
     .concat(ragOn ? ['ChromaDB (GS / MS / JPM)'] : [])
     .concat([p.meta.aiModel]).join(' · ');
   return (

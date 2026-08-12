@@ -2066,7 +2066,13 @@ const Footer = () => {
   // BASE статично печатал GS/MS/JPM — вводило в заблуждение при пустом RAG.
   const quality = p.quality || [];
   const ragOn = quality.some(q => typeof q === 'string' && q.includes('✓') && /rag/i.test(q));
-  const sources = ['SEC EDGAR', 'Tradernet', 'FRED', 'Quant Engine MAC3'].concat(ragOn ? ['ChromaDB (GS / MS / JPM)'] : []).concat([p.meta && p.meta.aiModel].filter(Boolean)).join(' · ');
+  // 🔴 Источник цен НЕ зашивается литералом (`AUDIT §−90`).  Здесь стояло имя
+  // брокерского фида, и отчёт по ручному портфелю заявлял пользователю связь с
+  // брокером, которой у него нет — I-12 на слое текста.  Имя приходит из
+  // payload, где его заполняет data_lineage по ProviderResult.source; пустое
+  // значение означает «не определили», и тогда подвал молчит, а не гадает.
+  const priceSource = p.meta && p.meta.priceSource || '';
+  const sources = ['SEC EDGAR'].concat(priceSource ? [priceSource] : []).concat(['FRED', 'Quant Engine MAC3']).concat(ragOn ? ['ChromaDB (GS / MS / JPM)'] : []).concat([p.meta && p.meta.aiModel].filter(Boolean)).join(' · ');
   return /*#__PURE__*/React.createElement("footer", {
     className: "mt-16 mb-8"
   }, /*#__PURE__*/React.createElement("div", {

@@ -793,6 +793,24 @@ def _fund_verdict(fund: dict) -> str:
     return (". ".join(parts) + ".") if parts else ""
 
 
+def _price_source(p: dict) -> str:
+    """Кто дал цены ЭТОГО отчёта — короткой строкой для подвала.
+
+    Берётся из строки CoVe «Цены и история активов», которую заполняет
+    `data_lineage._price_source_label` по `ProviderResult.source`.  Второй
+    источник правды здесь был бы тем же дефектом, что чинится: подвал уже один
+    раз разошёлся с реальностью, потому что знал ответ сам.
+
+    Пустая строка означает «не смогли определить», и подвал в этом случае
+    молчит — назвать наугад хуже, чем не назвать.
+    """
+    for row in _list(p, "cove_lineage"):
+        if str(_g(row, "name") or "").startswith("Цены и история"):
+            source = _txt(row, "source")
+            return "" if source == DASH else source
+    return ""
+
+
 def _coverage(p: dict) -> float:
     dq = _g(p, "data_quality", default={}) or {}
     fl, ft = _num(dq, "factors_loaded"), _num(dq, "factors_total", default=10.0)
@@ -949,6 +967,12 @@ def build_design_data(payload: dict | None, tier: str = "base",
         # Bot @username for the «Применить идею» → Scenario deep-link (the report
         # is static HTML; charging the token happens bot-side after the handoff).
         "botUsername": _txt(p, "bot_username") if _g(p, "bot_username") else "KEN_investment_bot",
+        # 🔴 Источник цен — ИЗ ДАННЫХ, а не константой в подвале (`AUDIT §−90`).
+        # Подвал Premium V2 печатал список источников литералом, и `Tradernet`
+        # в нём стоял всегда: отчёт по ручному портфелю заявлял пользователю
+        # связь с брокером, которой у него нет. Это I-12 на слое текста — тот
+        # же дефект, что F-6, но одним слоем глубже, в React-бандле.
+        "priceSource": _price_source(p),
     }
     return _map_deep(p, meta) if is_deep else _map_base(p, meta)
 
