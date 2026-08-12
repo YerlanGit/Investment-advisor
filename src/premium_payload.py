@@ -70,8 +70,29 @@ def _list(obj: Any, *path) -> list:
 
 # ── DEEP mapper ───────────────────────────────────────────────────────────────
 
+# Палитра тона KPI-карточки.  Ключи `ok/warn/bad` приходят из движка
+# (`finance.scoring.kpi_status`); прежние `normal/good/watch` — литералы
+# дизайн-макета, оставлены только как совместимость для старых payload'ов.
+_KPI_TONE_COLOR = {
+    "ok":     "#5d7c5c",   # sage   — в норме
+    "warn":   "#caa01a",   # gold   — внимание
+    "bad":    "#c47358",   # rust   — тревожно
+    "normal": "#5d7c5c",
+    "good":   "#caa01a",
+    "watch":  "#c47358",
+}
+
+
 def _kpi(p: dict, key: str, name: str, val_key: str, note_key: str,
          spark_key: str, status: str, color: str, sub: str) -> dict:
+    # Аудит 2026-08-12: `status`/`color` были ЛИТЕРАЛАМИ макета и не зависели
+    # от значения — живой отчёт 12.08 показывал Sharpe 0.56 с бейджем «good»
+    # рядом с ИИ-заметкой «отдача на единицу риска слабая».  Теперь тон
+    # приезжает посчитанным (`payload["kpi_status"][key]`); аргументы-литералы
+    # остаются ФОЛБЭКОМ для payload'ов без этого ключа.
+    tone  = str(_g(p, "kpi_status", key, default="") or "").strip().lower()
+    if tone in _KPI_TONE_COLOR:
+        status, color = tone, _KPI_TONE_COLOR[tone]
     spark = _g(p, "kpi_sparklines", spark_key, default="")
     # The Premium KPI card redraws the trend with the design's own <Sparkline>
     # (theme colour + gradient), so we feed it the REAL numeric series the engine
@@ -291,10 +312,17 @@ def _map_deep(p: dict, meta: dict) -> dict:
         if val in (DASH, "—", "-", ""):
             continue
         st = str(_g(m, "status") or "").strip().lower()
+        # Аудит 2026-08-12: РАЗДЕЛЕНЫ два разных факта, которые панель прежде
+        # печатала одним цветом.  `tone` — СВЕЖЕСТЬ ряда (им красится пилюля
+        # состояния «актуально/устарело»), `trendTone` — ЭКОНОМИЧЕСКИЙ знак
+        # движения (им красится значение и стрелка).  Раньше значение красилось
+        # свежестью: «Real GDP growth ▼ −2.13 пп» было зелёным, потому что ряд
+        # свежий, — и спорило с ✗-пунктом «ВВП замедляется» строкой ниже.
         drivers.append({"name": _txt(m, "name"), "val": val,
                         "trend": _txt(m, "trend_label") if _g(m, "trend_label") else "",
                         "state": _drv_state_ru.get(st, st or "—"),
-                        "tone": "pos" if st == "ok" else "warn"})
+                        "tone": "pos" if st == "ok" else "warn",
+                        "trendTone": str(_g(m, "trend_stance") or "flat")})
     _bullets_rc = [_signal_obj(x) for x in _list(rc, "signals")][:7]
     # Audit 2026-07-05 (R-6): the «RAG ·» chips used to show ETF momentum
     # (explainers) while the REAL bank excerpts (regime_rag_confirm) were a dead
@@ -488,9 +516,17 @@ def _map_base(p: dict, meta: dict) -> dict:
         "sumStandalone": _num(wf, "sum_standalone_pp"),
     }
 
-    def _kpi_obj(label, value_key, unit, frame):
+    def _kpi_obj(label, value_key, unit, frame, key=""):
+        # Аудит 2026-08-12: этот блок ЕСТЬ в payload с самого начала, но BASE
+        # его НЕ РЕНДЕРИЛ — в бандле `base-components.js` слова `kpis` не было
+        # ни разу, поэтому читатель платного отчёта не видел ни CVaR, ни
+        # Sharpe, ни просадку, ни волатильность.  Теперь их показывает
+        # `RiskKpiStrip`; тон каждой карточки — посчитанный, как в DEEP.
+        # `delta/deltaText` остаются нулями осознанно: месячной истории метрик
+        # у BASE нет, а рисовать «за месяц +0» значило бы выдумать замер.
         return {"label": label, "value": _num(p, value_key), "unit": unit,
-                "delta": 0, "deltaText": "", "frame": frame}
+                "delta": 0, "deltaText": "", "frame": frame,
+                "tone": str(_g(p, "kpi_status", key, default="") or "")}
 
     return {
         "meta": {**meta, "tier": "BASE", "engine": "MAC3"},
@@ -502,10 +538,10 @@ def _map_base(p: dict, meta: dict) -> dict:
                     "expSharpe": _txt(p, "expected_sharpe"),
                     "riskTrendDelta": _g(p, "risk_score_delta", default=0), "nav": _txt(p, "total_value_usd")},
         "kpis": {
-            "cvar": _kpi_obj("CVaR 95%", "cvar", "%", _txt(p, "cvar_dollar")),
-            "sharpe": _kpi_obj("Sharpe Ratio", "sharpe", "", f"Sortino {_txt(p, 'sortino')}"),
-            "dd": _kpi_obj("Max Drawdown", "max_drawdown", "%", _txt(p, "mdd_dollar")),
-            "vol": _kpi_obj("Волатильность", "volatility", "%", "год."),
+            "cvar": _kpi_obj("CVaR 95%", "cvar", "%", _txt(p, "cvar_dollar"), key="cvar"),
+            "sharpe": _kpi_obj("Sharpe Ratio", "sharpe", "", f"Sortino {_txt(p, 'sortino')}", key="sharpe"),
+            "dd": _kpi_obj("Max Drawdown", "max_drawdown", "%", _txt(p, "mdd_dollar"), key="dd"),
+            "vol": _kpi_obj("Волатильность", "volatility", "%", "год.", key="vol"),
         },
         "factorPills": _base_factor_pills(p, assets, sectors, riskDecomp),
         "heroStats": [

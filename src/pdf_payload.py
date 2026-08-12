@@ -44,6 +44,24 @@ def _format_pnl_abs(x: float) -> str:
 # Asset-class label — single source of truth in finance.scoring.
 # Aliased to the historical private name so existing call sites are untouched.
 from finance.scoring import classify_asset_class as _classify_asset
+# Вердикт KPI-карточки (тон по ЗНАЧЕНИЮ, а не литерал макета) — пороги якорены
+# на матрицу мандата, поэтому живут в движке, а не здесь.
+from finance.scoring import kpi_status as _kpi_status_impl
+
+
+def _kpi_status(metric: str, value, *, mandate: str = "MODERATE",
+                target_vol: float | None = None) -> str:
+    """Тон KPI-карточки; при любой неожиданности — нейтральный «warn».
+
+    Обёртка существует ровно ради последней строки: сборка payload не имеет
+    права упасть из-за метрики, а молчаливое «ok» на непонятном входе было бы
+    той же ложью, что и прежний литерал макета.
+    """
+    try:
+        return _kpi_status_impl(metric, value, mandate=mandate,
+                                target_vol=target_vol)
+    except Exception:                                  # noqa: BLE001
+        return "warn"
 
 
 def _action_color(action: Optional[str]) -> str:
@@ -473,6 +491,12 @@ def _build_macro_drivers_panel(raw: Optional[dict]) -> dict:
             # Regime panel: the regime cares about DIRECTION, not just level.
             "trend_label": trend.get("label", "") if trend else "",
             "trend_dir":   trend.get("dir", "") if trend else "",
+            # Аудит 2026-08-12: ЭКОНОМИЧЕСКИЙ тон тренда, отдельно от свежести.
+            # Панель красила значение по `status` (свежесть ряда), из-за чего
+            # замедляющийся ВВП светился зелёным рядом с ✗-пунктом «против фазы
+            # роста».  Знак — из `finance.regime` (SSOT), а не из вида.
+            "trend_stance": (_macro_trend_stance(key, trend.get("delta"))
+                             if trend else "flat"),
         })
         if as_of > latest_as_of:
             latest_as_of = as_of
@@ -486,6 +510,9 @@ def _build_macro_drivers_panel(raw: Optional[dict]) -> dict:
 # промпт ИИ обязан считать темп ПО ТОМУ ЖЕ окну, что показано в панели, иначе
 # текст и чип расходятся в числе (а на инфляции расходились в знаке).
 from finance.regime import macro_trend_lookback as _macro_trend_lookback
+# Экономический знак ряда — SSOT в `finance.regime` (те же знаки, что применяет
+# сам классификатор режима); вид его только показывает.
+from finance.regime import macro_trend_stance as _macro_trend_stance
 
 
 def _macro_series_trend(row: dict) -> Optional[dict]:
@@ -822,6 +849,12 @@ def build_payload(results: dict, tier: str,
     # vol on a degenerate book) would over-rotate the dial past its scale.
     composite  = int(min(100, max(0, _safe_float(
         metrics.get("Composite_Risk_Score"), vol_raw / 0.40 * 100))))
+
+    # Аудит 2026-08-12: вход для вердикта KPI-карточек (см. `kpi_status` ниже).
+    # Мандат и целевая волатильность — те же, по которым откалиброван гаудж,
+    # иначе бейдж карточки и стрелка индекса судили бы по разным шкалам.
+    _kpi_mandate    = results.get("risk_mandate", "MODERATE")
+    _kpi_target_vol = _safe_float((user_profile or {}).get("target_volatility"), 0.0)
 
     cvar_str    = f"{cvar_raw * 100:.1f}%"
     cvar_lo     = cvar_boot.get("lo95")
@@ -1350,6 +1383,22 @@ def build_payload(results: dict, tier: str,
             (results.get("expected_effect") or {}).get("sharpe_note") or ""),
         "expected_return_pct_num": exp_ret_num,          # numeric (chart-safe)
         "expected_sharpe":        exp_sharpe_str,
+        # Аудит 2026-08-12: ВЕРДИКТ KPI-карточек.  Прежде статус и цвет каждой
+        # карточки приезжали в premium-маппер литералами дизайн-макета и от
+        # значения НЕ зависели: Sharpe 0.56 нёс бейдж «good» рядом с ИИ-текстом
+        # «отдача на единицу риска слабая».  Пороги — `finance.scoring.kpi_status`
+        # (якорь на матрицу мандата), здесь только сборка.  Метрики отдаются
+        # движком в ДОЛЯХ, поэтому передаём сырые `*_raw`, а не строки.
+        "kpi_status": {
+            "cvar":   _kpi_status("cvar",   cvar_raw,   mandate=_kpi_mandate,
+                                  target_vol=_kpi_target_vol),
+            "sharpe": _kpi_status("sharpe", sharpe_raw, mandate=_kpi_mandate,
+                                  target_vol=_kpi_target_vol),
+            "dd":     _kpi_status("dd",     mdd_raw,    mandate=_kpi_mandate,
+                                  target_vol=_kpi_target_vol),
+            "vol":    _kpi_status("vol",    vol_raw,    mandate=_kpi_mandate,
+                                  target_vol=_kpi_target_vol),
+        },
         "risk_pct":          composite,
         "risk_label":        _risk_score_label(composite),
         # H1: mandate label next to the gauge — the gauge is mandate-

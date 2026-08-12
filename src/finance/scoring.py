@@ -424,6 +424,81 @@ def composite_risk_score(volatility: float, cvar: float,
     return int(round(min(100.0, base + aggr)))
 
 
+# ── KPI verdict (карточки риск-метрик) — SINGLE SOURCE OF TRUTH ──────────────
+# Аудит 2026-08-12: статус и цвет KPI-карточек DEEP приезжали в payload
+# ЛИТЕРАЛАМИ дизайн-макета (`"good"`/`"#caa01a"` для Sharpe, `"normal"` для
+# CVaR, `"watch"` для просадки) и НЕ зависели от значения.  Живой отчёт 12.08:
+# Sharpe 0.56 нёс бейдж «good», а ИИ-заметка на той же карточке говорила
+# «отдача на единицу риска слабая» — бейдж спорил с текстом рядом.  Тот же
+# класс дефекта, что литерал «8%» (`AUDIT §−48`) и mock-дата (`R-2`).
+#
+# Пороги ЯКОРЯТСЯ к уже существующим константам, а не выдумываются заново:
+#   • CVaR   — `cvar_base` мандата из `_RISK_MANDATE_MATRIX` (та же шкала, по
+#              которой считается риск-индекс): ≤½ базы спокойно, ≤базы внимание;
+#   • MaxDD  — точки рампы агграватора просадки (0.20 … 0.50) оттуда же;
+#   • Vol    — целевая волатильность мандата пользователя (`target_vol`);
+#   • Sharpe — классическая лестница 1.0 / 0.5 (иных якорей в проекте нет,
+#              поэтому она названа здесь явно, а не спрятана в шаблоне).
+#
+# Возвращается один из трёх ключей ПАЛИТРЫ, а не «оценка»: `ok` (зелёный),
+# `warn` (золотой), `bad` (терракота).  Решение о ЦВЕТЕ принимает вид, но
+# решение о ТОНЕ — здесь, потому что оно зависит от мандата, то есть от чисел.
+KPI_OK, KPI_WARN, KPI_BAD = "ok", "warn", "bad"
+
+
+def kpi_status(metric: str, value, *, mandate: str = "MODERATE",
+               target_vol: float | None = None) -> str:
+    """
+    Тон KPI-карточки по ФАКТИЧЕСКОМУ значению метрики.
+
+    `metric` ∈ {'cvar', 'sharpe', 'dd', 'vol'}.  `value` — сырое число движка:
+    CVaR/MaxDD/vol в ДОЛЯХ (−0.034, −0.403, 0.205), Sharpe — коэффициент.
+    Знак игнорируется там, где важна только величина (CVaR, просадка).
+
+    Неизвестная метрика или нечисловое значение → `warn` (нейтральный
+    «не знаю»), НИКОГДА не `ok`: молчаливое «всё хорошо» на неизвестных
+    данных — ровно та ложь, из-за которой правило и появилось.
+    """
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return KPI_WARN
+    if not np.isfinite(v):
+        return KPI_WARN
+
+    m = _RISK_MANDATE_MATRIX.get(str(mandate).strip().upper(),
+                                 _RISK_MANDATE_MATRIX["MODERATE"])
+    key = str(metric).strip().lower()
+
+    if key == "cvar":
+        base = m["cvar_base"]
+        a = abs(v)
+        if base <= 0:
+            return KPI_WARN
+        return KPI_OK if a <= 0.5 * base else (KPI_WARN if a <= base else KPI_BAD)
+
+    if key == "sharpe":
+        return KPI_OK if v >= 1.0 else (KPI_WARN if v >= 0.5 else KPI_BAD)
+
+    if key in ("dd", "max_drawdown"):
+        a = abs(v)
+        # Те же якоря, что у агграватора просадки в composite_risk_score.
+        return KPI_OK if a < 0.20 else (KPI_WARN if a <= 0.35 else KPI_BAD)
+
+    if key in ("vol", "volatility"):
+        try:
+            tgt = float(target_vol) if target_vol else 0.0
+        except (TypeError, ValueError):
+            tgt = 0.0
+        if tgt <= 0:
+            # Мандатной цели нет — падаем на шкалу нормализации гауджа (_VOL_BASE).
+            return (KPI_OK if v <= 0.5 * _VOL_BASE
+                    else (KPI_WARN if v <= 0.75 * _VOL_BASE else KPI_BAD))
+        return KPI_OK if v <= tgt else (KPI_WARN if v <= 1.25 * tgt else KPI_BAD)
+
+    return KPI_WARN
+
+
 # ── Asset-class display label — SINGLE SOURCE OF TRUTH ───────────────────────
 # Consolidates the two divergent DISPLAY classifiers that previously lived in
 # pdf_payload._classify_asset (suffix-aware, correct) and

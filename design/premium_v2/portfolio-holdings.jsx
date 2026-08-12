@@ -132,6 +132,15 @@ const FundCell = ({ label, value }) => (
 // compared `cls` against SECTOR names → never matched (bug: "Ничего не подходит
 // под фильтр «Технологии»").  These matchers read `sector` first and fall back
 // to `cls`, tolerant of English/Russian, so they work on real + sample data.
+// Русское склонение «позиция» по числу — счётчик секции строится по данным,
+// а не литералом, поэтому число может быть любым.
+const _plural = (n) => {
+  const a = Math.abs(Number(n) || 0), d10 = a % 10, d100 = a % 100;
+  if (d10 === 1 && d100 !== 11) return 'позиция';
+  if (d10 >= 2 && d10 <= 4 && (d100 < 12 || d100 > 14)) return 'позиции';
+  return 'позиций';
+};
+
 const _blob = (h) => `${h.sector||''} ${h.cls||''}`.toLowerCase();
 const _isTech = (h) => /tech|semicond|communicat|software|internet|технолог|полупровод|коммуникац|софт/.test(_blob(h));
 const _isDefensive = (h) =>
@@ -160,7 +169,12 @@ const Holdings = () => {
       <div className="flex items-end justify-between gap-4 flex-wrap mb-6">
         <div>
           <div className="flex items-center gap-2 text-[11px] tracking-widest uppercase text-ink-500 font-mono mb-2">
-            <span className="w-1.5 h-1.5 rounded-full bg-gold-400"/> Holdings · 9 позиций
+            {/* Аудит 2026-08-12: было «Holdings · 9 позиций» ЛИТЕРАЛОМ макета —
+                каждый отчёт печатал 9 независимо от книги (живой отчёт 12.08:
+                17 позиций в шапке и «9 позиций» здесь же).  Тот же класс, что
+                mock-дата R-2 и зашитый счётчик «4 идеи» (§−48).  Считаем по
+                данным и склоняем слово; при фильтре показываем «N из M». */}
+            <span className="w-1.5 h-1.5 rounded-full bg-gold-400"/> Holdings · {rows.length !== all.length ? `${rows.length} из ${all.length}` : all.length} {_plural(rows.length !== all.length ? all.length : rows.length)}
           </div>
           <h2 className="text-[40px] leading-[1.05] tracking-[-0.02em] font-light text-ink-900">
             Что вы держите<span className="text-ink-400">.</span>

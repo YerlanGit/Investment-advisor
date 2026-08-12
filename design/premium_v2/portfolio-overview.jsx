@@ -135,6 +135,74 @@ const HeroRiskGauge = ({ value, delta, profile }) => (
   </div>
 );
 
+// ── Risk KPI strip (BASE)
+//
+// 🔴 Аудит 2026-08-12: ключ `kpis` (CVaR 95% · Sharpe · Max Drawdown ·
+// волатильность) приезжал в BASE-payload с самого начала, но в бандле
+// `base-components.js` слова `kpis` не было НИ РАЗУ — четыре главные
+// риск-метрики считались движком и не показывались никому.  То же с
+// `verdict.expReturn` / `verdict.expSharpe` (BLOCK 5): в DEEP они на обложке,
+// в BASE их не рендерил никто.  Платный тир не показывал свой основной
+// результат.  Полоса ниже возвращает всё это на обложку BASE.
+//
+// Тон карточки — из движка (`finance.scoring.kpi_status`), а не из макета:
+// «ok» зелёный, «warn» золотой, «bad» терракота.  Пустой/незнакомый тон →
+// нейтральные чернила, никогда не «всё хорошо».
+const _KPI_TONE = {
+  ok:   { bar:'#5d7c5c', text:'text-sage-600' },
+  warn: { bar:'#caa01a', text:'text-gold-700' },
+  bad:  { bar:'#c47358', text:'text-rust-600' },
+};
+
+const RiskKpiCard = ({ k }) => {
+  const tone = _KPI_TONE[k.tone] || { bar:'#a8a293', text:'text-ink-900' };
+  const v = (k.value === null || k.value === undefined || Number.isNaN(Number(k.value)))
+    ? '—' : `${Number(k.value).toFixed(k.unit === '%' ? 1 : 2)}${k.unit || ''}`;
+  return (
+    <div className="glass-strong rounded-3xl p-4 sm:p-5 shadow-card lift flex flex-col min-w-0"
+         style={{ borderTop: `2px solid ${tone.bar}` }}>
+      <div className="text-[10px] tracking-widest uppercase text-ink-500 font-mono truncate">{k.label}</div>
+      <div className={`mt-1.5 num font-light leading-none tracking-tight break-words ${tone.text}`}
+           style={{ fontSize: 'clamp(22px, 6.4vw, 34px)' }}>{v}</div>
+      {k.frame && k.frame !== '–' && (
+        <div className="mt-1.5 text-[11px] text-ink-500 font-mono truncate">{k.frame}</div>
+      )}
+    </div>
+  );
+};
+
+const RiskKpiStrip = ({ kpis, verdict }) => {
+  const order = ['cvar', 'sharpe', 'dd', 'vol'];
+  const cards = order.map(key => kpis && kpis[key]).filter(Boolean);
+  if (!cards.length) return null;
+  const fwd = [
+    (verdict.expReturn && verdict.expReturn !== '–')
+      ? { label: 'Ожид. доходность (год.)', value: verdict.expReturn } : null,
+    (verdict.expSharpe && verdict.expSharpe !== '–')
+      ? { label: 'Ожид. Sharpe', value: verdict.expSharpe } : null,
+  ].filter(Boolean);
+  return (
+    <div className="mb-10">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        {cards.map((k, i) => <RiskKpiCard key={i} k={k}/>)}
+      </div>
+      {/* Форвардная оценка факторной модели — ДРУГАЯ величина, чем
+          реализованный Sharpe в карточке слева, поэтому подписана источником
+          и вынесена отдельной строкой, а не поставлена рядом как равная. */}
+      {fwd.length > 0 && (
+        <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-2xl bg-cream-50/80 border border-ink-900/5 px-4 py-2.5">
+          <span className="text-[10px] tracking-widest uppercase text-ink-400 font-mono">Прогноз модели</span>
+          {fwd.map((f, i) => (
+            <span key={i} className="text-[11.5px] text-ink-600 min-w-0">
+              {f.label}: <span className="num font-semibold text-ink-900">{f.value}</span>
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 // ── Risk decomposition card
 const RiskDecompCard = ({ data }) => (
   <div className="glass-strong rounded-4xl p-6 shadow-card lift h-full min-h-[420px] flex flex-col">
@@ -252,6 +320,10 @@ const Hero = () => {
           )}
         </div>
       </div>
+
+      {/* Риск-метрики отчёта (CVaR · Sharpe · просадка · волатильность).
+          До 2026-08-12 этот блок в BASE не рендерился вовсе — см. RiskKpiStrip. */}
+      <RiskKpiStrip kpis={p.kpis} verdict={v}/>
 
       {/* Factor pills strip (echoes reference small KPI bars) — a tidy 2-col grid
           on phones, an inline flowing row from sm up. */}

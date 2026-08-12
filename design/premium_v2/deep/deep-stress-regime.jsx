@@ -88,8 +88,10 @@ const RegimeBlock = ({ r }) => {
     {/* summary */}
     <div className="col-span-12 lg:col-span-7">
       <div className="glass-strong rounded-4xl p-6 shadow-card lift h-full flex flex-col">
-        <div className="flex items-start justify-between mb-4">
-          <div>
+        {/* Замер 2026-08-12: чип фазы («Рост») уезжал за экран на 320px —
+            длинная строка уверенности слева не оставляла ему места. */}
+        <div className="flex items-start justify-between flex-wrap gap-2 mb-4">
+          <div className="min-w-0">
             <div className="text-[10px] tracking-widest uppercase text-ink-500 font-mono mb-1">Текущий режим</div>
             <div className="flex items-baseline gap-3">
               <span className="text-[32px] font-light tracking-tight text-ink-900">{r.name}</span>
@@ -98,7 +100,7 @@ const RegimeBlock = ({ r }) => {
             </div>
             <div className="text-[11.5px] text-ink-500 font-mono mt-1">Уверенность модели <b className="text-gold-700">{r.confidence}%</b> · {r.confirms} подтверждающих сигнала</div>
           </div>
-          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-[11px] font-semibold ${phase.cls}`}>
+          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-[11px] font-semibold flex-shrink-0 ${phase.cls}`}>
             <Icons.Check size={13} stroke={2.2}/> {phase.t}
           </div>
         </div>
@@ -113,14 +115,26 @@ const RegimeBlock = ({ r }) => {
           Сигналы-драйверы{r.driversAsOf ? ` · as_of ${r.driversAsOf}` : ''}
         </div>
         <div className="space-y-1.5 flex-1">
-          {r.drivers.map((d,i) => (
-            <div key={i} className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-3 py-1.5 border-b border-ink-900/5 last:border-0">
-              <span className="text-[11.5px] text-ink-700 truncate">{d.name}</span>
-              <span className={`text-[11.5px] num font-semibold ${d.tone==='warn'?'text-gold-700':'text-sage-600'}`}>{d.val}</span>
-              <span className="text-[9.5px] font-mono text-ink-400 whitespace-nowrap">{d.trend}</span>
-              <span className={`text-[8.5px] font-mono font-bold tracking-wider px-1.5 py-0.5 rounded-full ${d.tone==='warn'?'bg-gold-400/18 text-gold-700':'bg-sage-500/12 text-sage-600'}`}>{d.state}</span>
+          {/* 🔴 Аудит 2026-08-12: ЗНАЧЕНИЕ и ТРЕНД красятся ЭКОНОМИЧЕСКИМ знаком
+              движения (`trendTone` из `finance.regime`), а пилюля справа —
+              СВЕЖЕСТЬЮ ряда (`tone`).  Прежде и то и другое красилось
+              свежестью, из-за чего «Real GDP growth ▼ −2.13 пп за 3кв»
+              светился зелёным «всё хорошо», а пунктом ниже, в подтверждении
+              режима, тот же факт стоял с ✗ «ВВП замедляется — против фазы
+              роста».  Зелёными были три драйвера из шести при ухудшающемся
+              тренде.  Неизвестное направление → нейтральные чернила. */}
+          {r.drivers.map((d,i) => {
+            const tt = d.trendTone === 'pos' ? 'text-sage-600'
+                     : d.trendTone === 'neg' ? 'text-rust-600' : 'text-ink-700';
+            return (
+            <div key={i} className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-2 sm:gap-3 py-1.5 border-b border-ink-900/5 last:border-0">
+              <span className="text-[11.5px] text-ink-700 truncate min-w-0">{d.name}</span>
+              <span className={`text-[11.5px] num font-semibold whitespace-nowrap ${tt}`}>{d.val}</span>
+              <span className={`text-[9.5px] font-mono whitespace-nowrap ${d.trendTone === 'flat' ? 'text-ink-400' : tt}`}>{d.trend}</span>
+              <span className={`text-[8.5px] font-mono font-bold tracking-wider px-1.5 py-0.5 rounded-full whitespace-nowrap ${d.tone==='warn'?'bg-gold-400/18 text-gold-700':'bg-sage-500/12 text-sage-600'}`}>{d.state}</span>
             </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>

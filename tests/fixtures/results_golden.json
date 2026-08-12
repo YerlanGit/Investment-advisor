@@ -352,10 +352,10 @@
     "improved": true
    },
    "it_share": {
-    "after": 0.5142653756,
-    "before": 0.4885653756,
-    "delta": 0.0257,
-    "delta_pp": 2.57,
+    "after": 0.5849377499,
+    "before": 0.5677825925,
+    "delta": 0.01715515736,
+    "delta_pp": 1.72,
     "improved": null
    },
    "max_drawdown": {

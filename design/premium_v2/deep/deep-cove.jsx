@@ -36,7 +36,8 @@ const Cove = () => {
             Каждый показатель прослеживается до первичного источника с методом расчёта и статусом QualityGate.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        {/* Замер 2026-08-12: три пилюли-счётчика в один ряд не влезают в 320px. */}
+        <div className="flex items-center flex-wrap gap-2">
           <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-sage-500/12 text-sage-600 text-[11px] font-semibold"><span className="font-bold">✓</span> {counts.ok} прошли</span>
           <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-gold-400/15 text-gold-700 text-[11px] font-semibold"><span className="font-bold">!</span> {counts.warn} частично</span>
           <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-rust-500/12 text-rust-600 text-[11px] font-semibold"><span className="font-bold">✗</span> {counts.fail} недоступно</span>

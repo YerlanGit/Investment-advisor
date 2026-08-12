@@ -1123,7 +1123,7 @@ const HeroGaugeCard = ({
 }, "Сводный 0–100")), v.riskTier && v.riskTier !== '–' && /*#__PURE__*/React.createElement("span", {
   className: "px-2 py-0.5 rounded-full bg-gold-400/25 text-gold-700 text-[9px] font-mono font-bold tracking-wider uppercase"
 }, v.riskTier)), v.expReturn && v.expReturn !== '–' && /*#__PURE__*/React.createElement("div", {
-  className: "flex items-center gap-4"
+  className: "flex items-center flex-wrap gap-x-4 gap-y-2 min-w-0"
 }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
   className: "text-[9px] text-ink-500 font-medium uppercase tracking-wider"
 }, "Ожид. дох. (год.)"), /*#__PURE__*/React.createElement("div", {
@@ -1183,8 +1183,10 @@ const MandateCard = ({
 }) => /*#__PURE__*/React.createElement("div", {
   className: "glass-strong rounded-4xl p-6 shadow-card lift flex flex-col"
 }, /*#__PURE__*/React.createElement("div", {
-  className: "flex items-start justify-between mb-1 gap-2"
-}, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  className: "flex items-start justify-between flex-wrap mb-1 gap-2"
+}, /*#__PURE__*/React.createElement("div", {
+  className: "min-w-0"
+}, /*#__PURE__*/React.createElement("div", {
   className: "text-ink-500 text-[12px] font-medium"
 }, "Соответствие мандату"), /*#__PURE__*/React.createElement("h3", {
   className: "text-xl font-semibold tracking-tight text-ink-900 leading-tight"
@@ -1252,14 +1254,24 @@ const _KPI_METHOD = {
 // нуля (последний год был хуже полной истории). Без подписи это читается
 // как противоречие в отчёте.
 const _SPARK_NOTE = '12 срезов за год · каждый по скользящему окну 60 дней (число выше — по полному окну истории)';
+
+// Аудит 2026-08-12: `k.status` теперь ВЕРДИКТ ПО ЗНАЧЕНИЮ из движка
+// (`finance.scoring.kpi_status` → ok/warn/bad), а не литерал дизайн-макета.
+// Прежде Sharpe всегда получал золотой бейдж «good» — даже когда ИИ-заметка
+// на той же карточке говорила «отдача на единицу риска слабая».  Старые ключи
+// (normal/good/watch) оставлены для payload'ов, собранных до этой правки.
+const _KPI_BORDER = {
+  ok: '#5d7c5c',
+  warn: '#caa01a',
+  bad: '#c47358',
+  normal: '#5d7c5c',
+  good: '#caa01a',
+  watch: '#c47358'
+};
 const KpiCard = ({
   k
 }) => {
-  const border = {
-    normal: '#5d7c5c',
-    good: '#caa01a',
-    watch: '#c47358'
-  }[k.status];
+  const border = _KPI_BORDER[k.status] || '#a8a293';
   const hasPts = Array.isArray(k.pts) && k.pts.length >= 2;
   return /*#__PURE__*/React.createElement("div", {
     className: "glass-strong rounded-4xl p-6 shadow-card lift flex flex-col",
@@ -2335,8 +2347,10 @@ const RegimeBlock = ({
   }, /*#__PURE__*/React.createElement("div", {
     className: "glass-strong rounded-4xl p-6 shadow-card lift h-full flex flex-col"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "flex items-start justify-between mb-4"
-  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-start justify-between flex-wrap gap-2 mb-4"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "min-w-0"
+  }, /*#__PURE__*/React.createElement("div", {
     className: "text-[10px] tracking-widest uppercase text-ink-500 font-mono mb-1"
   }, "Текущий режим"), /*#__PURE__*/React.createElement("div", {
     className: "flex items-baseline gap-3"
@@ -2349,7 +2363,7 @@ const RegimeBlock = ({
   }, "Уверенность модели ", /*#__PURE__*/React.createElement("b", {
     className: "text-gold-700"
   }, r.confidence, "%"), " · ", r.confirms, " подтверждающих сигнала")), /*#__PURE__*/React.createElement("div", {
-    className: `flex items-center gap-2 px-3 py-1.5 rounded-full text-[11px] font-semibold ${phase.cls}`
+    className: `flex items-center gap-2 px-3 py-1.5 rounded-full text-[11px] font-semibold flex-shrink-0 ${phase.cls}`
   }, /*#__PURE__*/React.createElement(Icons.Check, {
     size: 13,
     stroke: 2.2
@@ -2359,18 +2373,21 @@ const RegimeBlock = ({
     className: "text-[10px] tracking-widest uppercase text-ink-400 font-mono mb-2"
   }, "Сигналы-драйверы", r.driversAsOf ? ` · as_of ${r.driversAsOf}` : ''), /*#__PURE__*/React.createElement("div", {
     className: "space-y-1.5 flex-1"
-  }, r.drivers.map((d, i) => /*#__PURE__*/React.createElement("div", {
-    key: i,
-    className: "grid grid-cols-[1fr_auto_auto_auto] items-center gap-3 py-1.5 border-b border-ink-900/5 last:border-0"
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "text-[11.5px] text-ink-700 truncate"
-  }, d.name), /*#__PURE__*/React.createElement("span", {
-    className: `text-[11.5px] num font-semibold ${d.tone === 'warn' ? 'text-gold-700' : 'text-sage-600'}`
-  }, d.val), /*#__PURE__*/React.createElement("span", {
-    className: "text-[9.5px] font-mono text-ink-400 whitespace-nowrap"
-  }, d.trend), /*#__PURE__*/React.createElement("span", {
-    className: `text-[8.5px] font-mono font-bold tracking-wider px-1.5 py-0.5 rounded-full ${d.tone === 'warn' ? 'bg-gold-400/18 text-gold-700' : 'bg-sage-500/12 text-sage-600'}`
-  }, d.state)))))), /*#__PURE__*/React.createElement("div", {
+  }, r.drivers.map((d, i) => {
+    const tt = d.trendTone === 'pos' ? 'text-sage-600' : d.trendTone === 'neg' ? 'text-rust-600' : 'text-ink-700';
+    return /*#__PURE__*/React.createElement("div", {
+      key: i,
+      className: "grid grid-cols-[1fr_auto_auto_auto] items-center gap-2 sm:gap-3 py-1.5 border-b border-ink-900/5 last:border-0"
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "text-[11.5px] text-ink-700 truncate min-w-0"
+    }, d.name), /*#__PURE__*/React.createElement("span", {
+      className: `text-[11.5px] num font-semibold whitespace-nowrap ${tt}`
+    }, d.val), /*#__PURE__*/React.createElement("span", {
+      className: `text-[9.5px] font-mono whitespace-nowrap ${d.trendTone === 'flat' ? 'text-ink-400' : tt}`
+    }, d.trend), /*#__PURE__*/React.createElement("span", {
+      className: `text-[8.5px] font-mono font-bold tracking-wider px-1.5 py-0.5 rounded-full whitespace-nowrap ${d.tone === 'warn' ? 'bg-gold-400/18 text-gold-700' : 'bg-sage-500/12 text-sage-600'}`
+    }, d.state));
+  })))), /*#__PURE__*/React.createElement("div", {
     className: "col-span-12"
   }, /*#__PURE__*/React.createElement("div", {
     className: "rounded-4xl p-6 shadow-card",
@@ -3014,7 +3031,7 @@ const Cove = () => {
   }, ".")), /*#__PURE__*/React.createElement("p", {
     className: "text-[15px] text-ink-500 mt-2 font-light max-w-[640px]"
   }, "Каждый показатель прослеживается до первичного источника с методом расчёта и статусом QualityGate.")), /*#__PURE__*/React.createElement("div", {
-    className: "flex items-center gap-2"
+    className: "flex items-center flex-wrap gap-2"
   }, /*#__PURE__*/React.createElement("span", {
     className: "flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-sage-500/12 text-sage-600 text-[11px] font-semibold"
   }, /*#__PURE__*/React.createElement("span", {

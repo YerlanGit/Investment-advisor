@@ -232,27 +232,45 @@ def _it_share(tickers: list[str],
               weights: np.ndarray,
               sector_by_ticker: Optional[dict[str, str]] = None) -> float:
     """
-    Fraction of portfolio classified as Technology.
+    Share of the LONG book classified as Technology (0..1).
 
     Uses an explicit sector lookup when provided; otherwise falls back to
     a permissive prefix heuristic on common IT tickers.  Returns 0.0 when
     no IT exposure is identifiable.
+
+    🔴 Базис — ДОЛЯ ИНВЕСТИРОВАННОГО КАПИТАЛА (Σ положительных весов), тот же,
+    что у соседа `_top_sector_share`, у панели секторов (`pdf_payload`:
+    «share of long book») и у промпта ИИ (`ai_narrative._sector_weights_pct`).
+    Аудит 2026-08-12: здесь нормировки НЕ БЫЛО — доля считалась от NAV, и на
+    маржинальной книге одна и та же величина печаталась в отчёте ДВУМЯ
+    числами: панель «Ожидаемый эффект» показывала «Доля IT 57.0%», а
+    предупреждение секторов и текст ИИ рядом — «Tech-комплекс 55.9%».
+    Расхождение растёт с плечом (на книге 118% long это уже ~9 пп) и
+    воспроизводит ровно тот дефект, ради которого super-group и сводили в
+    один источник («BASE 55% против DEEP 80.8%»).  На книге без плеча
+    знаменатель равен 1.0 и число не меняется вовсе.
     """
     _IT_PREFIXES = {"AAPL", "MSFT", "NVDA", "GOOG", "GOOGL", "META", "AMZN",
                     "TSLA", "PLTR", "CRWD", "NET", "AMD", "INTC", "ORCL",
                     "ADBE", "CRM", "NOW", "SNOW", "SHOP", "AVGO", "QCOM",
                     "SMCI", "ASML", "TSM"}
     total = 0.0
+    long_sum = 0.0
     sector_by_ticker = sector_by_ticker or {}
     for t, w in zip(tickers, weights):
+        wf = float(w)
+        if wf > 0:
+            long_sum += wf
         sec = (sector_by_ticker.get(t) or "").lower()
         is_it = (
             "tech" in sec or "info" in sec or "software" in sec
             or t.upper().split(".")[0] in _IT_PREFIXES
         )
         if is_it:
-            total += float(w)
-    return float(total)
+            total += wf
+    if long_sum <= 1e-12:
+        return 0.0
+    return float(total / long_sum)
 
 
 def _top_sector_share(tickers: list[str],
