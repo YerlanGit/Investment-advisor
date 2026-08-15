@@ -164,6 +164,12 @@
   .kpi.st-normal { border-top: 2px solid var(--green); }
   .kpi.st-good   { border-top: 2px solid var(--tech-blue); }
   .kpi.st-watch  { border-top: 2px solid var(--amber); }
+  /* Аудит §−91: тон карточки теперь ВЕРДИКТ по значению (`finance.scoring.kpi_status`),
+     а не класс, вписанный в шаблон руками. ok/warn/bad — те же три цвета, что в
+     Premium V2; старые st-* оставлены для payload'ов без `kpi_status`. */
+  .kpi.st-ok   { border-top: 2px solid var(--green); }
+  .kpi.st-warn { border-top: 2px solid var(--amber); }
+  .kpi.st-bad  { border-top: 2px solid var(--neg); }
 
   .kpi-name {
     font-size: 10px; font-weight: 600; letter-spacing: 0.09em;
@@ -1280,7 +1286,7 @@
   <div class="kpi-grid">
 
     <!-- KPI 1 — CVaR 95% -->
-    <div class="kpi st-normal">
+    <div class="kpi st-{{ data.kpi_status.cvar if data.kpi_status and data.kpi_status.cvar else 'normal' }}">
       <div class="kpi-name">CVaR&nbsp;95%</div>
       <div class="kpi-value-row">
         <span class="kpi-value">{{ data.cvar }}</span>
@@ -1308,7 +1314,7 @@
     </div>
 
     <!-- KPI 2 — Sharpe Ratio -->
-    <div class="kpi st-good">
+    <div class="kpi st-{{ data.kpi_status.sharpe if data.kpi_status and data.kpi_status.sharpe else 'good' }}">
       <div class="kpi-name">Sharpe Ratio</div>
       <div class="kpi-value-row">
         <span class="kpi-value">{{ data.sharpe }}</span>
@@ -1342,7 +1348,7 @@
     </div>
 
     <!-- KPI 3 — Max Drawdown -->
-    <div class="kpi st-watch">
+    <div class="kpi st-{{ data.kpi_status.dd if data.kpi_status and data.kpi_status.dd else 'watch' }}">
       <div class="kpi-name">Max Drawdown</div>
       <div class="kpi-value-row">
         <span class="kpi-value">{{ data.max_drawdown }}</span>

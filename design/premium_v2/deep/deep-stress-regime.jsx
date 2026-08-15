@@ -7,7 +7,11 @@ const StressTable = ({ rows }) => (
         <h3 className="text-2xl font-semibold tracking-tight text-ink-900">Стресс-сценарии</h3>
         <p className="text-[12px] text-ink-500 font-mono mt-1">Параметрические шоки факторов (ΔPnL = w′·B·shock) · горизонт 1 квартал</p>
       </div>
-      <span className="text-[10px] font-mono text-ink-400 tracking-wider px-2.5 py-1 rounded-full bg-cream-50 border border-ink-900/5">7 сценариев · не прогноз</span>
+      {/* Аудит §−91: было «7 сценариев» ЛИТЕРАЛОМ при вычисляемом наборе
+          (`stress.DEFAULT_SCENARIOS`, и `run_stress_tests` принимает свой
+          список). Сегодня числа совпадают — но это ровно класс «9 позиций»
+          (A-8) и «4 идеи» (§−48): счётчик, напечатанный константой. */}
+      <span className="text-[10px] font-mono text-ink-400 tracking-wider px-2.5 py-1 rounded-full bg-cream-50 border border-ink-900/5">{rows.length} {_plural(rows.length, 'сценарий', 'сценария', 'сценариев')} · не прогноз</span>
     </div>
     <div className="swipe-hint items-center gap-1 text-[10px] font-mono text-gold-700 bg-gold-400/15 rounded-full px-2.5 py-1 mb-2.5 w-max">↔ листайте таблицу</div>
     <div className="mob-scroll-x"><div>

@@ -1,13 +1,22 @@
 /* DEEP Factors — β-radar + 4-pillar scoring */
 
-const FactorTable = ({ factors, benchmarkName }) => (
+// Аудит §−91: `benchmarkTicker` был МЁРТВЫМ ключом контракта. Маппер отдавал его
+// с настоящим значением (живой отчёт: `QQQ.US`), а комментарий обещал трёх
+// потребителей — «column header, radar legend и explainer plaque читают эти» —
+// при том, что в бандле ключ не встречался НИ РАЗУ. Тот же класс, что A-2
+// (`kpis` в BASE): устаревшее обоснование опаснее отсутствующего. Показываем
+// инструмент рядом с именем — читатель обязан видеть, ЧЕМ измеряли.
+const FactorTable = ({ factors, benchmarkName, benchmarkTicker }) => (
   <table className="w-full">
     <thead>
       <tr className="text-[9.5px] tracking-widest uppercase text-ink-400 font-mono border-b border-ink-900/8">
         <th className="text-left font-medium py-2">Фактор</th>
         <th className="text-right font-medium py-2"
             title="Частная (multi-factor) бета из Ridge-регрессии: влияние ЭТОЙ оси при удержании остальных постоянными. Не равна средневзвешенной бете позиций из таблицы «Что держите» — та считает каждую бумагу отдельно, без контроля прочих факторов.">β портф.</th>
-        <th className="text-right font-medium py-2" title={`${benchmarkName} — факторные беты вашего бенчмарка (его тоже разложили по этим осям)`}>{benchmarkName}</th>
+        <th className="text-right font-medium py-2" title={`${benchmarkName}${benchmarkTicker ? ` (${benchmarkTicker})` : ''} — факторные беты вашего бенчмарка (его тоже разложили по этим осям)`}>
+          {benchmarkName}
+          {benchmarkTicker && <span className="block normal-case tracking-normal text-ink-300 text-[8.5px]">{benchmarkTicker}</span>}
+        </th>
         <th className="text-right font-medium py-2" title="Активный наклон портфеля относительно бенчмарка">Наклон Δ</th>
       </tr>
     </thead>
@@ -191,6 +200,8 @@ const Factors = () => {
   // следуют за мандатным бенчмарком клиента (payload.benchmarkName); фолбэк
   // «S&P 500» сохраняет прежний вид для легаси-данных и S&P-константы.
   const benchName = p.benchmarkName || 'S&P 500';
+  // §−91: тикер бенчмарка доезжает до столбца (был мёртвым ключом контракта).
+  const benchTicker = p.benchmarkTicker || '';
   return (
     <section id="factors" className="rise" data-screen-label="03 Factors">
       <div className="mb-6">
@@ -234,7 +245,7 @@ const Factors = () => {
             <FactorRadar factors={p.factors} size={320}/>
           </div>
           <div className="col-span-12 lg:col-span-7">
-            <FactorTable factors={p.factors} benchmarkName={benchName}/>
+            <FactorTable factors={p.factors} benchmarkName={benchName} benchmarkTicker={benchTicker}/>
             <p className="text-[11px] text-ink-500 leading-relaxed font-light mt-4">
               <span className="text-ink-800 font-medium">Что показывает радар:</span> насколько портфель завязан на глобальные факторы. Большая площадь — больше зависимости от рынка; совпадение направлений по нескольким факторам — скрытая общая ставка.
             </p>
