@@ -15,7 +15,7 @@ GCP Cloud Run (long-polling) · Cloud Function (RAG-ингест) · ChromaDB ·
 ## Верификация (обязательна перед каждым пушем)
 
 ```bash
-PYTHONPATH=src python -m pytest tests/ -q          # → 1577 passed, 2 xfailed
+PYTHONPATH=src python -m pytest tests/ -q          # → 1592 passed, 2 xfailed
 ```
 
 - Префикс `PYTHONPATH=src` **ОБЯЗАТЕЛЕН** — без него `import finance…` не находится
@@ -23,11 +23,11 @@ PYTHONPATH=src python -m pytest tests/ -q          # → 1577 passed, 2 xfailed
 - **Прогонов ДВА.** Второй — зеркало деплой-образа, в нём НЕТ каталога `design/`:
   ```bash
   cp -r src tests SYSTEM_PROMPT.md requirements*.txt <tmp>/ && cd <tmp>
-  PYTHONPATH=src python -m pytest tests/ -q        # → 1517 passed, 60 skipped, 2 xfailed
+  PYTHONPATH=src python -m pytest tests/ -q        # → 1532 passed, 66 skipped, 2 xfailed
   ```
   Зелёный GitHub CI НЕ означает, что деплой пройдёт: CI видит полный чекаут,
-  Cloud Build — только образ. Разница 60 тестов — ровно те, что читают
-  `design/`, `CLAUDE.md` и `scripts/`, то есть отсутствующее в образе.
+  Cloud Build — только образ. Разница 66 тестов — ровно те, что читают
+  `design/`, `docs/`, `CLAUDE.md` и `scripts/`, то есть отсутствующее в образе.
 - Правил `design/*.jsx` → **обязательно** `bash design/premium_v2/build.sh`.
 - Смоук-рендер тиров: `html_renderer.render_report_html(None, <user_id>, ...)`.
 - `freedom-etl/` гоняется ОТДЕЛЬНО (свои зависимости, в основную сюиту не входит):
@@ -162,8 +162,11 @@ payload (`pdf_payload`) → design-data (DEEP/BASE, пин в `test_phase19_bloc
 
 ## История
 
-Все раунды, находки и обоснования решений — **`docs/audit/AUDIT.md`**
-(начни с «📋 ДОСКА ЗАДАЧ» в его начале: открытые/закрытые пункты по цене ошибки).
+**`docs/audit/AUDIT.md`** — НАВИГАТОР (доска задач · оценка · правила · индекс
+раундов · протокол обновления). Читается целиком, он маленький.
+Полные записи раундов — `docs/audit/rounds/` (файл по диапазону номеров).
+Ссылку вида `§−45` ищи так: `grep -n "^## −45\." docs/audit/rounds/*.md`.
+🔴 Нумерация раундов НЕ меняется: на неё ссылаются ~540 мест.
 Свежий сквозной аудит — `docs/audit/AUDIT_360_2026-08-12.md` (разбор ОТ АРТЕФАКТА:
 живые BASE/DEEP + мобильный замер; там же строгая оценка проекта).
 Планы по проектам РАЗДЕЛЕНЫ и смешивать их нельзя (разные основания I-12/I-14):

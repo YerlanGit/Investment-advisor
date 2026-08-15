@@ -112,11 +112,14 @@ def build_scenario_payload(results: dict) -> dict:
         return payload
     prices, weights, betas, disp_by_res = core
 
+    # §−91: `holdings_display` отсюда убран — он был ключом БЕЗ ПОТРЕБИТЕЛЯ
+    # (ноль ссылок в шаблонах, `src/` и тестах). Имя бумаги доезжает до
+    # читателя построчно, полем `display` (ниже), а словарь целиком нужен
+    # только здесь, локально, — в payload ему делать нечего.
     sc: dict = {"available": True,
                 "disclaimers": list(se.DISCLAIMERS),
                 "window_days": se.SCENARIO_LOOKBACK_DAYS,
-                "n_obs": int(len(prices)),
-                "holdings_display": disp_by_res}
+                "n_obs": int(len(prices))}
 
     # ── Панель A — 5 core-метрик (движок) ────────────────────────────────
     metrics = se.five_metrics(prices, weights, betas=betas)

@@ -1856,9 +1856,16 @@ Object.assign(window, {
 });
 /* DEEP Factors — β-radar + 4-pillar scoring */
 
+// Аудит §−91: `benchmarkTicker` был МЁРТВЫМ ключом контракта. Маппер отдавал его
+// с настоящим значением (живой отчёт: `QQQ.US`), а комментарий обещал трёх
+// потребителей — «column header, radar legend и explainer plaque читают эти» —
+// при том, что в бандле ключ не встречался НИ РАЗУ. Тот же класс, что A-2
+// (`kpis` в BASE): устаревшее обоснование опаснее отсутствующего. Показываем
+// инструмент рядом с именем — читатель обязан видеть, ЧЕМ измеряли.
 const FactorTable = ({
   factors,
-  benchmarkName
+  benchmarkName,
+  benchmarkTicker
 }) => /*#__PURE__*/React.createElement("table", {
   className: "w-full"
 }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", {
@@ -1870,8 +1877,10 @@ const FactorTable = ({
   title: "Частная (multi-factor) бета из Ridge-регрессии: влияние ЭТОЙ оси при удержании остальных постоянными. Не равна средневзвешенной бете позиций из таблицы «Что держите» — та считает каждую бумагу отдельно, без контроля прочих факторов."
 }, "β портф."), /*#__PURE__*/React.createElement("th", {
   className: "text-right font-medium py-2",
-  title: `${benchmarkName} — факторные беты вашего бенчмарка (его тоже разложили по этим осям)`
-}, benchmarkName), /*#__PURE__*/React.createElement("th", {
+  title: `${benchmarkName}${benchmarkTicker ? ` (${benchmarkTicker})` : ''} — факторные беты вашего бенчмарка (его тоже разложили по этим осям)`
+}, benchmarkName, benchmarkTicker && /*#__PURE__*/React.createElement("span", {
+  className: "block normal-case tracking-normal text-ink-300 text-[8.5px]"
+}, benchmarkTicker)), /*#__PURE__*/React.createElement("th", {
   className: "text-right font-medium py-2",
   title: "Активный наклон портфеля относительно бенчмарка"
 }, "Наклон Δ"))), /*#__PURE__*/React.createElement("tbody", null, factors.map((f, i) => {
@@ -2098,6 +2107,8 @@ const Factors = () => {
   // следуют за мандатным бенчмарком клиента (payload.benchmarkName); фолбэк
   // «S&P 500» сохраняет прежний вид для легаси-данных и S&P-константы.
   const benchName = p.benchmarkName || 'S&P 500';
+  // §−91: тикер бенчмарка доезжает до столбца (был мёртвым ключом контракта).
+  const benchTicker = p.benchmarkTicker || '';
   return /*#__PURE__*/React.createElement("section", {
     id: "factors",
     className: "rise",
@@ -2145,7 +2156,8 @@ const Factors = () => {
     className: "col-span-12 lg:col-span-7"
   }, /*#__PURE__*/React.createElement(FactorTable, {
     factors: p.factors,
-    benchmarkName: benchName
+    benchmarkName: benchName,
+    benchmarkTicker: benchTicker
   }), /*#__PURE__*/React.createElement("p", {
     className: "text-[11px] text-ink-500 leading-relaxed font-light mt-4"
   }, /*#__PURE__*/React.createElement("span", {
@@ -2218,7 +2230,7 @@ const StressTable = ({
   className: "text-[12px] text-ink-500 font-mono mt-1"
 }, "Параметрические шоки факторов (ΔPnL = w′·B·shock) · горизонт 1 квартал")), /*#__PURE__*/React.createElement("span", {
   className: "text-[10px] font-mono text-ink-400 tracking-wider px-2.5 py-1 rounded-full bg-cream-50 border border-ink-900/5"
-}, "7 сценариев · не прогноз")), /*#__PURE__*/React.createElement("div", {
+}, rows.length, " ", _plural(rows.length, 'сценарий', 'сценария', 'сценариев'), " · не прогноз")), /*#__PURE__*/React.createElement("div", {
   className: "swipe-hint items-center gap-1 text-[10px] font-mono text-gold-700 bg-gold-400/15 rounded-full px-2.5 py-1 mb-2.5 w-max"
 }, "↔ листайте таблицу"), /*#__PURE__*/React.createElement("div", {
   className: "mob-scroll-x"
