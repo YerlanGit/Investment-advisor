@@ -15,7 +15,7 @@ GCP Cloud Run (long-polling) · Cloud Function (RAG-ингест) · ChromaDB ·
 ## Верификация (обязательна перед каждым пушем)
 
 ```bash
-PYTHONPATH=src python -m pytest tests/ -q          # → 1611 passed, 2 xfailed
+PYTHONPATH=src python -m pytest tests/ -q          # → 1630 passed, 2 xfailed
 ```
 
 - Префикс `PYTHONPATH=src` **ОБЯЗАТЕЛЕН** — без него `import finance…` не находится
@@ -23,11 +23,12 @@ PYTHONPATH=src python -m pytest tests/ -q          # → 1611 passed, 2 xfailed
 - **Прогонов ДВА.** Второй — зеркало деплой-образа, в нём НЕТ каталога `design/`:
   ```bash
   cp -r src tests SYSTEM_PROMPT.md requirements*.txt <tmp>/ && cd <tmp>
-  PYTHONPATH=src python -m pytest tests/ -q        # → 1532 passed, 66 skipped, 2 xfailed
+  PYTHONPATH=src python -m pytest tests/ -q        # → 1558 passed, 72 skipped, 2 xfailed
   ```
   Зелёный GitHub CI НЕ означает, что деплой пройдёт: CI видит полный чекаут,
-  Cloud Build — только образ. Разница 66 тестов — ровно те, что читают
-  `design/`, `docs/`, `CLAUDE.md` и `scripts/`, то есть отсутствующее в образе.
+  Cloud Build — только образ. Разница 72 теста — ровно те, что читают
+  `design/`, `docs/`, `CLAUDE.md`, `scripts/` и `cloud_function/`, то есть
+  отсутствующее в образе.
 - Правил `design/*.jsx` → **обязательно** `bash design/premium_v2/build.sh`.
 - Смоук-рендер тиров: `html_renderer.render_report_html(None, <user_id>, ...)`.
 - `freedom-etl/` гоняется ОТДЕЛЬНО (свои зависимости, в основную сюиту не входит):
@@ -79,6 +80,15 @@ PYTHONPATH=src python -m pytest tests/ -q          # → 1611 passed, 2 xfailed
   SQLite поверх gcsfuse — это range-запрос на страницу, сотни на отчёт. Формы символа меняют НОТАЦИЮ, но не ПЛОЩАДКУ: кандидат
   `{base}.US` для иностранной бумаги подсунет ADR вместо листинга (`§−77`).
   Свежесть считается в ТОРГОВЫХ днях рынка бумаги, а не в календарных.
+- **Банковские PDF заливаются в INBOX, а не в STORE.** Ингестят ровно двое, и
+  оба слушают `…-chroma-db-inbox-investadv`: Cloud Function и
+  `entrypoint._boot_ingest_from_inbox`. `…-chroma-db-investadv/chroma_db/` — это
+  БИНАРНИК ChromaDB, который бот качает на буте; PDF там не парсит никто и
+  никогда, причём молча (`§−93`). Проверка — `scripts/rag_inventory.py --from-gcs
+  --inbox --check-store-pdfs`. Синк только НА БУТЕ: залил → рестартни бот.
+- **Новый банк-эмитент добавляется в `rag_engine._BANK_PATTERNS`.** Иначе
+  `bank="Unknown"`, а «Unknown» отбрасывается и в заголовке выдачи, и в отборе
+  «одна цитата на банк» — выдержка доедет до отчёта БЕЗ автора (`§−93`).
 - **Статус/тон карточки — ВЕРДИКТ, а не оформление.** Считается в `finance/*` от
   значения и мандата (`scoring.kpi_status`); маппер его ЧИТАЕТ. Литерал статуса в
   `premium_payload` запрещён: так Sharpe 0.56 годами носил ярлык «good» (`§−90`).
