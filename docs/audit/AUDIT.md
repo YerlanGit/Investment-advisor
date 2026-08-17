@@ -56,6 +56,15 @@ grep -n "^## −45\." docs/audit/rounds/*.md
 - [ ] **R-3 · ИИ цитирует факторные беты дословно.** `factorAI` написал
   «Value≈0» при `−0.34` в таблице рядом. Лечится приёмом `§−44 R-5`: не
   просить модель пересказать число, а дать готовую строку.
+- [ ] **IB-F1 · деплой-гейт не видит ценовой путь.** `cloudbuild.yaml` гоняет
+  `unittest discover -p "test_phase*.py"` — под шаблон не попадают
+  `test_stooq_*`, `test_manual_*`, `test_layering`, `test_repo_hygiene`,
+  `test_contracts_*`, `test_engine_*`. Зелёный GitHub CI ≠ проверенный образ;
+  разбор — `roadmap/ingest_bot/PLAN_2026-08-17.md §10.1`.
+- [ ] **IB-F2 · база котировок живёт в бакете с балансами и ключами брокера.**
+  Пока писателя нет — безопасно; появление сервиса-загрузчика расширяет радиус
+  поражения на `tokenomics.db` и `users_vault.db`. Лечится отдельным бакетом
+  (`roadmap/ingest_bot/PLAN_2026-08-17.md §7.1`).
 
 ### 🟡 P2 — сопровождаемость и косметика
 
@@ -80,6 +89,7 @@ grep -n "^## −45\." docs/audit/rounds/*.md
 | Проект | Открытое | План |
 |---|---|---|
 | Manual Portfolio | корпоративные события, приёмка на живых данных | `roadmap/manual_portfolio/PLAN_2026-08-12.md` |
+| Ingest Bot | спроектирован 17.08, кода нет: IB-0…IB-8 | `roadmap/ingest_bot/PLAN_2026-08-17.md` |
 | Freedom API / витрина | FW-1 тенге без курса · FW-2 сплиты · FW-3 приёмка · FW-4 алертинг | `roadmap/freedom_warehouse/PLAN_2026-08-12.md` |
 | Инфраструктура | 🔴 SQLite на gcsfuse ⇒ `max-instances=1`, платежей нет | — |
 
