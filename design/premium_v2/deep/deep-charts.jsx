@@ -340,11 +340,32 @@ const RegimeQuadrant = ({ dot, size=300 }) => {
       <line x1={cx} y1={cy} x2={dx} y2={dy} stroke="#caa01a" strokeOpacity="0.45" strokeWidth="1.2" strokeDasharray="3 2"/>
       <circle cx={dx} cy={dy} r="13" fill="#f5d04e" fillOpacity="0.2"/>
       <circle cx={dx} cy={dy} r="7" fill="#f5d04e" stroke="#caa01a" strokeWidth="1.5"/>
-      <text x={dx+14} y={dy-6} fontSize="9.5" fontFamily="JetBrains Mono" fontWeight="600" fill="#caa01a">сейчас</text>
-      <text x={dx+14} y={dy+5} fontSize="8" fontFamily="JetBrains Mono" fill="#6b6862">
-        {/* R-4: signed formatting — «+-0.05» is impossible now */}
-        G {(dot.growth>=0?'+':'')+dot.growth.toFixed(2)} · C {(dot.cycle>=0?'+':'')+dot.cycle.toFixed(2)}
-      </text>
+      {/* 🔴 §−92: подпись точки ставится с той стороны, где есть место, и
+          отодвигается от горизонтальной оси.
+          Прежде она всегда шла ВПРАВО от точки (`dx+14`) на высоте `dy±`, и
+          когда точка оказывалась у начала координат, строка «G … · C …»
+          наезжала на подпись оси «Cycle →». Это не редкий край, а ровно
+          случай НЕУВЕРЕННОГО режима (живой DEEP: growth +0.01, cycle +0.02,
+          уверенность 6 %) — то есть подпись ломалась именно тогда, когда её
+          внимательнее всего читают. Замер на 320 px это и поймал. */}
+      {(() => {
+        const flip = dx > cx;                       // точка справа → подпись влево
+        const lx = flip ? dx - 14 : dx + 14;
+        const anchor = flip ? 'end' : 'start';
+        const near = Math.abs(dy - cy) < 22;        // близко к горизонтальной оси
+        const ty = near ? (dy > cy ? dy + 22 : dy - 24) : dy;
+        return (
+          <g>
+            <text x={lx} y={ty - 6} textAnchor={anchor} fontSize="9.5"
+                  fontFamily="JetBrains Mono" fontWeight="600" fill="#caa01a">сейчас</text>
+            <text x={lx} y={ty + 5} textAnchor={anchor} fontSize="8"
+                  fontFamily="JetBrains Mono" fill="#6b6862">
+              {/* R-4: signed formatting — «+-0.05» is impossible now */}
+              G {(dot.growth>=0?'+':'')+dot.growth.toFixed(2)} · C {(dot.cycle>=0?'+':'')+dot.cycle.toFixed(2)}
+            </text>
+          </g>
+        );
+      })()}
     </svg>
   );
 };

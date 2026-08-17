@@ -220,11 +220,17 @@ class FxLineageHonestyTest(unittest.TestCase):
 class MacroDriverStanceTest(unittest.TestCase):
 
     def test_signs_match_the_engines_own_convention(self) -> None:
-        """Знаки взяты из `_macro_nudges`, а не назначены заново."""
+        """Знаки взяты из `_macro_nudges`, а не назначены заново.
+
+        🔴 §−92: имя ряда обязано быть НАСТОЯЩИМ. Прежняя редакция этого теста
+        сверяла таблицу сама с собой и пропустила выдуманный ключ `hy_oas`
+        (каталог зовёт ряд `hy_credit_spread`) — драйвер кредитного спреда
+        молча оставался нейтральным. Привязка к каталогу — в `test_phase50`.
+        """
         self.assertEqual(MACRO_DRIVER_DIRECTION["gdp_growth"], +1)
         self.assertEqual(MACRO_DRIVER_DIRECTION["unemployment"], -1)
         self.assertEqual(MACRO_DRIVER_DIRECTION["breakeven_inflation"], -1)
-        self.assertEqual(MACRO_DRIVER_DIRECTION["hy_oas"], -1)
+        self.assertEqual(MACRO_DRIVER_DIRECTION["hy_credit_spread"], -1)
         self.assertEqual(MACRO_DRIVER_DIRECTION["vix"], -1)
         self.assertEqual(MACRO_DRIVER_DIRECTION["yield_curve_10y2y"], +1)
 
@@ -234,7 +240,8 @@ class MacroDriverStanceTest(unittest.TestCase):
         self.assertEqual(macro_trend_stance("gdp_growth", +1.0), "pos")
 
     def test_widening_spreads_and_rising_fear_are_negative(self) -> None:
-        self.assertEqual(macro_trend_stance("hy_oas", +6.30), "neg")
+        self.assertEqual(macro_trend_stance("hy_credit_spread", +6.30), "neg")
+        self.assertEqual(macro_trend_stance("hy_credit_spread", -0.37), "pos")
         self.assertEqual(macro_trend_stance("vix", -1.12), "pos")
         self.assertEqual(macro_trend_stance("breakeven_inflation", +0.02), "neg")
         self.assertEqual(macro_trend_stance("unemployment", -0.21), "pos")

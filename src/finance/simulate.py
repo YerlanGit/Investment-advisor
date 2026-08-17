@@ -230,44 +230,76 @@ def _realised_expected_return(daily_log_matrix: np.ndarray,
 
 def _it_share(tickers: list[str],
               weights: np.ndarray,
-              sector_by_ticker: Optional[dict[str, str]] = None) -> float:
+              sector_by_ticker: Optional[dict[str, str]] = None,
+              outside_model: Optional[dict[str, float]] = None) -> float:
     """
-    Share of the LONG book classified as Technology (0..1).
+    Share of the LONG BOOK classified as Technology (0..1).
 
     Uses an explicit sector lookup when provided; otherwise falls back to
     a permissive prefix heuristic on common IT tickers.  Returns 0.0 when
     no IT exposure is identifiable.
 
-    🔴 Базис — ДОЛЯ ИНВЕСТИРОВАННОГО КАПИТАЛА (Σ положительных весов), тот же,
-    что у соседа `_top_sector_share`, у панели секторов (`pdf_payload`:
-    «share of long book») и у промпта ИИ (`ai_narrative._sector_weights_pct`).
-    Аудит 2026-08-12: здесь нормировки НЕ БЫЛО — доля считалась от NAV, и на
-    маржинальной книге одна и та же величина печаталась в отчёте ДВУМЯ
-    числами: панель «Ожидаемый эффект» показывала «Доля IT 57.0%», а
-    предупреждение секторов и текст ИИ рядом — «Tech-комплекс 55.9%».
-    Расхождение растёт с плечом (на книге 118% long это уже ~9 пп) и
-    воспроизводит ровно тот дефект, ради которого super-group и сводили в
-    один источник («BASE 55% против DEEP 80.8%»).  На книге без плеча
-    знаменатель равен 1.0 и число не меняется вовсе.
+    🔴 Базис — ДОЛЯ ИНВЕСТИРОВАННОГО КАПИТАЛА ВСЕЙ КНИГИ, тот же, что у панели
+    секторов (`pdf_payload`: «share of long book») и у промпта ИИ
+    (`ai_narrative._sector_weights_pct`).
+
+    История двух ошибок подряд — обе про ЗНАМЕНАТЕЛЬ:
+
+    * `§−90` A-6: нормировки не было вовсе, доля считалась от NAV. Отчёт
+      печатал одну величину двумя числами: «Доля IT 57.0%» в панели эффекта и
+      «Tech-комплекс 55.9%» в предупреждении секторов.
+    * `§−92`: правка A-6 нормировала на `Σ|w|` ПЕРЕДАННЫХ тикеров, а
+      передаются только те, что пережили факторную регрессию
+      (`struct_tickers`). Бумага, выброшенная за короткую историю, исчезала из
+      ЗНАМЕНАТЕЛЯ — и доля росла. Живой DEEP 15.08: `SPCX` весом 6.17% (сектор
+      «Other») вне модели, и панель эффекта показала **59.6%** против 56% в
+      предупреждении секторов — расхождение 3.6 пп, ВТРОЕ БОЛЬШЕ прежнего.
+      Починка сделала хуже, потому что чинила формулу, не проверив вход.
+
+    `outside_model` — веса длинных позиций книги, которых нет в структурной
+    модели: `{тикер: вес}`. Они не торгуются планом (их вес одинаков «до» и
+    «после»), но в инвестированный капитал входят и обязаны быть в
+    знаменателе; в числитель попадут, только если это IT.
+
+    🔴 **Кэш в знаменатель НЕ входит** — и это третья, последняя итерация над
+    одним и тем же числом. Панель секторов исключает денежные позиции
+    сознательно (`get_sector_exposure` пропускает `NON_RISK_ASSETS`, правило
+    `R-1`/`§−43`: «кэш — не сектор, плечо раскрывается своим бейджем»). Пока
+    здесь кэш учитывался, книга с ПОЛОЖИТЕЛЬНЫМ остатком давала расхождение в
+    ту же сторону, что и прежние два дефекта: на фикстуре с кэшем 14.3 %
+    панель показывала 36 %, а панель эффекта — 30.7 %.
+    Урок раунда: у величины, которая печатается дважды, сверять надо не
+    формулу, а ЗНАМЕНАТЕЛЬ — оба прошлых раза ошибка была именно в нём.
     """
+    from finance.asset_taxonomy import is_cash          # SSOT ФАКТОВ (A-5)
+
     _IT_PREFIXES = {"AAPL", "MSFT", "NVDA", "GOOG", "GOOGL", "META", "AMZN",
                     "TSLA", "PLTR", "CRWD", "NET", "AMD", "INTC", "ORCL",
                     "ADBE", "CRM", "NOW", "SNOW", "SHOP", "AVGO", "QCOM",
                     "SMCI", "ASML", "TSM"}
+    sector_by_ticker = sector_by_ticker or {}
+
+    def _is_it(t: str) -> bool:
+        sec = (sector_by_ticker.get(t) or "").lower()
+        return ("tech" in sec or "info" in sec or "software" in sec
+                or str(t).upper().split(".")[0] in _IT_PREFIXES)
+
     total = 0.0
     long_sum = 0.0
-    sector_by_ticker = sector_by_ticker or {}
-    for t, w in zip(tickers, weights):
+
+    def _add(t, w) -> None:
+        nonlocal total, long_sum
         wf = float(w)
-        if wf > 0:
-            long_sum += wf
-        sec = (sector_by_ticker.get(t) or "").lower()
-        is_it = (
-            "tech" in sec or "info" in sec or "software" in sec
-            or t.upper().split(".")[0] in _IT_PREFIXES
-        )
-        if is_it:
+        if wf <= 0 or is_cash(str(t)):   # кэш и маржинальный заём — не капитал
+            return
+        long_sum += wf
+        if _is_it(t):
             total += wf
+
+    for t, w in zip(tickers, weights):
+        _add(t, w)
+    for t, w in (outside_model or {}).items():
+        _add(t, w)
     if long_sum <= 1e-12:
         return 0.0
     return float(total / long_sum)
@@ -857,8 +889,16 @@ def simulate_after_plan(*,
                              else sample_after["sharpe"])
 
     # ── IT share ───────────────────────────────────────────────────────────
-    it_before = _it_share(struct_tickers, w_before, sector_by_ticker)
-    it_after  = _it_share(struct_tickers, w_after,  sector_by_ticker)
+    # §−92: знаменатель — ВСЯ книга, а не только пережившее регрессию.
+    # `struct_tickers` не содержит бумаг с короткой историей; без этой поправки
+    # они выпадали из инвестированного капитала и доля IT росла (живой отчёт
+    # 15.08: 59.6% против 56% в предупреждении секторов, при том что выпавший
+    # `SPCX` вовсе не IT). Позиции вне модели планом не торгуются, поэтому их
+    # вес одинаков «до» и «после».
+    _outside = {t: w for t, w in cur_w_by_ticker.items()
+                if t not in set(struct_tickers)}
+    it_before = _it_share(struct_tickers, w_before, sector_by_ticker, _outside)
+    it_after  = _it_share(struct_tickers, w_after,  sector_by_ticker, _outside)
 
     # ── Compose the result ─────────────────────────────────────────────────
     metrics = {
