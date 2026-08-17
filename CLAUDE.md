@@ -80,12 +80,12 @@ PYTHONPATH=src python -m pytest tests/ -q          # → 1630 passed, 2 xfailed
   SQLite поверх gcsfuse — это range-запрос на страницу, сотни на отчёт. Формы символа меняют НОТАЦИЮ, но не ПЛОЩАДКУ: кандидат
   `{base}.US` для иностранной бумаги подсунет ADR вместо листинга (`§−77`).
   Свежесть считается в ТОРГОВЫХ днях рынка бумаги, а не в календарных.
-- **Банковские PDF заливаются в INBOX, а не в STORE.** Ингестят ровно двое, и
-  оба слушают `…-chroma-db-inbox-investadv`: Cloud Function и
-  `entrypoint._boot_ingest_from_inbox`. `…-chroma-db-investadv/chroma_db/` — это
-  БИНАРНИК ChromaDB, который бот качает на буте; PDF там не парсит никто и
-  никогда, причём молча (`§−93`). Проверка — `scripts/rag_inventory.py --from-gcs
-  --inbox --check-store-pdfs`. Синк только НА БУТЕ: залил → рестартни бот.
+- **База RAG синкается ТОЛЬКО НА БУТЕ.** `_download_chroma_db` и
+  `_boot_ingest_from_inbox` зовутся из `__main__` разово; живой контейнер держит
+  копию, снятую при старте, и свежий STORE его не догоняет. Залил PDF в INBOX
+  (`…-chroma-db-inbox-investadv`) → **рестартни бот**, иначе отчёт честно
+  печатает старые «N отчётов · M чанков» (`§−93`). Проверка —
+  `scripts/rag_inventory.py --from-gcs --inbox`.
 - **Новый банк-эмитент добавляется в `rag_engine._BANK_PATTERNS`.** Иначе
   `bank="Unknown"`, а «Unknown» отбрасывается и в заголовке выдачи, и в отборе
   «одна цитата на банк» — выдержка доедет до отчёта БЕЗ автора (`§−93`).
