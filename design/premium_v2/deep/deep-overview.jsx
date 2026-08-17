@@ -176,15 +176,27 @@ const KpiCard = ({ k }) => {
       {/* trend chart — how the metric moved over the last 12 months */}
       <div className="rounded-2xl bg-cream-50/70 border border-ink-900/5 px-3 pt-2 pb-1.5 mb-3">
         <div className="flex items-center justify-between text-[8.5px] tracking-widest uppercase text-ink-400 font-mono mb-0.5">
-          <span>Динамика · 12 мес</span><span>сейчас</span>
+          <span>Динамика · окно 60 дн.</span><span>сейчас</span>
         </div>
         <div className="h-12">
           {hasPts
             ? <div title={_SPARK_NOTE}><Sparkline points={k.pts} color={k.color} height={44} width={300} gradId={`spk-${k.key}`}/></div>
             : (k.svg
                 ? <div className="w-full h-full" dangerouslySetInnerHTML={{ __html: k.svg }}/>
+
                 : <div className="w-full h-full flex items-center justify-center text-[9px] text-ink-300 font-mono">нет истории</div>)}
         </div>
+        {/* 🔴 §−92: подпись сделана ВИДИМОЙ, а не всплывающей.
+            `R-9` (§−48) уже назвал проблему — у числа и у графика разные окна
+            (Max Drawdown −40.3% над линией, не опускающейся ниже −17.2%) — но
+            доставлял объяснение через `title=`, то есть ТОЛЬКО по наведению
+            мыши. Продукт читают из Telegram, с телефона, где наведения нет:
+            для большинства читателей раскрытия просто не существовало. */}
+        {hasPts && (
+          <div className="mt-1 text-[8px] leading-tight text-ink-400 font-mono">
+            число выше — по полному окну истории
+          </div>
+        )}
       </div>
       <div className="text-[10.5px] text-ink-400 font-mono leading-snug mb-4">{k.sub}</div>
       <div className="mt-auto flex items-start gap-2.5 rounded-2xl bg-cream-50 border border-ink-900/5 px-3.5 py-3">

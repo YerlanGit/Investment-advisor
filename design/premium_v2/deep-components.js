@@ -977,20 +977,29 @@ const RegimeQuadrant = ({
     fill: "#f5d04e",
     stroke: "#caa01a",
     strokeWidth: "1.5"
-  }), /*#__PURE__*/React.createElement("text", {
-    x: dx + 14,
-    y: dy - 6,
-    fontSize: "9.5",
-    fontFamily: "JetBrains Mono",
-    fontWeight: "600",
-    fill: "#caa01a"
-  }, "сейчас"), /*#__PURE__*/React.createElement("text", {
-    x: dx + 14,
-    y: dy + 5,
-    fontSize: "8",
-    fontFamily: "JetBrains Mono",
-    fill: "#6b6862"
-  }, "G ", (dot.growth >= 0 ? '+' : '') + dot.growth.toFixed(2), " · C ", (dot.cycle >= 0 ? '+' : '') + dot.cycle.toFixed(2)));
+  }), (() => {
+    const flip = dx > cx; // точка справа → подпись влево
+    const lx = flip ? dx - 14 : dx + 14;
+    const anchor = flip ? 'end' : 'start';
+    const near = Math.abs(dy - cy) < 22; // близко к горизонтальной оси
+    const ty = near ? dy > cy ? dy + 22 : dy - 24 : dy;
+    return /*#__PURE__*/React.createElement("g", null, /*#__PURE__*/React.createElement("text", {
+      x: lx,
+      y: ty - 6,
+      textAnchor: anchor,
+      fontSize: "9.5",
+      fontFamily: "JetBrains Mono",
+      fontWeight: "600",
+      fill: "#caa01a"
+    }, "сейчас"), /*#__PURE__*/React.createElement("text", {
+      x: lx,
+      y: ty + 5,
+      textAnchor: anchor,
+      fontSize: "8",
+      fontFamily: "JetBrains Mono",
+      fill: "#6b6862"
+    }, "G ", (dot.growth >= 0 ? '+' : '') + dot.growth.toFixed(2), " · C ", (dot.cycle >= 0 ? '+' : '') + dot.cycle.toFixed(2)));
+  })());
 };
 
 // ── Mandate compliance bar: allowed band [lo,hi] + tick at value
@@ -1289,7 +1298,7 @@ const KpiCard = ({
     className: "rounded-2xl bg-cream-50/70 border border-ink-900/5 px-3 pt-2 pb-1.5 mb-3"
   }, /*#__PURE__*/React.createElement("div", {
     className: "flex items-center justify-between text-[8.5px] tracking-widest uppercase text-ink-400 font-mono mb-0.5"
-  }, /*#__PURE__*/React.createElement("span", null, "Динамика · 12 мес"), /*#__PURE__*/React.createElement("span", null, "сейчас")), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("span", null, "Динамика · окно 60 дн."), /*#__PURE__*/React.createElement("span", null, "сейчас")), /*#__PURE__*/React.createElement("div", {
     className: "h-12"
   }, hasPts ? /*#__PURE__*/React.createElement("div", {
     title: _SPARK_NOTE
@@ -1306,7 +1315,9 @@ const KpiCard = ({
     }
   }) : /*#__PURE__*/React.createElement("div", {
     className: "w-full h-full flex items-center justify-center text-[9px] text-ink-300 font-mono"
-  }, "нет истории"))), /*#__PURE__*/React.createElement("div", {
+  }, "нет истории")), hasPts && /*#__PURE__*/React.createElement("div", {
+    className: "mt-1 text-[8px] leading-tight text-ink-400 font-mono"
+  }, "число выше — по полному окну истории")), /*#__PURE__*/React.createElement("div", {
     className: "text-[10.5px] text-ink-400 font-mono leading-snug mb-4"
   }, k.sub), /*#__PURE__*/React.createElement("div", {
     className: "mt-auto flex items-start gap-2.5 rounded-2xl bg-cream-50 border border-ink-900/5 px-3.5 py-3"

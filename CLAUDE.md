@@ -15,7 +15,7 @@ GCP Cloud Run (long-polling) · Cloud Function (RAG-ингест) · ChromaDB ·
 ## Верификация (обязательна перед каждым пушем)
 
 ```bash
-PYTHONPATH=src python -m pytest tests/ -q          # → 1592 passed, 2 xfailed
+PYTHONPATH=src python -m pytest tests/ -q          # → 1611 passed, 2 xfailed
 ```
 
 - Префикс `PYTHONPATH=src` **ОБЯЗАТЕЛЕН** — без него `import finance…` не находится
@@ -167,7 +167,9 @@ payload (`pdf_payload`) → design-data (DEEP/BASE, пин в `test_phase19_bloc
 Полные записи раундов — `docs/audit/rounds/` (файл по диапазону номеров).
 Ссылку вида `§−45` ищи так: `grep -n "^## −45\." docs/audit/rounds/*.md`.
 🔴 Нумерация раундов НЕ меняется: на неё ссылаются ~540 мест.
-Свежий сквозной аудит — `docs/audit/AUDIT_360_2026-08-12.md` (разбор ОТ АРТЕФАКТА:
+Свежий сквозной аудит — `docs/audit/AUDIT_360_2026-08-17.md`
+(там же КАРТА ПРОИСХОЖДЕНИЯ ДАННЫХ: что снаружи, что считается). Предыдущий —
+`docs/audit/AUDIT_360_2026-08-12.md` (разбор ОТ АРТЕФАКТА:
 живые BASE/DEEP + мобильный замер; там же строгая оценка проекта).
 Планы по проектам РАЗДЕЛЕНЫ и смешивать их нельзя (разные основания I-12/I-14):
 `docs/roadmap/manual_portfolio/PLAN_2026-08-12.md` · `docs/roadmap/freedom_warehouse/PLAN_2026-08-12.md`.
