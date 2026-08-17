@@ -1209,7 +1209,7 @@
     {
       "st": "ok",
       "title": "Bank RAG (выдержки)",
-      "meta": "ChromaDB · GS / MS / JPM PDF reports · cosine retrieval ≥0,72"
+      "meta": "ChromaDB · банковские PDF-обзоры · cosine retrieval ≥0,72"
     },
     {
       "st": "ok",

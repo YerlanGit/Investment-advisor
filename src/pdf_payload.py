@@ -1500,6 +1500,12 @@ def build_payload(results: dict, tier: str,
         "ai_ideas":              ai_ideas,
         "ideas_count":           ideas_count,
         "used_rag":              bool((ai_summary or {}).get("used_rag")),
+        # §−95: эмитенты, реально лежащие в ChromaDB.  Блок «ИСТОЧНИКИ» шаблонов
+        # печатал ЛИТЕРАЛ «GS / MS / JPM» (а BASE — ещё и три ВЫДУМАННЫХ
+        # названия отчётов).  Пустой список = строка не печатается вовсе:
+        # промолчать честнее, чем назвать банки, которых в базе нет.
+        "rag_banks":             [str(b) for b in
+                                  ((ai_summary or {}).get("rag_kb_banks") or [])],
         "ai_model_used":         model_display_name((ai_summary or {}).get("model_used", "")),
         # Bot @username for the report's «Применить идею» deep-link
         # (t.me/<bot>?start=scn_<n>).  Env-configurable; strips a leading «@».

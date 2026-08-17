@@ -2296,10 +2296,15 @@
     <b>Quant Engine MAC3</b> — расчёт риска и сигналов ·
     <b>Factor Engine</b> — фактор-скрининг качества ·
     <b>Regime Model</b> — определение режима рынка ·
-    {% if data.ai_model_used %}<b>AI</b>: {{ data.ai_model_used }} · {% endif %}
-    <b>Goldman Sachs</b> «Q2 2026 Market Outlook» ·
-    <b>Morgan Stanley</b> «Technology Sector Outlook 2026» ·
-    <b>JPMorgan</b> «Q2 2026 Strategy &amp; Allocation»
+    {% if data.ai_model_used %}<b>AI</b>: {{ data.ai_model_used }}{% if data.rag_banks %} · {% endif %}{% endif %}
+    {#- §−95: здесь стояли ТРИ ВЫДУМАННЫХ названия банковских отчётов с
+        периодами и заголовками. Ни один из них в базу не ингестировался — это
+        был несуществующий факт в ПОСТАВЛЯЕМОМ отчёте, причём в блоке
+        «ИСТОЧНИКИ», то есть ровно там, где читатель проверяет происхождение
+        данных. Теперь печатаются РЕАЛЬНЫЕ эмитенты из ChromaDB (`rag_banks`),
+        а при пустой базе строка не печатается вовсе. -#}
+    {% if data.rag_banks %}<b>ChromaDB</b> — публичные обзоры:
+    {{ data.rag_banks | join(', ') }}{% endif %}
   </div>
 
 

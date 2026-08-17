@@ -15,7 +15,7 @@ GCP Cloud Run (long-polling) · Cloud Function (RAG-ингест) · ChromaDB ·
 ## Верификация (обязательна перед каждым пушем)
 
 ```bash
-PYTHONPATH=src python -m pytest tests/ -q          # → 1647 passed, 2 xfailed
+PYTHONPATH=src python -m pytest tests/ -q          # → 1670 passed, 2 xfailed
 ```
 
 - Префикс `PYTHONPATH=src` **ОБЯЗАТЕЛЕН** — без него `import finance…` не находится
@@ -23,10 +23,10 @@ PYTHONPATH=src python -m pytest tests/ -q          # → 1647 passed, 2 xfailed
 - **Прогонов ДВА.** Второй — зеркало деплой-образа, в нём НЕТ каталога `design/`:
   ```bash
   cp -r src tests SYSTEM_PROMPT.md requirements*.txt <tmp>/ && cd <tmp>
-  PYTHONPATH=src python -m pytest tests/ -q        # → 1572 passed, 75 skipped, 2 xfailed
+  PYTHONPATH=src python -m pytest tests/ -q        # → 1594 passed, 76 skipped, 2 xfailed
   ```
   Зелёный GitHub CI НЕ означает, что деплой пройдёт: CI видит полный чекаут,
-  Cloud Build — только образ. Разница 75 тестов — ровно те, что читают
+  Cloud Build — только образ. Разница 76 тестов — ровно те, что читают
   `design/`, `docs/`, `CLAUDE.md`, `scripts/` и `cloud_function/`, то есть
   отсутствующее в образе.
 - Правил `design/*.jsx` → **обязательно** `bash design/premium_v2/build.sh`.
@@ -80,23 +80,23 @@ PYTHONPATH=src python -m pytest tests/ -q          # → 1647 passed, 2 xfailed
   SQLite поверх gcsfuse — это range-запрос на страницу, сотни на отчёт. Формы символа меняют НОТАЦИЮ, но не ПЛОЩАДКУ: кандидат
   `{base}.US` для иностранной бумаги подсунет ADR вместо листинга (`§−77`).
   Свежесть считается в ТОРГОВЫХ днях рынка бумаги, а не в календарных.
-- **База RAG синкается ТОЛЬКО НА БУТЕ.** `_download_chroma_db` и
-  `_boot_ingest_from_inbox` зовутся из `__main__` разово; живой контейнер держит
-  копию, снятую при старте, и свежий STORE его не догоняет. Залил PDF в INBOX
-  (`…-chroma-db-inbox-investadv`) → **рестартни бот**, иначе отчёт честно
-  печатает старые «N отчётов · M чанков» (`§−93`). Проверка —
-  `scripts/rag_inventory.py --from-gcs --inbox`.
-- **Отказ брокера — ТРИ разные причины** (`_ramp_fallback_reason`): `waf_block`
-  (отбил Cloudflare по IP — САМО не пройдёт), `api_error` (транспорт — пройдёт),
-  `parse_error` (ответ пришёл, не разобрали — НАШ дефект). «Пройдёт за 5–15
-  минут» честно только для `api_error`. `_ramp_is_mock`/`_ramp_is_fallback` не
-  трогать: на них стоят бот-гейт и `RealPortfolioRequired` (`§−94`).
+- **База RAG синкается ТОЛЬКО НА БУТЕ** (`_download_chroma_db`/`_boot_ingest_from_inbox`
+  зовутся из `__main__` разово): живой контейнер держит копию со старта. Залил PDF в
+  INBOX (`…-chroma-db-inbox-investadv`) → **рестартни бот**, иначе печатаются старые
+  «N отчётов · M чанков» (`§−93`). Проверка — `scripts/rag_inventory.py --from-gcs --inbox`.
+- **Отказ брокера — ТРИ причины** (`_ramp_fallback_reason`): `waf_block` (отбил
+  Cloudflare по IP — САМО не пройдёт), `api_error` (транспорт — пройдёт),
+  `parse_error` (НАШ дефект разбора). «Пройдёт за 5–15 минут» честно только для
+  `api_error`. `_ramp_is_mock`/`_ramp_is_fallback` не трогать — на них гейты (`§−94`).
 - **Бот гоняет ONNX-эмбеддинг в СВОЁМ контейнере** (`_boot_ingest_from_inbox`) на
-  2Gi/1CPU — deploy-шаг обязан нести тот же кап потоков, что и RAG-функция:
-  потоки > 1 отбирают единственный CPU у выдачи отчёта (`§−94`).
-- **Новый банк-эмитент добавляется в `rag_engine._BANK_PATTERNS`.** Иначе
-  `bank="Unknown"`, а «Unknown» отбрасывается и в заголовке выдачи, и в отборе
-  «одна цитата на банк» — выдержка доедет до отчёта БЕЗ автора (`§−93`).
+  2Gi/1CPU: deploy-шаг обязан нести тот же кап потоков, что и RAG-функция (`§−94`).
+- **Имя эмитента — ОДИН реестр** (`rag_engine.BANK_*`), новый банк = одна строка.
+  Копий было четыре и они разошлись: пять банков молча стали `Unknown` на конвенции
+  `wells_fargo_*.pdf` — `_` для `\b` СЛОВНЫЙ символ (`§−95`). Реестр в `rag_engine`:
+  у `cloud_function/` свой `--source`, `finance/` там нет. Короткие формы
+  (`MS`/`GS`) — только имя файла и тег, в прозе нельзя (`§−14` C-8).
+- **Отчёт не называет источник, которого нет в базе**: имена — из `rag_banks`/
+  `meta.ragBanks`; нечего назвать — молчи. В BASE стояли ТРИ выдуманных отчёта (`§−95`).
 - **Статус/тон карточки — ВЕРДИКТ, а не оформление.** Считается в `finance/*` от
   значения и мандата (`scoring.kpi_status`); маппер его ЧИТАЕТ. Литерал статуса в
   `premium_payload` запрещён: так Sharpe 0.56 годами носил ярлык «good» (`§−90`).

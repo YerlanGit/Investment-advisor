@@ -77,6 +77,14 @@ const TopBar = ({ active, setActive }) => {
   );
 };
 
+// §−95: имена банков в футере — ИЗ БАЗЫ (meta.ragBanks), а не литералом
+// «GS / MS / JPM». База может держать любые одиннадцать эмитентов; печатать
+// три — выдумывать факт в блоке источников. Пусто → просто «ChromaDB».
+const ragSource = (p) => {
+  const banks = (p.meta && p.meta.ragBanks) || [];
+  return banks.length ? 'ChromaDB (' + banks.slice(0, 5).join(' / ') + ')' : 'ChromaDB';
+};
+
 const Footer = () => {
   const p = window.PORTFOLIO;
   // Паритет с DEEP (RAG-наблюдаемость): банк-источники заявляем ТОЛЬКО когда
@@ -85,7 +93,7 @@ const Footer = () => {
   const quality = p.quality || [];
   const ragOn = quality.some(q => typeof q === 'string' && q.includes('✓') && /rag/i.test(q));
   const sources = ['SEC EDGAR', 'Tradernet', 'FRED', 'Quant Engine MAC3']
-    .concat(ragOn ? ['ChromaDB (GS / MS / JPM)'] : [])
+    .concat(ragOn ? [ragSource(p)] : [])
     .concat([p.meta && p.meta.aiModel].filter(Boolean)).join(' · ');
   return (
   <footer className="mt-16 mb-8">

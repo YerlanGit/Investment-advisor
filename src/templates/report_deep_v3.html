@@ -3211,7 +3211,10 @@
     <b>FRED</b> — макро-индикаторы (yield curve, HY spread, VIX, breakeven, безработица, ВВП) ·
     <b>SEC EDGAR</b> — earnings revisions ratio ·
     <b>Tradernet</b> — рыночные цены/тех-индикаторы ·
-    <b>ChromaDB · Bank PDF reports</b> — публичные обзоры GS / MS / JPM ·
+    {#- §−95: было «публичные обзоры GS / MS / JPM» литералом — база могла
+        держать любые одиннадцать эмитентов, отчёт называл три. -#}
+    {% if data.rag_banks %}<b>ChromaDB · Bank PDF reports</b> — публичные обзоры
+    {{ data.rag_banks | join(' / ') }} ·{% endif %}
     {% if data.ai_model_used %}<b>AI</b>: {{ data.ai_model_used }}{% endif %}
   </div>
 
