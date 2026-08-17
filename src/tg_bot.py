@@ -568,6 +568,31 @@ def _clean_rag_excerpt(text: str, max_len: int = 190) -> str:
     return t.strip()
 
 
+def _broker_outage_advice(reason: str, error_id: str) -> str:
+    """Совет пользователю ПО ПРИЧИНЕ отказа брокера, а не один на все случаи.
+
+    §−94: все три ветки `broker_api.fetch_portfolio` печатали «обычно это
+    проходит за 5–15 минут». Для `waf_block` это неправда — Cloudflare отбивает
+    ПО IP, и само оно не рассосётся (рестарт лишь перекатывает IP из общего
+    пула, отсюда же «работало и вдруг перестало»). Для `parse_error` это тоже
+    неправда: ответ пришёл, разобрать не смогли — ждать можно вечно.
+    Неизвестная причина трактуется как временная — это прежнее поведение и
+    самый мягкий для пользователя вариант, но код ошибки печатается всегда,
+    иначе поддержке не за что зацепиться.
+    """
+    if reason == "waf_block":
+        return ("Брокер отклонил запрос на уровне защиты от ботов — это блок по "
+                "IP-адресу, он *не пройдёт сам*. Мы уже видим проблему.\n\n"
+                f"Код для поддержки: `{error_id}`")
+    if reason == "parse_error":
+        return ("Брокер ответил, но мы не смогли разобрать ответ — это ошибка на "
+                "*нашей* стороне, и повтор её не вылечит. Мы уже видим проблему.\n\n"
+                f"Код для поддержки: `{error_id}`")
+    return ("Брокерский API не вернул ваш портфель — обрыв соединения или сбой "
+            "на стороне брокера. Обычно это проходит за 5–15 минут.\n\n"
+            f"Попробуйте ещё раз чуть позже. Код для поддержки: `{error_id}`")
+
+
 def _kb_banks(docs: list[dict]) -> list[str]:
     """Issuers actually present in the RAG store, most-covered first.
 
@@ -2627,17 +2652,19 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
     _attrs = getattr(df, "attrs", {}) or {}
     if _attrs.get("_ramp_is_fallback") or (
             source != "demo" and _attrs.get("_ramp_is_mock")):
+        _reason = str(_attrs.get("_ramp_fallback_reason") or "")
+        _error_id = uuid.uuid4().hex[:12]
         logger.error(
-            "PORTFOLIO SOURCE: fallback-mock  user=%s — Freedom API недоступен "
-            "(обрыв/сбой на стороне брокера); превью не показываем, отчёт не строим.",
-            user_id,
+            "PORTFOLIO SOURCE: fallback-mock  user=%s reason=%s [%s] detail=%s — "
+            "превью не показываем, отчёт не строим.",
+            user_id, _reason or "unknown", _error_id,
+            _attrs.get("_ramp_fallback_detail") or "—",
         )
         await _release_user_slot(user_id)
         await callback.message.answer(
             "❌ *Freedom Broker сейчас недоступен.*\n\n"
-            "Брокерский API не вернул ваш портфель — обрыв соединения или сбой "
-            "на стороне брокера. Обычно это проходит за 5–15 минут.\n\n"
-            "✅ Токен *не списан*. Попробуйте ещё раз чуть позже.",
+            + _broker_outage_advice(_reason, _error_id) +
+            "\n\n✅ Токен *не списан*.",
             parse_mode=ParseMode.MARKDOWN,
         )
         await state.clear()

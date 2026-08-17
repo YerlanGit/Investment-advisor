@@ -238,20 +238,17 @@ class FreedomConnector:
                 "Cloudflare WAF заблокировал все запросы к Tradernet API. "
                 "IP-адрес Cloud Run отклонён. %s — returning fallback mock.", exc,
             )
-            df = self._mock_portfolio()
-            df.attrs["_ramp_is_fallback"] = True
-            return df
+            return self._fallback("waf_block", exc)
         except BrokerAPIError as exc:
             logger.error("Tradernet API failure: %s — returning fallback mock.", exc)
-            df = self._mock_portfolio()
-            df.attrs["_ramp_is_fallback"] = True
-            return df
+            return self._fallback("api_error", exc)
         except Exception as exc:
             # Catches pydantic.ValidationError if the API response is malformed.
-            logger.error("Unexpected error parsing Tradernet response: %s — returning fallback mock.", exc)
-            df = self._mock_portfolio()
-            df.attrs["_ramp_is_fallback"] = True
-            return df
+            # `.exception` — не `.error`: без трейсбека дефект НАШЕЙ стороны
+            # неотличим от сбоя брокера, а именно он сюда и попадает (§−94).
+            logger.exception(
+                "Unexpected error parsing Tradernet response: %s — returning fallback mock.", exc)
+            return self._fallback("parse_error", exc)
 
         df = self._to_dataframe(portfolio)
         if df.empty:
@@ -260,6 +257,30 @@ class FreedomConnector:
                 "Откройте позиции в Freedom Broker или переключитесь на демо-режим (/start)."
             )
         logger.info("Загружено %d позиций из Freedom Broker (включая кэш).", len(df))
+        return df
+
+    # Причины, по которым fetch_portfolio отдаёт fallback-мок.  Они РАЗНЫЕ по
+    # природе, и склеивать их в одно сообщение нельзя (§−94):
+    #   waf_block   — Cloudflare отбил ПО IP.  Само не пройдёт: нужен статический
+    #                 egress (scripts/setup_static_egress.sh).  Рестарт может
+    #                 «вылечить» его случайно — новый инстанс берёт другой IP из
+    #                 общего пула, — и поэтому же ломает работавшего бота.
+    #   api_error   — транспорт/HTTP/таймаут.  Вот это как раз обычно временное.
+    #   parse_error — ОТВЕТ ПРИШЁЛ, но мы его не разобрали.  Дефект на НАШЕЙ
+    #                 стороне (или смена контракта у брокера); «подождите 15
+    #                 минут» здесь — прямая ложь, ждать можно вечно.
+    FALLBACK_REASONS = ("waf_block", "api_error", "parse_error")
+
+    def _fallback(self, reason: str, exc: Exception) -> pd.DataFrame:
+        """Fallback-мок с обоими гейт-маркерами и ПРИЧИНОЙ отказа.
+
+        Маркеры `_ramp_is_mock` / `_ramp_is_fallback` не трогаем: на них стоят
+        и бот-гейт, и движковый `RealPortfolioRequired`.  `_ramp_fallback_reason`
+        — ДОБАВКА для диагностики, потребители без неё работают как раньше."""
+        df = self._mock_portfolio()
+        df.attrs["_ramp_is_fallback"] = True
+        df.attrs["_ramp_fallback_reason"] = reason
+        df.attrs["_ramp_fallback_detail"] = f"{type(exc).__name__}: {exc}"[:300]
         return df
 
     def fetch_balance(self) -> dict:
