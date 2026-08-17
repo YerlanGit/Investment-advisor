@@ -125,7 +125,18 @@ steps:
       # here makes the premium routing persistent across every redeploy.  The
       # render path still falls back to v3 on any premium error (see
       # html_renderer.render_report_html), so this is safe to ship.
-      - --set-env-vars=REPORT_BUCKET_NAME=ramp-bot-reports,CHROMA_BUCKET=ramp-bot-chroma-db-investadv,TOKENOMICS_DB_PATH=/mnt/state/tokenomics.db,VAULT_DB_PATH=/mnt/state/users_vault.db,REPORTING_CURRENCY=USD,ADMIN_USER_IDS=148046720,PREMIUM_REPORT_ENABLED=true,STOOQ_DB_PATH=/mnt/state/stooq/prices.sqlite,STOOQ_LOCAL_COPY_DIR=/tmp/ramp-stooq
+      #
+      # THREAD CAPS (§−94) — ОБЯЗАТЕЛЬНЫ, и по той же причине, что у RAG-функции
+      # ниже (шаг 5).  Бот гоняет ТОТ ЖЕ ONNX-эмбеддинг в контейнере:
+      # `entrypoint._boot_ingest_from_inbox` на буте ингестит PDF, которых нет в
+      # базе.  Для этой нагрузки INFRA_NETWORKING.md §2 предписывает 4Gi/2CPU +
+      # ограничение потоков, а бот живёт на 2Gi/1CPU и БЕЗ ограничения: при
+      # `--cpu=1` onnxruntime/OpenBLAS всё равно поднимают поток на ядро и
+      # переподписывают единственный CPU, отбирая его у event-loop бота ровно
+      # тогда, когда пользователь ждёт портфель.  На одном CPU потоки > 1 — это
+      # чистые накладные расходы и для pandas/sklearn тоже, так что кап здесь
+      # ничего не замедляет.
+      - --set-env-vars=REPORT_BUCKET_NAME=ramp-bot-reports,CHROMA_BUCKET=ramp-bot-chroma-db-investadv,TOKENOMICS_DB_PATH=/mnt/state/tokenomics.db,VAULT_DB_PATH=/mnt/state/users_vault.db,REPORTING_CURRENCY=USD,ADMIN_USER_IDS=148046720,PREMIUM_REPORT_ENABLED=true,STOOQ_DB_PATH=/mnt/state/stooq/prices.sqlite,STOOQ_LOCAL_COPY_DIR=/tmp/ramp-stooq,OMP_NUM_THREADS=1,OPENBLAS_NUM_THREADS=1,TOKENIZERS_PARALLELISM=false
 
   # ── Step 4b: STATIC EGRESS (2026-07-08 fix for Cloudflare-WAF 403) ──────────
   # The broker's Cloudflare WAF blocks Cloud Run's SHARED egress IP pool (the

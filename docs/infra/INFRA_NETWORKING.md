@@ -102,11 +102,48 @@ gcloud run services update ingest-pdf-trigger --region=us-central1 \
 ONNX-модель (без сетевой докачки), поэтому там segfault не воспроизводился. Данный
 инцидент — именно у отдельной GCS-триггерной функции, качающей модель на лету.
 
+> 🔴 **Правка `§−94` (2026-08-17): абзац выше устарел и был опасен.** «Segfault не
+> воспроизводился» замерено 08.07, когда в INBOX лежала пара файлов. Нагрузка
+> boot-ingest растёт с числом НЕингестированных PDF: 10 новых отчётов — это
+> десятки минут ONNX-эмбеддинга **внутри бота**, на 2Gi/1CPU и (до `§−94`) без
+> капа потоков, тогда как для той же нагрузки в функции здесь же предписаны
+> 4Gi/2CPU + кап. `onnxruntime`/OpenBLAS поднимают поток на ядро и
+> переподписывают единственный CPU ровно тогда, когда пользователь ждёт
+> портфель, — а наружу это выходит как «❌ Freedom Broker сейчас недоступен».
+> Кап потоков бота добавлен в `cloudbuild.yaml` (шаг deploy) и закреплён
+> тестом `tests/test_phase51_broker_outage_diagnosis.py::BotThreadCapTest`.
+> Если понадобится больше — поднимать `--cpu` бота, а не снимать кап.
+
+---
+
+## 1b. Как отличить WAF-блок от прочих отказов брокера (`§−94`)
+
+Пользователю все отказы выглядели одинаково («обычно проходит за 5–15 минут»),
+хотя по природе они разные. Теперь причина проставляется коннектором в
+`df.attrs["_ramp_fallback_reason"]` и видна в логе бота:
+
+```
+PORTFOLIO SOURCE: fallback-mock  user=… reason=waf_block [<код>] detail=…
+```
+
+| `reason` | Что произошло | Что делать |
+|---|---|---|
+| `waf_block` | Cloudflare отбил по IP | статический egress (§1) — само не пройдёт |
+| `api_error` | транспорт/HTTP/таймаут | подождать; если постоянно — смотреть §1b и CPU бота |
+| `parse_error` | ответ пришёл, не разобрали | наш дефект либо смена контракта Tradernet; трейсбек уже в логе |
+
+```bash
+gcloud run services logs read ramp-bot --region=us-central1 --limit=200 \
+  | grep -E "fallback-mock|Cloudflare WAF"
+```
+
 ---
 
 ## Сводка правок в репозитории
 | Файл | Правка |
 |---|---|
-| `cloudbuild.yaml` | шаг 5: RAG-функция 1Gi→**4Gi + 2CPU + 540s + thread-env**; новый шаг `configure-egress` (опц. VPC-коннектор через `_VPC_CONNECTOR`) |
+| `cloudbuild.yaml` | шаг 5: RAG-функция 1Gi→**4Gi + 2CPU + 540s + thread-env**; новый шаг `configure-egress` (опц. VPC-коннектор через `_VPC_CONNECTOR`); шаг deploy: **thread-env и у бота** (`§−94`) |
+| `finance/broker_api.py` | `_fallback(reason, exc)` — причина отказа в `df.attrs`, трейсбек на `parse_error` (`§−94`) |
+| `tg_bot.py` | `_broker_outage_advice` — совет по причине, а не один текст на все (`§−94`) |
 | `cloud_function/main.py` | docstring-команда деплоя обновлена (4Gi/2CPU) + прямая команда фикса работающего сервиса |
 | `scripts/setup_static_egress.sh` | one-time настройка статического egress (VPC/NAT/IP) |
