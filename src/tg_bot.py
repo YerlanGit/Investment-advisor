@@ -512,7 +512,7 @@ def _safe_float(val, default: float = 0.0) -> float:
 _RAG_BANK_REMNANT_RE = re.compile(
     r"^(?:(?:J\.?\s?P\.?\s?)?Morgan(?:\s+Stanley)?+|Goldman(?:\s+Sachs)?+|Sachs|"
     r"Stanley|Barclays|JPMorgan(?:\s+Chase)?+|Chase|Citi(?:group|bank)?+|UBS|"
-    r"HSBC|BofA|Bank\s+of\s+America|Deutsche\s+Bank|Wells\s+Fargo)"
+    r"HSBC|BofA|Bank\s+of\s+America|Deutsche\s+Bank|Wells\s+Fargo|Jefferies)"
     r"[\s:—–-]+(?=[A-ZА-Я])")
 # Runs of ≥3 numeric/percent tokens are chart-axis labels scraped from the
 # PDF («12% 10% 8% 6% 4% 2%»), never prose — cut the run and what follows it.
@@ -568,6 +568,26 @@ def _clean_rag_excerpt(text: str, max_len: int = 190) -> str:
     return t.strip()
 
 
+def _kb_banks(docs: list[dict]) -> list[str]:
+    """Issuers actually present in the RAG store, most-covered first.
+
+    §−93: the provenance label was the frozen literal «GS / MS / JPM», so a KB
+    holding Citi / Jefferies / Barclays notes still advertised three banks — the
+    reader could not tell whether a newly ingested issuer had arrived.  Derived
+    here from the SAME `list_documents()` inventory that feeds отчёты/чанки, so
+    label and counts can never disagree.  «Unknown» is dropped: it is the
+    absence of an issuer, not an issuer.
+    """
+    tally: dict[str, int] = {}
+    for d in docs or []:
+        bank = str((d or {}).get("bank") or "").strip()
+        if not bank or bank == "Unknown":
+            continue
+        tally[bank] = tally.get(bank, 0) + int((d or {}).get("chunks", 0) or 0)
+    # Chunks desc, then name — ties must not reorder between runs.
+    return [b for b, _ in sorted(tally.items(), key=lambda kv: (-kv[1], kv[0]))]
+
+
 def _fetch_rag_context(results: dict) -> tuple[str, list[str], str, dict]:
     """
     Pull macro + micro RAG excerpts for the AI narrative (deep tier only).
@@ -581,11 +601,15 @@ def _fetch_rag_context(results: dict) -> tuple[str, list[str], str, dict]:
       • "no_match"    — queried, but no bank report cleared the similarity gate
       • "used"        — relevant bank context was retrieved and fed to the model
 
-    kb_stats = {"docs": <distinct source PDFs in ChromaDB>, "chunks": <embeddings>}
+    kb_stats = {"docs": <distinct source PDFs in ChromaDB>, "chunks": <embeddings>,
+                "banks": [<issuers present, most-covered first>]}
     surfaces how much bank research the knowledge base actually holds, so the
     CoVe panel can prove "RAG sees N reports / M chunks" instead of a bare flag.
+    `banks` (§−93) feeds the provenance label, which used to be the FROZEN
+    literal «GS / MS / JPM» — after ingesting Citi/Jefferies/Barclays notes the
+    report kept naming three banks and hid the other seven.
     """
-    _empty_stats = {"docs": 0, "chunks": 0}
+    _empty_stats = {"docs": 0, "chunks": 0, "banks": []}
     try:
         from agent.rag_engine import FinancialRAG
         rag = FinancialRAG(db_path=os.environ.get("CHROMA_LOCAL_PATH",
@@ -600,9 +624,11 @@ def _fetch_rag_context(results: dict) -> tuple[str, list[str], str, dict]:
             docs = rag.list_documents()   # real sources only
             n_docs   = len(docs)
             n_chunks = sum(int(d.get("chunks", 0) or 0) for d in docs)
+            banks    = _kb_banks(docs)
         except Exception:
             n_docs, n_chunks = 0, int(rag.collection.count())
-        kb_stats = {"docs": n_docs, "chunks": n_chunks}
+            banks = []
+        kb_stats = {"docs": n_docs, "chunks": n_chunks, "banks": banks}
 
         perf = results.get("performance_table")
         tickers: list[str] = []
@@ -749,6 +775,9 @@ def _build_pdf_payload(results: dict, tier: str,
         # panels can prove HOW MUCH bank research RAG actually holds and read.
         ai_summary["rag_kb_docs"]   = int((rag_kb or {}).get("docs", 0) or 0)
         ai_summary["rag_kb_chunks"] = int((rag_kb or {}).get("chunks", 0) or 0)
+        # §−93: issuers present in the KB — the provenance label names THEM
+        # instead of the frozen «GS / MS / JPM».
+        ai_summary["rag_kb_banks"]  = [str(b) for b in (rag_kb or {}).get("banks") or []]
         payload = _build_v2_payload(
             results, tier,
             ai_summary=ai_summary,

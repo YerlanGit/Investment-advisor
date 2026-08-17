@@ -483,6 +483,27 @@ def _stress_status(results: dict) -> dict:
     )
 
 
+# §−93: the retrieval row named «GS / MS / JPM» as a FROZEN literal.  Ten new
+# Citi / Jefferies / Barclays notes could land in ChromaDB and the отчёт still
+# advertised three banks — the label described the KB of 2026-07, not the one
+# actually queried.  Name the issuers the store really holds; the literal
+# survives ONLY as the fallback for summaries that predate `rag_kb_banks`.
+_RAG_SOURCE_FALLBACK = "ChromaDB · GS / MS / JPM PDF reports"
+_RAG_SOURCE_MAX_BANKS = 5
+
+
+def _rag_source_label(banks) -> str:
+    """«ChromaDB · <issuers> PDF reports» from the KB inventory (most-covered
+    first).  Long rosters are truncated with «+N» so the CoVe cell stays one
+    line; an empty/absent roster keeps the historical literal."""
+    names = [str(b).strip() for b in (banks or []) if str(b or "").strip()]
+    if not names:
+        return _RAG_SOURCE_FALLBACK
+    shown, rest = names[:_RAG_SOURCE_MAX_BANKS], len(names) - _RAG_SOURCE_MAX_BANKS
+    label = " / ".join(shown) + (f" +{rest}" if rest > 0 else "")
+    return f"ChromaDB · {label} PDF reports"
+
+
 def _rag_status(ai_summary: Optional[dict]) -> dict:
     """Retrieval row — proves HOW MUCH bank research the KB holds and whether it
     was actually read on this run (docs/chunks inventory + retrieved snippets),
@@ -506,7 +527,7 @@ def _rag_status(ai_summary: Optional[dict]) -> dict:
                   if chunks == 0 else f"{kb} · RAG не запрашивался")
     return _row(
         name   = "Bank RAG (выдержки)",
-        source = "ChromaDB · GS / MS / JPM PDF reports",
+        source = _rag_source_label(a.get("rag_kb_banks")),
         method = "cosine similarity retrieval (semantic 0.6 ⊕ recency 0.4)",
         status = status,
         note   = note,
