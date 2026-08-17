@@ -53,6 +53,132 @@ def _is_temp_source(src) -> bool:
     return bool(_TEMP_SOURCE_RE.match(str(src or "").strip()))
 
 
+# ── Идентичность банка — SSOT ФАКТОВ (§−95) ──────────────────────────────────
+# До §−95 «как зовут эмитента» было описано ЧЕТЫРЕЖДЫ и по-разному: здесь,
+# в `tg_bot._RAG_BANK_REMNANT_RE`, в `ai_narrative` (три структуры) и литералами
+# в отчёте.  Добавление одного банка требовало правки четырёх файлов, и ни один
+# тест их не связывал — расхождения копились молча:
+#   • `Citi` в прозе нарратива не засчитывался (в regex было только
+#     Citigroup|Citibank), хотя ингест клал `bank="Citi"`;
+#   • `Merrill` не снимался со шапки выдержки, хотя нарратив его знал;
+#   • ПЯТЬ эмитентов из одиннадцати становились `Unknown` на собственной
+#     конвенции имён проекта (`wells_fargo_2026.pdf`): шаблоны писались через
+#     `\s*`, а разделитель в именах файлов — `_`, и он для `\b` СЛОВНЫЙ символ,
+#     то есть `\bubs\b` не матчит `ubs_outlook`.
+#
+# Здесь лежат ФАКТЫ — канон-имя и его написания.  РЕШЕНИЯ у потребителей
+# остаются разными и сливать их нельзя (тот же принцип, что у
+# `asset_taxonomy`): ингест смотрит имя файла, нарратив — прозу, чистильщик
+# выдержки — шапку письма.  Поэтому написания разложены по УВЕРЕННОСТИ:
+#   BANK_ALIASES — полные имена, однозначные в любом тексте;
+#   BANK_SHORT   — короткие формы, однозначные только в имени файла / в теге;
+#   BANK_TAILS   — «хвосты» двусловных имён, остающиеся от разрыва шапки PDF
+#                  («…Morgan Stanley» → выдержка начинается со «Stanley …»).
+#
+# Реестр обязан жить ИМЕННО в этом модуле: `cloud_function/` деплоится
+# с `--source ./cloud_function` и `finance/` там нет, а копия обязана быть
+# идентичной оригиналу.  Общий L0-модуль потребовал бы ВТОРОЙ синхронной копии.
+BANK_ALIASES: dict[str, tuple[str, ...]] = {
+    "JPMorgan":        ("j.p. morgan", "jp morgan", "jpmorgan chase"),
+    "Morgan Stanley":  ("morgan stanley",),
+    "Goldman Sachs":   ("goldman sachs", "goldman"),
+    "Bank of America": ("bank of america", "bofa", "merrill lynch", "merrill"),
+    "Barclays":        ("barclays",),
+    "UBS":             ("ubs",),
+    "Citi":            ("citigroup", "citibank", "citi"),
+    "Jefferies":       ("jefferies",),
+    "Wells Fargo":     ("wells fargo",),
+    "Deutsche Bank":   ("deutsche bank", "deutsche"),
+    "HSBC":            ("hsbc",),
+}
+
+#: Короткие формы. В ПРОЗЕ не ищутся: «MS» — это Microsoft/миллисекунды
+#: (`§−14` C-8), «GS» слишком общо. Годятся для имени файла и для тега `[JPM]`.
+BANK_SHORT: dict[str, tuple[str, ...]] = {
+    "JPMorgan":        ("jpm",),
+    "Morgan Stanley":  ("ms",),
+    "Goldman Sachs":   ("gs",),
+    "Bank of America": ("bac",),
+    "Jefferies":       ("jef",),
+    "Wells Fargo":     ("wfc",),
+}
+
+#: Обрубки имён, остающиеся от разрыва шапки PDF — ТОЛЬКО для чистки выдержки.
+#: «Morgan» здесь потому, что это общий обрубок и «J.P. Morgan», и «Morgan
+#: Stanley»: в ингесте он был бы двусмысленным, в чистке шапки — нет.
+BANK_TAILS: dict[str, tuple[str, ...]] = {
+    "Goldman Sachs":   ("sachs",),
+    "Morgan Stanley":  ("stanley", "morgan"),
+    "JPMorgan":        ("chase",),
+}
+
+#: Порядок разбора: сначала длинные/составные имена, иначе «Morgan Stanley»
+#: перехватил бы «J.P. Morgan». Питается порядком объявления BANK_ALIASES.
+BANK_ORDER: tuple[str, ...] = tuple(BANK_ALIASES)
+
+# Границы, для которых `_` и цифра — РАЗДЕЛИТЕЛИ, а не часть слова.  `\b` здесь
+# не годится: в Python `_` — словный символ, поэтому `\bubs\b` не видит
+# `ubs_outlook_2026.pdf` (дефект, из-за которого пять банков были `Unknown`).
+_L, _R = r"(?<![a-z0-9])", r"(?![a-z0-9])"
+
+
+def _alias_core(alias: str) -> str:
+    """«wells fargo» → `wells[\\s_.\\-]*fargo` — одно написание, любой разделитель.
+
+    Пробел в алиасе означает «здесь может стоять что угодно из разделителей или
+    ничего»: так одна запись покрывает и `wells fargo`, и `wells_fargo`, и
+    `WellsFargo`, и `j.p. morgan` ⇄ `jpmorgan`."""
+    words = [re.escape(w) for w in re.split(r"[\s.]+", alias.strip()) if w]
+    return r"[\s_.\-]*".join(words)
+
+
+def _alternation(aliases) -> str:
+    """Альтернация, отсортированная ДЛИННЫМИ ВПЕРЁД.
+
+    Питоновская альтернация берёт ПЕРВОЕ совпадение, а не самое длинное: при
+    порядке «jp morgan | jpmorgan chase» шапка «JPMorgan Chase Equities…»
+    срезалась до «Chase Equities…» — то есть чистка выдержки оставляла обрубок
+    имени ровно того вида, который она и должна была убрать."""
+    ordered = sorted(set(aliases), key=lambda a: (-len(a), a))
+    return "|".join(_alias_core(a) for a in ordered)
+
+
+def bank_alias_regex(bank: str) -> str:
+    """Regex полных имён банка — безопасен в любом тексте (проза, обложка)."""
+    alts = _alternation(BANK_ALIASES.get(bank, ()))
+    return f"{_L}(?:{alts}){_R}" if alts else ""
+
+
+def bank_short_regex(bank: str) -> str:
+    """Regex коротких форм — применять ТОЛЬКО к имени файла или тегу."""
+    alts = _alternation(BANK_SHORT.get(bank, ()))
+    return f"{_L}(?:{alts}){_R}" if alts else ""
+
+
+def bank_tail_regex(bank: str) -> str:
+    """Regex «хвостов» имени — только для чистки шапки письма в выдержке."""
+    alts = _alternation(BANK_TAILS.get(bank, ()))
+    return f"{_L}(?:{alts}){_R}" if alts else ""
+
+
+def canonical_bank(raw) -> str:
+    """Любое написание → канон-имя; неизвестное возвращается КАК ЕСТЬ.
+
+    Возврат «как есть» намеренный: неизвестный эмитент — это повод завести его
+    в реестре, а не потерять имя, которое уже напечатано в отчёте."""
+    text = re.sub(r"\s+", " ", str(raw or "").strip()).lower()
+    if not text:
+        return ""
+    for bank in BANK_ORDER:
+        if text == bank.lower():
+            return bank
+        if any(text == a for a in BANK_ALIASES[bank]):
+            return bank
+        if any(text == s for s in BANK_SHORT.get(bank, ())):
+            return bank
+    return str(raw or "").strip()
+
+
 # ── Recency weights ─────────────────────────────────────────────────────────
 W_SEMANTIC = 0.60   # вес семантической близости к запросу
 W_RECENCY  = 0.40   # вес свежести документа
@@ -169,35 +295,23 @@ class FinancialRAG:
 
     # ── Bank / ticker extraction + section-aware chunking (RAG #в) ────────────
 
-    # Known bank issuers → canonical label (filename + cover-page detection).
-    _BANK_PATTERNS = [
-        ("Goldman Sachs",  r"goldman|gs\b|\bgs_"),
-        # §−14 C-8: bare `\bms\b` dropped — «MS» — обычное сокращение в тексте
-        # (Microsoft, миллисекунды); имя банка требует полного «morgan stanley»
-        # или файлового префикса ms_.
-        ("Morgan Stanley", r"morgan\s*stanley|\bms_"),
-        ("JPMorgan",       r"jp\s*morgan|jpm|j\.p\.\s*morgan"),
-        ("Bank of America",r"bank\s*of\s*america|bofa|merrill"),
-        ("Barclays",       r"barclays"),
-        ("UBS",            r"\bubs\b"),
-        ("Citi",           r"citi(group|bank)?"),
-        # §−93: Jefferies отсутствовал в перечне — его отчёты ингестились с
-        # bank="Unknown", а «Unknown» отбрасывается и в заголовке выдачи
-        # (get_market_sentiment), и в отборе «по одной цитате на банк»
-        # (tg_bot._fetch_rag_context), то есть цитата уезжала БЕЗ автора.
-        ("Jefferies",      r"jefferies|\bjef_"),
-        ("Wells Fargo",    r"wells\s*fargo"),
-        ("Deutsche Bank",  r"deutsche"),
-        ("HSBC",           r"hsbc"),
-    ]
-
     @classmethod
     def _extract_bank(cls, filename: str, md_text: str) -> str:
-        """Canonical issuing bank from the filename first, then the cover page."""
-        hay = f"{filename}\n{md_text[:1500]}".lower()
-        for label, pat in cls._BANK_PATTERNS:
-            if re.search(pat, hay):
-                return label
+        """Canonical issuing bank from the filename first, then the cover page.
+
+        Полные имена ищутся и в имени файла, и на обложке; КОРОТКИЕ формы
+        (`gs`, `ms`, `jpm`, `jef`…) — ТОЛЬКО в имени файла. Причина — `§−14`
+        C-8: «MS» в тексте это обычно Microsoft или миллисекунды, а вот
+        `ms_strategy_2026.pdf` двусмысленным не бывает.
+        """
+        fname = str(filename or "").lower()
+        cover = f"{fname}\n{str(md_text or '')[:1500]}".lower()
+        for bank in BANK_ORDER:
+            if re.search(bank_alias_regex(bank), cover):
+                return bank
+            short = bank_short_regex(bank)
+            if short and re.search(short, fname):
+                return bank
         return "Unknown"
 
     @staticmethod

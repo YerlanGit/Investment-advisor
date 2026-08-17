@@ -22,6 +22,15 @@ import re
 from datetime import date
 from typing import Optional
 
+# SSOT имён эмитентов (§−95).  L1 → импорт вниз разрешён; модуль на импорте
+# тянет только stdlib (chromadb/pymupdf4llm там ленивые).
+from agent.rag_engine import (
+    BANK_ORDER,
+    bank_alias_regex,
+    bank_short_regex,
+    canonical_bank,
+)
+
 logger = logging.getLogger("AINarrative")
 
 MAX_TOKENS_BASE = 5_000  # 4_500 → 5_000 (BLOCK 1.2): BASE now runs on Sonnet (more verbose than Haiku); headroom so the structured tool output is never truncated → no JSON repair / dropped KPI notes
@@ -778,30 +787,24 @@ def _strip_unverified_rag_citations(text: str, market_context: str) -> str:
 #     bracket tags     ChromaDB is empty ("даже без RAG-данных").  NOT proof a
 #                      report was read.
 _RAG_FILE_CITE_RE = re.compile(r"\[RAG:\s*[^\]]+\]")
-# Full, unambiguous issuer names only (bare GS/MS/JPM in prose are dropped —
-# §−14 C-8: «MS» is usually Microsoft/milliseconds, «GS» too generic).
+# §−95: перечень эмитентов больше НЕ живёт здесь — он один на проект
+# (`agent.rag_engine`, SSOT ФАКТОВ).  Разошедшиеся копии стоили нам «Citi» в
+# прозе: ингест клал `bank="Citi"`, а этот regex знал только Citigroup|Citibank,
+# и модель, честно сославшаяся на Citi, получала «0 ссылок на банки».
+# РЕШЕНИЕ при этом остаётся здешним: в ПРОЗЕ засчитываются только полные имена
+# (`§−14` C-8 — «MS» это Microsoft/миллисекунды, «GS» слишком общо), а короткие
+# формы — исключительно внутри квадратного тега `[JPM]`.
 _BANK_NAME_RE = re.compile(
-    r"\b(Goldman(?:\s+Sachs)?|JP\s?Morgan|JPMorgan|Morgan\s+Stanley|Barclays|"
-    r"Bank\s+of\s+America|BofA|Merrill|UBS|Citigroup|Citibank|Wells\s+Fargo|"
-    r"Deutsche\s+Bank|HSBC|Jefferies)\b", re.IGNORECASE)
+    "(" + "|".join(bank_alias_regex(b) for b in BANK_ORDER) + ")", re.IGNORECASE)
 # Bare abbreviations count ONLY inside square-bracket citation tags.
 _BANK_TAG_RE = re.compile(
-    r"\[(GS|MS|JPM|BofA|Barclays|UBS|Citi|HSBC|JEF|Jefferies)\b[^\]]*\]")
-
-_BANK_CANON = {
-    "goldman": "Goldman Sachs", "goldman sachs": "Goldman Sachs", "gs": "Goldman Sachs",
-    "jpmorgan": "JPMorgan", "jp morgan": "JPMorgan", "jpmorgan chase": "JPMorgan", "jpm": "JPMorgan",
-    "morgan stanley": "Morgan Stanley", "ms": "Morgan Stanley",
-    "barclays": "Barclays",
-    "bank of america": "Bank of America", "bofa": "Bank of America", "merrill": "Bank of America",
-    "ubs": "UBS", "citigroup": "Citi", "citibank": "Citi", "citi": "Citi",
-    "wells fargo": "Wells Fargo", "deutsche bank": "Deutsche Bank", "hsbc": "HSBC",
-    "jefferies": "Jefferies", "jef": "Jefferies",
-}
+    r"\[(" + "|".join(
+        "|".join(p for p in (bank_alias_regex(b), bank_short_regex(b)) if p)
+        for b in BANK_ORDER) + r")[^\]]*\]", re.IGNORECASE)
 
 
 def _canon_bank(raw: str) -> str:
-    return _BANK_CANON.get(re.sub(r"\s+", " ", str(raw).strip().lower()), str(raw).strip())
+    return canonical_bank(raw)
 
 
 def _count_rag_citations(texts: list[str]) -> dict:

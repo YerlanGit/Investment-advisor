@@ -299,7 +299,7 @@ const DEEP = {
     { st:'warn', title:'Стресс-сценарии',                meta:'Quant Engine · parametric factor shocks · per-asset β · 7 сценариев · 2 proxy' },
     { st:'warn', title:'Макро-драйверы (FRED)',          meta:'FRED St. Louis Fed · yield curve · HY · VIX · breakeven · unemployment · GDP · 6 серий · требуют внимания: безработица, GDP' },
     { st:'fail', title:'Smart-Money (инсайдеры Form 4)', meta:'SEC EDGAR · Form 4 · SMART_MONEY_INSIDERS=0 (выкл. по умолчанию)' },
-    { st:'ok',   title:'Bank RAG (выдержки)',            meta:'ChromaDB · GS / MS / JPM PDF reports · cosine retrieval (semantic 0,6 ⊕ recency 0,4)' },
+    { st:'ok',   title:'Bank RAG (выдержки)',            meta:'ChromaDB · банковские PDF-обзоры · cosine retrieval (semantic 0,6 ⊕ recency 0,4)' },
     { st:'ok',   title:'ИИ-цитирование банк-аналитики',  meta:'CoVe · [RAG:файл] (проверено) vs. банк-консенсус из знаний модели' },
     { st:'ok',   title:'AI verdict · bullets',           meta:'Anthropic · Claude Opus 4.8 · advisory only · не является ИИР' },
     { st:'ok',   title:'LLM-чекеры: галлюцинации + вычисления', meta:'CoVe · held-filter + data-driven + фильтр противоречий ⊕ stress-cap + no-self-aggregation — настроены' },

@@ -88,6 +88,8 @@ from finance.data_checks import DataQualityBlocked
 from finance.investment_logic import UniversalPortfolioManager
 from finance.security import SecureVault, MasterKeyRotatedError
 from agent.gatekeeper import run_gatekeeper
+# SSOT имён эмитентов (§−95) — модуль на импорте тянет только stdlib.
+from agent.rag_engine import BANK_ORDER, bank_alias_regex, bank_tail_regex
 from html_renderer import MOCK_DATA, render_report_html, write_report_html
 from services.report_storage import upload_report
 from pdf_payload import build_payload as _build_v2_payload, TIER_BASE, TIER_DEEP, TIER_SCENARIO
@@ -509,11 +511,25 @@ def _safe_float(val, default: float = 0.0) -> float:
 # backtracks on «Morgan Stanley expects…» (lowercase verb → full name fails →
 # retry with bare «Morgan» + capital «S» of «Stanley») and strips HALF the
 # bank name; possessive tails make the match all-or-nothing.
+# §−95: перечень имён — из общего реестра (`agent.rag_engine`), а не пятой
+# копией здесь.  Копия молча разошлась: «Merrill» нарратив знал, а этот
+# чистильщик — нет, и шапка «Merrill Equities remain…» уезжала в выдержку.
+# Полные имена И «хвосты» двусловных: разрыв шапки PDF оставляет в начале
+# выдержки как «Morgan Stanley», так и одинокое «Stanley».
+#
+# Две тонкости старого regex, которые обязаны пережить переезд на реестр:
+#  • АТОМАРНАЯ группа `(?>…)`. Совпало длинное имя — откатываться к короткому
+#    нельзя. Иначе «Morgan Stanley expects…» (банк — ПОДЛЕЖАЩЕЕ, глагол с
+#    маленькой) откатится к обрубку «Morgan» и срежет полфамилии, оставив
+#    «Stanley expects…». Раньше это делали посессивные `?+`.
+#  • Взгляд вперёд СТРОГО регистрозависимый — `(?-i:…)`. Имена ищем без учёта
+#    регистра, но «дальше идёт заглавная» — это и есть признак шапки письма, а
+#    не подлежащего; под общим IGNORECASE он совпадал с чем угодно.
 _RAG_BANK_REMNANT_RE = re.compile(
-    r"^(?:(?:J\.?\s?P\.?\s?)?Morgan(?:\s+Stanley)?+|Goldman(?:\s+Sachs)?+|Sachs|"
-    r"Stanley|Barclays|JPMorgan(?:\s+Chase)?+|Chase|Citi(?:group|bank)?+|UBS|"
-    r"HSBC|BofA|Bank\s+of\s+America|Deutsche\s+Bank|Wells\s+Fargo|Jefferies)"
-    r"[\s:—–-]+(?=[A-ZА-Я])")
+    r"^(?>"
+    + "|".join(p for b in BANK_ORDER
+               for p in (bank_alias_regex(b), bank_tail_regex(b)) if p)
+    + r")[\s:—–-]+(?-i:(?=[A-ZА-Я]))", re.IGNORECASE)
 # Runs of ≥3 numeric/percent tokens are chart-axis labels scraped from the
 # PDF («12% 10% 8% 6% 4% 2%»), never prose — cut the run and what follows it.
 _RAG_AXIS_RUN_RE = re.compile(

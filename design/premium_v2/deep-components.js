@@ -3187,13 +3187,21 @@ const TopBar = ({
     className: "hidden sm:inline"
   }, "Профиль · ", meta.profile)), /*#__PURE__*/React.createElement("span", null, "Generated ", meta.generated)));
 };
+
+// §−95: имена банков в футере — ИЗ БАЗЫ (meta.ragBanks), а не литералом
+// «GS / MS / JPM». База может держать любые одиннадцать эмитентов; печатать
+// три — выдумывать факт в блоке источников. Пусто → просто «ChromaDB».
+const ragSource = p => {
+  const banks = p.meta && p.meta.ragBanks || [];
+  return banks.length ? 'ChromaDB (' + banks.slice(0, 5).join(' / ') + ')' : 'ChromaDB';
+};
 const Footer = () => {
   const p = window.DEEP;
   // §−14 C-6: ChromaDB (банковский RAG) в списке источников — только когда RAG
   // реально консультировался (quality несёт «✓ … RAG …»); при выключенном/пустом
   // RAG источник не заявляется (футер был статичным — вводил в заблуждение).
   const ragOn = (p.quality || []).some(q => typeof q === 'string' && q.includes('✓') && /rag/i.test(q));
-  const sources = ['Tradernet', 'SEC EDGAR', 'FRED', 'Quant Engine MAC3'].concat(ragOn ? ['ChromaDB (GS / MS / JPM)'] : []).concat([p.meta.aiModel]).join(' · ');
+  const sources = ['Tradernet', 'SEC EDGAR', 'FRED', 'Quant Engine MAC3'].concat(ragOn ? [ragSource(p)] : []).concat([p.meta.aiModel]).join(' · ');
   return /*#__PURE__*/React.createElement("footer", {
     className: "mt-16 mb-8"
   }, /*#__PURE__*/React.createElement("div", {
