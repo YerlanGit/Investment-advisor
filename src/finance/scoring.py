@@ -565,3 +565,39 @@ __all__ = [
     "classify_asset_class",
     "AssetScore",
 ]
+
+
+#: Насколько плечо ЗАМЕТНО в книге.  Пороги по маржинальному долгу в % капитала.
+LEVERAGE_MINOR    = "minor"      # долг есть, но он на уровне остатка по счёту
+LEVERAGE_MATERIAL = "material"   # долг влияет на риск, но не определяет его
+LEVERAGE_DOMINANT = "dominant"   # плечо — главный факт о книге
+
+#: Граница «остаток по счёту против настоящей маржи».  Ниже неё маржинальный
+#: долг неотличим от технического минуса кэша после комиссии или дивиденда.
+_LEVERAGE_MINOR_MAX    = 5.0
+#: Выше этой доли долг перестаёт быть деталью и становится главной темой.
+_LEVERAGE_DOMINANT_MIN = 25.0
+
+
+def leverage_salience(margin_debt_pct) -> str:
+    """Насколько плечо заслуживает первого места в тексте отчёта.
+
+    🔴 Правило `R-4`. Директива промпта включалась по БИНАРНОМУ `is_leveraged`
+    и требовала вынести плечо «отдельным ПЕРВЫМ пунктом» при любом размере
+    долга. На книге с маржой 1.9 % — то есть с техническим минусом кэша —
+    заголовок BASE открывался предупреждением о заёмных средствах, вытесняя
+    настоящий главный риск. Масштаб языка обязан быть пропорционален факту.
+
+    Неизвестное/нечисловое значение → `material`: не «всё хорошо» и не паника.
+    """
+    try:
+        v = abs(float(margin_debt_pct))
+    except (TypeError, ValueError):
+        return LEVERAGE_MATERIAL
+    if not np.isfinite(v):
+        return LEVERAGE_MATERIAL
+    if v < _LEVERAGE_MINOR_MAX:
+        return LEVERAGE_MINOR
+    if v >= _LEVERAGE_DOMINANT_MIN:
+        return LEVERAGE_DOMINANT
+    return LEVERAGE_MATERIAL

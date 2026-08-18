@@ -165,6 +165,8 @@ def _mock_payload(tier: str = "base") -> dict:
                               "доходности — риск окупается.",
             "ai_mdd_note":    "Когда-то портфель просел на 12.8% от пика — "
                               "переживаемо, но держите подушку.",
+            "ai_vol_note":    "Стоимость портфеля колеблется примерно на 14.2% "
+                              "в год — внутри целевой волатильности мандата.",
             # Per-section AI commentary — mock values so the smoke render
             # exercises the data-bound AI blocks in both templates.
             "ai_risk_comment":      "CVaR −5.2% (≈$2.6K) в пределах мандата, но "
@@ -277,6 +279,9 @@ def _build_mock_sparklines() -> dict:
                     0.99,   1.12,   1.20,   1.28,   1.30,   1.34]
     mdd_pts    = [-0.040, -0.055, -0.072, -0.095, -0.110, -0.128,
                    -0.115, -0.108, -0.105, -0.100, -0.110, -0.128]
+    #   Vol rises into the drawdown, then settles back
+    vol_pts    = [ 0.118,  0.126,  0.139,  0.152,  0.168,  0.171,
+                    0.160,  0.149,  0.141,  0.137,  0.144,  0.142]
     # Raw points too (scaled) — the Premium V2 KPI cards redraw these with the
     # design's own <Sparkline>; mirrors the production keys from
     # tg_bot._build_kpi_sparklines so the smoke render exercises the same path.
@@ -284,6 +289,7 @@ def _build_mock_sparklines() -> dict:
         "cvar_pts":   [round(x * 100, 2) for x in cvar_pts],
         "sharpe_pts": [round(x, 3) for x in sharpe_pts],
         "mdd_pts":    [round(x * 100, 2) for x in mdd_pts],
+        "vol_pts":    [round(x * 100, 2) for x in vol_pts],
     }
     try:
         # Арх-5: было `from tg_bot import _sparkline_svg` — инверсия слоёв.
@@ -292,6 +298,7 @@ def _build_mock_sparklines() -> dict:
             "cvar_svg":   sparkline_svg(cvar_pts,   color="#3F8F5F", invert=True),
             "sharpe_svg": sparkline_svg(sharpe_pts, color="#9A7A10", invert=False),
             "mdd_svg":    sparkline_svg(mdd_pts,    color="#C0492F", invert=True),
+            "vol_svg":    sparkline_svg(vol_pts,    color="#C0492F", invert=True),
             **_pts,
         }
     except Exception:
@@ -312,6 +319,7 @@ def _build_mock_sparklines() -> dict:
                      f'</svg>')
         return {
             "cvar_svg":   _fallback(cvar_pts,   "#3F8F5F"),
+            "vol_svg":    _fallback(vol_pts,    "#C0492F"),
             "sharpe_svg": _fallback(sharpe_pts, "#9A7A10"),
             "mdd_svg":    _fallback(mdd_pts,    "#C0492F"),
             **_pts,

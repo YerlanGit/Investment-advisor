@@ -179,6 +179,38 @@ def canonical_bank(raw) -> str:
     return str(raw or "").strip()
 
 
+#: Конец предложения: точка/вопрос/восклицание/многоточие, за которым идёт
+#: пробел, закрывающая кавычка/скобка или конец текста.  Сокращения вроде
+#: «U.S.» ловятся как конец предложения — это ОСОЗНАННО: лишний рез по
+#: границе слова безвреден, а пропущенный рез оставляет обрыв в середине.
+_SENT_END_RE = re.compile(r"[.!?…](?=[\s\"»)\]]|$)")
+
+
+#: Заголовок ОДНОГО извлечённого отрывка в собранном контексте.  Он же —
+#: единственный признак, по которому отрывки можно пересчитать: тело чанка
+#: содержит произвольный markdown с пустыми строками, поэтому «абзац» и
+#: «отрывок» — РАЗНЫЕ вещи.
+_SNIPPET_HEADER_RE = re.compile(r"^--- \[.*?\] .*? ---$", re.M)
+
+
+def count_snippets(context: str) -> int:
+    """Сколько ОТРЫВКОВ реально прочитано в этом контексте.
+
+    🔴 Считалось иначе и врало в разы. Прежняя формула — «непустые куски после
+    split("\n\n")» — опиралась на то, что `_fetch_rag_context` склеивает свои
+    ДВА раздела через пустую строку. Но тела чанков это markdown из PDF, и
+    пустых строк в них десятки: живой DEEP 17.08 напечатал «прочитано 97
+    отрывков», тогда как запрошено было не больше шести (macro 3 + micro 3).
+
+    Место у этой функции ровно здесь: заголовок отрывка пишет
+    `get_market_sentiment`, и правило «что считается отрывком» обязано жить
+    рядом с тем, кто этот заголовок печатает, а не у двух разных потребителей.
+    Панель провенанса — то место, где читатель ПРОВЕРЯЕТ отчёт; завышенный
+    счётчик именно там дороже любой другой неточности.
+    """
+    return len(_SNIPPET_HEADER_RE.findall(str(context or "")))
+
+
 # ── Recency weights ─────────────────────────────────────────────────────────
 W_SEMANTIC = 0.60   # вес семантической близости к запросу
 W_RECENCY  = 0.40   # вес свежести документа
@@ -329,34 +361,110 @@ class FinancialRAG:
         return ("," + ",".join(tickers) + ",") if tickers else ""
 
     @staticmethod
+    def _split_point(text: str, limit: int, *, min_frac: float = 0.55) -> int:
+        """Где резать окно: индекс конца куска (эксклюзивно), не дальше `limit`.
+
+        Приоритет границ — от самой крупной к самой мелкой: абзац → конец
+        предложения → перевод строки → пробел → жёсткий рез. Граница ближе
+        `min_frac * limit` не берётся: иначе один ранний перенос строки резал бы
+        окно вдвое и чанки мельчали бы без пользы.
+        """
+        if len(text) <= limit:
+            return len(text)
+        window = text[:limit]
+        floor  = int(limit * min_frac)
+
+        p = window.rfind("\n\n")
+        if p >= floor:
+            return p + 2
+        best = -1
+        for m in _SENT_END_RE.finditer(window):
+            if m.end() >= floor:
+                best = m.end()
+        if best > 0:
+            return best
+        for sep, off in (("\n", 1), (" ", 1)):
+            p = window.rfind(sep)
+            if p >= floor:
+                return p + off
+        return limit                      # последнее средство
+
+    @staticmethod
+    def _has_prose(text: str) -> bool:
+        """Есть ли в куске хоть что-то читаемое, кроме разметки и цифр."""
+        return bool(re.search(r"[A-Za-zА-Яа-яЁё]{2,}", text or ""))
+
+    @staticmethod
     def _chunk_markdown(md_text: str, *, max_chars: int = 1200,
-                        overlap: int = 150, min_chars: int = 150) -> list[tuple[str, str]]:
+                        overlap: int = 150, min_chars: int = 12) -> list[tuple[str, str]]:
         """Section-aware, size-bounded chunks → list of (heading, chunk_text).
 
-        Splits on Markdown headings (keeps the section title as metadata), then
-        sub-splits any section longer than `max_chars` into overlapping windows
-        so no single embedding is truncated (the old header-only split produced
-        multi-page chunks that embedded poorly).  Short fragments are dropped."""
-        sections = re.split(r'\n(?=#{1,3}\s)', md_text)
+        Режет по заголовкам Markdown (заголовок уходит в метаданные секции),
+        затем длинные секции — на перекрывающиеся окна ПО ГРАНИЦАМ ТЕКСТА.
+
+        🔴 Три замера 2026-08-18 на разметке банковского PDF (`§−97`):
+
+        1. **Рез шёл по символу.** Окно бралось как `sec[start:start+1200]`,
+           поэтому три чанка из пяти начинались с середины предложения
+           («history, and we expect…») и столько же им обрывались. Именно это
+           чинил постфактум `_clean_rag_excerpt` в слое отчёта: он ищет начало
+           предложения и отрезает огрызок — то есть лечил следствие, теряя
+           текст, вместо того чтобы резать по границе сразу.
+        2. **Заголовки глубже третьего уровня не были точками разреза.**
+           `#{1,3}` не видит `#### Sector view`, и подраздел вливался в
+           предыдущую секцию с ЧУЖИМ именем — а имя секции доезжает до отчёта
+           в подписи выдержки.
+        3. **Секции короче 150 символов молча выбрасывались ЦЕЛИКОМ.**
+           «### Rates / Duration risk is back.» (тело 22 символа) не попадал
+           в базу вообще: у банковских отчётов короткая секция это обычно самый
+           резкий тезис. Порог теперь отсеивает НЕ короткое, а бессодержательное:
+           голый заголовок, номер страницы, «Source: …» без текста под ним.
+           Смещение осознанное — мусорный чанк проигрывает настоящему абзацу по
+           семантической близости, а выброшенный тезис не вернуть ничем.
+        """
+        sections = re.split(r'\n(?=#{1,6}\s)', md_text)
         out: list[tuple[str, str]] = []
         for sec in sections:
             sec = sec.strip()
-            if len(sec) < min_chars:
+            if not sec:
                 continue
             first_nl = sec.find("\n")
             heading = (sec[:first_nl] if first_nl > 0 else sec)[:120].lstrip("# ").strip()
+            body    = sec[first_nl + 1:].strip() if first_nl > 0 else ""
+            # Голый заголовок без тела — оглавление или подпись к таблице.
+            if len(body) < min_chars or not FinancialRAG._has_prose(body):
+                continue
             if len(sec) <= max_chars:
                 out.append((heading, sec))
                 continue
             start = 0
             while start < len(sec):
-                piece = sec[start:start + max_chars]
-                if len(piece) >= min_chars:
+                cut   = start + FinancialRAG._split_point(sec[start:], max_chars)
+                piece = sec[start:cut].strip()
+                if piece and FinancialRAG._has_prose(piece):
                     out.append((heading, piece))
-                if start + max_chars >= len(sec):
+                if cut >= len(sec):
                     break
-                start += max_chars - overlap
+                # Перекрытие тоже начинается с границы: иначе следующий чанк
+                # снова открывался бы серединой слова.
+                back = max(start + 1, cut - overlap)
+                nxt  = FinancialRAG._sentence_start(sec, back, cut)
+                start = nxt if nxt > start else cut
         return out
+
+    @staticmethod
+    def _sentence_start(text: str, lo: int, hi: int) -> int:
+        """Первое начало предложения в `[lo, hi)`; иначе граница слова у `lo`."""
+        m = _SENT_END_RE.search(text, lo, hi)
+        while m is not None:
+            j = m.end()
+            while j < hi and text[j] in " \t\n\"»)]":
+                j += 1
+            if j < hi:
+                return j
+            m = _SENT_END_RE.search(text, m.end(), hi)
+        sp = text.rfind(" ", lo, hi)
+        return sp + 1 if sp > lo else lo
 
     # ── Recency scoring ──────────────────────────────────────────────────────
 

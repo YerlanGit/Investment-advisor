@@ -1090,6 +1090,115 @@ Object.assign(window, {
   ScorePillar,
   MagnitudeBar
 });
+// ── KPI card — ОДНА реализация на ОБА тира ─────────────────────────────────
+//
+// 🔴 Почему файл общий, а не скопированный.  До 2026-08-18 карточка KPI
+// существовала в двух видах: DEEP рисовал значение + график динамики +
+// заметку ИИ, BASE — только значение и подпись.  Данные для полной карточки
+// лежали в payload ОБОИХ тиров (`kpi_sparklines`, `ai_*_note`) и в BASE
+// молча терялись в маппере.  Две копии одного объекта — ровно тот механизм,
+// которым имя эмитента разошлось шестью способами (`§−95`), поэтому здесь
+// копии нет: файл включается в оба бандла (см. `build.sh`).
+//
+// Зависимости — `Icons` и `Sparkline`; обе реализации в бандлах побитово
+// одинаковы, поэтому карточка рисуется идентично в BASE и DEEP.
+
+// Методология метрики (по наведению) — делает знаменатель явным (Sprint-3 #8).
+const _KPI_METHOD = {
+  sharpe: 'Знаменатель — структурная (факторная) волатильность σ = √(w′Σw), Σ = B·F·Bᵀ + D; числитель — геом. годовая доходность − валютно-сопоставленная RFR.',
+  cvar: 'Средний убыток в худшие 5% дней (1-дневный горизонт), эмпирически + bootstrap-CI.',
+  dd: 'Максимальная просадка пик→дно по реконструированной кривой капитала exp(Σ log-доходностей).',
+  vol: 'Годовая σ портфеля; в графике — σ того же скользящего окна, что и у знаменателя Sharpe.'
+};
+
+// Аудит 2026-08-12: `k.status` — ВЕРДИКТ ПО ЗНАЧЕНИЮ из движка
+// (`finance.scoring.kpi_status` → ok/warn/bad), а не литерал дизайн-макета.
+// Прежде Sharpe всегда получал золотой бейдж «good» — даже когда ИИ-заметка
+// на той же карточке говорила «отдача на единицу риска слабая».  Старые ключи
+// (normal/good/watch) оставлены для payload'ов, собранных до той правки.
+const _KPI_BORDER = {
+  ok: '#5d7c5c',
+  warn: '#caa01a',
+  bad: '#c47358',
+  normal: '#5d7c5c',
+  good: '#caa01a',
+  watch: '#c47358'
+};
+
+// R-9 (2026-08-02): у ЧИСЛА и у ГРАФИКА разные окна, и это надо назвать.
+// Крупная цифра — по полному окну истории; точки спарклайна — срезы за
+// последний год, каждый по СКОЛЬЗЯЩЕМУ окну 60 дней. Отсюда законная, но
+// сбивающая с толку картина: Sharpe в заголовке +0.55, а линия целиком ниже
+// нуля (последний год был хуже полной истории). Без подписи это читается
+// как противоречие в отчёте.
+//
+// 🔴 Число срезов СЧИТАЕТСЯ, а не пишется словом. Подпись годами обещала
+// «12 срезов», тогда как движок отдаёт 11: при окне 252 дня шаг равен 21, и
+// первый срез не набирает минимальных 30 наблюдений, поэтому отбрасывается
+// ВСЕГДА. Тот же класс, что напечатанные константой счётчики позиций и
+// стресс-сценариев (`§−90` A-8, `§−91` B-4).
+const _sparkNote = n => `${n} срезов за год · каждый по скользящему окну 60 дней ` + '(число выше — по полному окну истории)';
+const KpiCard = ({
+  k
+}) => {
+  const border = _KPI_BORDER[k.status] || '#a8a293';
+  const pts = Array.isArray(k.pts) ? k.pts : [];
+  const hasPts = pts.length >= 2;
+  // Заметка ИИ — ПРОЗА: её отсутствие не заполняется прочерком, а убирает
+  // рамку целиком. Пустая рамка «комментарий ИИ» выглядит как доставленный
+  // контент, хотя не сообщает ничего; на no-API пути (фолбэк-нарратив вообще
+  // не содержит заметок KPI) так было у КАЖДОЙ карточки DEEP.
+  const ai = (k.ai || '').trim();
+  return /*#__PURE__*/React.createElement("div", {
+    className: "glass-strong rounded-4xl p-5 sm:p-6 shadow-card lift flex flex-col min-w-0",
+    style: {
+      borderTop: `2px solid ${border}`
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between gap-2 mb-2 min-w-0"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "text-[10px] tracking-widest uppercase text-ink-500 font-mono cursor-help truncate",
+    title: _KPI_METHOD[k.key] || undefined
+  }, k.name), /*#__PURE__*/React.createElement("span", {
+    className: "leading-none font-light num text-ink-900 tracking-tight flex-shrink-0",
+    style: {
+      fontSize: 'clamp(24px, 5.2vw, 40px)'
+    }
+  }, k.value)), /*#__PURE__*/React.createElement("div", {
+    className: "rounded-2xl bg-cream-50/70 border border-ink-900/5 px-3 pt-2 pb-1.5 mb-3"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between text-[8.5px] tracking-widest uppercase text-ink-400 font-mono mb-0.5"
+  }, /*#__PURE__*/React.createElement("span", null, "Динамика · окно 60 дн."), /*#__PURE__*/React.createElement("span", null, "сейчас")), /*#__PURE__*/React.createElement("div", {
+    className: "h-12"
+  }, hasPts ? /*#__PURE__*/React.createElement("div", {
+    title: _sparkNote(pts.length)
+  }, /*#__PURE__*/React.createElement(Sparkline, {
+    points: pts,
+    color: k.color,
+    height: 44,
+    width: 300,
+    gradId: `spk-${k.key}`
+  })) : k.svg ? /*#__PURE__*/React.createElement("div", {
+    className: "w-full h-full",
+    dangerouslySetInnerHTML: {
+      __html: k.svg
+    }
+  }) : /*#__PURE__*/React.createElement("div", {
+    className: "w-full h-full flex items-center justify-center text-[9px] text-ink-300 font-mono"
+  }, "нет истории")), hasPts && /*#__PURE__*/React.createElement("div", {
+    className: "mt-1 text-[8px] leading-tight text-ink-400 font-mono"
+  }, "число выше — по полному окну истории")), k.sub && k.sub !== '–' && /*#__PURE__*/React.createElement("div", {
+    className: "text-[10.5px] text-ink-400 font-mono leading-snug mb-4 truncate"
+  }, k.sub), ai && /*#__PURE__*/React.createElement("div", {
+    className: "mt-auto flex items-start gap-2.5 rounded-2xl bg-cream-50 border border-ink-900/5 px-3.5 py-3"
+  }, /*#__PURE__*/React.createElement(Icons.Sparkles, {
+    size: 13,
+    className: "text-gold-600 mt-0.5 flex-shrink-0",
+    stroke: 1.8
+  }), /*#__PURE__*/React.createElement("p", {
+    className: "text-[11.5px] text-ink-700 leading-snug font-light"
+  }, ai)));
+};
 /* DEEP Overview — verdict, risk gauge, KPIs, mandate compliance, risk concentration */
 
 const HeroStat = ({
@@ -1244,91 +1353,10 @@ const MandateCard = ({
   }, "допустимо ", r.lo, "–", r.hi, "%"));
 })));
 
-// KPI card — value + a prominent 12-month trend chart (user request «добавь
-// графики к показателям»).  Draws the design <Sparkline> from the real numeric
-// series; falls back to the server-rendered SVG if only that is present.
-// Per-metric methodology note (hover) — makes the denominators explicit
-// (Sprint-3 #8): Sharpe/Sortino use the STRUCTURAL factor volatility σ, not a
-// realised sample vol.
-const _KPI_METHOD = {
-  sharpe: 'Знаменатель — структурная (факторная) волатильность σ = √(w′Σw), Σ = B·F·Bᵀ + D; числитель — геом. годовая доходность − валютно-сопоставленная RFR.',
-  cvar: 'Средний убыток в худшие 5% дней (1-дневный горизонт), эмпирически + bootstrap-CI.',
-  dd: 'Максимальная просадка пик→дно по реконструированной кривой капитала exp(Σ log-доходностей).'
-};
-
-// R-9 (2026-08-02): у ЧИСЛА и у ГРАФИКА разные окна, и это надо назвать.
-// Крупная цифра — по полному окну истории; точки спарклайна — 12 срезов за
-// последний год, каждый по СКОЛЬЗЯЩЕМУ окну 60 дней. Отсюда законная, но
-// сбивающая с толку картина: Sharpe в заголовке +0.55, а линия целиком ниже
-// нуля (последний год был хуже полной истории). Без подписи это читается
-// как противоречие в отчёте.
-const _SPARK_NOTE = '12 срезов за год · каждый по скользящему окну 60 дней (число выше — по полному окну истории)';
-
-// Аудит 2026-08-12: `k.status` теперь ВЕРДИКТ ПО ЗНАЧЕНИЮ из движка
-// (`finance.scoring.kpi_status` → ok/warn/bad), а не литерал дизайн-макета.
-// Прежде Sharpe всегда получал золотой бейдж «good» — даже когда ИИ-заметка
-// на той же карточке говорила «отдача на единицу риска слабая».  Старые ключи
-// (normal/good/watch) оставлены для payload'ов, собранных до этой правки.
-const _KPI_BORDER = {
-  ok: '#5d7c5c',
-  warn: '#caa01a',
-  bad: '#c47358',
-  normal: '#5d7c5c',
-  good: '#caa01a',
-  watch: '#c47358'
-};
-const KpiCard = ({
-  k
-}) => {
-  const border = _KPI_BORDER[k.status] || '#a8a293';
-  const hasPts = Array.isArray(k.pts) && k.pts.length >= 2;
-  return /*#__PURE__*/React.createElement("div", {
-    className: "glass-strong rounded-4xl p-6 shadow-card lift flex flex-col",
-    style: {
-      borderTop: `2px solid ${border}`
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "flex items-center justify-between mb-2"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "text-[10px] tracking-widest uppercase text-ink-500 font-mono cursor-help",
-    title: _KPI_METHOD[k.key] || undefined
-  }, k.name), /*#__PURE__*/React.createElement("span", {
-    className: "text-[40px] leading-none font-light num text-ink-900 tracking-tight"
-  }, k.value)), /*#__PURE__*/React.createElement("div", {
-    className: "rounded-2xl bg-cream-50/70 border border-ink-900/5 px-3 pt-2 pb-1.5 mb-3"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "flex items-center justify-between text-[8.5px] tracking-widest uppercase text-ink-400 font-mono mb-0.5"
-  }, /*#__PURE__*/React.createElement("span", null, "Динамика · окно 60 дн."), /*#__PURE__*/React.createElement("span", null, "сейчас")), /*#__PURE__*/React.createElement("div", {
-    className: "h-12"
-  }, hasPts ? /*#__PURE__*/React.createElement("div", {
-    title: _SPARK_NOTE
-  }, /*#__PURE__*/React.createElement(Sparkline, {
-    points: k.pts,
-    color: k.color,
-    height: 44,
-    width: 300,
-    gradId: `spk-${k.key}`
-  })) : k.svg ? /*#__PURE__*/React.createElement("div", {
-    className: "w-full h-full",
-    dangerouslySetInnerHTML: {
-      __html: k.svg
-    }
-  }) : /*#__PURE__*/React.createElement("div", {
-    className: "w-full h-full flex items-center justify-center text-[9px] text-ink-300 font-mono"
-  }, "нет истории")), hasPts && /*#__PURE__*/React.createElement("div", {
-    className: "mt-1 text-[8px] leading-tight text-ink-400 font-mono"
-  }, "число выше — по полному окну истории")), /*#__PURE__*/React.createElement("div", {
-    className: "text-[10.5px] text-ink-400 font-mono leading-snug mb-4"
-  }, k.sub), /*#__PURE__*/React.createElement("div", {
-    className: "mt-auto flex items-start gap-2.5 rounded-2xl bg-cream-50 border border-ink-900/5 px-3.5 py-3"
-  }, /*#__PURE__*/React.createElement(Icons.Sparkles, {
-    size: 13,
-    className: "text-gold-600 mt-0.5 flex-shrink-0",
-    stroke: 1.8
-  }), /*#__PURE__*/React.createElement("p", {
-    className: "text-[11.5px] text-ink-700 leading-snug font-light"
-  }, k.ai)));
-};
+// KPI-карточка переехала в `shared-kpi.jsx` — ОДНА реализация на оба
+// тира.  Копия здесь и урезанная копия в `portfolio-overview.jsx`
+// расходились: BASE не показывал ни график динамики, ни заметку ИИ,
+// хотя данные для обеих лежали в его payload (`§−97`).
 
 // Concentration table
 const ConcentrationCard = ({
@@ -1344,7 +1372,7 @@ const ConcentrationCard = ({
 }, "Топ-вкладчики")), /*#__PURE__*/React.createElement("span", {
   className: "px-2.5 py-1 rounded-full bg-cream-50 border border-ink-900/5 text-[10px] font-mono tracking-wider text-ink-700"
 }, "TRC · Euler")), /*#__PURE__*/React.createElement("div", {
-  className: "grid grid-cols-[1.4fr_1fr_1fr_1.6fr_auto] gap-3 px-1 pb-2 text-[9px] tracking-widest uppercase text-ink-400 font-mono border-b border-ink-900/8"
+  className: "grid grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.6fr)_auto] gap-3 px-1 pb-2 text-[9px] tracking-widest uppercase text-ink-400 font-mono border-b border-ink-900/8"
 }, /*#__PURE__*/React.createElement("div", null, "Тикер"), /*#__PURE__*/React.createElement("div", {
   className: "text-right"
 }, "Вес"), /*#__PURE__*/React.createElement("div", {
@@ -1355,7 +1383,7 @@ const ConcentrationCard = ({
   const hot = r.status === 'HOTSPOT';
   return /*#__PURE__*/React.createElement("div", {
     key: i,
-    className: "grid grid-cols-[1.4fr_1fr_1fr_1.6fr_auto] gap-3 items-center px-1 py-2.5"
+    className: "grid grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.6fr)_auto] gap-3 items-center px-1 py-2.5"
   }, /*#__PURE__*/React.createElement("div", {
     className: "text-[14px] font-bold num text-ink-900"
   }, r.t), /*#__PURE__*/React.createElement("div", {
@@ -2136,7 +2164,7 @@ const Factors = () => {
     className: "text-ink-400"
   }, ".")), /*#__PURE__*/React.createElement("p", {
     className: "text-[15px] text-ink-500 mt-2 font-light max-w-[680px]"
-  }, "Скрытые концентрации по 10 факторам и оценка каждой бумаги по четырём столпам.")), /*#__PURE__*/React.createElement("div", {
+  }, "Скрытые концентрации по ", (p.factors || []).length, " факторам и оценка каждой бумаги по четырём столпам.")), /*#__PURE__*/React.createElement("div", {
     className: "glass-strong rounded-4xl p-7 shadow-card mb-5"
   }, /*#__PURE__*/React.createElement("div", {
     className: "flex items-start justify-between gap-4 flex-wrap mb-4"

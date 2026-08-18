@@ -295,7 +295,10 @@ class ReportLabelsTest(unittest.TestCase):
 
     def test_jsx_sources_match_the_bundles(self):
         for rel, needle in (
-            ("design/premium_v2/deep/deep-overview.jsx", "скользящему окну 60 дней"),
+            # Карточка KPI переехала в общий файл обоих тиров (`§−97`):
+            # раньше её вёрстка существовала в двух копиях, и BASE потерял
+            # график динамики вместе с заметкой ИИ.
+            ("design/premium_v2/shared-kpi.jsx", "скользящему окну 60 дней"),
             ("design/premium_v2/deep/deep-factors.jsx", "Отрицательная доля — не ошибка"),
         ):
             p = Path(rel)

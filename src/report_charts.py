@@ -166,17 +166,27 @@ def build_kpi_sparklines(results: dict) -> Optional[dict]:
         cvar_pts   = series["cvar_pts"]
         sharpe_pts = series["sharpe_pts"]
         mdd_pts    = series["mdd_pts"]
-        return {
+        # `vol_pts` появился позже трёх остальных: payload'ы, собранные до него,
+        # ключа не несут, поэтому читаем с дефолтом, а не по индексу.
+        vol_pts    = series.get("vol_pts") or []
+        out = {
             "cvar_svg":   sparkline_svg(cvar_pts,   color="#3F8F5F", invert=True),
             "sharpe_svg": sparkline_svg(sharpe_pts, color="#9A7A10", invert=False),
             "mdd_svg":    sparkline_svg(mdd_pts,    color="#C0492F", invert=True),
             # Raw series too — the Premium V2 KPI cards redraw these with the
             # design's own <Sparkline>.  Scaled ×100 so the React component plots
-            # them as percent-points (CVaR/MaxDD) and a ratio (Sharpe).
+            # them as percent-points (CVaR/MaxDD/Vol) and a ratio (Sharpe).
             "cvar_pts":   [round(x * 100, 2) for x in cvar_pts],
             "sharpe_pts": [round(x, 3) for x in sharpe_pts],
             "mdd_pts":    [round(x * 100, 2) for x in mdd_pts],
         }
+        if vol_pts:
+            # invert=True: у волатильности «лучшая» точка — МИНИМУМ, как у CVaR
+            # и просадки.  Маркер экстремума обязан показывать лучший месяц, а
+            # не самый громкий — иначе подсветка хвалит худший результат.
+            out["vol_svg"] = sparkline_svg(vol_pts, color="#C0492F", invert=True)
+            out["vol_pts"] = [round(x * 100, 2) for x in vol_pts]
+        return out
     except Exception as exc:
         logger.warning("kpi_sparklines build failed: %s", exc)
         return None

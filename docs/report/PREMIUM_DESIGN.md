@@ -45,6 +45,11 @@ Babel-в-браузере медленный). Поэтому статика **�
 - **BASE (11):** `meta, verdict, kpis, factorPills, heroStats, topHotspot, sectors, riskDecomp,
   holdings, performance, ideas`.
 
+🔴 **Карточка KPI — один файл на оба тира**: `design/premium_v2/shared-kpi.jsx`
+включается в ОБА бандла (`build.sh`). До `§−97` вёрстка существовала в двух
+копиях, и BASE показывал только значение с подписью, теряя график динамики и
+заметку ИИ, — хотя `kpi_sparklines` и `ai_*_note` приезжали в его payload.
+
 ### Маппинг «движок → контракт дизайна» (ОСТАВШАЯСЯ работа)
 
 Движок уже считает все эти данные (см. `REPORT_SECTIONS.md`), но в ДРУГОЙ форме (payload v3-шаблона).
@@ -55,7 +60,7 @@ Babel-в-браузере медленный). Поэтому статика **�
 | `meta` | `tier`, `user_id`, `ai_model_used`, `total_value`, `n_positions`, `generated_at` |
 | `verdict{headline,sub,riskIndex,riskTier,summary,bullets}` | `ai_verdict`, `ai_plain_summary`, `risk_pct`, `risk_label`, `ai_bullets[]` |
 | `mandate{rows[label,value,lo,hi,state]}` | `mandate_compliance.rows` |
-| `kpis[{name,value,status,sub,ai,color,pts}]` | `cvar/sharpe/max_drawdown`+`*_dollar`+`ai_*_note`+`kpi_sparklines` |
+| `kpis[{key,name,value,status,color,sub,ai,pts,svg}]` — ОДНА форма на оба тира (`§−97`); BASE несёт 4 карточки (+`vol`), DEEP 3 | `cvar/sharpe/max_drawdown/volatility`+`*_dollar`+`ai_*_note`+`kpi_status`+`kpi_sparklines` |
 | `holdings[]`, `concentration`, `riskDecomp` | `assets[]` (вес/β/TRC/PnL/action), `hotspots[]`, `risk_waterfall` |
 | `sectors`, `sectorWarn` | `sectors[]`, `sector_warnings`, `sector_complex` |
 | `factors`, `factorCoverage`, `factorAI` | `factor_betas`/`factor_scores`, `data_quality`, `ai_factor_comment` |

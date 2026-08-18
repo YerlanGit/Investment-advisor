@@ -85,6 +85,15 @@ _KPI_TONE_COLOR = {
 
 def _kpi(p: dict, key: str, name: str, val_key: str, note_key: str,
          spark_key: str, status: str, color: str, sub: str) -> dict:
+    """Одна KPI-карточка — ОДНА функция на оба тира.
+
+    До 2026-08-18 BASE собирал свои карточки отдельным `_kpi_obj` с другими
+    именами полей (`label/frame/tone` против `name/sub/status`) и БЕЗ трёх
+    ключей, которые уже лежали в payload: заметки ИИ, ряда спарклайна и его
+    SVG.  Данные считались, доезжали до маппера и там терялись — тот же класс,
+    что `holdingsAI` и мёртвый `kpis` (`§−90` A-2).  Одна форма на два тира
+    убирает саму возможность такого расхождения.
+    """
     # Аудит 2026-08-12: `status`/`color` были ЛИТЕРАЛАМИ макета и не зависели
     # от значения — живой отчёт 12.08 показывал Sharpe 0.56 с бейджем «good»
     # рядом с ИИ-заметкой «отдача на единицу риска слабая».  Теперь тон
@@ -106,7 +115,12 @@ def _kpi(p: dict, key: str, name: str, val_key: str, note_key: str,
         "value": _txt(p, val_key),
         "status": status, "color": color,
         "sub": sub if sub != DASH else _txt(p, val_key + "_dollar"),
-        "ai": _txt(p, note_key),
+        # ПРОЗА, а не число: у отсутствующего комментария нет «нейтрального
+        # значения», поэтому здесь пусто, а не `–`.  Карточка с прочерком в
+        # рамке «комментарий ИИ» сообщает читателю ровно ничего, но выглядит
+        # как доставленный контент — на no-API пути так было у ВСЕХ карточек
+        # (в фолбэк-словаре `ai_narrative` заметок KPI нет вовсе).
+        "ai": str(_g(p, note_key) or "").strip(),
         "pts": pts, "svg": spark,
     }
 
@@ -516,18 +530,6 @@ def _map_base(p: dict, meta: dict) -> dict:
         "sumStandalone": _num(wf, "sum_standalone_pp"),
     }
 
-    def _kpi_obj(label, value_key, unit, frame, key=""):
-        # Аудит 2026-08-12: этот блок ЕСТЬ в payload с самого начала, но BASE
-        # его НЕ РЕНДЕРИЛ — в бандле `base-components.js` слова `kpis` не было
-        # ни разу, поэтому читатель платного отчёта не видел ни CVaR, ни
-        # Sharpe, ни просадку, ни волатильность.  Теперь их показывает
-        # `RiskKpiStrip`; тон каждой карточки — посчитанный, как в DEEP.
-        # `delta/deltaText` остаются нулями осознанно: месячной истории метрик
-        # у BASE нет, а рисовать «за месяц +0» значило бы выдумать замер.
-        return {"label": label, "value": _num(p, value_key), "unit": unit,
-                "delta": 0, "deltaText": "", "frame": frame,
-                "tone": str(_g(p, "kpi_status", key, default="") or "")}
-
     return {
         "meta": {**meta, "tier": "BASE", "engine": "MAC3"},
         "verdict": {"headline": _txt(p, "ai_verdict"), "sub": _txt(p, "ai_plain_summary"),
@@ -537,12 +539,23 @@ def _map_base(p: dict, meta: dict) -> dict:
                     "expReturn": _txt(p, "expected_return_annual"),
                     "expSharpe": _txt(p, "expected_sharpe"),
                     "riskTrendDelta": _g(p, "risk_score_delta", default=0), "nav": _txt(p, "total_value_usd")},
-        "kpis": {
-            "cvar": _kpi_obj("CVaR 95%", "cvar", "%", _txt(p, "cvar_dollar"), key="cvar"),
-            "sharpe": _kpi_obj("Sharpe Ratio", "sharpe", "", f"Sortino {_txt(p, 'sortino')}", key="sharpe"),
-            "dd": _kpi_obj("Max Drawdown", "max_drawdown", "%", _txt(p, "mdd_dollar"), key="dd"),
-            "vol": _kpi_obj("Волатильность", "volatility", "%", "год.", key="vol"),
-        },
+        # Аудит 2026-08-12 вернул этот блок на обложку BASE (в бандле слова
+        # `kpis` не было ни разу — четыре главные риск-метрики считались и не
+        # показывались никому).  Правка 2026-08-18 доводит дело до конца: форма
+        # карточки теперь ОДНА с DEEP, поэтому BASE получает и заметку ИИ, и
+        # ряд спарклайна, и SVG — всё это лежало в payload и терялось в
+        # маппере.  Четвёртая карточка (волатильность) есть только в BASE:
+        # в DEEP её роль играет отдельная риск-панель.
+        "kpis": [
+            _kpi(p, "cvar", "CVaR 95%", "cvar", "ai_cvar_note", "cvar_svg",
+                 "normal", "#5d7c5c", _txt(p, "cvar_dollar")),
+            _kpi(p, "sharpe", "Sharpe Ratio", "sharpe", "ai_sharpe_note", "sharpe_svg",
+                 "good", "#caa01a", f"Sortino {_txt(p, 'sortino')}"),
+            _kpi(p, "dd", "Max Drawdown", "max_drawdown", "ai_mdd_note", "mdd_svg",
+                 "watch", "#c47358", _txt(p, "mdd_dollar")),
+            _kpi(p, "vol", "Волатильность", "volatility", "ai_vol_note", "vol_svg",
+                 "watch", "#c47358", "год."),
+        ],
         "factorPills": _base_factor_pills(p, assets, sectors, riskDecomp),
         "heroStats": [
             # BASE Hero icon map only has {briefcase, trendUp, wallet} (no shield).

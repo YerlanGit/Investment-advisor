@@ -39,6 +39,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
+sys.path.insert(0, str(ROOT / "tests"))
 
 import premium_payload as pp
 from premium_renderer import load_sample
@@ -50,7 +51,15 @@ _BUNDLE = {"base": "base-components.js", "deep": "deep-components.js"}
 
 
 def _bundle(tier: str) -> str:
-    return (_ASSETS / _BUNDLE[tier]).read_text(encoding="utf-8")
+    """Текст бандла БЕЗ комментариев.
+
+    🔴 Гейты ниже ищут литералы, которых не должно быть в поставляемом коде.
+    Babel сохраняет комментарии, поэтому разбор дефекта, написанный рядом с
+    починкой, валил охраняющий её гейт (`§−97`, дважды за раунд). Комментарий
+    до глаз читателя не доходит — гейт обязан смотреть на КОД.
+    """
+    from bundle_text import code_only
+    return code_only((_ASSETS / _BUNDLE[tier]).read_text(encoding="utf-8"))
 
 
 # ──────────────────────────────────────────────────────────────────────────

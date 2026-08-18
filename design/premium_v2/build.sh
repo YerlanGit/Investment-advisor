@@ -24,12 +24,18 @@ echo "@tailwind base;@tailwind components;@tailwind utilities;" > tailwind.in.cs
 
 # 2) Component bundles — DATA-FREE (the data file is injected at render time as
 #    window.DEEP / window.PORTFOLIO).  Concatenate in dependency order, app LAST.
-cat deep/deep-icons.jsx deep/deep-charts.jsx deep/deep-overview.jsx deep/deep-holdings.jsx \
+# `shared-kpi.jsx` идёт в ОБА бандла и обязан стоять ПОСЛЕ icons/charts (он
+# использует `Icons` и `Sparkline`) и ДО overview (тот его вызывает).  Это
+# единственная карточка KPI в проекте: две копии уже разошлись однажды —
+# BASE потерял график динамики и заметку ИИ, хотя данные для них приезжали.
+cat deep/deep-icons.jsx deep/deep-charts.jsx shared-kpi.jsx deep/deep-overview.jsx \
+    deep/deep-holdings.jsx \
     deep/deep-factors.jsx deep/deep-stress-regime.jsx deep/deep-plan.jsx deep/deep-cove.jsx \
     deep/deep-app.jsx > .deep.jsx
 npx babel .deep.jsx -o deep-components.js
 
-cat portfolio-icons.jsx portfolio-charts.jsx portfolio-overview.jsx portfolio-holdings.jsx \
+cat portfolio-icons.jsx portfolio-charts.jsx shared-kpi.jsx portfolio-overview.jsx \
+    portfolio-holdings.jsx \
     portfolio-performance.jsx portfolio-ideas.jsx portfolio-app.jsx > .base.jsx
 npx babel .base.jsx -o base-components.js
 

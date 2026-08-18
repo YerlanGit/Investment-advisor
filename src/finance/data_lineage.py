@@ -504,6 +504,22 @@ def _rag_source_label(banks) -> str:
     return f"ChromaDB · {label} PDF reports"
 
 
+def rag_ranking_method() -> str:
+    """Формула отбора — ИЗ КОДА отбора, а не переписанная в строку.
+
+    Веса живут в `agent.rag_engine` (`W_SEMANTIC` / `W_RECENCY`); строка в
+    панели происхождения обязана следовать за ними, иначе панель начнёт
+    описывать методологию, которой уже нет — как это случилось с порогом
+    «cosine ≥0.72», не существовавшим в коде ни дня (`§−97`).
+    """
+    try:
+        from agent.rag_engine import W_RECENCY, W_SEMANTIC
+        return (f"cosine similarity retrieval "
+                f"(semantic {W_SEMANTIC:g} ⊕ recency {W_RECENCY:g})")
+    except Exception:                                   # pragma: no cover - defensive
+        return "cosine similarity retrieval"
+
+
 def _rag_status(ai_summary: Optional[dict]) -> dict:
     """Retrieval row — proves HOW MUCH bank research the KB holds and whether it
     was actually read on this run (docs/chunks inventory + retrieved snippets),
@@ -515,7 +531,15 @@ def _rag_status(ai_summary: Optional[dict]) -> dict:
     docs   = int(a.get("rag_kb_docs", 0) or 0)
     chunks = int(a.get("rag_kb_chunks", 0) or 0)
     ctx    = a.get("rag_context") or ""
-    snippets = sum(1 for p in ctx.split("\n\n") if p.strip()) if ctx else 0
+    # 🔴 Счётчик берётся у того, кто ПИШЕТ заголовок отрывка, а не считается
+    # здесь заново по пустым строкам: тела чанков это markdown из PDF, и
+    # «абзац» отрывком не является. Живой DEEP 17.08 печатал «прочитано 97
+    # отрывков» при не более чем шести запрошенных (`§−97`).
+    try:
+        from agent.rag_engine import count_snippets
+        snippets = count_snippets(ctx)
+    except Exception:                                   # pragma: no cover - defensive
+        snippets = 0
     kb = f"база: {docs} отчётов · {chunks} чанков"
     if rag_status == "used":
         status, note = "ok", f"прочитано {snippets} отрывков · {kb}"
@@ -528,7 +552,7 @@ def _rag_status(ai_summary: Optional[dict]) -> dict:
     return _row(
         name   = "Bank RAG (выдержки)",
         source = _rag_source_label(a.get("rag_kb_banks")),
-        method = "cosine similarity retrieval (semantic 0.6 ⊕ recency 0.4)",
+        method = rag_ranking_method(),
         status = status,
         note   = note,
     )

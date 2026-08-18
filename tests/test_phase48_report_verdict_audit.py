@@ -120,15 +120,18 @@ class KpiToneReachesDesignDataTest(unittest.TestCase):
         self.assertEqual(kpis["dd"]["color"], "#c47358")
 
     def test_base_carries_tone_too(self) -> None:
-        kpis = pp.build_design_data(self.PAYLOAD, "base")["kpis"]
-        self.assertEqual(kpis["sharpe"]["tone"], "warn")
-        self.assertEqual(kpis["vol"]["tone"], "bad")
+        # `§−97`: BASE отдаёт карточки в ТОЙ ЖЕ форме, что DEEP (`status`, а не
+        # собственный `tone`) — одна форма на два тира, потому что двух копий
+        # карточки не стало.  Утверждение теста прежнее: тон ДОЕХАЛ.
+        kpis = {k["key"]: k for k in pp.build_design_data(self.PAYLOAD, "base")["kpis"]}
+        self.assertEqual(kpis["sharpe"]["status"], "warn")
+        self.assertEqual(kpis["vol"]["status"], "bad")
 
     def test_payload_without_status_does_not_invent_ok(self) -> None:
         """Старый payload не должен получить зелёный «всё хорошо» задаром."""
         thin = {k: v for k, v in self.PAYLOAD.items() if k != "kpi_status"}
         base = pp.build_design_data(thin, "base")["kpis"]
-        self.assertNotIn("ok", {v["tone"] for v in base.values()})
+        self.assertNotIn("ok", {c["status"] for c in base})
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -161,7 +164,7 @@ class BaseRendersItsKpisTest(unittest.TestCase):
         kpis = pp.build_design_data({"cvar": "-3.4", "sharpe": "0.56",
                                      "max_drawdown": "-40.3",
                                      "volatility": "20.5"}, "base")["kpis"]
-        self.assertEqual(set(kpis), {"cvar", "sharpe", "dd", "vol"})
+        self.assertEqual({c["key"] for c in kpis}, {"cvar", "sharpe", "dd", "vol"})
 
 
 class HoldingsCounterIsComputedTest(unittest.TestCase):

@@ -339,6 +339,62 @@ def cmd_verify_universe(args) -> int:
     return 1 if missing else 0
 
 
+
+def cmd_measure_dividend_axis(args) -> int:
+    """MP-A · дивидендная ось: сверка ряда базы с независимым источником.
+
+    `measure-convention` отвечает про СПЛИТЫ и честно говорит, что про
+    дивиденды не отвечает. Эта команда закрывает вторую половину вопроса:
+    растёт ли ряд Stooq быстрее ценового примерно на дивидендную доходность
+    (значит `TOTAL_RETURN`) или совпадает с ним (значит `SPLIT_ADJUSTED`).
+
+    Эталон приносит ОПЕРАТОР — CSV `date,close` из независимого источника по
+    той же бумаге. Ходить в сеть отсюда нельзя: загрузчик работает на машине
+    оператора и не имеет права на сетевые зависимости (`OPERATOR_STOOQ`).
+    """
+    import csv
+
+    import pandas as pd
+
+    ref_path = Path(args.reference)
+    if not ref_path.exists():
+        print(f"🔴 эталонный файл не найден: {ref_path}")
+        return 1
+    try:
+        rows = list(csv.DictReader(ref_path.read_text(encoding="utf-8").splitlines()))
+    except OSError as exc:
+        print(f"🔴 не читается {ref_path}: {exc}")
+        return 1
+    if not rows or "date" not in rows[0] or "close" not in rows[0]:
+        print("🔴 эталон обязан быть CSV с колонками `date,close`")
+        return 1
+    ref = pd.Series(
+        {pd.Timestamp(r["date"]).normalize(): float(r["close"])
+         for r in rows if r.get("date") and r.get("close")})
+
+    from finance.stooq_store import StooqStore
+    with StooqStore.open_readonly(args.db) as store:
+        frame = store.bars([args.ticker], days=args.days)
+    if frame.empty:
+        print(f"🔴 в базе нет ряда по {args.ticker}")
+        return 1
+    ours = frame[args.ticker]
+    ours.index = pd.to_datetime(ours.index.astype(str), format="%Y%m%d").normalize()
+
+    probe = si.measure_dividend_axis(ours, ref, ticker=args.ticker)
+    print(f"бумага           {probe.ticker}")
+    print(f"общих дней       {probe.days}")
+    print(f"рост базы        {probe.growth_a:.6f}")
+    print(f"рост эталона     {probe.growth_b:.6f}")
+    print(f"дрейф, п.п./год  {probe.annual_drift_pp:+.3f}")
+    print(f"вердикт          {probe.verdict}")
+    print()
+    print("Вывод скопируйте ЦЕЛИКОМ — он идёт в `STOOQ_CONVENTION §4`.")
+    if probe.verdict == si.DIV_NO_OVERLAP:
+        return 1
+    return 0
+
+
 def cmd_measure_convention(args) -> int:
     """Замер конвенции корректировок — вход для `STOOQ_CONVENTION §4`."""
     if not _require_archive(args.archive):
@@ -493,6 +549,16 @@ def build_parser() -> argparse.ArgumentParser:
                           help="сырой ряд или скорректированный (блокер MP-09)")
     conv.add_argument("--archive", default=str(DEFAULT_ROOT / "archive"))
     conv.set_defaults(func=cmd_measure_convention)
+
+    div = sub.add_parser("measure-dividend-axis",
+                         help="MP-A: сверить ось дивидендов с эталоном")
+    div.add_argument("--db", default=None, help="путь к prices.sqlite")
+    div.add_argument("--ticker", required=True, help="тикер движка, напр. AAPL.US")
+    div.add_argument("--reference", required=True,
+                     help="CSV `date,close` из независимого источника")
+    div.add_argument("--days", type=int, default=1825,
+                     help="окно сверки в календарных днях (по умолчанию 5 лет)")
+    div.set_defaults(func=cmd_measure_dividend_axis)
     return parser
 
 

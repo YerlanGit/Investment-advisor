@@ -9,7 +9,18 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pandas as pd
-import pytest
+try:
+    import pytest
+except ModuleNotFoundError:          # pragma: no cover - деплой-гейт без pytest
+    # 🔴 IB-F1.  Деплой-гейт гоняет `unittest discover` ВНУТРИ образа, где
+    # pytest не установлен (его нет ни в `requirements.txt`, ни в локе).
+    # Из-за одного этого импорта шаблон поиска пришлось сузить до
+    # `test_phase*.py`, и мимо гейта прошли ВСЕ тесты ценового пути:
+    # `test_stooq_*`, `test_manual_*`, `test_contracts_*`, `test_engine_*`,
+    # `test_layering`, `test_repo_hygiene`.  Зелёный GitHub CI не означал,
+    # что образ проверен.  Функции-тесты этого файла собирает только pytest,
+    # поэтому под `unittest` модуль обязан просто импортироваться.
+    pytest = None
 
 _SRC = Path(__file__).resolve().parent.parent / "src"
 if str(_SRC) not in sys.path:

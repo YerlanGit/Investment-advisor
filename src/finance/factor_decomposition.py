@@ -260,3 +260,36 @@ def build_factor_decomposition(B, F, D, weights,
     out["driven_by"] = driven_by(B, weights, factor_names, asset_names)
     out.update(marginal_overlap(B, F, D, weights, asset_names))
     return out
+
+
+def active_factor_tilt(portfolio_betas: dict, benchmark_betas: dict,
+                       *, min_abs: float = 0.10, top_n: int = 4) -> list[dict]:
+    """Активный наклон портфеля ОТНОСИТЕЛЬНО бенчмарка, по осям.
+
+    Возвращает список `{factor, port, bench, tilt}` — по убыванию |tilt|,
+    только оси с заметным отклонением. Пустой список — валидный ответ
+    «бенчмарк не разложен» или «наклонов нет».
+
+    🔴 Зачем считать это здесь, а не оставлять модели.  Живой DEEP 17.08:
+    в таблице рядом стояли Value портфеля −0.36 и Value бенчмарка −0.08, и
+    нарратив написал «портфель … почти нулевой в недооценённых акциях
+    (Value ≈ −0,08 у бенчмарка)» — то есть описал наклон ПОРТФЕЛЯ числом
+    БЕНЧМАРКА и получил противоположный по смыслу вывод. Модель не считает
+    и не выбирает между двумя похожими числами: разность считает движок,
+    а модель получает её готовой (`§−44` R-5, разбор — `§−97`).
+    """
+    out: list[dict] = []
+    for axis, pv in (portfolio_betas or {}).items():
+        bv = (benchmark_betas or {}).get(axis)
+        try:
+            p_val = float(pv)
+            b_val = float(bv)
+        except (TypeError, ValueError):
+            continue
+        tilt = p_val - b_val
+        if abs(tilt) < min_abs:
+            continue
+        out.append({"factor": str(axis), "port": _round(p_val, 2),
+                    "bench": _round(b_val, 2), "tilt": _round(tilt, 2)})
+    out.sort(key=lambda r: -abs(r["tilt"]))
+    return out[:top_n]
