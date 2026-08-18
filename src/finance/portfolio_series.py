@@ -119,16 +119,24 @@ def compute_equity_curve_series(
 
 def compute_kpi_trend_series(results: dict) -> Optional[dict]:
     """
-    12-month CVaR / Sharpe / MaxDD trend series for the KPI sparklines.
+    12-month CVaR / Sharpe / MaxDD / Vol trend series for the KPI sparklines.
 
     Window: last 252 trading days, sampled at ~12 evenly-spaced snapshots; each
     snapshot computes the metric over a trailing 60-day window of cap-weighted
     portfolio daily LOG returns.
 
-    Returns {"cvar_pts", "sharpe_pts", "mdd_pts"} as RAW decimal series (CVaR /
-    MaxDD are decimals, Sharpe a bare ratio), or None when there is not enough
-    history (≥ 90 daily price obs and ≥ 3 valid snapshots).  The caller scales /
-    renders; no rendering here.
+    Returns {"cvar_pts", "sharpe_pts", "mdd_pts", "vol_pts"} as RAW decimal
+    series (CVaR / MaxDD / Vol are decimals, Sharpe a bare ratio), or None when
+    there is not enough history (≥ 90 daily price obs and ≥ 3 valid snapshots).
+    The caller scales / renders; no rendering here.
+
+    `vol_pts` — annualised σ of the SAME window, added so the BASE tier can draw
+    a trend under EVERY one of its four KPI cards.  BASE shows volatility as a
+    fourth card; without this series that card would be the only one with «нет
+    истории» under it, and a chart missing on one card of four reads as a
+    rendering failure rather than as an honest absence.  It is the same σ the
+    Sharpe snapshot already divides by — one number, one window, no second
+    definition of volatility.
 
     F-21 (2026-07-11): the series source is the engine's masked composite
     (results["port_log_returns"] — per-day renormalised weights, full panel;
@@ -204,7 +212,7 @@ def compute_kpi_trend_series(results: dict) -> Optional[dict]:
             return None
         snap_indices = [step * (i + 1) - 1 for i in range(12) if step * (i + 1) - 1 < n]
 
-        cvar_pts, sharpe_pts, mdd_pts = [], [], []
+        cvar_pts, sharpe_pts, mdd_pts, vol_pts = [], [], [], []
         for end in snap_indices:
             win = port_lr.iloc[max(0, end - 60):end + 1]
             if len(win) < 30:
@@ -213,6 +221,9 @@ def compute_kpi_trend_series(results: dict) -> Optional[dict]:
             cvar_pts.append(float(win.sort_values().iloc[:cutoff].mean()))
             std = float(win.std())
             sharpe_pts.append(float(win.mean()) / std * (252 ** 0.5) if std > 0 else 0.0)
+            # Annualised σ of the very same window — the Sharpe denominator,
+            # surfaced as its own series rather than recomputed elsewhere.
+            vol_pts.append(std * (252 ** 0.5))
             # `win` holds LOG returns — reconstruct equity with exp(cumsum).
             eq = np.exp(win.cumsum())
             dd = (eq / eq.cummax() - 1).min()
@@ -220,7 +231,8 @@ def compute_kpi_trend_series(results: dict) -> Optional[dict]:
 
         if len(cvar_pts) < 3:
             return None
-        return {"cvar_pts": cvar_pts, "sharpe_pts": sharpe_pts, "mdd_pts": mdd_pts}
+        return {"cvar_pts": cvar_pts, "sharpe_pts": sharpe_pts,
+                "mdd_pts": mdd_pts, "vol_pts": vol_pts}
     except Exception as exc:                          # pragma: no cover - defensive
         logger.warning("compute_kpi_trend_series failed: %s", exc)
         return None

@@ -263,6 +263,11 @@ REPORT_TOOL: dict = {
             "ai_cvar_note":           {"type": "string"},
             "ai_sharpe_note":         {"type": "string"},
             "ai_mdd_note":            {"type": "string"},
+            # Четвёртая карточка полосы KPI (волатильность) существует ТОЛЬКО в
+            # BASE — в DEEP её роль играет отдельная риск-панель.  Заметка нужна
+            # затем же, зачем три соседние: карточка без пояснения в ряду из
+            # четырёх читается как недогруженная, а не как «пояснять нечего».
+            "ai_vol_note":            {"type": "string"},
             "ai_risk_comment":        {"type": "string"},
             "ai_holdings_comment":    {"type": "string"},
             "ai_sector_comment":      {"type": "string"},
@@ -616,6 +621,8 @@ def _summarise_for_prompt(results: dict) -> dict:
         # SAME numbers the report's «Источники риска» panel shows, вместо
         # догадок по одной лишь Beta_Market.
         "factor_decomposition": _factor_decomposition_for_prompt(results),
+        # R-3: наклон против бенчмарка ГОТОВОЙ строкой — см. `_factor_tilt_text`.
+        "factor_tilt_text": _factor_tilt_text(results),
     }
 
 
@@ -645,6 +652,37 @@ def _benchmark_profile_for_prompt(results: dict) -> Optional[dict]:
         name = str(tk)
     return {"ticker": _safe_ticker(tk), "name": _safe_text(name, 44),
             "betas": None}
+
+
+def _factor_tilt_text(results: dict) -> str:
+    """Готовая фраза про активный наклон — модель её ЦИТИРУЕТ, а не считает.
+
+    🔴 Живой DEEP 17.08 (`§−97`): в факторной таблице рядом стояли Value
+    портфеля −0.36 и Value бенчмарка −0.08. Нарратив написал «портфель ещё
+    сильнее в рынке и импульсе и почти нулевой в недооценённых акциях
+    (Value ≈ −0,08 у бенчмарка)» — то есть взял число БЕНЧМАРКА, описал им
+    наклон ПОРТФЕЛЯ и получил вывод, противоположный правде: −0.36 это не
+    «почти ноль», а заметный недовес стоимости.
+
+    Лечится приёмом `§−44` R-5: не просить модель пересказать число, а дать
+    готовую строку. Разность считает движок (`finance.factor_decomposition.
+    active_factor_tilt`), здесь — только формат, как и положено слою отчёта.
+    """
+    try:
+        from finance.factor_decomposition import active_factor_tilt
+    except Exception:                                   # pragma: no cover - defensive
+        return ""
+    fd  = (results.get("portfolio_metrics") or {}).get("factor_decomposition") or {}
+    bfp = results.get("benchmark_factor_profile") or {}
+    rows = active_factor_tilt(fd.get("betas_covered") or {}, bfp.get("betas") or {})
+    if not rows:
+        return ""
+    parts = [
+        f"{r['factor']}: портфель {r['port']:+.2f} против {r['bench']:+.2f} "
+        f"у бенчмарка ({'перевес' if r['tilt'] > 0 else 'недовес'} {abs(r['tilt']):.2f})"
+        for r in rows
+    ]
+    return "; ".join(parts)
 
 
 def _factor_decomposition_for_prompt(results: dict) -> dict:
@@ -751,7 +789,19 @@ def _leverage_for_prompt(lm: Optional[dict]) -> dict:
         "net_exposure_pct":   _safe_round((lm.get("net_exposure") or 0) * 100, 1),
         "margin_debt_pct":    _safe_round(abs(min(0.0, lm.get("cash_weight") or 0)) * 100, 1),
         "leverage_ratio":     _safe_round(lm.get("leverage_ratio"), 2),
+        # R-4: НАСКОЛЬКО плечо заметно — вердикт движка, а не «есть/нет».
+        "salience": _leverage_salience(
+            _safe_round(abs(min(0.0, lm.get("cash_weight") or 0)) * 100, 1)),
     }
+
+
+def _leverage_salience(margin_debt_pct) -> str:
+    """Обёртка над движком: слой отчёта решений о значимости не принимает."""
+    try:
+        from finance.scoring import leverage_salience
+        return leverage_salience(margin_debt_pct)
+    except Exception:                                   # pragma: no cover - defensive
+        return "material"
 
 
 def _safe_round(v, digits: int):
@@ -801,6 +851,46 @@ _BANK_TAG_RE = re.compile(
     r"\[(" + "|".join(
         "|".join(p for p in (bank_alias_regex(b), bank_short_regex(b)) if p)
         for b in BANK_ORDER) + r")[^\]]*\]", re.IGNORECASE)
+
+
+#: Короткая форма имени банка, стоящая В ПРОЗЕ (а не внутри тега `[GS]`).
+#: Собирается из ЕДИНОГО реестра (`agent.rag_engine`), поэтому новый банк
+#: подхватывается автоматически, а не заводится здесь второй раз (`§−95`).
+_BANK_SHORT_IN_PROSE = [
+    (bank, re.compile(r"(?<!\[)" + bank_short_regex(bank) + r"(?![^\[\]]*\])",
+                      re.IGNORECASE))
+    for bank in BANK_ORDER if bank_short_regex(bank)
+]
+
+
+def _expand_bank_short_forms(text: str, held: set[str]) -> str:
+    """«против совета GS» → «против совета Goldman Sachs».
+
+    🔴 Живой DEEP 17.08: нарратив написал «против совета GS», а панель
+    провенанса рядом сообщила «ИИ сослался на 1 банк(ов) (Barclays)». Оба
+    утверждения по-своему верны, и вместе они противоречат друг другу: аудитор
+    засчитывает в прозе ТОЛЬКО полные имена (`§−14` C-8 — «MS» это чаще
+    Microsoft или миллисекунды), а модель короткую форму всё равно пишет.
+
+    Причина не в модели: короткой форме её научил САМ ПРОМПТ, где примеры
+    источников выглядят как `[GS]/[JPM]/[Barclays]`. Правило «в прозе только
+    полное имя» жило в коде аудитора и в `CLAUDE.md`, но производителю текста
+    его никто не сообщал — тот же класс, что «запрет неисполним без факта»
+    (`§−90` A-5). Промпт теперь это правило называет, а функция ниже —
+    вторая линия: она чинит текст, если модель всё же сорвалась.
+
+    `held` — тикеры портфеля: если пользователь держит бумагу `MS`, то `MS` в
+    прозе это ПОЗИЦИЯ, а не Morgan Stanley, и трогать её нельзя.
+    """
+    s = str(text or "")
+    if not s:
+        return s
+    for bank, rx in _BANK_SHORT_IN_PROSE:
+        def _sub(m: "re.Match[str]") -> str:
+            token = m.group(0)
+            return token if token.upper() in held else bank
+        s = rx.sub(_sub, s)
+    return s
 
 
 def _canon_bank(raw: str) -> str:
@@ -1095,7 +1185,20 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
     )
 
     rag_block = ""
-    rag_rule  = ""
+    # 🔴 Правило имён эмитента говорится МОДЕЛИ, а не только аудитору.
+    # Аудитор ссылок засчитывает в прозе лишь полные имена (`§−14` C-8: «MS»
+    # это чаще Microsoft или миллисекунды), но самому промпту это правило не
+    # сообщалось — зато примеры источников в нём выглядят как `[GS]/[JPM]`,
+    # то есть промпт УЧИЛ короткой форме. Живой DEEP 17.08 её и написал:
+    # «против совета GS», при этом панель провенанса честно отчиталась об
+    # одном банке. Запрет, о котором не сказано исполнителю, неисполним
+    # (`§−90` A-5, разбор — `§−97`).
+    rag_rule  = (
+        "ИМЯ БАНКА В ТЕКСТЕ — ТОЛЬКО ПОЛНОЕ: «Goldman Sachs», «Morgan Stanley», "
+        "«JPMorgan». Сокращения (GS, MS, JPM) допустимы ИСКЛЮЧИТЕЛЬНО внутри "
+        "квадратного тега источника — [GS], [JPM]. В самой фразе сокращение "
+        "недопустимо: читатель не обязан их знать, а «MS» это ещё и тикер.\n"
+    )
     if market_context:
         ctx_limit = 6000 if tier == "deep" else 2000
         # Defence: RAG chunks come from third-party PDFs that may carry
@@ -1253,6 +1356,22 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
     lev = summary.get("leverage") or {}
     leverage_rule = ""
     if lev.get("is_leveraged"):
+        # 🔴 R-4: масштаб языка пропорционален размеру долга, а не факту его
+        # наличия.  Прежде директива включалась по бинарному `is_leveraged` и
+        # требовала «ОТДЕЛЬНЫМ ПЕРВЫМ пунктом» одинаково при марже 1.9 % и при
+        # марже 60 %.  На книге с техническим минусом кэша это вытесняло из
+        # первой строки вердикта НАСТОЯЩИЙ главный риск.  Порог — вердикт
+        # движка (`finance.scoring.leverage_salience`), не литерал промпта.
+        _sal = str(lev.get("salience") or "material")
+        _place = {
+            "minor":    ("НЕ выноси плечо в первый пункт bullets и не открывай им verdict: "
+                         "при таком размере долга это ДЕТАЛЬ книги, а не её главный риск. "
+                         "Скажи о нём там, где речь о структуре капитала"),
+            "material": ("Упомяни плечо среди bullets — но первым пунктом ставь то, что "
+                         "действительно доминирует в риске"),
+            "dominant": ("Выдели это ОТДЕЛЬНЫМ ПЕРВЫМ пунктом в bullets: при таком долге "
+                         "плечо и есть главный факт о книге"),
+        }.get(_sal, "Упомяни плечо среди bullets")
         leverage_rule = (
             "⚠ ЗАЁМНЫЕ СРЕДСТВА (МАРЖА): портфель использует кредитное плечо — "
             f"валовая экспозиция ≈{lev.get('gross_exposure_pct')}% капитала, "
@@ -1260,8 +1379,7 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
             "ОБЯЗАТЕЛЬНО заполни поле ai_leverage_warning (≤240 знаков): объясни простыми словами, "
             f"что и прибыль, и убыток умножаются на коэффициент плеча ≈{lev.get('leverage_ratio')}x "
             f"(НЕ пиши «удваивается», если плечо не ≈2x), и при просадке возможен Margin Call "
-            "(принудительное закрытие позиций брокером по худшим ценам). Также выдели это "
-            "ОТДЕЛЬНЫМ первым пунктом в bullets [Quant Engine].\n"
+            f"(принудительное закрытие позиций брокером по худшим ценам). {_place} [Quant Engine].\n"
         )
 
     # ── Base tier: compact prompt, 1 pick per scenario, 4 scenarios ──
@@ -1290,6 +1408,8 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
             '[Сравни с нормой 1.0]. [Хорошо/плохо] потому что [причина]",\n'
             '  "ai_mdd_note": "≤120 знаков — простыми словами: портфель уже падал на X% от максимума '
             '(≈Y$). [Приемлемо/опасно] для [профиля]",\n'
+            '  "ai_vol_note": "≤120 знаков — простыми словами: насколько сильно скачет стоимость '
+            'портфеля за год и укладывается ли это в целевую волатильность мандата [Quant Engine]",\n'
             '  "ai_risk_comment": "≤160 знаков — ПРИЧИНА высокого CVaR/Vol: назови 1-2 конкретных тикера '
             '(→ из раздела holdings) и их вклад в риск. Скажи что продать чтобы снизить [Quant Engine]",\n'
             '  "ai_holdings_comment": "≤170 знаков — hotspot-позиции с наибольшим вкладом в риск '
@@ -1301,7 +1421,8 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
             # копирует его как факт (см. инцидент с «8%» уверенности режима).
             'ВЕРБАТИМ (формат: \\"Tech-комплекс <weight_pct>%\\"). Сектор с перекосом + % → ПОЧЕМУ это опасно в режиме '
             f'{regime_label}. Назови сектор для докупки [Regime]",\n'
-            '  "ai_factor_comment": "≤220 знаков — (1) Value-фактор портфеля [Quant Engine]: '
+            '  "ai_factor_comment": "≤220 знаков — наклон против бенчмарка бери ГОТОВОЙ строкой '
+            'summary.factor_tilt_text (числа портфеля и бенчмарка там уже разведены). (1) Value-фактор портфеля [Quant Engine]: '
             'если отрицательный — значит портфель против стоимостных акций, что ПРОТИВОРЕЧИТ режиму '
             f'{regime_label} (→ Barclays/Goldman рекомендуют Value в Recovery). '
             '(2) Назови КОНКРЕТНЫЙ фактор для наращивания (напр. Value через JNJ/KO) и что продать",\n'
@@ -1401,8 +1522,10 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
         "  Факторы (β-концентрации) → Режим (Recovery/Stagflation/...) →\n"
         "  Банки (Goldman/Barclays/JPM) → 4-Pillar (F+V+T+C) → Action Plan.\n"
         f"  СКВОЗНАЯ ОСЬ ЦЕПОЧКИ — БЕНЧМАРК ({bench_label}) и МАНДАТ клиента: (1) факторы и «наклон Δ» "
-        "трактуй как активный перекос ОТНОСИТЕЛЬНО этого бенчмарка (summary.benchmark_profile), не "
-        "«рынка вообще»; (2) секторную/классовую концентрацию всегда сверяй с ЛИМИТАМИ мандата — "
+        "трактуй как активный перекос ОТНОСИТЕЛЬНО этого бенчмарка. 🔴 Наклон УЖЕ ПОСЧИТАН "
+        "движком и лежит в summary.factor_tilt_text ГОТОВОЙ строкой — цитируй её, НЕ вычитай "
+        "беты сам и НЕ подставляй число бенчмарка вместо числа портфеля: у портфеля и у "
+        "бенчмарка беты по одной оси РАЗНЫЕ, и перепутать их значит сказать обратное; (2) секторную/классовую концентрацию всегда сверяй с ЛИМИТАМИ мандата — "
         "превышение лимита класса это НАРУШЕНИЕ мандата и самостоятельный риск; (3) режим и идеи "
         "оценивай через призму мандатного риск-профиля (консерватору — хвост, агрессивному — рост); "
         "(4) Action Plan/ai_action_comment ОБЯЗАН вести портфель В рамки мандата (целевая vol, лимиты "
@@ -1418,6 +1541,8 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
         'лучше или хуже рынка [Quant Engine].",\n'
         '  "ai_mdd_note": "≤120 знаков — простыми словами: насколько глубоко портфель падал '
         'исторически и что это значит для владельца [Quant Engine].",\n'
+        '  "ai_vol_note": "≤120 знаков — простыми словами: насколько сильно скачет стоимость '
+        'портфеля за год и укладывается ли это в целевую волатильность мандата [Quant Engine].",\n'
         '  "ai_risk_comment": "260–380 знаков, 2–3 ПОЛНЫХ предложения — (1) средний убыток в редкий '
         'плохой день (CVaR) и нестабильность (Vol) с цифрами и $ потерь, (2) какая позиция вносит '
         'наибольший вклад [см. ai_holdings_comment], (3) как это соотносится с целевой волатильностью '
@@ -1453,7 +1578,8 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
         '  "ai_sector_comment": "≤170 знаков — какие секторы перевешены и недовешены. '
         'Назови субсектора (напр. внутри Tech: софт vs полупроводники). '
         'Укажи риск ротации при режиме [см. ai_regime_comment]",\n'
-        '  "ai_factor_comment": "≤560 знаков — ЕДИНЫЙ вывод, связывающий ОБЕ иллюстрации секции: '
+        '  "ai_factor_comment": "≤560 знаков — ЕДИНЫЙ вывод, связывающий ОБЕ иллюстрации секции. '
+        'Наклон против бенчмарка бери ГОТОВОЙ строкой summary.factor_tilt_text и не пересчитывай: '
         f'(A) радар β (betas — наклоны портфеля; активный Наклон Δ считается против бенчмарка {bench_label}) И (B) «Откуда берётся риск» '
         '(var_shares — доли дисперсии, twins). СТРОГО по summary.factor_decomposition, числа verbatim. '
         '4 шага через «;», ЗАКОНЧИ мысль (НЕ обрывай на полуслове, уложись в лимит): '
@@ -1669,8 +1795,15 @@ def _fallback_narrative(results: dict, tier: str,
             "убыток; при сильной просадке возможен Margin Call — принудительное "
             "закрытие позиций брокером по невыгодным ценам [Quant Engine]."
         )
-        # Lead the bullets with the leverage warning.
-        bullets.insert(0, ai_leverage_warning)
+        # R-4: место предупреждения зависит от РАЗМЕРА долга.  Фолбэк ставил
+        # его первым всегда — та же ошибка, что в промпте, и «починка обязана
+        # накрывать фолбэк» (`§−91` B-1).  На книге с маржой 1.9 % плечо не
+        # является главным фактом и первую строку не занимает.
+        _debt_pct = abs(min(0.0, lm.get("cash_weight") or 0)) * 100
+        if _leverage_salience(_debt_pct) == "minor":
+            bullets.append(ai_leverage_warning)
+        else:
+            bullets.insert(0, ai_leverage_warning)
 
     action_plan_text = ""
     ai_action_impact = ""
@@ -1988,11 +2121,17 @@ def generate_narrative(results: dict, tier: str = "base",
             )
 
         # CoVe: strip RAG citations whose source file is not in market_context.
-        bullets       = [_strip_unverified_rag_citations(b, market_context) for b in bullets]
-        plan_txt      = _strip_unverified_rag_citations(plan_txt, market_context)
-        verdict       = _strip_unverified_rag_citations(verdict, market_context)
-        plain_summary = _strip_unverified_rag_citations(plain_summary, market_context)
-        impact_txt    = _strip_unverified_rag_citations(impact_txt, market_context)
+        _held_now     = _held_symbols(results)
+
+        def _clean_top(txt: str) -> str:
+            return _expand_bank_short_forms(
+                _strip_unverified_rag_citations(txt, market_context), _held_now)
+
+        bullets       = [_clean_top(b) for b in bullets]
+        plan_txt      = _clean_top(plan_txt)
+        verdict       = _clean_top(verdict)
+        plain_summary = _clean_top(plain_summary)
+        impact_txt    = _clean_top(impact_txt)
 
         # Normalise stock_picks structure.
         stock_picks = _normalise_stock_picks(stock_picks, tier, market_context)
@@ -2030,10 +2169,22 @@ def generate_narrative(results: dict, tier: str = "base",
         # a comment never references a bank report that wasn't retrieved.
         # `_soft_trim` lands the cut on a sentence boundary so the report
         # never shows half-sentences like "[GS][Bar".
+        _held = _held_symbols(results)
+
+        def _clean(txt: str) -> str:
+            """Единственная точка пост-обработки текста нарратива.
+
+            Здесь снимаются неподтверждённые [RAG]-ссылки и разворачиваются
+            короткие имена банков. Обе правки обязаны стоять ДО аудита ссылок,
+            иначе панель провенанса опишет не тот текст, который читает
+            пользователь (`§−97`).
+            """
+            return _expand_bank_short_forms(
+                _strip_unverified_rag_citations(txt, market_context), _held)
+
         def _comment(key: str, limit: int = 250) -> str:
             txt = str(parsed.get(key, "")).strip()
-            stripped = _strip_unverified_rag_citations(txt, market_context)
-            return _soft_trim(stripped, limit)
+            return _soft_trim(_clean(txt), limit)
 
         # Structured regime-confirmation cell — DEEP tier only.  Validates
         # that the AI cross-checked the engine's regime label against macro
@@ -2045,15 +2196,13 @@ def generate_narrative(results: dict, tier: str = "base",
             stance  = str(raw.get("stance", "")).strip().lower()
             if stance not in {"confirms", "partial", "diverges"}:
                 stance = ""
-            summary = _soft_trim(_strip_unverified_rag_citations(
-                str(raw.get("summary", "")).strip(), market_context), 260)
+            summary = _soft_trim(_clean(str(raw.get("summary", "")).strip()), 260)
             signals_in = raw.get("signals") or []
             # 2026-07-05: cap 6→7 — the checklist gained a mandatory INFLATION
             # (breakeven level⊕темп) checkpoint, mirroring the overlay's third
             # nudge; at 6 the model had to drop a signal to fit.
             signals = [
-                _soft_trim(_strip_unverified_rag_citations(
-                    str(s).strip(), market_context), 120)
+                _soft_trim(_clean(str(s).strip()), 120)
                 for s in signals_in if str(s).strip()
             ][:7]
             return {"stance": stance, "summary": summary, "signals": signals}
@@ -2095,6 +2244,7 @@ def generate_narrative(results: dict, tier: str = "base",
             "ai_cvar_note":             _comment("ai_cvar_note", 160),
             "ai_sharpe_note":           _comment("ai_sharpe_note", 160),
             "ai_mdd_note":              _comment("ai_mdd_note", 160),
+            "ai_vol_note":              _comment("ai_vol_note", 160),
             "ai_risk_comment":          _comment("ai_risk_comment", 420 if tier == "deep" else 250),
             "ai_benchmark_comment":     _comment("ai_benchmark_comment"),
             "ai_performance_comment":   _comment("ai_performance_comment"),
@@ -2167,6 +2317,21 @@ def _normalise_stock_picks(raw: dict, tier: str, market_context: str) -> dict:
     return result
 
 
+def _held_symbols(results: dict) -> set[str]:
+    """Базовые символы позиций портфеля (без суффикса площадки).
+
+    Нужен двоим: фильтру идей и разворачиванию коротких имён банков (`MS` в
+    прозе это Morgan Stanley — но НЕ у того, кто держит бумагу `MS`).
+    Приватное имя между потребителями не ходит, поэтому функция публичная в
+    пределах модуля и одна на обоих (`tests/test_layering.py`).
+    """
+    perf = results.get("performance_table")
+    if perf is None or getattr(perf, "empty", True):
+        return set()
+    col = perf.get("Ticker", perf.index if getattr(perf.index, "name", None) == "Ticker" else [])
+    return {str(x).upper().split(".")[0] for x in col}
+
+
 def _remove_held_picks(stock_picks: dict, results: dict) -> dict:
     """
     Remove tickers already in the live portfolio from AI idea picks.
@@ -2176,13 +2341,9 @@ def _remove_held_picks(stock_picks: dict, results: dict) -> dict:
     scenarios are all cleaned — the AI should only suggest additions, not echo
     current holdings.
     """
-    perf = results.get("performance_table")
-    if perf is None or getattr(perf, "empty", True):
+    held: set[str] = _held_symbols(results)
+    if not held:
         return stock_picks
-    held: set[str] = {
-        str(t).upper().split(".")[0]
-        for t in perf.get("Ticker", perf.index if perf.index.name == "Ticker" else [])
-    }
     if not held:
         return stock_picks
     for scenario in stock_picks.values():

@@ -63,11 +63,17 @@ steps:
       - discover
       - -s
       - /app/tests
-      # Only the hermetic, network-free engine suite (test_phase*.py).  The
-      # broker-integration tests (test_freedom_*.py) depend on pytest +
-      # live credentials and are intentionally excluded from the deploy gate.
+      # 🔴 IB-F1 (исправлено 2026-08-18).  Шаблон был `test_phase*.py`, и мимо
+      # деплой-гейта проходил ВЕСЬ ценовой путь: `test_stooq_*`, `test_manual_*`,
+      # `test_contracts_*`, `test_engine_*`, `test_layering`, `test_repo_hygiene`.
+      # Зелёный GitHub CI не означал проверенный ОБРАЗ — CI видит полный
+      # чекаут, Cloud Build только то, что попало в слой.
+      # Единственной причиной сужения был `import pytest` в двух брокерских
+      # тестах; теперь он необязателен, и гейт смотрит на всю сюиту.
+      # Тесты, читающие `design/`, `docs/`, `scripts/`, `cloud_function/`,
+      # обязаны сами вызывать `skipTest` — в образе этих каталогов нет.
       - -p
-      - "test_phase*.py"
+      - "test_*.py"
 
   # ── Step 3: Push both tags (only when tests are green) ─────────────────────
   - id: push
@@ -136,7 +142,7 @@ steps:
       # тогда, когда пользователь ждёт портфель.  На одном CPU потоки > 1 — это
       # чистые накладные расходы и для pandas/sklearn тоже, так что кап здесь
       # ничего не замедляет.
-      - --set-env-vars=REPORT_BUCKET_NAME=ramp-bot-reports,CHROMA_BUCKET=ramp-bot-chroma-db-investadv,TOKENOMICS_DB_PATH=/mnt/state/tokenomics.db,VAULT_DB_PATH=/mnt/state/users_vault.db,REPORTING_CURRENCY=USD,ADMIN_USER_IDS=148046720,PREMIUM_REPORT_ENABLED=true,STOOQ_DB_PATH=/mnt/state/stooq/prices.sqlite,STOOQ_LOCAL_COPY_DIR=/tmp/ramp-stooq,OMP_NUM_THREADS=1,OPENBLAS_NUM_THREADS=1,TOKENIZERS_PARALLELISM=false
+      - --set-env-vars=REPORT_BUCKET_NAME=ramp-bot-reports,CHROMA_BUCKET=ramp-bot-chroma-db-investadv,TOKENOMICS_DB_PATH=/mnt/state/tokenomics.db,VAULT_DB_PATH=/mnt/state/users_vault.db,REPORTING_CURRENCY=USD,ADMIN_USER_IDS=148046720,PREMIUM_REPORT_ENABLED=true,STATIC_EGRESS=off,STOOQ_DB_PATH=/mnt/state/stooq/prices.sqlite,STOOQ_LOCAL_COPY_DIR=/tmp/ramp-stooq,OMP_NUM_THREADS=1,OPENBLAS_NUM_THREADS=1,TOKENIZERS_PARALLELISM=false
 
   # ── Step 4b: STATIC EGRESS (2026-07-08 fix for Cloudflare-WAF 403) ──────────
   # The broker's Cloudflare WAF blocks Cloud Run's SHARED egress IP pool (the
@@ -154,16 +160,29 @@ steps:
     args:
       - -c
       - |
+        # 🔴 R-9.  Пустой `_VPC_CONNECTOR` — это ШТАТНЫЙ дефолт, поэтому шаг
+        # годами заканчивался предупреждением в логе сборки, которого никто не
+        # читает, и сервис молча жил на общем пуле IP.  Состояние теперь
+        # доезжает до контейнера переменной `STATIC_EGRESS`: диагностика отказа
+        # брокера обязана называть ПРИЧИНУ, по которой блок не пройдёт сам
+        # (§−94), а не оставлять её в истории сборки.
+        #
+        # Дефолт `off` ставит шаг `deploy`, а этот шаг только ПОВЫШАЕТ его до
+        # `on`.  Иначе обычный деплой (без коннектора) создавал бы ВТОРУЮ
+        # ревизию Cloud Run ради одной переменной — цена диагностики не должна
+        # быть выше самой диагностики.
         if [ -n "${_VPC_CONNECTOR}" ]; then
           echo "Routing ramp-bot egress through VPC connector: ${_VPC_CONNECTOR}"
           gcloud run services update ${_SERVICE} \
             --region=${_REGION} \
             --vpc-connector=${_VPC_CONNECTOR} \
             --vpc-egress=all-traffic \
+            --update-env-vars=STATIC_EGRESS=on \
             --quiet \
             || echo "WARN: could not attach VPC connector — check it exists in ${_REGION} and the SA has run.admin. Bot still runs on the shared egress IP."
         else
           echo "No _VPC_CONNECTOR set — bot uses the default shared egress IP (Cloudflare-WAF risk). Run scripts/setup_static_egress.sh to enable a static egress IP."
+          echo "STATIC_EGRESS=off задан шагом deploy — сервис знает, что живёт на общем пуле."
         fi
         exit 0
 

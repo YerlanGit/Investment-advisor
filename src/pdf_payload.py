@@ -1517,6 +1517,7 @@ def build_payload(results: dict, tier: str,
         "ai_cvar_note":          (ai_summary or {}).get("ai_cvar_note", ""),
         "ai_sharpe_note":        (ai_summary or {}).get("ai_sharpe_note", ""),
         "ai_mdd_note":           (ai_summary or {}).get("ai_mdd_note", ""),
+        "ai_vol_note":           (ai_summary or {}).get("ai_vol_note", ""),
         # Per-section AI commentary (populated by Claude, empty if fallback —
         # the templates hide each block when its comment is empty).
         "ai_risk_comment":           (ai_summary or {}).get("ai_risk_comment", ""),
@@ -2284,10 +2285,14 @@ def _build_integrity_checks(results: dict,
     _ai = ai_summary or {}
     rag_status  = _ai.get("rag_status")
     rag_context = _ai.get("rag_context") or ""
-    # _fetch_rag_context joins sections with "\n\n"; count non-blank
-    # paragraphs as approximate snippet count (header lines included).
-    snippets    = (sum(1 for p in rag_context.split("\n\n") if p.strip())
-                   if rag_context else 0)
+    # 🔴 Один счётчик на оба пути отчёта — из `rag_engine`, где печатается сам
+    # заголовок отрывка. Прежняя формула считала непустые АБЗАЦЫ и завышала
+    # число в разы: в живом DEEP 17.08 «97 отрывков» при шести запрошенных.
+    try:
+        from agent.rag_engine import count_snippets
+        snippets = count_snippets(rag_context)
+    except Exception:                                   # pragma: no cover - defensive
+        snippets = 0
     # KB inventory (2026-07-04): show how many bank PDFs / chunks the store holds
     # so «RAG видит отчёты» is provable, not a bare flag.
     _kb_docs   = int(_ai.get("rag_kb_docs", 0) or 0)
@@ -2297,7 +2302,13 @@ def _build_integrity_checks(results: dict,
         rag_status = "used" if _ai.get("used_rag") else "no_match"
     if rag_status == "used":
         _rag_icon = "✓"
-        _rag_detail = f"ChromaDB · cosine ≥0.72 · прочитано ~{snippets} отрывков из {_kb}"
+        # Порога «cosine ≥0.72» в коде НЕТ и никогда не было: отбор идёт
+        # ре-ранжированием (семантика 0.6 ⊕ свежесть 0.4) и срезом top-N.
+        # Печатать несуществующий порог в панели происхождения — выдумывать
+        # методологию ровно там, где читатель её проверяет (`§−97`).
+        from finance.data_lineage import rag_ranking_method
+        _rag_detail = (f"ChromaDB · {rag_ranking_method()} · "
+                       f"прочитано {snippets} отрывков из {_kb}")
     elif rag_status == "no_match":
         _rag_icon, _rag_detail = "—", f"база {_kb} · релевантных отчётов не найдено"
     else:  # "unavailable"
@@ -2381,3 +2392,141 @@ __all__ = ["build_payload", "TIER_BASE", "TIER_DEEP", "TIER_SCENARIO"]
 # контракт, а не внутренность).  Приватный алиас сохранён, чтобы не трогать
 # уже написанные тесты.  `ARCHITECTURE_FOR_AGENTS.md` §4 Арх-5.
 _model_display_name = model_display_name
+
+
+# ── R-6 · СХЕМА КОНТРАКТА PAYLOAD ────────────────────────────────────────────
+#
+# 🔴 Зачем она.  `build_payload` отдаёт сотню ключей, и до 2026-08-18 состав
+# этой сотни не был записан НИГДЕ.  Прямое следствие — дефект `§−90` A-2:
+# ключ `kpis` жил в контракте BASE и не рендерился ВООБЩЕ, потому что «что
+# входит в payload» знал только сам код, который его собирает.  Схема ниже
+# делает состав ПРЕДМЕТОМ ДОГОВОРА: новый ключ надо объявить, исчезнувший —
+# убрать осознанно, и тест это проверяет (`tests/test_phase56_payload_schema`).
+#
+# Пинится РОД значения, а не тип: половина ключей на пустом прогоне равна
+# `None` (данных нет), и «тип» здесь врал бы. Род отвечает на вопрос
+# потребителя — «мне придёт текст, число, список или словарь».
+#
+#   text — строка, готовая к печати (формат уже наложен)
+#   num  — число либо None, если величина не посчитана
+#   flag — булев признак
+#   list — список (возможно пустой)
+#   map  — словарь либо None, если блок не собран
+#
+# Контракт результатов движка живёт отдельно и выше по течению —
+# `finance/contracts.py` (`RESULTS_KEYS`). Это ДВЕ разные границы конвейера,
+# и сливать их нельзя: results → payload → design-data.
+
+PAYLOAD_CONTRACT: dict[str, str] = {
+    "action_plan": "list",
+    "ai_4pillar_comment": "text",
+    "ai_action_comment": "text",
+    "ai_action_impact": "text",
+    "ai_benchmark_comment": "text",
+    "ai_bullets": "list",
+    "ai_cvar_note": "text",
+    "ai_effect_comment": "text",
+    "ai_factor_comment": "text",
+    "ai_holdings_comment": "text",
+    "ai_ideas": "map",
+    "ai_leverage_warning": "text",
+    "ai_mdd_note": "text",
+    "ai_model_used": "text",
+    "ai_performance_comment": "text",
+    "ai_plain_summary": "text",
+    "ai_regime_comment": "text",
+    "ai_risk_comment": "text",
+    "ai_sector_comment": "text",
+    "ai_sharpe_note": "text",
+    "ai_stock_picks": "map",
+    "ai_stress_comment": "text",
+    "ai_verdict": "text",
+    "ai_vol_note": "text",
+    "asset_concentration": "map",
+    "assets": "list",
+    "benchmark_name": "text",
+    "benchmark_ticker": "text",
+    "benchmark_vol_pct": "num",
+    "bl_records": "list",
+    "bot_username": "text",
+    "cove_lineage": "list",
+    "cvar": "text",
+    "cvar_ci": "text",
+    "cvar_dollar": "text",
+    "cvar_num": "num",
+    "data_quality": "map",
+    "expected_effect": "map",
+    "expected_effect_sharpe_note": "text",
+    "expected_effect_uses_bl": "flag",
+    "expected_return_annual": "text",
+    "expected_return_pct_num": "num",
+    "expected_sharpe": "text",
+    "factor_variance": "map",
+    "fundamental_layer": "list",
+    "holdings_count": "num",
+    "hotspots": "list",
+    "ideas_count": "num",
+    "integrity_checks": "list",
+    "kpi_extremes": "map",
+    "kpi_status": "map",
+    "leverage_metrics": "map",
+    "macro_drivers": "map",
+    "mandate_compliance": "map",
+    "max_drawdown": "text",
+    "max_drawdown_num": "num",
+    "mdd_dollar": "text",
+    "model_uncovered_names": "text",
+    "model_uncovered_pct": "num",
+    "performance_benchmark_name": "text",
+    "period_returns_table": "map",
+    "pie_chart_data": "list",
+    "pnl_best": "map",
+    "pnl_total_abs": "text",
+    "pnl_total_color": "text",
+    "pnl_total_pct": "text",
+    "pnl_worst": "map",
+    "portfolio_metrics": "map",
+    "prev_risk_score": "num",
+    "priority_action": "map",
+    "rag_banks": "list",
+    "regime": "map",
+    "regime_confirmation": "map",
+    "regime_consistency": "map",
+    "regime_rag_confirm": "list",
+    "return_series_coverage": "map",
+    "risk_free_rate": "text",
+    "risk_label": "text",
+    "risk_mandate": "text",
+    "risk_mandate_label": "text",
+    "risk_pct": "num",
+    "risk_score_delta": "num",
+    "risk_waterfall": "map",
+    "scenarios": "list",
+    "score_breakdown": "list",
+    "sector_complex": "map",
+    "sector_concentration": "map",
+    "sector_groups": "list",
+    "sector_warnings": "list",
+    "sectors": "list",
+    "sharpe": "text",
+    "sharpe_num": "num",
+    "smart_money": "map",
+    "sortino": "text",
+    "sortino_num": "num",
+    "stress_scenarios": "list",
+    "tier": "text",
+    "total_value_usd": "text",
+    "used_rag": "flag",
+    "var_95_daily": "text",
+    "var_95_daily_num": "num",
+    "var_dollar": "text",
+    "volatility": "text",
+    "volatility_num": "num",
+}
+
+DEEP_ONLY_KEYS: frozenset[str] = frozenset({
+    "action_plan",
+    "bl_records",
+    "score_breakdown",
+    "smart_money",
+})

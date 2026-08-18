@@ -142,38 +142,19 @@ const HeroRiskGauge = ({ value, delta, profile }) => (
 // `base-components.js` слова `kpis` не было НИ РАЗУ — четыре главные
 // риск-метрики считались движком и не показывались никому.  То же с
 // `verdict.expReturn` / `verdict.expSharpe` (BLOCK 5): в DEEP они на обложке,
-// в BASE их не рендерил никто.  Платный тир не показывал свой основной
-// результат.  Полоса ниже возвращает всё это на обложку BASE.
+// в BASE их не рендерил никто.  Полоса ниже возвращает всё это на обложку.
 //
-// Тон карточки — из движка (`finance.scoring.kpi_status`), а не из макета:
-// «ok» зелёный, «warn» золотой, «bad» терракота.  Пустой/незнакомый тон →
-// нейтральные чернила, никогда не «всё хорошо».
-const _KPI_TONE = {
-  ok:   { bar:'#5d7c5c', text:'text-sage-600' },
-  warn: { bar:'#caa01a', text:'text-gold-700' },
-  bad:  { bar:'#c47358', text:'text-rust-600' },
-};
-
-const RiskKpiCard = ({ k }) => {
-  const tone = _KPI_TONE[k.tone] || { bar:'#a8a293', text:'text-ink-900' };
-  const v = (k.value === null || k.value === undefined || Number.isNaN(Number(k.value)))
-    ? '—' : `${Number(k.value).toFixed(k.unit === '%' ? 1 : 2)}${k.unit || ''}`;
-  return (
-    <div className="glass-strong rounded-3xl p-4 sm:p-5 shadow-card lift flex flex-col min-w-0"
-         style={{ borderTop: `2px solid ${tone.bar}` }}>
-      <div className="text-[10px] tracking-widest uppercase text-ink-500 font-mono truncate">{k.label}</div>
-      <div className={`mt-1.5 num font-light leading-none tracking-tight break-words ${tone.text}`}
-           style={{ fontSize: 'clamp(22px, 6.4vw, 34px)' }}>{v}</div>
-      {k.frame && k.frame !== '–' && (
-        <div className="mt-1.5 text-[11px] text-ink-500 font-mono truncate">{k.frame}</div>
-      )}
-    </div>
-  );
-};
+// 🔴 Правка 2026-08-18 (`§−97`): собственная урезанная карточка BASE удалена.
+// Она показывала ТОЛЬКО значение и подпись, тогда как график динамики и
+// заметка ИИ уже лежали в payload BASE и терялись в маппере — читатель
+// платного отчёта видел цифру без всякого объяснения, откуда она и куда
+// движется.  Карточка теперь общая с DEEP (`shared-kpi.jsx`), поэтому
+// разойтись повторно она не может.
 
 const RiskKpiStrip = ({ kpis, verdict }) => {
-  const order = ['cvar', 'sharpe', 'dd', 'vol'];
-  const cards = order.map(key => kpis && kpis[key]).filter(Boolean);
+  // Маппер отдаёт СПИСОК карточек в том же виде, что и DEEP; порядок задан
+  // там, а не здесь — иначе он был бы вторым местом, где живёт состав полосы.
+  const cards = Array.isArray(kpis) ? kpis.filter(Boolean) : [];
   if (!cards.length) return null;
   const fwd = [
     (verdict.expReturn && verdict.expReturn !== '–')
@@ -183,8 +164,11 @@ const RiskKpiStrip = ({ kpis, verdict }) => {
   ].filter(Boolean);
   return (
     <div className="mb-10">
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        {cards.map((k, i) => <RiskKpiCard key={i} k={k}/>)}
+      {/* Сетка повторяет DEEP: на телефоне ОДНА колонка. Две колонки на 320 px
+          оставляли карточке ~140 px — в них не помещается ни график динамики,
+          ни заметка ИИ, ради которых карточка и существует. */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
+        {cards.map(k => <KpiCard key={k.key} k={k}/>)}
       </div>
       {/* Форвардная оценка факторной модели — ДРУГАЯ величина, чем
           реализованный Sharpe в карточке слева, поэтому подписана источником

@@ -1878,7 +1878,7 @@
     {# ─── KPI cards (Step 6.2b — wire value + sub only; sparklines + AI ────
          commentary remain hardcoded prototype text for the next round.   #}
     {# KPI 1 — CVaR 95% #}
-    <div class="kpi st-{{ data.kpi_status.cvar if data.kpi_status and data.kpi_status.cvar else 'normal' }}">
+    <div class="kpi st-{{ data.kpi_status.cvar if data.kpi_status and data.kpi_status.cvar else 'warn' }}">
       <div class="kpi-name">CVaR&nbsp;95%</div>
       <div class="kpi-value-row">
         <span class="kpi-value">{{ data.cvar }}</span>
@@ -1886,14 +1886,13 @@
           (худшие 5% дней · за 1 день{% if data.cvar_dollar %} · ≈ {{ data.cvar_dollar }}{% endif %}{% if data.cvar_ci %} · разброс {{ data.cvar_ci }}{% endif %})
         </span>
       </div>
-{# KPI sparkline — historical trend chart for this metric.
-         Gated behind data.kpi_sparklines because the engine doesn't yet
-         emit per-KPI history series.  When the future helper
-         tg_bot._build_kpi_sparkline_series() lands, the chart re-appears
-         automatically; until then the hardcoded prototype polyline would
-         be misleading (it implies real history) — so we hide it cleanly.
-         The headline value + AI commentary above + below remain wired to
-         real engine data, so the KPI is still informative. #}
+{# Спарклайн метрики — срезы за последний год, каждый по скользящему
+         окну 60 дней (`finance.portfolio_series.compute_kpi_trend_series`).
+         🔴 Комментарий здесь годами утверждал, что «движок ещё не отдаёт
+         поштучные ряды» и ждал будущего хелпера: хелпер приехал, а текст
+         остался и убеждал не проверять. Гейт `{% if %}` нужен по ДРУГОЙ
+         причине — истории может не хватить (< 90 наблюдений), и тогда
+         ячейка честно исчезает. #}
       {% if data.kpi_sparklines %}
       <div class="kpi-spark">
         {{ data.kpi_sparklines.cvar_svg | safe }}
@@ -1908,7 +1907,7 @@
     </div>
 
     <!-- KPI 2 — Sharpe Ratio -->
-    <div class="kpi st-{{ data.kpi_status.sharpe if data.kpi_status and data.kpi_status.sharpe else 'good' }}">
+    <div class="kpi st-{{ data.kpi_status.sharpe if data.kpi_status and data.kpi_status.sharpe else 'warn' }}">
       <div class="kpi-name">Sharpe Ratio</div>
       <div class="kpi-value-row">
         <span class="kpi-value">{{ data.sharpe }}</span>
@@ -1922,14 +1921,13 @@
         <span class="kpi-sub">Ожид. доходность (год.): <b>{{ data.expected_return_annual }}</b>{% if data.expected_sharpe and data.expected_sharpe != '—' %} · фвд-Sharpe {{ data.expected_sharpe }}{% endif %}</span>
       </div>
       {% endif %}
-{# KPI sparkline — historical trend chart for this metric.
-         Gated behind data.kpi_sparklines because the engine doesn't yet
-         emit per-KPI history series.  When the future helper
-         tg_bot._build_kpi_sparkline_series() lands, the chart re-appears
-         automatically; until then the hardcoded prototype polyline would
-         be misleading (it implies real history) — so we hide it cleanly.
-         The headline value + AI commentary above + below remain wired to
-         real engine data, so the KPI is still informative. #}
+{# Спарклайн метрики — срезы за последний год, каждый по скользящему
+         окну 60 дней (`finance.portfolio_series.compute_kpi_trend_series`).
+         🔴 Комментарий здесь годами утверждал, что «движок ещё не отдаёт
+         поштучные ряды» и ждал будущего хелпера: хелпер приехал, а текст
+         остался и убеждал не проверять. Гейт `{% if %}` нужен по ДРУГОЙ
+         причине — истории может не хватить (< 90 наблюдений), и тогда
+         ячейка честно исчезает. #}
       {% if data.kpi_sparklines %}
       <div class="kpi-spark">
         {{ data.kpi_sparklines.sharpe_svg | safe }}
@@ -1944,20 +1942,19 @@
     </div>
 
     <!-- KPI 3 — Max Drawdown -->
-    <div class="kpi st-{{ data.kpi_status.dd if data.kpi_status and data.kpi_status.dd else 'watch' }}">
+    <div class="kpi st-{{ data.kpi_status.dd if data.kpi_status and data.kpi_status.dd else 'warn' }}">
       <div class="kpi-name">Max Drawdown</div>
       <div class="kpi-value-row">
         <span class="kpi-value">{{ data.max_drawdown }}</span>
         <span class="kpi-sub">(пик→дно{% if data.mdd_dollar %} · ≈ {{ data.mdd_dollar }}{% endif %})</span>
       </div>
-{# KPI sparkline — historical trend chart for this metric.
-         Gated behind data.kpi_sparklines because the engine doesn't yet
-         emit per-KPI history series.  When the future helper
-         tg_bot._build_kpi_sparkline_series() lands, the chart re-appears
-         automatically; until then the hardcoded prototype polyline would
-         be misleading (it implies real history) — so we hide it cleanly.
-         The headline value + AI commentary above + below remain wired to
-         real engine data, so the KPI is still informative. #}
+{# Спарклайн метрики — срезы за последний год, каждый по скользящему
+         окну 60 дней (`finance.portfolio_series.compute_kpi_trend_series`).
+         🔴 Комментарий здесь годами утверждал, что «движок ещё не отдаёт
+         поштучные ряды» и ждал будущего хелпера: хелпер приехал, а текст
+         остался и убеждал не проверять. Гейт `{% if %}` нужен по ДРУГОЙ
+         причине — истории может не хватить (< 90 наблюдений), и тогда
+         ячейка честно исчезает. #}
       {% if data.kpi_sparklines %}
       <div class="kpi-spark">
         {{ data.kpi_sparklines.mdd_svg | safe }}

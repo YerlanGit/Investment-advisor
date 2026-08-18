@@ -132,80 +132,10 @@ const MandateCard = ({ m }) => (
   </div>
 );
 
-// KPI card — value + a prominent 12-month trend chart (user request «добавь
-// графики к показателям»).  Draws the design <Sparkline> from the real numeric
-// series; falls back to the server-rendered SVG if only that is present.
-// Per-metric methodology note (hover) — makes the denominators explicit
-// (Sprint-3 #8): Sharpe/Sortino use the STRUCTURAL factor volatility σ, not a
-// realised sample vol.
-const _KPI_METHOD = {
-  sharpe: 'Знаменатель — структурная (факторная) волатильность σ = √(w′Σw), Σ = B·F·Bᵀ + D; числитель — геом. годовая доходность − валютно-сопоставленная RFR.',
-  cvar:   'Средний убыток в худшие 5% дней (1-дневный горизонт), эмпирически + bootstrap-CI.',
-  dd:     'Максимальная просадка пик→дно по реконструированной кривой капитала exp(Σ log-доходностей).',
-};
-
-// R-9 (2026-08-02): у ЧИСЛА и у ГРАФИКА разные окна, и это надо назвать.
-// Крупная цифра — по полному окну истории; точки спарклайна — 12 срезов за
-// последний год, каждый по СКОЛЬЗЯЩЕМУ окну 60 дней. Отсюда законная, но
-// сбивающая с толку картина: Sharpe в заголовке +0.55, а линия целиком ниже
-// нуля (последний год был хуже полной истории). Без подписи это читается
-// как противоречие в отчёте.
-const _SPARK_NOTE = '12 срезов за год · каждый по скользящему окну 60 дней (число выше — по полному окну истории)';
-
-// Аудит 2026-08-12: `k.status` теперь ВЕРДИКТ ПО ЗНАЧЕНИЮ из движка
-// (`finance.scoring.kpi_status` → ok/warn/bad), а не литерал дизайн-макета.
-// Прежде Sharpe всегда получал золотой бейдж «good» — даже когда ИИ-заметка
-// на той же карточке говорила «отдача на единицу риска слабая».  Старые ключи
-// (normal/good/watch) оставлены для payload'ов, собранных до этой правки.
-const _KPI_BORDER = {
-  ok:'#5d7c5c', warn:'#caa01a', bad:'#c47358',
-  normal:'#5d7c5c', good:'#caa01a', watch:'#c47358',
-};
-
-const KpiCard = ({ k }) => {
-  const border = _KPI_BORDER[k.status] || '#a8a293';
-  const hasPts = Array.isArray(k.pts) && k.pts.length >= 2;
-  return (
-    <div className="glass-strong rounded-4xl p-6 shadow-card lift flex flex-col"
-         style={{ borderTop:`2px solid ${border}` }}>
-      <div className="flex items-center justify-between mb-2">
-        <div className="text-[10px] tracking-widest uppercase text-ink-500 font-mono cursor-help"
-             title={_KPI_METHOD[k.key] || undefined}>{k.name}</div>
-        <span className="text-[40px] leading-none font-light num text-ink-900 tracking-tight">{k.value}</span>
-      </div>
-      {/* trend chart — how the metric moved over the last 12 months */}
-      <div className="rounded-2xl bg-cream-50/70 border border-ink-900/5 px-3 pt-2 pb-1.5 mb-3">
-        <div className="flex items-center justify-between text-[8.5px] tracking-widest uppercase text-ink-400 font-mono mb-0.5">
-          <span>Динамика · окно 60 дн.</span><span>сейчас</span>
-        </div>
-        <div className="h-12">
-          {hasPts
-            ? <div title={_SPARK_NOTE}><Sparkline points={k.pts} color={k.color} height={44} width={300} gradId={`spk-${k.key}`}/></div>
-            : (k.svg
-                ? <div className="w-full h-full" dangerouslySetInnerHTML={{ __html: k.svg }}/>
-
-                : <div className="w-full h-full flex items-center justify-center text-[9px] text-ink-300 font-mono">нет истории</div>)}
-        </div>
-        {/* 🔴 §−92: подпись сделана ВИДИМОЙ, а не всплывающей.
-            `R-9` (§−48) уже назвал проблему — у числа и у графика разные окна
-            (Max Drawdown −40.3% над линией, не опускающейся ниже −17.2%) — но
-            доставлял объяснение через `title=`, то есть ТОЛЬКО по наведению
-            мыши. Продукт читают из Telegram, с телефона, где наведения нет:
-            для большинства читателей раскрытия просто не существовало. */}
-        {hasPts && (
-          <div className="mt-1 text-[8px] leading-tight text-ink-400 font-mono">
-            число выше — по полному окну истории
-          </div>
-        )}
-      </div>
-      <div className="text-[10.5px] text-ink-400 font-mono leading-snug mb-4">{k.sub}</div>
-      <div className="mt-auto flex items-start gap-2.5 rounded-2xl bg-cream-50 border border-ink-900/5 px-3.5 py-3">
-        <Icons.Sparkles size={13} className="text-gold-600 mt-0.5 flex-shrink-0" stroke={1.8}/>
-        <p className="text-[11.5px] text-ink-700 leading-snug font-light">{k.ai}</p>
-      </div>
-    </div>
-  );
-};
+// KPI-карточка переехала в `shared-kpi.jsx` — ОДНА реализация на оба
+// тира.  Копия здесь и урезанная копия в `portfolio-overview.jsx`
+// расходились: BASE не показывал ни график динамики, ни заметку ИИ,
+// хотя данные для обеих лежали в его payload (`§−97`).
 
 // Concentration table
 const ConcentrationCard = ({ rows }) => (
@@ -217,14 +147,20 @@ const ConcentrationCard = ({ rows }) => (
       </div>
       <span className="px-2.5 py-1 rounded-full bg-cream-50 border border-ink-900/5 text-[10px] font-mono tracking-wider text-ink-700">TRC · Euler</span>
     </div>
-    <div className="grid grid-cols-[1.4fr_1fr_1fr_1.6fr_auto] gap-3 px-1 pb-2 text-[9px] tracking-widest uppercase text-ink-400 font-mono border-b border-ink-900/8">
+    {/* Замер 2026-08-18 (headless, 320px): у `fr`-трека действует
+        `min-width: auto` — минимум равен ширине СОДЕРЖИМОГО, поэтому
+        строка не сжималась и бейдж «Hotspot» уезжал за правый край на
+        4px. `minmax(0, Nfr)` возвращает трекам право сжиматься. Дефект
+        прятался за страничным `overflow-x: hidden`: он обрезает, а не
+        чинит, и обнуляет ровно ту метрику, которой мерили. */}
+    <div className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.6fr)_auto] gap-3 px-1 pb-2 text-[9px] tracking-widest uppercase text-ink-400 font-mono border-b border-ink-900/8">
       <div>Тикер</div><div className="text-right">Вес</div><div className="text-right">Beta</div><div>Вклад в риск</div><div></div>
     </div>
     <div className="divide-y divide-ink-900/5 mt-1">
       {rows.map((r,i) => {
         const hot = r.status === 'HOTSPOT';
         return (
-          <div key={i} className="grid grid-cols-[1.4fr_1fr_1fr_1.6fr_auto] gap-3 items-center px-1 py-2.5">
+          <div key={i} className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.6fr)_auto] gap-3 items-center px-1 py-2.5">
             <div className="text-[14px] font-bold num text-ink-900">{r.t}</div>
             <div className="text-[13px] num text-ink-700 text-right">{r.w.toFixed(1)}%</div>
             <div className="text-[13px] num text-ink-700 text-right">{r.beta.toFixed(2)}</div>

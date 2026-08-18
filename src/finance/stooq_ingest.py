@@ -827,6 +827,84 @@ def _verdict_for(observed: float, expected: float) -> str:
     return VERDICT_RAW if to_raw <= to_adjusted else VERDICT_ADJUSTED
 
 
+
+# ── Дивидендная ось конвенции (MP-A) ─────────────────────────────────────────
+
+#: Вердикты дивидендного замера.  Порог в п.п. годовых — не «точность», а
+#: граница различимости: расхождение меньше него объясняется разными ценами
+#: закрытия и календарём, а не разной конвенцией.
+DIV_SAME_AXIS  = "дрейфа нет → ОБА ряда по одной оси"
+DIV_DIFF_AXIS  = "дрейф ≈ дивидендной доходности → оси РАЗНЫЕ"
+DIV_INCONCLUSIVE = "дрейф есть, но не похож на дивиденды → НЕЯСНО"
+DIV_NO_OVERLAP = "нет общего окна ≥ 250 торговых дней"
+
+#: Ниже этого дрейфа (п.п. годовых) оси считаются одинаковыми.
+_DIV_NOISE_PP = 0.5
+#: Выше этого дрейфа расхождение слишком велико для дивидендов широкого рынка.
+_DIV_MAX_PLAUSIBLE_PP = 12.0
+
+
+@dataclass(frozen=True)
+class DividendAxisProbe:
+    """Результат сверки ДВУХ рядов по одной бумаге на дивидендную ось."""
+
+    ticker: str
+    days: int
+    growth_a: float                    # накопленный рост ряда A за окно
+    growth_b: float                    # то же для ряда B
+    annual_drift_pp: float             # (A/B)^(252/days) − 1, в п.п. годовых
+    verdict: str
+
+
+def measure_dividend_axis(series_a, series_b, *, ticker: str = "?",
+                          min_days: int = 250) -> DividendAxisProbe:
+    """Одна ли ценовая ось у двух рядов: `SPLIT_ADJUSTED` или `TOTAL_RETURN`.
+
+    🔴 **Зачем это отдельный замер.** `measure_convention` отвечает про СПЛИТЫ
+    и честно говорит, что про дивиденды не отвечает. Между тем разница осей
+    молчалива и опасна ровно тем же, чем несплитованная ступенька: ряд с
+    реинвестированными дивидендами растёт быстрее ценового примерно на
+    дивидендную доходность в год, и портфель из бумаг с РАЗНЫМИ осями получает
+    систематически искажённые доходности, корреляции и, следом, беты.
+
+    **Метод.** Сравниваются два ряда ОДНОЙ бумаги за общее окно: накопленный
+    рост каждого приводится к годовым, разность и есть дрейф. Ноль (в пределах
+    шума) — оси совпадают. Дрейф порядка дивидендной доходности — оси разные,
+    и знак говорит, какой ряд total-return. Дрейф больше правдоподобного —
+    вердикт «неясно»: значит расхождение вызвано не дивидендами, и объяснять
+    его надо, а не списывать.
+
+    Функция считает и НИЧЕГО не печатает: вывод — дело CLI (`scripts/`).
+    Второй ряд оператор берёт у независимого источника — это и есть та живая
+    машина, без которой замер невозможен (`OPERATOR_STOOQ`).
+    """
+    import pandas as pd
+
+    a = pd.Series(series_a).dropna().astype(float)
+    b = pd.Series(series_b).dropna().astype(float)
+    common = a.index.intersection(b.index)
+    a, b = a.loc[common].sort_index(), b.loc[common].sort_index()
+    n = len(common)
+    if n < min_days or a.empty or b.empty or a.iloc[0] <= 0 or b.iloc[0] <= 0:
+        return DividendAxisProbe(str(ticker), n, 0.0, 0.0, 0.0, DIV_NO_OVERLAP)
+
+    growth_a = float(a.iloc[-1] / a.iloc[0])
+    growth_b = float(b.iloc[-1] / b.iloc[0])
+    if growth_b <= 0:
+        return DividendAxisProbe(str(ticker), n, growth_a, growth_b, 0.0,
+                                 DIV_NO_OVERLAP)
+    drift_pp = ((growth_a / growth_b) ** (252.0 / n) - 1.0) * 100.0
+
+    magnitude = abs(drift_pp)
+    if magnitude < _DIV_NOISE_PP:
+        verdict = DIV_SAME_AXIS
+    elif magnitude <= _DIV_MAX_PLAUSIBLE_PP:
+        verdict = DIV_DIFF_AXIS
+    else:
+        verdict = DIV_INCONCLUSIVE
+    return DividendAxisProbe(str(ticker), n, round(growth_a, 6),
+                             round(growth_b, 6), round(drift_pp, 3), verdict)
+
 def measure_convention(archive_dir, *,
                        today: Optional[date] = None) -> list[ConventionProbe]:
     """Измерить конвенцию корректировок Stooq по известным сплитам.
