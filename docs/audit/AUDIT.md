@@ -89,7 +89,7 @@ grep -n "^## −45\." docs/audit/rounds/*.md
 | Проект | Открытое | План |
 |---|---|---|
 | Manual Portfolio | корпоративные события, приёмка на живых данных | `roadmap/manual_portfolio/PLAN_2026-08-12.md` |
-| Ingest Bot | спроектирован 17.08, кода нет: IB-0…IB-8 | `roadmap/ingest_bot/PLAN_2026-08-17.md` |
+| Ingest Bot | IB-0…IB-4 доставлены офлайн (20.08); открыты IB-5…IB-8 и деплой | `roadmap/ingest_bot/PLAN_2026-08-17.md` |
 | Freedom API / витрина | FW-1 тенге без курса · FW-2 сплиты · FW-3 приёмка · FW-4 алертинг | `roadmap/freedom_warehouse/PLAN_2026-08-12.md` |
 | Инфраструктура | 🔴 SQLite на gcsfuse ⇒ `max-instances=1`, платежей нет | — |
 
