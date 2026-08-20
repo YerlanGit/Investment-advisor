@@ -31,6 +31,17 @@ substitutions:
   # IP the broker's Cloudflare no longer challenges.  Format: connector NAME
   # (same region) or full projects/…/connectors/… path.
   _VPC_CONNECTOR: ''
+  # Бот-загрузчик котировок (IB-8). ПУСТО ПО УМОЛЧАНИЮ → шаг ниже не делает
+  # ничего, и текущий деплой остаётся ровно таким, каким был. Заполните имя
+  # сервиса (например `ramp-ingest-bot`), когда будете готовы: понадобятся
+  # секрет RAMP_INGEST_BOT_TOKEN в Secret Manager, бакет из _QUOTES_BUCKET и
+  # ваш Telegram-id в _INGEST_ADMIN_IDS.
+  _INGEST_SERVICE: ''
+  _INGEST_ADMIN_IDS: ''
+  # ОТДЕЛЬНЫЙ бакет, а не _STATE_BUCKET: там лежат tokenomics.db (балансы) и
+  # users_vault.db (зашифрованные ключи брокера). Ограничивается не человек, а
+  # всегда работающий сервис-писатель (PLAN §7.1).
+  _QUOTES_BUCKET: 'ramp-bot-quotes'
 
 steps:
   # ── Step 1: Build Docker image ──────────────────────────────────────────────
@@ -154,6 +165,51 @@ steps:
         else
           echo "No _VPC_CONNECTOR set — bot uses the default shared egress IP (Cloudflare-WAF risk). Run scripts/setup_static_egress.sh to enable a static egress IP."
         fi
+        exit 0
+
+  # ── Step 4c: INGEST BOT (IB-8) — ВЫКЛЮЧЕН, пока _INGEST_SERVICE пуст ───────
+  # Второй Cloud Run сервис из ТОГО ЖЕ образа: логика разбора не дублируется,
+  # `finance/stooq_ingest.py` уже внутри. Переопределяется только команда.
+  #
+  # Шаг fail-soft и no-op по умолчанию — тот же приём, что у configure-egress и
+  # deploy-rag-function: пустая подстановка не должна ломать сборку главного
+  # бота, ради которой этот файл существует.
+  #
+  # 🔴 Главный бот здесь НЕ ТРОГАЕТСЯ. Переезд его STOOQ_DB_PATH на новый бакет
+  # делается ОТДЕЛЬНО и осознанно: `--set-env-vars` заменяет ВЕСЬ набор
+  # переменных, и эта грабля уже однажды выключила Premium V2 в проде.
+  - id: deploy-ingest-bot
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    waitFor: [deploy]
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        if [ -z "${_INGEST_SERVICE}" ]; then
+          echo "Ingest-бот не деплоится: _INGEST_SERVICE пуст (штатное состояние)."
+          exit 0
+        fi
+        if [ -z "${_INGEST_ADMIN_IDS}" ]; then
+          echo "WARN: _INGEST_ADMIN_IDS пуст — бот откажется стартовать (fail-closed)."
+          echo "      Это защита, а не сбой: сервис пишет в базу котировок."
+        fi
+        gcloud run deploy ${_INGEST_SERVICE} \
+          --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:$SHORT_SHA \
+          --region=${_REGION} \
+          --platform=managed \
+          --command=python --args=/app/src/ingest_entrypoint.py \
+          --min-instances=1 \
+          --max-instances=1 \
+          --concurrency=1 \
+          --memory=512Mi \
+          --cpu=1 \
+          --timeout=3600 \
+          --no-cpu-throttling \
+          --no-allow-unauthenticated \
+          --set-secrets=RAMP_INGEST_BOT_TOKEN=RAMP_INGEST_BOT_TOKEN:latest,INGEST_TASK_TOKEN=INGEST_TASK_TOKEN:latest \
+          --set-env-vars=QUOTES_BACKEND=gcs,QUOTES_BUCKET=${_QUOTES_BUCKET},QUOTES_PREFIX=stooq/,INGEST_ADMIN_IDS=${_INGEST_ADMIN_IDS} \
+          --quiet \
+          || echo "WARN: деплой ingest-бота не прошёл. Главный бот не затронут."
         exit 0
 
   # ── Step 5: Deploy the RAG-ingest Cloud Function (M3) ──────────────────────

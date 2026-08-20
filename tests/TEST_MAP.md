@@ -25,7 +25,7 @@
 > импорт), то есть когда карта действительно врёт.
 
 
-**Замер:** 76 тест-файлов · 57 модулей `src/` имеют хотя бы один адресный тест-импорт.
+**Замер:** 76 тест-файлов · 58 модулей `src/` имеют хотя бы один адресный тест-импорт.
 
 ## Модуль → тесты
 
@@ -77,6 +77,7 @@
 | `html_renderer` | 4 | `test_phase18_sprint5.py` · `test_phase19_block_audit.py` · `test_phase21_recos.py` · `test_phase24_scenario_report.py` |
 | `ingest_access` | 1 | `test_phase51_ingest_bot.py` |
 | `ingest_bot` | 1 | `test_phase51_ingest_bot.py` |
+| `ingest_entrypoint` | 1 | `test_phase51_ingest_bot.py` |
 | `pdf_charts` | 2 | `test_phase4_reporting.py` · `test_phase5_rag_quality.py` |
 | `pdf_payload` | 25 | `test_factor_decomposition.py` · `test_phase10_pillar_chip.py` · `test_phase14_refactor.py` · `test_phase16_sprint2.py` · `test_phase18_sprint5.py` · `test_phase19_block_audit.py` · `test_phase25_math_sprint1.py` · `test_phase28_risk_methodology_audit.py` · `test_phase31_benchmark_factor_propagation.py` · `test_phase33_effect_reinvest_quality.py` · `test_phase36_illiquid_proxy.py` · `test_phase36_report_audit_fixes.py` · `test_phase37_position_contract.py` · `test_phase39_report_consistency.py` · `test_phase40_labels_and_boundary.py` · `test_phase41_fx_base_currency.py` · `test_phase44_live_report_fixes.py` · `test_phase47_cove_and_fx_honesty.py` · `test_phase49_contract_reaches_eyes.py` · `test_phase4_reporting.py` · `test_phase50_report_layer_parity.py` · `test_phase5_rag_quality.py` · `test_phase7_logic_wiring.py` · `test_phase8_report_fixes.py` · `test_phase9_fpillar_stress.py` |
 | `premium_payload` | 14 | `test_factor_decomposition.py` · `test_phase19_block_audit.py` · `test_phase21_recos.py` · `test_phase26_report_fixes.py` · `test_phase31_benchmark_factor_propagation.py` · `test_phase36_illiquid_proxy.py` · `test_phase37_base_holdings_ai.py` · `test_phase39_report_consistency.py` · `test_phase40_labels_and_boundary.py` · `test_phase44_live_report_fixes.py` · `test_phase47_cove_and_fx_honesty.py` · `test_phase48_report_verdict_audit.py` · `test_phase49_contract_reaches_eyes.py` · `test_phase50_report_layer_parity.py` |
@@ -108,7 +109,6 @@
 - `freedom_portfolio.__main__`
 - `freedom_portfolio.display`
 - `freedom_portfolio.websocket`
-- `ingest_entrypoint`
 - `report_charts`
 - `report_mocks`
 - `services.quote_ingest`

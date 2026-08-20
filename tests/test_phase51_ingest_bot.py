@@ -261,7 +261,9 @@ class ApplyDailyTest(_IngestCase):
         self.assertTrue(outcome.ok, outcome.reason)
         self.assertTrue(outcome.published)
         self.assertEqual(outcome.result.rows_written, 2)
-        self.assertIn(20260813, [d for d, in [(20260813,)]])
+        self.assertEqual(
+            [d for _, d, _ in _bars(self.db) if d == 20260813].count(20260813), 2,
+            "бары дня не доехали до таблицы фактов")
         self.assertEqual(self.publisher.read_cursor().applied_dates, (20260813,))
 
     def test_repeat_leaves_the_fact_table_identical(self) -> None:
@@ -324,7 +326,7 @@ class ApplyDailyTest(_IngestCase):
         публикации была РОВНО ОДНА.
         """
         calls: list[int] = []
-        real_upload = self.publisher.upload
+        before = _bars(self.db)
 
         def spy(src, *, if_generation_match):
             calls.append(if_generation_match)
@@ -338,7 +340,8 @@ class ApplyDailyTest(_IngestCase):
         self.assertTrue(outcome.conflict)
         self.assertEqual(len(calls), 1, "конфликт не должен приводить к ретраю")
         self.assertIn("вручную", outcome.reason)
-        self.assertIsNotNone(real_upload)
+        self.assertEqual(_bars(self.db), before,
+                         "при конфликте хранилище обязано остаться прежним")
 
     def test_failed_publish_tells_the_operator_the_change_is_lost(self) -> None:
         """Свойство read-modify-write, которое нельзя замалчивать."""
@@ -711,6 +714,321 @@ class BotWiringTest(unittest.TestCase):
         with mock.patch.object(ingest_bot, "BOT_TOKEN", ""):
             with self.assertRaises(RuntimeError):
                 asyncio.run(ingest_bot.main())
+
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# IB-5/IB-6 — диагностика
+# ═════════════════════════════════════════════════════════════════════════════
+
+_FACTORS = ("SPY.US", "AAPL.US")
+_BENCH = ("MSFT.US",)
+
+
+class UniverseReportTest(_IngestCase):
+    """Списки факторов подменяются: сам `data_checks` тянет pandas."""
+
+    def test_missing_factor_is_named_and_marks_the_gate_incomplete(self) -> None:
+        with mock.patch.object(qi, "_engine_universe",
+                               return_value=(_FACTORS, _BENCH)):
+            report = qi.universe_report(publisher=self.publisher)
+        self.assertTrue(report.ok)
+        self.assertEqual(report.factors_ok, 2)
+        self.assertEqual(report.benchmarks_ok, 0)      # MSFT.US в базе нет
+        text = qi.format_universe(report)
+        self.assertIn("MSFT.US", text)
+        self.assertIn("НЕТ В БАЗЕ", text)
+
+    def test_complete_coverage_is_reported_as_such(self) -> None:
+        with mock.patch.object(qi, "_engine_universe",
+                               return_value=(_FACTORS, ())):
+            report = qi.universe_report(publisher=self.publisher)
+        self.assertTrue(report.complete)
+        self.assertIn("✅", qi.format_universe(report))
+
+    def test_depth_is_reported_not_just_presence(self) -> None:
+        """Наличие бары не равно пригодности: обрывочная история схлопывает окно.
+
+        Одна молодая бумага обнуляет окно регрессии ВСЕЙ панели (F-15/F-21),
+        поэтому в отчёте число баров, а не галочка.
+        """
+        with mock.patch.object(qi, "_engine_universe",
+                               return_value=(_FACTORS, ())):
+            report = qi.universe_report(publisher=self.publisher)
+        self.assertEqual({p.bars for p in report.factors}, {3})
+        self.assertIn("3 баров", qi.format_universe(report))
+
+    def test_without_pandas_it_refuses_instead_of_copying_the_list(self) -> None:
+        """🔴 Вторая копия списка факторов однажды разошлась бы с первой молча."""
+        with mock.patch.object(qi, "_engine_universe",
+                               side_effect=ImportError("pandas")):
+            report = qi.universe_report(publisher=self.publisher)
+        self.assertFalse(report.ok)
+        self.assertIn("data_checks", report.reason)
+
+
+class CheckTickerTest(_IngestCase):
+
+    def test_known_ticker_reports_its_source_form(self) -> None:
+        probe = qi.check_ticker("SPY.US", publisher=self.publisher)
+        self.assertTrue(probe.found)
+        self.assertEqual(probe.source_symbol, "SPY.US")
+        self.assertEqual(probe.bars, 3)
+        self.assertFalse(probe.substituted)
+
+    def test_unknown_ticker_says_so_and_suggests_the_fix(self) -> None:
+        probe = qi.check_ticker("NOSUCH.US", publisher=self.publisher)
+        self.assertFalse(probe.found)
+        self.assertIn("файл истории", qi.format_probe(probe))
+
+    def test_venue_substitution_is_surfaced_not_hidden(self) -> None:
+        """🔴 Подмена площадки меняет цену И валюту — она обязана быть видимой.
+
+        Прокси меняет бумагу ради факторной модели, оставляя цену настоящей;
+        смена площадки подменяет саму цену. `KSPI.KZ`, «найденный» как ADR на
+        Nasdaq, — другая бумага (ловушка №6).
+        """
+        conn = si.connect(self.db)
+        iid = conn.execute(
+            "SELECT id FROM instruments WHERE source_symbol='SPY.US'"
+        ).fetchone()["id"]
+        conn.execute("INSERT INTO symbol_map(engine_ticker, instrument_id, "
+                     "match_kind, note) VALUES (?,?,?,?)",
+                     ("KAP.IL", iid, "venue_substitution", "тест"))
+        conn.commit()
+        conn.close()
+        probe = qi.check_ticker("KAP.IL", publisher=self.publisher)
+        self.assertTrue(probe.substituted)
+        self.assertIn("ПОДМЕНА ПЛОЩАДКИ", qi.format_probe(probe))
+
+
+class PruneTest(_IngestCase):
+
+    def _add_thin(self) -> None:
+        thin = self.root / "thin.us.txt"
+        thin.write_text(_history_text("THIN.US", (20260812,)), encoding="utf-8")
+        conn = si.connect(self.db)
+        si.apply_batch(conn, si.parse_history_file(thin, window_days=9000),
+                       kind="bootstrap", allow_new=True)
+        conn.close()
+
+    def test_without_the_core_it_refuses_instead_of_deleting(self) -> None:
+        """🔴 Пустой `keep` — это «не знаем, что защищать», а не «нечего защищать».
+
+        Чистка без ядра срезала бы факторные ETF, а в профиле STRICT потеря
+        ЛЮБОГО фактора даёт BLOCK — ручной тир перестал бы отдавать отчёты.
+        """
+        with mock.patch.object(qi, "_working_set",
+                               side_effect=ImportError("pandas")):
+            outcome = qi.prune(dry_run=False, actor="1",
+                               publisher=self.publisher)
+        self.assertFalse(outcome.ok)
+        self.assertIn("ядро", outcome.reason)
+
+    def test_dry_run_shows_the_victims_and_touches_nothing(self) -> None:
+        self._add_thin()
+        before = _bars(self.db)
+        generation = self.publisher._generation()
+        with mock.patch.object(qi, "_working_set", return_value=list(self.universe)):
+            outcome = qi.prune(dry_run=True, actor="1", publisher=self.publisher)
+        self.assertTrue(outcome.ok)
+        self.assertIn("THIN.US", outcome.removed)
+        self.assertFalse(outcome.published)
+        self.assertEqual(_bars(self.db), before)
+        self.assertEqual(self.publisher._generation(), generation)
+        self.assertIn("НЕ изменена", qi.format_prune(outcome))
+
+    def test_real_prune_publishes_even_though_the_base_shrinks(self) -> None:
+        """🔴 Единственная операция, где гард обвала размера НЕ применяется.
+
+        `prune_thin_instruments` завершается `VACUUM`; сжатие файла — это её
+        работа, а не признак поломки. Гард существует для дельты, которая
+        умеет только добавлять.
+        """
+        self._add_thin()
+        with mock.patch.object(qi, "_working_set", return_value=list(self.universe)):
+            outcome = qi.prune(dry_run=False, actor="1", publisher=self.publisher)
+        self.assertTrue(outcome.ok, outcome.reason)
+        self.assertTrue(outcome.published)
+        conn = si.connect(self.db, read_only=True)
+        try:
+            left = {r["source_symbol"] for r in conn.execute(
+                "SELECT source_symbol FROM instruments")}
+        finally:
+            conn.close()
+        self.assertNotIn("THIN.US", left)
+        self.assertEqual(left, set(self.universe))
+
+    def test_core_survives_even_below_the_threshold(self) -> None:
+        """Фактор с обрезанной историей чинят ре-бутстрапом, а не удалением."""
+        thin_core = self.root / "spycut.txt"
+        thin_core.write_text(_history_text("SPY.US", (20260812,)), encoding="utf-8")
+        conn = si.connect(self.db)
+        conn.execute("DELETE FROM daily_bars WHERE instrument_id IN "
+                     "(SELECT id FROM instruments WHERE source_symbol='SPY.US') "
+                     "AND trade_date < 20260812")
+        conn.commit()
+        conn.close()
+        with mock.patch.object(qi, "_working_set", return_value=["SPY.US"]):
+            outcome = qi.prune(dry_run=True, actor="1", publisher=self.publisher)
+        self.assertNotIn("SPY.US", outcome.removed)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# IB-7 — напоминания
+# ═════════════════════════════════════════════════════════════════════════════
+
+def _state(**kw):
+    base = dict(ok=True, storage="тест")
+    base.update(kw)
+    return qi.StoreStatus(**base)
+
+
+class ReminderTest(unittest.TestCase):
+
+    def test_healthy_base_produces_SILENCE(self) -> None:
+        """🔴 Молчание — штатный исход, и это главное свойство напоминаний.
+
+        Сообщение, приходящее каждый день независимо от состояния, перестают
+        читать за неделю — и тогда оно не сработает в тот единственный раз,
+        когда было нужно.
+        """
+        state = _state(markets=(qi.MarketState("US", 20260819, 5, 50,
+                                               stale_days=1, days_left=6),))
+        self.assertIsNone(qi.build_reminder(state))
+
+    def test_approaching_block_warns_with_the_number_of_days(self) -> None:
+        state = _state(markets=(qi.MarketState("US", 20260814, 5, 50,
+                                               stale_days=6, days_left=1),))
+        text = qi.build_reminder(state)
+        self.assertIn("1 дн.", text)
+
+    def test_already_blocked_is_reported_as_such(self) -> None:
+        state = _state(markets=(qi.MarketState("US", 20260810, 5, 50,
+                                               stale_days=10, days_left=-3),))
+        self.assertIn("УЖЕ заблокирован", qi.build_reminder(state))
+
+    def test_missing_days_outrank_the_countdown(self) -> None:
+        """Пропавшие дни — про потерю данных, обратный отсчёт — про свежесть."""
+        state = _state(missing_dates=(20260813, 20260814),
+                       markets=(qi.MarketState("US", 20260819, 5, 50,
+                                               stale_days=1, days_left=6),))
+        text = qi.build_reminder(state)
+        self.assertIn("20260813", text)
+        self.assertIn("перезаливали", text)
+
+    def test_unavailable_store_is_an_alarm(self) -> None:
+        self.assertIn("недоступна",
+                      qi.build_reminder(_state(ok=False, reason="нет базы")))
+
+    def test_threshold_comes_from_the_provider_not_from_a_literal(self) -> None:
+        """Свой порог означал бы: бот обещает один срок, отчёт блокирует по другому."""
+        self.assertLessEqual(qi.REMIND_DAYS_LEFT, 7)
+
+
+class TaskEndpointTest(unittest.TestCase):
+    """Плановая проверка (IB-7) закрыта дважды; здесь — внутренний рубеж."""
+
+    def setUp(self) -> None:
+        import ingest_entrypoint                        # noqa: PLC0415
+        self.ie = ingest_entrypoint
+        self.calls: list[int] = []
+
+    async def _task(self):
+        self.calls.append(1)
+        return "тихо"
+
+    def _run(self, method, headers):
+        import asyncio                                  # noqa: PLC0415
+        return asyncio.run(self.ie._handle_task(method, headers, self._task))
+
+    def test_request_line_and_headers_are_parsed(self) -> None:
+        method, path, headers = self.ie._parse(
+            b"POST /tasks/check?x=1 HTTP/1.1\r\nX-Ingest-Task-Token: s\r\n\r\n")
+        self.assertEqual((method, path.split("?")[0]), ("POST", "/tasks/check"))
+        self.assertEqual(headers["x-ingest-task-token"], "s")
+
+    def test_without_a_secret_the_route_is_OFF(self) -> None:
+        """🔴 Незакрытая ручка шлёт сообщения владельцу — это канал для шума
+        в единственном канале связи оператора."""
+        with mock.patch.dict(os.environ, {"INGEST_TASK_TOKEN": ""}), \
+                self.assertLogs("ramp.ingest.entrypoint", level="WARNING") as log:
+            reply = self._run("POST", {"x-ingest-task-token": "s"})
+        self.assertIn(b"503", reply.split(b"\r\n")[0])
+        self.assertIn("отключён", "\n".join(log.output))
+        self.assertEqual(self.calls, [])
+
+    def test_wrong_secret_is_refused(self) -> None:
+        with mock.patch.dict(os.environ, {"INGEST_TASK_TOKEN": "right"}), \
+                self.assertLogs("ramp.ingest.entrypoint", level="WARNING") as log:
+            reply = self._run("POST", {"x-ingest-task-token": "wrong"})
+        self.assertIn(b"401", reply.split(b"\r\n")[0])
+        self.assertIn("неверным секретом", "\n".join(log.output))
+        self.assertEqual(self.calls, [])
+
+    def test_get_is_refused_so_a_crawler_cannot_fire_it(self) -> None:
+        with mock.patch.dict(os.environ, {"INGEST_TASK_TOKEN": "right"}):
+            reply = self._run("GET", {"x-ingest-task-token": "right"})
+        self.assertIn(b"405", reply.split(b"\r\n")[0])
+        self.assertEqual(self.calls, [])
+
+    def test_correct_secret_runs_the_check(self) -> None:
+        with mock.patch.dict(os.environ, {"INGEST_TASK_TOKEN": "right"}):
+            reply = self._run("POST", {"x-ingest-task-token": "right"})
+        self.assertIn(b"200", reply.split(b"\r\n")[0])
+        self.assertEqual(self.calls, [1])
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# IB-8 — деплой
+# ═════════════════════════════════════════════════════════════════════════════
+
+class DeployStepTest(unittest.TestCase):
+    """Шаг деплоя загрузчика не имеет права трогать главного бота."""
+
+    def setUp(self) -> None:
+        try:
+            import yaml                                 # noqa: PLC0415
+        except ImportError:
+            self.skipTest("PyYAML не установлен")
+        path = Path(__file__).resolve().parents[1] / "cloudbuild.yaml"
+        self.doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+
+    def test_ingest_step_is_a_noop_until_the_owner_enables_it(self) -> None:
+        self.assertEqual(self.doc["substitutions"]["_INGEST_SERVICE"], "")
+
+    def test_main_bot_env_is_untouched(self) -> None:
+        """🔴 `--set-env-vars` заменяет ВЕСЬ набор переменных.
+
+        Эта грабля уже однажды выключила Premium V2 в проде: выставленный
+        руками флаг стирался следующим деплоем, и прод месяцами отдавал старый
+        шаблон отчёта.
+        """
+        deploy = next(s for s in self.doc["steps"] if s["id"] == "deploy")
+        env = next(a for a in deploy["args"] if a.startswith("--set-env-vars"))
+        for expected in ("PREMIUM_REPORT_ENABLED=true",
+                         "TOKENOMICS_DB_PATH=/mnt/state/tokenomics.db",
+                         "STOOQ_DB_PATH=/mnt/state/stooq/prices.sqlite"):
+            self.assertIn(expected, env)
+
+    def test_loader_gets_its_own_bucket_not_the_state_one(self) -> None:
+        """Радиус поражения писателя не должен включать балансы и ключи брокера."""
+        self.assertNotEqual(self.doc["substitutions"]["_QUOTES_BUCKET"],
+                            self.doc["substitutions"]["_STATE_BUCKET"])
+        step = next(s for s in self.doc["steps"] if s["id"] == "deploy-ingest-bot")
+        body = "\n".join(step["args"])
+        # 🔴 Проверяются ОБА написания. Мутация показала, что проверка одного
+        # лишь ЗНАЧЕНИЯ пропускает ссылку на подстановку `${_STATE_BUCKET}` —
+        # то есть ровно ту форму, в которой её и написали бы в YAML.
+        self.assertNotIn(self.doc["substitutions"]["_STATE_BUCKET"], body)
+        self.assertNotIn("_STATE_BUCKET", body)
+        self.assertIn("ingest_entrypoint.py", body)
+
+    def test_loader_does_not_mount_the_state_volume(self) -> None:
+        step = next(s for s in self.doc["steps"] if s["id"] == "deploy-ingest-bot")
+        body = "\n".join(step["args"])
+        self.assertNotIn("--add-volume", body)
+        self.assertNotIn("/mnt/state", body)
 
 
 # ═════════════════════════════════════════════════════════════════════════════

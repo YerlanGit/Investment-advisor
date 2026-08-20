@@ -607,18 +607,364 @@ def format_status(state: StoreStatus) -> str:
     return "\n".join(lines)
 
 
+
+# ═════════════════════════════════════════════════════════════════════════════
+# IB-5/IB-6 — диагностика: покрытие, бумага, чистка
+# ═════════════════════════════════════════════════════════════════════════════
+
+@dataclass(frozen=True)
+class TickerProbe:
+    """Что база знает о тикере ДВИЖКА.
+
+    Спрашивается именно тикером движка, а не формой источника: `resolve_symbol`
+    перебирает формы сам (`BRK.B` → `brk-b.us`), и оператор, добравший бумагу,
+    обязан иметь возможность проверить ровно то, что спросит отчёт. Прежняя
+    редакция `verify-universe` спрашивала символами ИСТОЧНИКА и рапортовала
+    полное покрытие для отсутствующих бумаг (`AUDIT §−80`, дефект 5).
+    """
+
+    ticker: str
+    found: bool
+    source_symbol: Optional[str] = None
+    market: Optional[str] = None
+    currency: Optional[str] = None
+    match_kind: Optional[str] = None
+    last_bar: Optional[int] = None
+    bars: int = 0
+
+    @property
+    def substituted(self) -> bool:
+        return bool(self.found and self.match_kind and self.match_kind != "exact")
+
+
+@dataclass(frozen=True)
+class UniverseReport:
+    ok: bool
+    reason: Optional[str] = None
+    factors: tuple[TickerProbe, ...] = ()
+    benchmarks: tuple[TickerProbe, ...] = ()
+
+    @property
+    def factors_ok(self) -> int:
+        return sum(1 for p in self.factors if p.found and p.bars)
+
+    @property
+    def benchmarks_ok(self) -> int:
+        return sum(1 for p in self.benchmarks if p.found and p.bars)
+
+    @property
+    def complete(self) -> bool:
+        return bool(self.factors) and self.factors_ok == len(self.factors)
+
+
+@dataclass(frozen=True)
+class PruneOutcome:
+    ok: bool
+    dry_run: bool
+    reason: Optional[str] = None
+    removed: tuple[str, ...] = ()
+    kept: int = 0
+    bars_removed: int = 0
+    min_bars_used: int = 0
+    busiest_bars: int = 0
+    published: bool = False
+    conflict: bool = False
+    generation: Optional[int] = None
+
+
+def _probe(conn: sqlite3.Connection, ticker: str) -> TickerProbe:
+    found = si.resolve_symbol(conn, ticker)
+    if found is None:
+        return TickerProbe(ticker=str(ticker), found=False)
+    row = conn.execute(
+        "SELECT COUNT(*) AS n, MAX(trade_date) AS last FROM daily_bars "
+        "WHERE instrument_id=?", (int(found["id"]),)).fetchone()
+    return TickerProbe(
+        ticker=str(ticker), found=True, source_symbol=str(found["sym"]),
+        market=str(found["market"]), currency=str(found["ccy"]),
+        match_kind=str(found["kind"]),
+        bars=int(row["n"] or 0) if row else 0,
+        last_bar=int(row["last"]) if row and row["last"] is not None else None)
+
+
+def check_ticker(ticker: str, *,
+                 publisher: Optional[QuotePublisher] = None) -> TickerProbe:
+    """Есть ли бумага в базе под тикером ДВИЖКА — и под какой формой источника.
+
+    🔴 Команда сверх плана, и вот зачем. Добор бумаги (IB-5) без ответа на этот
+    вопрос доделан наполовину: оператор видит «инструмент заведён», но не
+    знает, найдёт ли его отчёт. Формы расходятся ровно там, где это опаснее
+    всего — `BRK.B` лежит у Stooq как `brk-b.us`, и ни один наивный кандидат не
+    совпадает (ловушка №7, `STOOQ_CONVENTION §3.7`).
+    """
+    publisher = publisher or publisher_from_env()
+    with tempfile.TemporaryDirectory(prefix="ramp-check-") as tmp:
+        local = Path(tmp) / "prices.sqlite"
+        try:
+            publisher.download(local)
+            conn = _open_checked(local)
+        except PublisherUnavailable:
+            return TickerProbe(ticker=str(ticker), found=False)
+        try:
+            return _probe(conn, str(ticker).strip().upper())
+        finally:
+            conn.close()
+
+
+def universe_report(*, publisher: Optional[QuotePublisher] = None) -> UniverseReport:
+    """Допуск C-1 с ГЛУБИНОЙ истории, а не только с фактом наличия.
+
+    Наличие бары не гарантирует пригодности: факторная регрессия строится на
+    окне, и бумага с обрывочной историей схлопывает окно ВСЕЙ панели
+    (F-15/F-21). Поэтому в отчёте число баров, а не галочка.
+    """
+    publisher = publisher or publisher_from_env()
+    try:
+        factor_etfs, benchmark_etfs = _engine_universe()
+    except ImportError as exc:
+        name = getattr(exc, "name", None) or "зависимость"
+        return UniverseReport(
+            ok=False,
+            reason=(f"{name} не установлен — список факторов живёт в "
+                    "`data_checks` и берётся ОТТУДА, а не копируется сюда. "
+                    "Вторая копия однажды разошлась бы с первой молча."))
+    with tempfile.TemporaryDirectory(prefix="ramp-universe-") as tmp:
+        local = Path(tmp) / "prices.sqlite"
+        try:
+            publisher.download(local)
+            conn = _open_checked(local)
+        except PublisherUnavailable as exc:
+            return UniverseReport(ok=False, reason=str(exc))
+        try:
+            return UniverseReport(
+                ok=True,
+                factors=tuple(_probe(conn, t) for t in factor_etfs),
+                benchmarks=tuple(_probe(conn, t) for t in benchmark_etfs))
+        finally:
+            conn.close()
+
+
+def prune(*, dry_run: bool, actor: str,
+          publisher: Optional[QuotePublisher] = None) -> PruneOutcome:
+    """Вычистить бумаги с обрывочной историей.
+
+    🔴 **Единственная операция, где база УМЕНЬШАЕТСЯ**, поэтому гард обвала
+    размера здесь не применяется: `prune_thin_instruments` завершается
+    `VACUUM`, и сжатие файла — это её работа, а не признак поломки. Гард
+    существует для дельты, которая умеет только добавлять.
+
+    🔴 **Без ядра чистка НЕ запускается.** `keep` — это факторные ETF в формах
+    источника; удалить их значило бы уронить допуск C-1, а с ним и ручной тир
+    целиком (`data_checks`: в профиле STRICT потеря любого фактора даёт BLOCK).
+    Пустой `keep` при недоступном `data_checks` — это не «ничего не защищаем»,
+    а «не знаем, что защищать», и разница между ними стоит базы.
+    """
+    publisher = publisher or publisher_from_env()
+    try:
+        keep = _working_set()
+    except ImportError as exc:
+        name = getattr(exc, "name", None) or "зависимость"
+        return PruneOutcome(
+            ok=False, dry_run=dry_run,
+            reason=(f"{name} не установлен — не могу определить ядро, которое "
+                    "нельзя удалять. Чистка без него срезала бы факторные ETF "
+                    "и заблокировала ручной тир."))
+
+    with tempfile.TemporaryDirectory(prefix="ramp-prune-") as tmp:
+        local = Path(tmp) / "prices.sqlite"
+        try:
+            snapshot = publisher.download(local)
+            conn = _open_checked(local)
+        except PublisherUnavailable as exc:
+            return PruneOutcome(ok=False, dry_run=dry_run, reason=str(exc))
+        try:
+            report = si.prune_thin_instruments(conn, keep=keep, dry_run=dry_run)
+        finally:
+            conn.close()
+
+        common = dict(removed=tuple(report.removed), kept=report.kept,
+                      bars_removed=report.bars_removed,
+                      min_bars_used=report.min_bars_used,
+                      busiest_bars=report.busiest_bars)
+        if dry_run or not report.removed:
+            return PruneOutcome(ok=True, dry_run=dry_run, **common)
+
+        upload = publisher.upload(local, if_generation_match=snapshot.generation)
+
+    if upload.conflict:
+        return PruneOutcome(
+            ok=False, dry_run=False, conflict=True, **common,
+            reason=("🔴 база изменилась, пока я чистил. Ничего не опубликовано — "
+                    "повторите /prune."))
+    if not upload.published:
+        return PruneOutcome(ok=False, dry_run=False, **common,
+                            reason=f"опубликовать не удалось: {upload.reason}")
+
+    cursor = publisher.read_cursor() or Cursor()
+    publisher.write_cursor(cursor.with_applied(
+        None, generation=upload.generation,
+        last_run={"file": "prune", "actor": str(actor), "kind": "prune",
+                  "removed": len(report.removed)}))
+    return PruneOutcome(ok=True, dry_run=False, published=True,
+                        generation=upload.generation, **common)
+
+
+def _working_set() -> list[str]:
+    """Ядро в формах ИСТОЧНИКА — то, что `prune` не удаляет ни при каком пороге.
+
+    🔴 Два разных списка, и путать их нельзя (`AUDIT §−80`). `coverage_report`
+    и `_probe` спрашивают тикером ДВИЖКА (`resolve_symbol` сам переберёт
+    формы); `prune` сравнивает с `instruments.source_symbol`, то есть с формой
+    ИСТОЧНИКА. Подать сюда тикеры движка значило бы не защитить ничего —
+    молча, потому что для US-бумаг формы совпадают и ошибка проявилась бы
+    только на бумаге с нестандартным суффиксом.
+    """
+    from finance import stooq_symbols as sym                # noqa: PLC0415
+
+    factor_etfs, benchmark_etfs = _engine_universe()
+    out: list[str] = []
+    for ticker in list(factor_etfs) + list(benchmark_etfs):
+        for candidate in sym.candidates_for(ticker):
+            if candidate not in out:
+                out.append(candidate)
+    return out
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# IB-7 — напоминания
+# ═════════════════════════════════════════════════════════════════════════════
+
+#: За сколько дней до блокировки ручного тира начинать предупреждать.
+#: Три календарных дня при пороге 7 означают: после пятничной заливки первое
+#: напоминание придёт во ВТОРНИК, если понедельничный файл не применён.
+#: Меньше — и выходные давали бы ложную тревогу каждую субботу; больше — и
+#: предупреждение перестало бы отличаться от фона.
+REMIND_DAYS_LEFT = env_int("INGEST_REMIND_DAYS_LEFT", 3, lo=1, hi=30)
+
+
+def build_reminder(state: StoreStatus) -> Optional[str]:
+    """Текст напоминания — либо `None`, если говорить не о чем.
+
+    🔴 `None` здесь обязателен, и это не оптимизация. Напоминание, приходящее
+    каждый день независимо от состояния, перестают читать за неделю — и тогда
+    оно не сработает в тот единственный раз, когда было нужно.
+
+    Порог считается от того же числа, которым провайдер БЛОКИРУЕТ отчёт
+    (`MAX_MARKET_STALE_DAYS`), а не от отдельной константы: иначе бот обещал
+    бы один срок, а ручной тир отказывал по другому.
+    """
+    if not state.ok:
+        return (f"🔴 база котировок недоступна: {state.reason}\n"
+                "Ручной тир сейчас не построит ни одного отчёта.")
+    if state.missing_dates:
+        listed = " ".join(str(d) for d in state.missing_dates[:12])
+        tail = "" if len(state.missing_dates) <= 12 else " …"
+        return (f"🔴 в базе не хватает {len(state.missing_dates)} дн., которые я "
+                f"применял: {listed}{tail}\n"
+                "Похоже, базу перезаливали. Перешлите эти файлы — повтор безвреден.")
+    left = state.days_left
+    if left is not None and left <= 0:
+        return ("🔴 ручной тир УЖЕ заблокирован: база не обновлялась дольше "
+                "порога. Пришлите свежий дневной срез.")
+    if left is not None and left <= REMIND_DAYS_LEFT:
+        return (f"⚠️ до блокировки ручного тира {left} дн. "
+                "Пришлите свежий дневной срез со stooq.com/db/.")
+    return None
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Сводки диагностики
+# ═════════════════════════════════════════════════════════════════════════════
+
+def format_universe(report: UniverseReport) -> str:
+    if not report.ok:
+        return f"🔴 покрытие не проверено\n   {report.reason}"
+    mark = "✅" if report.complete else "🔴"
+    lines = [f"🎯 допуск C-1 · факторы {report.factors_ok}/{len(report.factors)} "
+             f"{mark} · бенчмарки {report.benchmarks_ok}/{len(report.benchmarks)}"]
+    for probe in report.factors + report.benchmarks:
+        if not probe.found:
+            lines.append(f"  🔴 {probe.ticker:.<12} НЕТ В БАЗЕ")
+            continue
+        note = ""
+        if probe.substituted:
+            note = f"  ⚠️ подмена площадки → {probe.source_symbol}"
+        lines.append(f"  {probe.ticker:.<12} {probe.bars:>5} баров, "
+                     f"последний {probe.last_bar}{note}")
+    if not report.complete:
+        lines.append("🔴 в профиле STRICT потеря ЛЮБОГО фактора даёт BLOCK — "
+                     "ручной тир отдаст отказ вместо отчёта.")
+    return "\n".join(lines)
+
+
+def format_probe(probe: TickerProbe) -> str:
+    if not probe.found:
+        return (f"🔴 {probe.ticker} в базе НЕТ ни под одной формой символа.\n"
+                "   Пришлите файл истории этой бумаги из архива — она заведётся.")
+    lines = [f"✅ {probe.ticker} найден",
+             f"  форма источника ....... {probe.source_symbol}",
+             f"  рынок / валюта ........ {probe.market} / {probe.currency}",
+             f"  баров в базе .......... {probe.bars}",
+             f"  последний бар ......... {probe.last_bar}"]
+    if probe.substituted:
+        lines.append("  ⚠️ ПОДМЕНА ПЛОЩАДКИ: это другая биржа, другая цена и, "
+                     "возможно, другая валюта. Решение ваше, но оно обязано "
+                     "быть видимым.")
+    return "\n".join(lines)
+
+
+def format_prune(outcome: PruneOutcome) -> str:
+    if not outcome.ok:
+        return f"🔴 чистка не выполнена\n   {outcome.reason}"
+    lines = [f"  порог истории ......... {outcome.min_bars_used} баров "
+             f"(у самой полной бумаги базы — {outcome.busiest_bars})",
+             f"  под нож ............... {len(outcome.removed)} бумаг, "
+             f"{outcome.bars_removed} баров",
+             f"  остаётся .............. {outcome.kept} бумаг"]
+    lines += [f"    − {s}" for s in outcome.removed[:15]]
+    if len(outcome.removed) > 15:
+        lines.append(f"    … и ещё {len(outcome.removed) - 15}")
+    if outcome.dry_run:
+        lines.append("режим --dry-run: база НЕ изменена.")
+    elif outcome.published:
+        lines.append(f"✅ база вычищена и опубликована · поколение "
+                     f"{outcome.generation}")
+    else:
+        lines.append("✅ чистить нечего.")
+    return "\n".join(lines)
+
+
+def format_missing(dates: Sequence[int]) -> str:
+    if not dates:
+        return ("✅ пропавших дней нет: всё, что я применял, в базе на месте.")
+    listed = "\n".join(f"  {d}_d.txt" for d in dates)
+    return (f"⚠️ не хватает {len(dates)} дн. — перешлите эти файлы из applied/:\n"
+            f"{listed}\nПорядок не важен, повтор безвреден.")
+
 __all__ = [
     "ApplyOutcome",
     "C1Coverage",
     "MAX_UPLOAD_BYTES",
     "MarketState",
+    "PruneOutcome",
+    "REMIND_DAYS_LEFT",
     "StoreStatus",
+    "TickerProbe",
+    "UniverseReport",
     "UploadDecision",
     "apply_daily",
     "apply_history",
+    "build_reminder",
+    "check_ticker",
     "classify_upload",
+    "format_missing",
+    "format_probe",
+    "format_prune",
     "format_status",
     "format_summary",
+    "format_universe",
     "missing_dates",
+    "prune",
     "status",
+    "universe_report",
 ]
