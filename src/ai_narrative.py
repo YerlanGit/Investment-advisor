@@ -783,9 +783,10 @@ _RAG_FILE_CITE_RE = re.compile(r"\[RAG:\s*[^\]]+\]")
 _BANK_NAME_RE = re.compile(
     r"\b(Goldman(?:\s+Sachs)?|JP\s?Morgan|JPMorgan|Morgan\s+Stanley|Barclays|"
     r"Bank\s+of\s+America|BofA|Merrill|UBS|Citigroup|Citibank|Wells\s+Fargo|"
-    r"Deutsche\s+Bank|HSBC)\b", re.IGNORECASE)
+    r"Deutsche\s+Bank|HSBC|Jefferies)\b", re.IGNORECASE)
 # Bare abbreviations count ONLY inside square-bracket citation tags.
-_BANK_TAG_RE = re.compile(r"\[(GS|MS|JPM|BofA|Barclays|UBS|Citi|HSBC)\b[^\]]*\]")
+_BANK_TAG_RE = re.compile(
+    r"\[(GS|MS|JPM|BofA|Barclays|UBS|Citi|HSBC|JEF|Jefferies)\b[^\]]*\]")
 
 _BANK_CANON = {
     "goldman": "Goldman Sachs", "goldman sachs": "Goldman Sachs", "gs": "Goldman Sachs",
@@ -795,6 +796,7 @@ _BANK_CANON = {
     "bank of america": "Bank of America", "bofa": "Bank of America", "merrill": "Bank of America",
     "ubs": "UBS", "citigroup": "Citi", "citibank": "Citi", "citi": "Citi",
     "wells fargo": "Wells Fargo", "deutsche bank": "Deutsche Bank", "hsbc": "HSBC",
+    "jefferies": "Jefferies", "jef": "Jefferies",
 }
 
 

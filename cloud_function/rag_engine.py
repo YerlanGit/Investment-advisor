@@ -181,6 +181,11 @@ class FinancialRAG:
         ("Barclays",       r"barclays"),
         ("UBS",            r"\bubs\b"),
         ("Citi",           r"citi(group|bank)?"),
+        # §−93: Jefferies отсутствовал в перечне — его отчёты ингестились с
+        # bank="Unknown", а «Unknown» отбрасывается и в заголовке выдачи
+        # (get_market_sentiment), и в отборе «по одной цитате на банк»
+        # (tg_bot._fetch_rag_context), то есть цитата уезжала БЕЗ автора.
+        ("Jefferies",      r"jefferies|\bjef_"),
         ("Wells Fargo",    r"wells\s*fargo"),
         ("Deutsche Bank",  r"deutsche"),
         ("HSBC",           r"hsbc"),
