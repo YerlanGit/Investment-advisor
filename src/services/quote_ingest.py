@@ -524,7 +524,13 @@ def status(*, publisher: Optional[QuotePublisher] = None,
 
 
 def missing_dates(*, publisher: Optional[QuotePublisher] = None) -> tuple[int, ...]:
-    """Даты, которые бот применял, а в базе их нет.  Вход для `/missing`."""
+    """Даты, которые бот применял, а в базе их нет.
+
+    🔴 Возвращает ТОЛЬКО список и потому не годится для ответа человеку:
+    пустой кортеж означает и «всё на месте», и «базу прочитать не удалось».
+    Печатать их одинаково — ровно дефект `§−90` A-3 («пустая коллекция ≠ всё
+    хорошо»). Ответ в чат строится из `status()`, где это различие сохранено.
+    """
     return status(publisher=publisher).missing_dates
 
 
@@ -625,6 +631,14 @@ class TickerProbe:
 
     ticker: str
     found: bool
+    #: 🔴 Ответило ли хранилище вообще. Различать ОБЯЗАТЕЛЬНО: «в базе этой
+    #: бумаги нет» и «базы нет» — разные утверждения, и второе не даёт права
+    #: говорить про бумагу ничего. Инвариант не новый: ровно это записано в
+    #: `manual_portfolio.PreflightCoverage.answered`, и первая редакция
+    #: `check_ticker` его нарушала — отсутствие базы выглядело как «бумаги
+    #: нет», а совет «пришлите файл истории» вёл оператора чинить не то.
+    answered: bool = True
+    reason: Optional[str] = None
     source_symbol: Optional[str] = None
     market: Optional[str] = None
     currency: Optional[str] = None
@@ -703,8 +717,9 @@ def check_ticker(ticker: str, *,
         try:
             publisher.download(local)
             conn = _open_checked(local)
-        except PublisherUnavailable:
-            return TickerProbe(ticker=str(ticker), found=False)
+        except PublisherUnavailable as exc:
+            return TickerProbe(ticker=str(ticker), found=False,
+                               answered=False, reason=str(exc))
         try:
             return _probe(conn, str(ticker).strip().upper())
         finally:
@@ -777,10 +792,18 @@ def prune(*, dry_run: bool, actor: str,
             conn = _open_checked(local)
         except PublisherUnavailable as exc:
             return PruneOutcome(ok=False, dry_run=dry_run, reason=str(exc))
+        cursor = publisher.read_cursor() or Cursor()
         try:
+            # Даты курсора ДО чистки: то, что пропало раньше, — чужой откат и
+            # остаётся тревогой. То, что пропадёт из-за нас, тревогой быть не
+            # вправе, иначе бот пошлёт оператору на телефон ложный сигнал
+            # «база откатилась» и отправит искать файлы, которые сам же удалил.
+            present_before = _dates_present(conn, cursor.applied_dates)
             report = si.prune_thin_instruments(conn, keep=keep, dry_run=dry_run)
+            present_after = _dates_present(conn, cursor.applied_dates)
         finally:
             conn.close()
+        dropped_by_us = present_before - present_after
 
         common = dict(removed=tuple(report.removed), kept=report.kept,
                       bars_removed=report.bars_removed,
@@ -800,11 +823,15 @@ def prune(*, dry_run: bool, actor: str,
         return PruneOutcome(ok=False, dry_run=False, **common,
                             reason=f"опубликовать не удалось: {upload.reason}")
 
-    cursor = publisher.read_cursor() or Cursor()
-    publisher.write_cursor(cursor.with_applied(
+    survived = Cursor(
+        applied_dates=tuple(d for d in cursor.applied_dates
+                            if d not in dropped_by_us),
+        generation=cursor.generation, at=cursor.at, last_run=cursor.last_run)
+    publisher.write_cursor(survived.with_applied(
         None, generation=upload.generation,
         last_run={"file": "prune", "actor": str(actor), "kind": "prune",
-                  "removed": len(report.removed)}))
+                  "removed": len(report.removed),
+                  "dates_dropped": len(dropped_by_us)}))
     return PruneOutcome(ok=True, dry_run=False, published=True,
                         generation=upload.generation, **common)
 
@@ -898,6 +925,11 @@ def format_universe(report: UniverseReport) -> str:
 
 
 def format_probe(probe: TickerProbe) -> str:
+    if not probe.answered:
+        # Совет «пришлите файл истории» здесь был бы вредным: применять его
+        # некуда, и оператор пошёл бы чинить не то.
+        return (f"🔴 не могу ответить про {probe.ticker}: хранилище недоступно.\n"
+                f"   {probe.reason}")
     if not probe.found:
         return (f"🔴 {probe.ticker} в базе НЕТ ни под одной формой символа.\n"
                 "   Пришлите файл истории этой бумаги из архива — она заведётся.")
@@ -934,12 +966,21 @@ def format_prune(outcome: PruneOutcome) -> str:
     return "\n".join(lines)
 
 
-def format_missing(dates: Sequence[int]) -> str:
-    if not dates:
-        return ("✅ пропавших дней нет: всё, что я применял, в базе на месте.")
-    listed = "\n".join(f"  {d}_d.txt" for d in dates)
-    return (f"⚠️ не хватает {len(dates)} дн. — перешлите эти файлы из applied/:\n"
-            f"{listed}\nПорядок не важен, повтор безвреден.")
+def format_missing(state: StoreStatus) -> str:
+    """Ответ на `/missing`.  Принимает СТАТУС, а не список дат.
+
+    🔴 Разница принципиальная и стоила отдельной правки: список сам по себе
+    пуст и когда всё в порядке, и когда базу не удалось прочитать. Первая
+    редакция печатала на оба случая зелёное «всё на месте» — то есть самый
+    громкий отказ выглядел как самый спокойный ответ.
+    """
+    if not state.ok:
+        return (f"🔴 не могу сказать: база недоступна.\n   {state.reason}")
+    if not state.missing_dates:
+        return "✅ пропавших дней нет: всё, что я применял, в базе на месте."
+    listed = "\n".join(f"  {d}_d.txt" for d in state.missing_dates)
+    return (f"⚠️ не хватает {len(state.missing_dates)} дн. — перешлите эти "
+            f"файлы из applied/:\n{listed}\nПорядок не важен, повтор безвреден.")
 
 __all__ = [
     "ApplyOutcome",

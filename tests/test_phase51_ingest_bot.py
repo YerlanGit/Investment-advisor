@@ -591,6 +591,24 @@ class SummaryTest(_IngestCase):
         self.assertIn("НЕ применён", text)
         self.assertIn("бутстрап", text.lower())
 
+    def test_c1_reports_real_numbers_when_the_engine_lists_are_available(self) -> None:
+        """🔴 В деплой-образе pandas ЕСТЬ, значит в проде идёт именно эта ветка.
+
+        Без подмены списков она не исполняется здесь ни разу, и сводка
+        проверялась бы только в состоянии «не проверено» — то есть в том,
+        которого в проде не бывает.
+        """
+        with mock.patch.object(qi, "_engine_universe",
+                               return_value=(("SPY.US", "MSFT.US"), ("AAPL.US",))):
+            outcome = qi.apply_daily(self.daily(20260813), actor="1",
+                                     publisher=self.publisher)
+        self.assertTrue(outcome.c1.checked)
+        self.assertEqual((outcome.c1.factors_ok, outcome.c1.factors_total), (1, 2))
+        self.assertEqual(outcome.c1.missing_factors, ("MSFT.US",))
+        text = qi.format_summary(outcome)
+        self.assertIn("C-1 факторы ........... 1/2 🔴", text)
+        self.assertIn("нет истории: MSFT.US", text)
+
     def test_c1_is_either_a_number_or_an_explicit_not_checked(self) -> None:
         """🔴 Молчание про C-1 читалось бы как «проверено, всё хорошо».
 
@@ -672,7 +690,8 @@ class BotWiringTest(unittest.TestCase):
             seen.append("HANDLER")
             return "reached"
 
-        with mock.patch.dict(os.environ, {access.ENV_NAME: "1"}):
+        with mock.patch.dict(os.environ, {access.ENV_NAME: "1"}), \
+                self.assertLogs("ingest_access", level="WARNING"):
             result = asyncio.run(
                 ingest_bot.AdminOnlyMiddleware()(handler, _Event(), {}))
         self.assertIsNone(result)
@@ -884,6 +903,34 @@ def _state(**kw):
     return qi.StoreStatus(**base)
 
 
+class MissingAnswerTest(_IngestCase):
+    """🔴 «Пустая коллекция ≠ всё хорошо» — правило проекта (`§−90` A-3).
+
+    Список пропавших дат пуст и когда всё в порядке, и когда базу прочитать не
+    удалось. Первая редакция печатала на оба случая зелёное «всё на месте»:
+    самый громкий отказ выглядел как самый спокойный ответ.
+    """
+
+    def test_unavailable_store_is_not_reported_as_all_clear(self) -> None:
+        state = qi.status(publisher=LocalQuotePublisher(self.root / "no"))
+        text = qi.format_missing(state)
+        self.assertIn("не могу сказать", text)
+        self.assertNotIn("✅", text)
+
+    def test_healthy_store_with_nothing_missing_says_so(self) -> None:
+        text = qi.format_missing(qi.status(publisher=self.publisher))
+        self.assertIn("✅", text)
+
+    def test_missing_days_are_listed_as_files_to_resend(self) -> None:
+        qi.apply_daily(self.daily(20260813), actor="1", publisher=self.publisher)
+        conn = si.connect(self.db)
+        conn.execute("DELETE FROM daily_bars WHERE trade_date=20260813")
+        conn.commit()
+        conn.close()
+        text = qi.format_missing(qi.status(publisher=self.publisher))
+        self.assertIn("20260813_d.txt", text)
+
+
 class ReminderTest(unittest.TestCase):
 
     def test_healthy_base_produces_SILENCE(self) -> None:
@@ -1029,6 +1076,411 @@ class DeployStepTest(unittest.TestCase):
         body = "\n".join(step["args"])
         self.assertNotIn("--add-volume", body)
         self.assertNotIn("/mnt/state", body)
+
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# «Базы нет» ≠ «бумаги нет»
+# ═════════════════════════════════════════════════════════════════════════════
+
+class StoreSilenceIsNotAnAnswerTest(_IngestCase):
+    """🔴 Инвариант не новый: он записан в `manual_portfolio.PreflightCoverage`.
+
+    «В базе этой бумаги нет» и «базы нет» — разные утверждения, и второе не
+    даёт права говорить про бумагу ничего. Первая редакция `check_ticker`
+    сливала их в `found=False`, и ответ советовал «пришлите файл истории» —
+    совет, который применять некуда, когда базы нет вовсе.
+    """
+
+    def test_absent_store_is_reported_as_unanswered(self) -> None:
+        probe = qi.check_ticker("SPY.US",
+                                publisher=LocalQuotePublisher(self.root / "no"))
+        self.assertFalse(probe.answered)
+        self.assertFalse(probe.found)
+
+    def test_absent_store_does_not_advise_sending_a_history_file(self) -> None:
+        probe = qi.check_ticker("SPY.US",
+                                publisher=LocalQuotePublisher(self.root / "no"))
+        text = qi.format_probe(probe)
+        self.assertIn("хранилище недоступно", text)
+        self.assertNotIn("Пришлите файл истории", text)
+
+    def test_present_store_answers_and_the_two_cases_differ(self) -> None:
+        known = qi.check_ticker("SPY.US", publisher=self.publisher)
+        unknown = qi.check_ticker("NOSUCH.US", publisher=self.publisher)
+        self.assertTrue(known.answered and known.found)
+        self.assertTrue(unknown.answered)
+        self.assertFalse(unknown.found)
+        self.assertIn("Пришлите файл истории", qi.format_probe(unknown))
+
+
+class PruneDoesNotFabricateARollbackTest(_IngestCase):
+    """Чистка не вправе оставить в журнале дату, которую сама и удалила.
+
+    Иначе следующая проверка пошлёт оператору на телефон «база откатилась» и
+    отправит искать файлы, которых бот лишил базу по его же команде. Ложная
+    тревога дороже пропущенной: после неё перестают верить настоящей.
+    """
+
+    def test_dates_removed_by_prune_leave_the_cursor(self) -> None:
+        thin = self.root / "thin.us.txt"
+        thin.write_text(_history_text("THIN.US", (20260901,)), encoding="utf-8")
+        conn = si.connect(self.db)
+        si.apply_batch(conn, si.parse_history_file(thin, window_days=99999,
+                                                   today=date(2026, 9, 2)),
+                       kind="bootstrap", allow_new=True)
+        conn.close()
+        self.publisher.write_cursor(
+            Cursor().with_applied(20260901, generation=1))
+
+        with mock.patch.object(qi, "_working_set", return_value=list(self.universe)):
+            outcome = qi.prune(dry_run=False, actor="1", publisher=self.publisher)
+        self.assertTrue(outcome.ok, outcome.reason)
+        self.assertIn("THIN.US", outcome.removed)
+        self.assertEqual(self.publisher.read_cursor().applied_dates, ())
+        self.assertEqual(qi.status(publisher=self.publisher).missing_dates, ())
+
+    def test_a_real_rollback_still_survives_a_prune(self) -> None:
+        """Пропавшее ДО чистки — чужой откат, и он обязан остаться тревогой.
+
+        🔴 Первая редакция этого теста была ПУСТОЙ, и вскрыла её мутация.
+        Чистить было нечего (все бумаги проходили порог), `prune` выходил
+        раньше записи курсора — то есть тест проверял, что нетронутый журнал
+        остался нетронутым. Здесь база СОДЕРЖИТ обрывочную бумагу, поэтому
+        путь записи курсора исполняется по-настоящему.
+        """
+        thin = self.root / "thin.us.txt"
+        thin.write_text(_history_text("THIN.US", (20260812,)), encoding="utf-8")
+        conn = si.connect(self.db)
+        si.apply_batch(conn, si.parse_history_file(thin, window_days=9000),
+                       kind="bootstrap", allow_new=True)
+        conn.close()
+        self.publisher.write_cursor(
+            Cursor().with_applied(20250101, generation=1))   # в базе такого нет
+
+        with mock.patch.object(qi, "_working_set", return_value=list(self.universe)):
+            outcome = qi.prune(dry_run=False, actor="1", publisher=self.publisher)
+        self.assertTrue(outcome.published, "чистка не дошла до записи курсора — "
+                                           "тест снова стал бы пустым")
+        self.assertIn(20250101, self.publisher.read_cursor().applied_dates)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# IB-4 — ядро бота: приём документа целиком
+# ═════════════════════════════════════════════════════════════════════════════
+
+class _Doc:
+    def __init__(self, name, size):
+        self.file_name = name
+        self.file_size = size
+
+
+class _Sent:
+    def __init__(self):
+        self.deleted = False
+
+    async def delete(self):
+        self.deleted = True
+
+
+class _FakeBot:
+    """Телеграм, которого нет: пишет заготовленный файл вместо `getFile`."""
+
+    def __init__(self, payload: str):
+        self.payload = payload
+        self.downloads: list = []
+
+    async def download(self, document, destination):
+        self.downloads.append(Path(destination))
+        Path(destination).write_text(self.payload, encoding="utf-8")
+
+
+class _FakeMessage:
+    def __init__(self, bot, document=None, text=None, user_id=1):
+        self.bot = bot
+        self.document = document
+        self.text = text
+        self.from_user = type("U", (), {"id": user_id})()
+        self.answers: list = []
+
+    async def answer(self, text, **kwargs):
+        self.answers.append((text, kwargs))
+        return _Sent()
+
+    async def edit_reply_markup(self, **_kw):
+        return None
+
+
+@unittest.skipUnless(_HAS_AIOGRAM, "aiogram не установлен (офлайн-разработка)")
+class DocumentHandlerTest(_IngestCase):
+    """🔴 Раньше ядро бота не имело НИ ОДНОГО теста.
+
+    Сводка, лимиты, маршрутизация файла и удаление временной копии
+    проверялись только глазами — то есть не проверялись. Здесь Telegram
+    подменён целиком: сети нет, токена нет, а путь пройден весь.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        import ingest_bot                                # noqa: PLC0415
+        self.ib = ingest_bot
+        env = mock.patch.dict(os.environ, {
+            "QUOTES_BACKEND": "local",
+            "QUOTES_LOCAL_ROOT": str(self.store),
+        })
+        env.start()
+        self.addCleanup(env.stop)
+
+    def _send(self, name, payload, size=1000):
+        import asyncio                                   # noqa: PLC0415
+        bot = _FakeBot(payload)
+        message = _FakeMessage(bot, document=_Doc(name, size))
+        asyncio.run(self.ib.on_document(message))
+        return bot, message
+
+    def test_daily_file_travels_end_to_end_and_is_published(self) -> None:
+        bot, message = self._send("20260813_d.txt",
+                                  _daily_text(20260813, self.universe))
+        summary = message.answers[-1][0]
+        self.assertIn("применён", summary)
+        self.assertIn("поколение", summary)
+        self.assertEqual(len(_bars(self.db)), 8)
+        self.assertEqual(len(bot.downloads), 1)
+
+    def test_oversized_file_is_refused_WITHOUT_downloading_it(self) -> None:
+        """🔴 Главное свойство порядка проверок.
+
+        `/tmp` на Cloud Run — это оперативная память; скачать архив, чтобы
+        потом отказать, значит заплатить памятью за отказ.
+        """
+        bot, message = self._send("20260813_d.txt", "неважно",
+                                  size=qi.MAX_UPLOAD_BYTES + 1)
+        self.assertEqual(bot.downloads, [], "файл скачали, хотя обязаны были "
+                                            "отказать по метаданным")
+        self.assertIn("не принят", message.answers[-1][0])
+
+    def test_history_file_is_routed_to_the_backfill_path(self) -> None:
+        before = self.instruments()
+        _bot, message = self._send("nvda.us.txt",
+                                   _history_text("NVDA.US", (20260810,)))
+        self.assertIn("применён", message.answers[-1][0])
+        self.assertEqual(self.instruments(), before + 1)
+
+    def test_the_temporary_copy_is_removed_afterwards(self) -> None:
+        bot, _message = self._send("20260813_d.txt",
+                                   _daily_text(20260813, self.universe))
+        self.assertFalse(bot.downloads[0].exists(),
+                         "временный файл остался в /tmp — а это RAM")
+
+    def test_refusal_reaches_the_operator_instead_of_a_traceback(self) -> None:
+        with self.assertLogs("ramp.ingest", level="WARNING"):
+            _bot, message = self._send("20260813_d.txt", "<html>капча</html>")
+        summary = message.answers[-1][0]
+        self.assertIn("применён", summary)
+        self.assertIn("TICKER", summary)
+
+    def test_every_summary_goes_out_as_escaped_HTML(self) -> None:
+        """🔴 Пин на способ доставки, а не на его вид.
+
+        Legacy-Markdown разбирает разметку и внутри блока и отвечает 400-м на
+        несбалансированный символ — сводка не доходит ВООБЩЕ. Откат на него
+        прошёл бы мимо всех остальных тестов.
+        """
+        _bot, message = self._send("20260813_d.txt",
+                                   _daily_text(20260813, self.universe))
+        text, kwargs = message.answers[-1]
+        self.assertTrue(text.startswith("<pre>"), text[:40])
+        self.assertEqual(str(kwargs.get("parse_mode")).lower().split(".")[-1],
+                         "html")
+
+    def test_dangerous_characters_are_escaped_not_rendered(self) -> None:
+        self.assertIn("&lt;b&gt;", self.ib.render_block("<b>x</b>"))
+        self.assertIn("&amp;", self.ib.render_block("a & b"))
+
+    def test_a_long_summary_is_clipped_rather_than_dropped(self) -> None:
+        """Обрезанная сводка лучше не доставленной: лимит Telegram — 4096."""
+        rendered = self.ib.render_block("x" * 10_000)
+        self.assertLess(len(rendered), 4096)
+        self.assertIn("обрезано", rendered)
+
+
+@unittest.skipUnless(_HAS_AIOGRAM, "aiogram не установлен (офлайн-разработка)")
+class PruneConfirmationTest(_IngestCase):
+    """Необратимая команда требует второго осознанного действия."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        import ingest_bot                                # noqa: PLC0415
+        self.ib = ingest_bot
+        env = mock.patch.dict(os.environ, {
+            "QUOTES_BACKEND": "local",
+            "QUOTES_LOCAL_ROOT": str(self.store),
+        })
+        env.start()
+        self.addCleanup(env.stop)
+        thin = self.root / "thin.us.txt"
+        thin.write_text(_history_text("THIN.US", (20260812,)), encoding="utf-8")
+        conn = si.connect(self.db)
+        si.apply_batch(conn, si.parse_history_file(thin, window_days=9000),
+                       kind="bootstrap", allow_new=True)
+        conn.close()
+
+    def _callback(self, data):
+        import asyncio                                   # noqa: PLC0415
+        message = _FakeMessage(_FakeBot(""))
+
+        class _CB:
+            def __init__(self, msg):
+                self.data = data
+                self.message = msg
+                self.from_user = type("U", (), {"id": 1})()
+
+            async def answer(self, *a, **k):
+                return None
+
+        with mock.patch.object(qi, "_working_set",
+                               return_value=list(self.universe)):
+            asyncio.run(self.ib.cb_prune(_CB(message)))
+        return message
+
+    def test_cancel_leaves_the_base_alone(self) -> None:
+        before = _bars(self.db)
+        message = self._callback("prune:no")
+        self.assertIn("Отменено", message.answers[-1][0])
+        self.assertEqual(_bars(self.db), before)
+
+    def test_confirmation_actually_prunes_and_publishes(self) -> None:
+        message = self._callback("prune:go")
+        self.assertIn("вычищена", message.answers[-1][0])
+        conn = si.connect(self.db, read_only=True)
+        try:
+            left = {r["source_symbol"] for r in conn.execute(
+                "SELECT source_symbol FROM instruments")}
+        finally:
+            conn.close()
+        self.assertNotIn("THIN.US", left)
+
+
+@unittest.skipUnless(_HAS_AIOGRAM, "aiogram не установлен (офлайн-разработка)")
+class CommandFailureTest(_IngestCase):
+    """Ни одна команда не имеет права уронить polling или отдать traceback."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        import ingest_bot                                # noqa: PLC0415
+        self.ib = ingest_bot
+
+    def test_missing_store_is_explained_not_raised(self) -> None:
+        import asyncio                                   # noqa: PLC0415
+        message = _FakeMessage(_FakeBot(""), text="/status")
+        with mock.patch.dict(os.environ, {
+                "QUOTES_BACKEND": "local",
+                "QUOTES_LOCAL_ROOT": str(self.root / "nowhere")}):
+            asyncio.run(self.ib.cmd_status(message))
+        self.assertIn("недоступна", message.answers[-1][0])
+
+    def test_an_unexpected_error_is_caught_and_named(self) -> None:
+        import asyncio                                   # noqa: PLC0415
+        message = _FakeMessage(_FakeBot(""), text="/status")
+        with mock.patch.object(qi, "status", side_effect=RuntimeError("бум")), \
+                self.assertLogs("ramp.ingest", level="ERROR"):
+            asyncio.run(self.ib.cmd_status(message))
+        self.assertIn("бум", message.answers[-1][0])
+
+    def test_check_without_an_argument_explains_the_format(self) -> None:
+        import asyncio                                   # noqa: PLC0415
+        message = _FakeMessage(_FakeBot(""), text="/check")
+        asyncio.run(self.ib.cmd_check(message))
+        self.assertIn("/check", message.answers[-1][0])
+
+
+
+@unittest.skipUnless(_HAS_AIOGRAM, "aiogram не установлен (офлайн-разработка)")
+class DispatcherRoutingTest(unittest.TestCase):
+    """Проверка НАСТОЯЩЕЙ маршрутизации, а не только сборки диспетчера.
+
+    Всё остальное здесь зовёт хендлеры напрямую и потому ничего не говорит о
+    том, доедет ли до них апдейт. Здесь апдейт скармливается диспетчеру
+    целиком: работают фильтры, порядок регистрации и middleware.
+    """
+
+    def _update(self, text: str, user_id: int):
+        from datetime import datetime                    # noqa: PLC0415
+        from aiogram.types import Chat, Message, Update, User   # noqa: PLC0415
+
+        return Update(update_id=1, message=Message(
+            message_id=1, date=datetime.now(),
+            chat=Chat(id=user_id, type="private"),
+            from_user=User(id=user_id, is_bot=False, first_name="op"),
+            text=text))
+
+    def _feed(self, text: str, user_id: int, admins: str) -> list:
+        import asyncio                                   # noqa: PLC0415
+        from aiogram import Bot                          # noqa: PLC0415
+        import ingest_bot                                # noqa: PLC0415
+
+        seen: list = []
+
+        async def recorder(message):
+            seen.append(message.text)
+
+        # 🔴 `Message.answer` подменяется НЕ для удобства. Гейт деплоя объявлен
+        # сетевно-изолированным («no live calls leave the builder»,
+        # `cloudbuild.yaml`), а отказ чужому отправляется именно через
+        # `answer` — то есть без подмены тест стучался бы в api.telegram.org с
+        # заведомо чужим токеном. Подмена заодно делает отказ проверяемым.
+        from aiogram.types import Message                # noqa: PLC0415
+
+        refusals: list = []
+
+        async def _answer(self, text, **_kw):
+            refusals.append(text)
+            return None
+
+        async def run():
+            bot = Bot(token="123456:AAaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+            try:
+                with mock.patch.object(ingest_bot, "cmd_status", recorder), \
+                        mock.patch.object(Message, "answer", _answer), \
+                        mock.patch.dict(os.environ, {access.ENV_NAME: admins}):
+                    dispatcher = ingest_bot.build_dispatcher()
+                    await dispatcher.feed_update(bot, self._update(text, user_id))
+            finally:
+                await bot.session.close()
+
+        asyncio.run(run())
+        self._refusals = refusals
+        return seen
+
+    def test_the_admin_command_reaches_its_handler(self) -> None:
+        self.assertEqual(self._feed("/status", 7, "7"), ["/status"])
+
+    def test_a_stranger_never_reaches_the_handler(self) -> None:
+        """Гейт стоит ДО хендлера, а не внутри него."""
+        with self.assertLogs("ingest_access", level="WARNING"):
+            self.assertEqual(self._feed("/status", 999, "7"), [])
+        self.assertEqual(self._refusals, [access.DENIAL_TEXT],
+                         "чужому не ответили нейтральным отказом")
+
+    def test_an_empty_admin_list_stops_everyone(self) -> None:
+        with self.assertLogs("ingest_access", level="WARNING"):
+            self.assertEqual(self._feed("/status", 7, ""), [])
+
+    def test_both_buses_carry_the_gate(self) -> None:
+        """🔴 Кнопка подтверждения чистки приходит КОЛБЭКОМ.
+
+        Шина без гейта пустила бы чужое нажатие к необратимой операции —
+        именно этого не хватало в первой редакции.
+        """
+        import ingest_bot                                # noqa: PLC0415
+
+        dispatcher = ingest_bot.build_dispatcher()
+        for bus in ("message", "callback_query"):
+            with self.subTest(bus=bus):
+                observer = getattr(dispatcher, bus)
+                names = [type(m).__name__
+                         for m in getattr(observer.middleware, "_middlewares", [])]
+                self.assertIn("AdminOnlyMiddleware", names)
 
 
 # ═════════════════════════════════════════════════════════════════════════════

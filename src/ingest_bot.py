@@ -182,7 +182,7 @@ async def cmd_status(message: Message) -> None:
 
 
 async def cmd_missing(message: Message) -> None:
-    await _guarded(message, lambda: qi.format_missing(qi.missing_dates()))
+    await _guarded(message, lambda: qi.format_missing(qi.status()))
 
 
 async def cmd_universe(message: Message) -> None:

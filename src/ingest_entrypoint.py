@@ -23,6 +23,7 @@
 """
 
 import asyncio
+import hmac
 import logging
 import os
 import sys
@@ -110,7 +111,10 @@ async def _handle_task(method: str, headers: dict, on_task) -> bytes:
         return _reply(503, "INGEST_TASK_TOKEN не задан — маршрут отключён")
     if method != "POST":
         return _reply(405, "только POST")
-    if headers.get(TASK_TOKEN_HEADER, "") != token:
+    # `compare_digest`, а не `!=`: сравнение секрета не должно зависеть от
+    # длины совпавшего префикса. Маршрут закрыт ещё и OIDC снаружи, но это
+    # ровно тот случай, где правильный идиом стоит одну строку.
+    if not hmac.compare_digest(headers.get(TASK_TOKEN_HEADER, ""), token):
         logger.warning("плановая проверка с неверным секретом — отказ")
         return _reply(401, "неверный секрет")
     try:
