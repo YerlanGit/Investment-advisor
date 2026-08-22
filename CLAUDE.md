@@ -15,15 +15,13 @@ GCP Cloud Run (long-polling) · Cloud Function (RAG-ингест) · ChromaDB ·
 ## Верификация (обязательна перед каждым пушем)
 
 ```bash
-PYTHONPATH=src python -m pytest tests/ -q          # → 1670 passed, 2 xfailed
+PYTHONPATH=src python -m pytest tests/ -q          # → 1734 passed, 5 skipped, 2 xfailed
 ```
 
 - Префикс `PYTHONPATH=src` **ОБЯЗАТЕЛЕН** (`conftest.py`/`pyproject.toml` нет).
 - **Прогонов ДВА.** Второй — зеркало деплой-образа, в нём НЕТ каталога `design/`:
-  ```bash
-  cp -r src tests SYSTEM_PROMPT.md requirements*.txt <tmp>/ && cd <tmp>
-  PYTHONPATH=src python -m pytest tests/ -q        # → 1594 passed, 76 skipped, 2 xfailed
-  ```
+  `cp -r src tests SYSTEM_PROMPT.md requirements*.txt <tmp>/ && cd <tmp>`, тот же
+  прогон → 1657 passed, 82 skipped, 2 xfailed.
   Зелёный GitHub CI НЕ означает, что деплой пройдёт: CI видит полный чекаут,
   Cloud Build — только образ. Разница 76 тестов — ровно те, что читают
   `design/`, `docs/`, `CLAUDE.md`, `scripts/` и `cloud_function/`, то есть
@@ -31,10 +29,8 @@ PYTHONPATH=src python -m pytest tests/ -q          # → 1670 passed, 2 xfailed
 - Правил `design/*.jsx` → **обязательно** `bash design/premium_v2/build.sh`.
 - Смоук-рендер тиров: `html_renderer.render_report_html(None, <user_id>, ...)`.
 - `freedom-etl/` гоняется ОТДЕЛЬНО (свои зависимости, в основную сюиту не входит):
-  ```bash
-  cd freedom-etl && python -m pytest tests/ -q     # → 109 passed, 13 skipped
-  ```
-  13 skipped — интеграционные; их включает `ETL_TEST_DSN=<dsn живого PostgreSQL>`.
+  `cd freedom-etl && python -m pytest tests/ -q` → 109 passed, 13 skipped
+  (интеграционные; включает `ETL_TEST_DSN=<dsn живого PostgreSQL>`).
 
 ## Инварианты (не сломать)
 
@@ -47,8 +43,10 @@ PYTHONPATH=src python -m pytest tests/ -q          # → 1670 passed, 2 xfailed
 - Новый тикер — ТОЛЬКО в `finance/asset_taxonomy.py` (SSOT ФАКТОВ); решения у
   потребителей РАЗНЫЕ (`TLT`: мандат «Bonds», `Asset_Type` «ETF» — оба верны).
   `NoSecondCopyTest` падает на литерале тикера в потребителе.
-- Разбор env на уровне модуля — ТОЛЬКО через `env_config.env_int`/`env_float`:
-  голый `int(os.getenv(...))` роняет ИМПОРТ, то есть старт контейнера (AST-сканер).
+- Старт контейнера роняют ДВЕ вещи. Разбор env на уровне модуля — ТОЛЬКО через
+  `env_config.env_int`/`env_float`: голый `int(os.getenv(...))` роняет ИМПОРТ (AST-сканер).
+  И ТЯЖЁЛЫЙ импорт на фоновом потоке: демон RAG рвал numpy у главного потока (`§−98`),
+  новый импорт в теле потока обязан попасть в `entrypoint._preimport_boot_ingest_deps`.
 - `SYSTEM_PROMPT.md` лежит ТОЛЬКО в корне — он читается в рантайме и копируется Dockerfile.
 - `cloud_function/rag_engine.py` держится ИДЕНТИЧНЫМ `src/agent/rag_engine.py`.
 - Premium-бандлы `src/premium_assets/*` руками НЕ править — только через `build.sh`.
@@ -78,7 +76,8 @@ PYTHONPATH=src python -m pytest tests/ -q          # → 1670 passed, 2 xfailed
   gcsfuse — сотни range-запросов на отчёт. Формы символа меняют НОТАЦИЮ, но не
   ПЛОЩАДКУ: `{base}.US` для иностранной бумаги подсунет ADR (`§−77`). Свежесть —
   в ТОРГОВЫХ днях рынка бумаги, не в календарных.
-  из `__main__`): залил PDF в INBOX → **рестартни бот**, иначе печатаются старые
+- Синк ChromaDB и бут-ингест идут ОДИН РАЗ за старт (`entrypoint._main`, ПОСЛЕ
+  тяжёлых импортов): залил PDF в INBOX → **рестартни бот**, иначе печатаются старые
   «N отчётов · M чанков» (`§−93`; проверка — `scripts/rag_inventory.py --from-gcs`).
 - **Отказ брокера — ТРИ причины** (`_ramp_fallback_reason`): `waf_block` (WAF по IP,
   САМО не пройдёт), `api_error` (пройдёт), `parse_error` (НАШ дефект). «5–15 минут»
