@@ -1058,8 +1058,33 @@ class DeployStepTest(unittest.TestCase):
                          "STOOQ_DB_PATH=/mnt/state/stooq/prices.sqlite"):
             self.assertIn(expected, env)
 
+    def test_loader_refuses_to_deploy_without_its_own_service_account(self) -> None:
+        """🔴 Без своего SA всё ограничение прав — слова.
+
+        `--service-account` в шаге не задавался, и Cloud Run брал дефолтный
+        Compute-SA, у которого уже есть objectAdmin на бакете с `tokenomics.db`
+        и `users_vault.db`. То есть утверждение «у загрузчика нет прав на
+        балансы» было ЛОЖНЫМ как реализовано — ни отдельный бакет, ни условие
+        IAM этого не меняли: сервис бежал с полным доступом.
+        """
+        step = next(s for s in self.doc["steps"] if s["id"] == "deploy-ingest-bot")
+        body = "\n".join(step["args"])
+        self.assertIn("--service-account=", body)
+        self.assertIn("_INGEST_SA", body)
+        self.assertIn("ОТКАЗ", body, "пустой SA обязан останавливать деплой")
+        self.assertEqual(self.doc["substitutions"]["_INGEST_SA"], "",
+                         "SA заводится осознанно, а не достаётся по умолчанию")
+
     def test_loader_gets_its_own_bucket_not_the_state_one(self) -> None:
-        """Радиус поражения писателя не должен включать балансы и ключи брокера."""
+        """Радиус поражения писателя не должен включать балансы и ключи брокера.
+
+        🔴 Пинится ДЕФОЛТ репозитория и отсутствие тома состояния — не то, что
+        реально приедет в прод: `_QUOTES_BUCKET` можно переопределить в
+        Build Trigger. Вариант «тот же бакет + условие IAM на префикс `stooq/`»
+        делает это осознанно, и компенсирующий контроль там — условие, а не
+        эта проверка. Тест говорит: по умолчанию репозиторий предлагает
+        раздельные бакеты.
+        """
         self.assertNotEqual(self.doc["substitutions"]["_QUOTES_BUCKET"],
                             self.doc["substitutions"]["_STATE_BUCKET"])
         step = next(s for s in self.doc["steps"] if s["id"] == "deploy-ingest-bot")

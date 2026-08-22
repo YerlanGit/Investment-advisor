@@ -38,6 +38,15 @@ substitutions:
   # ваш Telegram-id в _INGEST_ADMIN_IDS.
   _INGEST_SERVICE: ''
   _INGEST_ADMIN_IDS: ''
+  # 🔴 СВОЙ сервис-аккаунт загрузчика — не удобство, а условие.
+  # Без него Cloud Run берёт дефолтный Compute-SA, у которого уже есть
+  # objectAdmin на _STATE_BUCKET, то есть на tokenomics.db (балансы) и
+  # users_vault.db (ключи брокера). Тогда любое ограничение прав — хоть
+  # отдельным бакетом, хоть условием IAM — становится словами: сервис всё
+  # равно бежит с полным доступом. Поэтому шаг ниже ОТКАЗЫВАЕТСЯ деплоить
+  # загрузчик, пока эта подстановка пуста.
+  # Формат: ramp-ingest@<PROJECT_ID>.iam.gserviceaccount.com
+  _INGEST_SA: ''
   # ОТДЕЛЬНЫЙ бакет, а не _STATE_BUCKET: там лежат tokenomics.db (балансы) и
   # users_vault.db (зашифрованные ключи брокера). Ограничивается не человек, а
   # всегда работающий сервис-писатель (PLAN §7.1).
@@ -193,11 +202,25 @@ steps:
           echo "WARN: _INGEST_ADMIN_IDS пуст — бот откажется стартовать (fail-closed)."
           echo "      Это защита, а не сбой: сервис пишет в базу котировок."
         fi
+        if [ -z "${_INGEST_SA}" ]; then
+          echo "🔴 ОТКАЗ: _INGEST_SA пуст."
+          echo "   Без своего сервис-аккаунта загрузчик побежит под дефолтным"
+          echo "   Compute-SA, а у того полный доступ к бакету с балансами и"
+          echo "   ключами брокера. Ограничение прав тогда существует только на"
+          echo "   бумаге. Заведите SA и выдайте ему доступ УЗКО:"
+          echo "     gcloud iam service-accounts create ramp-ingest"
+          echo "     gcloud storage buckets add-iam-policy-binding gs://<бакет> \\"
+          echo "       --member=serviceAccount:<SA> --role=roles/storage.objectAdmin \\"
+          echo "       --condition=title=stooq-only,expression=\"resource.name.startsWith('projects/_/buckets/<бакет>/objects/stooq/')\""
+          echo "   Главный бот не затронут."
+          exit 0
+        fi
         gcloud run deploy ${_INGEST_SERVICE} \
           --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:$SHORT_SHA \
           --region=${_REGION} \
           --platform=managed \
           --command=python --args=/app/src/ingest_entrypoint.py \
+          --service-account=${_INGEST_SA} \
           --min-instances=1 \
           --max-instances=1 \
           --concurrency=1 \
