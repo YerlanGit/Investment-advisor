@@ -203,7 +203,13 @@ jobs:
                 out_lines.append(f"_Превью: последние {PREVIEW} из {len(records)} (полностью — в артефакте)._\n")
             out_lines.append("```")
             for r in preview:
-                msg = r["message"].strip().replace("\n", " ")[:500]
+                # §−98: обрезка в 500 символов СКРЫВАЛА причину падения.
+                # Traceback Python приезжает ОДНОЙ записью, и строка с типом
+                # исключения стоит В КОНЦЕ — то есть ровно то, ради чего логи
+                # и читают, обрезалось первым.  Разбор старта бота 17.08 упёрся
+                # именно в это: видно «Traceback … asyncio.run(_main())» и
+                # ничего о том, ЧТО упало.
+                msg = r["message"].strip().replace("\n", " ")[:8000]
                 line = f"[{r['timestamp']}] {r['severity']:8s} {msg}"
                 print(line)
                 out_lines.append(line)
