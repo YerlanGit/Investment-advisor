@@ -34,10 +34,18 @@ substitutions:
   # Бот-загрузчик котировок (IB-8). ПУСТО ПО УМОЛЧАНИЮ → шаг ниже не делает
   # ничего, и текущий деплой остаётся ровно таким, каким был. Заполните имя
   # сервиса (например `ramp-ingest-bot`), когда будете готовы: понадобятся
-  # секрет RAMP_INGEST_BOT_TOKEN в Secret Manager, бакет из _QUOTES_BUCKET и
+  # секрет из _INGEST_BOT_TOKEN_SECRET в Secret Manager, бакет из _QUOTES_BUCKET и
   # ваш Telegram-id в _INGEST_ADMIN_IDS.
   _INGEST_SERVICE: ''
   _INGEST_ADMIN_IDS: ''
+  # Имя СЕКРЕТА В SECRET MANAGER с токеном бота-загрузчика. Вынесено в
+  # подстановку, потому что проект переезжает с имени RAMP на OMBRI, а имя
+  # секрета живёт не в репозитории: переименовали в GCP → поменяли здесь одну
+  # строку (или передали `--substitutions=_INGEST_BOT_TOKEN_SECRET=...`), не
+  # трогая шаг деплоя.
+  # 🔴 Секреты ГЛАВНОГО бота здесь НЕ ЗАТРОНУТЫ: он работает, его переезд —
+  # отдельная осознанная операция.
+  _INGEST_BOT_TOKEN_SECRET: 'OMBRI_INGEST_BOT_TOKEN'
   # 🔴 СВОЙ сервис-аккаунт загрузчика — не удобство, а условие.
   # Без него Cloud Run берёт дефолтный Compute-SA, у которого уже есть
   # objectAdmin на _STATE_BUCKET, то есть на tokenomics.db (балансы) и
@@ -259,7 +267,7 @@ steps:
           --timeout=3600 \
           --no-cpu-throttling \
           --no-allow-unauthenticated \
-          --set-secrets=RAMP_INGEST_BOT_TOKEN=RAMP_INGEST_BOT_TOKEN:latest,INGEST_TASK_TOKEN=INGEST_TASK_TOKEN:latest \
+          --set-secrets=OMBRI_INGEST_BOT_TOKEN=${_INGEST_BOT_TOKEN_SECRET}:latest,INGEST_TASK_TOKEN=INGEST_TASK_TOKEN:latest \
           --set-env-vars=QUOTES_BACKEND=gcs,QUOTES_BUCKET=${_QUOTES_BUCKET},QUOTES_PREFIX=stooq/,INGEST_ADMIN_IDS=${_INGEST_ADMIN_IDS} \
           --quiet \
           || echo "WARN: деплой ingest-бота не прошёл. Главный бот не затронут."

@@ -15,13 +15,13 @@ GCP Cloud Run (long-polling) · Cloud Function (RAG-ингест) · ChromaDB ·
 ## Верификация (обязательна перед каждым пушем)
 
 ```bash
-PYTHONPATH=src python -m pytest tests/ -q          # → 1851 passed, 5 skipped, 2 xfailed
+PYTHONPATH=src python -m pytest tests/ -q          # → 1861 passed, 5 skipped, 2 xfailed
 ```
 
 - Префикс `PYTHONPATH=src` **ОБЯЗАТЕЛЕН** (`conftest.py`/`pyproject.toml` нет).
 - **Прогонов ДВА.** Второй — зеркало деплой-образа, без `design/`: `cp -r src tests
-  SYSTEM_PROMPT.md requirements*.txt <tmp>/ && cd <tmp>`, тот же прогон → 1768 passed,
-  88 skipped, 2 xfailed. Зелёный GitHub CI НЕ означает, что деплой пройдёт: CI видит
+  SYSTEM_PROMPT.md requirements*.txt <tmp>/ && cd <tmp>`, тот же прогон → 1775 passed,
+  91 skipped, 2 xfailed. Зелёный GitHub CI НЕ означает, что деплой пройдёт: CI видит
   полный чекаут, Cloud Build — только образ, и разница — ровно тесты, читающие
   `design/`, `docs/`, `CLAUDE.md`, `scripts/` и `cloud_function/`.
 - Правил `design/*.jsx` → **обязательно** `bash design/premium_v2/build.sh`.
@@ -48,6 +48,12 @@ PYTHONPATH=src python -m pytest tests/ -q          # → 1851 passed, 5 skipped,
   ленивый импорт обязан попасть в реестр предзагрузки своего бота
   (`entrypoint._BOOT_INGEST_HEAVY_IMPORTS` / `ingest_bot._WORKER_HEAVY_IMPORTS`).
 - У двух ботов РАЗНЫЕ токены: один на двоих — 409 у обоих и упавший ГЛАВНЫЙ бот (`§−99`).
+- Загрузчик переехал на имя OMBRI (`OMBRI_INGEST_BOT_TOKEN`, логгеры `ombri.*`);
+  имя СЕКРЕТА — подстановка `_INGEST_BOT_TOKEN_SECRET`, не литерал. ГЛАВНЫЙ бот
+  остаётся на `RAMP_*`: его переезд — отдельная операция (`§−100`).
+- Кольцо «загрузчик → отчёт» держится на равенстве ИМЕНИ ОБЪЕКТА: `QUOTES_PREFIX`
+  + `DB_OBJECT_NAME` = путь под точкой монтирования в `STOOQ_DB_PATH`. Разъехались —
+  оба бота живы, файлы разные, срезы уходят в пустоту (`§−100`, тест в `phase51`).
 - `SYSTEM_PROMPT.md` лежит ТОЛЬКО в корне — он читается в рантайме и копируется Dockerfile.
 - `cloud_function/rag_engine.py` держится ИДЕНТИЧНЫМ `src/agent/rag_engine.py`.
 - Premium-бандлы `src/premium_assets/*` руками НЕ править — только через `build.sh`.

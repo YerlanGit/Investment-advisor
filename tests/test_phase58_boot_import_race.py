@@ -368,32 +368,68 @@ class SharedTokenIsRefusedTest(unittest.TestCase):
         self.assertLess(guard_line, build_line,
                         "страж срабатывает ПОСЛЕ создания Bot — поздно")
 
-    def test_identical_token_refuses(self):
-        import importlib as _il
-        import os
-        prev = {k: os.environ.get(k) for k in
-                ("RAMP_BOT_TOKEN", "RAMP_INGEST_BOT_TOKEN", "INGEST_ADMIN_IDS")}
-        os.environ["RAMP_BOT_TOKEN"] = "111:SAME"
-        os.environ["RAMP_INGEST_BOT_TOKEN"] = "111:SAME"
-        os.environ["INGEST_ADMIN_IDS"] = "42"
+    _KEYS = ("OMBRI_BOT_TOKEN", "RAMP_BOT_TOKEN", "OMBRI_INGEST_BOT_TOKEN",
+             "RAMP_INGEST_BOT_TOKEN", "INGEST_ADMIN_IDS")
+
+    def _reloaded(self, env: dict):
+        """Перезагрузить `ingest_bot` с заданным окружением.
+
+        Токен читается на уровне МОДУЛЯ, поэтому проверять его можно только
+        через перезагрузку — иначе тест мерил бы окружение своего процесса,
+        а не то, что увидит бот на старте.
+        """
+        import importlib as _il                           # noqa: PLC0415
+        import os                                         # noqa: PLC0415
+        for key in self._KEYS:
+            os.environ.pop(key, None)
+        os.environ.update(env)
         try:
-            try:
-                ingest_bot = _il.import_module("ingest_bot")
-            except ModuleNotFoundError:                   # pragma: no cover
-                self.skipTest("aiogram не установлен")
-            ingest_bot = _il.reload(ingest_bot)
-            with self.assertRaises(RuntimeError) as ctx:
-                ingest_bot._refuse_shared_token()
-            self.assertIn("RAMP_BOT_TOKEN", str(ctx.exception))
-            # Разные токены — молчание, а не отказ.
-            os.environ["RAMP_BOT_TOKEN"] = "222:OTHER"
-            ingest_bot._refuse_shared_token()
-        finally:
-            for key, value in prev.items():
+            module = _il.import_module("ingest_bot")
+        except ModuleNotFoundError:                       # pragma: no cover
+            self.skipTest("aiogram не установлен")
+        return _il.reload(module)
+
+    def setUp(self) -> None:
+        super().setUp()
+        import os                                         # noqa: PLC0415
+        self._prev = {k: os.environ.get(k) for k in self._KEYS}
+
+        def _restore() -> None:
+            for key, value in self._prev.items():
                 if value is None:
                     os.environ.pop(key, None)
                 else:
                     os.environ[key] = value
+        self.addCleanup(_restore)
+
+    def test_identical_token_refuses(self):
+        ingest_bot = self._reloaded({"OMBRI_BOT_TOKEN": "111:SAME",
+                                     "OMBRI_INGEST_BOT_TOKEN": "111:SAME",
+                                     "INGEST_ADMIN_IDS": "42"})
+        with self.assertRaises(RuntimeError) as ctx:
+            ingest_bot._refuse_shared_token()
+        self.assertIn("OMBRI_BOT_TOKEN", str(ctx.exception))
+
+    def test_different_tokens_are_silent(self):
+        ingest_bot = self._reloaded({"OMBRI_BOT_TOKEN": "222:OTHER",
+                                     "OMBRI_INGEST_BOT_TOKEN": "111:MINE",
+                                     "INGEST_ADMIN_IDS": "42"})
+        ingest_bot._refuse_shared_token()                 # молчание — штатно
+
+    def test_legacy_name_of_the_main_bot_is_still_compared(self):
+        """Главный бот ещё под именем `RAMP_BOT_TOKEN` — совпадение ловится.
+
+        🔴 Переезд РАЗНЕСЁН во времени: загрузчик переименован, главный бот
+        работает под прежним именем и не тронут. Если бы страж смотрел только
+        на новое имя, то ровно в это окно — то есть СЕЙЧАС — он ничего бы не
+        поймал, а копия секрета уронила бы прод.
+        """
+        ingest_bot = self._reloaded({"RAMP_BOT_TOKEN": "111:SAME",
+                                     "OMBRI_INGEST_BOT_TOKEN": "111:SAME",
+                                     "INGEST_ADMIN_IDS": "42"})
+        with self.assertRaises(RuntimeError) as ctx:
+            ingest_bot._refuse_shared_token()
+        self.assertIn("RAMP_BOT_TOKEN", str(ctx.exception))
 
 
 if __name__ == "__main__":                                        # pragma: no cover

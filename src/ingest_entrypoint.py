@@ -30,7 +30,7 @@ import sys
 
 from env_config import env_int
 
-logger = logging.getLogger("ramp.ingest.entrypoint")
+logger = logging.getLogger("ombri.ingest.entrypoint")
 
 TASK_PATH = "/tasks/check"
 TASK_TOKEN_HEADER = "x-ingest-task-token"

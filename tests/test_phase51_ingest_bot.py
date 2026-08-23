@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import re
 import sqlite3
 import sys
 import tempfile
@@ -999,7 +1000,7 @@ class TaskEndpointTest(unittest.TestCase):
         """🔴 Незакрытая ручка шлёт сообщения владельцу — это канал для шума
         в единственном канале связи оператора."""
         with mock.patch.dict(os.environ, {"INGEST_TASK_TOKEN": ""}), \
-                self.assertLogs("ramp.ingest.entrypoint", level="WARNING") as log:
+                self.assertLogs("ombri.ingest.entrypoint", level="WARNING") as log:
             reply = self._run("POST", {"x-ingest-task-token": "s"})
         self.assertIn(b"503", reply.split(b"\r\n")[0])
         self.assertIn("отключён", "\n".join(log.output))
@@ -1007,7 +1008,7 @@ class TaskEndpointTest(unittest.TestCase):
 
     def test_wrong_secret_is_refused(self) -> None:
         with mock.patch.dict(os.environ, {"INGEST_TASK_TOKEN": "right"}), \
-                self.assertLogs("ramp.ingest.entrypoint", level="WARNING") as log:
+                self.assertLogs("ombri.ingest.entrypoint", level="WARNING") as log:
             reply = self._run("POST", {"x-ingest-task-token": "wrong"})
         self.assertIn(b"401", reply.split(b"\r\n")[0])
         self.assertIn("неверным секретом", "\n".join(log.output))
@@ -1084,6 +1085,80 @@ class DeployStepTest(unittest.TestCase):
         self.assertIn("ОТКАЗ", body, "пустой SA обязан останавливать деплой")
         self.assertEqual(self.doc["substitutions"]["_INGEST_SA"], "",
                          "SA заводится осознанно, а не достаётся по умолчанию")
+
+    def test_loader_token_secret_is_a_substitution_named_by_the_owner(self) -> None:
+        """Имя секрета — подстановка `_INGEST_BOT_TOKEN_SECRET` (`§−100`).
+
+        Имя секрета живёт НЕ в репозитории, а в Secret Manager: переименовали
+        там — поменяли одну подстановку, не трогая шаг деплоя. Литерал в
+        `--set-secrets` означал бы правку файла на каждый переезд, а этот шаг
+        стоит рядом с деплоем главного бота.
+        """
+        self.assertEqual(
+            self.doc["substitutions"]["_INGEST_BOT_TOKEN_SECRET"],
+            "OMBRI_INGEST_BOT_TOKEN")
+        step = next(s for s in self.doc["steps"] if s["id"] == "deploy-ingest-bot")
+        script = "\n".join(step["args"])
+        self.assertIn(
+            "OMBRI_INGEST_BOT_TOKEN=${_INGEST_BOT_TOKEN_SECRET}:latest", script,
+            "слева от `=` — имя переменной В КОНТЕЙНЕРЕ, справа — имя СЕКРЕТА; "
+            "их путают, и тогда бот читает пустоту при живом секрете")
+
+    def test_the_rename_did_not_touch_the_main_bot_secrets(self) -> None:
+        """🔴 Главный бот работает — его секреты переездом не затронуты.
+
+        `--set-secrets` заменяет ВЕСЬ набор привязок. Опечатка здесь означает
+        не «не переименовали», а «главный бот остался без токена»: `tg_bot`
+        читает его через `os.environ[...]` на уровне модуля, то есть падает
+        ИМПОРТ и контейнер не стартует (`§−98` по симптому).
+        """
+        deploy = next(s for s in self.doc["steps"] if s["id"] == "deploy")
+        secrets = next(a for a in deploy["args"] if a.startswith("--set-secrets"))
+        for expected in ("RAMP_BOT_TOKEN=RAMP_BOT_TOKEN:latest",
+                         "FINTECH_MASTER_KEY=FINTECH_MASTER_KEY:latest",
+                         "ANTHROPIC_API_KEY=ANTHROPIC_API_KEY:latest"):
+            self.assertIn(expected, secrets)
+
+    def test_writer_and_reader_address_the_same_object_name(self) -> None:
+        """Префикс писателя и путь читателя обязаны совпасть (`§−100`).
+
+        🔴 Владелец свёл оба бота в ОДИН бакет (`_QUOTES_BUCKET=ramp-bot-state`)
+        с условием IAM на префикс `stooq/`, и этим ЗАМКНУЛ кольцо: загрузчик
+        публикует `gs://ramp-bot-state/stooq/prices.sqlite`, а отчётный бот
+        читает `/mnt/state/stooq/prices.sqlite` — тот же объект через gcsfuse.
+
+        Держится это равенство на трёх независимо редактируемых строках:
+        `QUOTES_PREFIX` у загрузчика, `STOOQ_DB_PATH` у отчётного бота и
+        `DB_OBJECT_NAME` в коде. Разъехались — кольцо размыкается МОЛЧА: оба
+        бота живы, у каждого «свой» файл, и оператор неделю шлёт срезы в
+        пустоту, пока отчёт не заблокируется по свежести. Поэтому равенство —
+        тест, а не договорённость.
+
+        Пинится ИМЯ ОБЪЕКТА, а не бакет: бакет — решение владельца (общий с
+        условием IAM либо отдельный), и тест его не навязывает.
+        """
+        from services.quote_publisher import DB_OBJECT_NAME  # noqa: PLC0415
+
+        ingest = next(s for s in self.doc["steps"]
+                      if s["id"] == "deploy-ingest-bot")
+        body = "\n".join(ingest["args"])
+        env = dict(kv.split("=", 1) for kv in
+                   re.search(r"--set-env-vars=(\S+)", body).group(1).split(","))
+        written = env["QUOTES_PREFIX"] + DB_OBJECT_NAME
+
+        deploy = next(s for s in self.doc["steps"] if s["id"] == "deploy")
+        mount = next(a for a in deploy["args"]
+                     if a.startswith("--add-volume-mount=")).split("mount-path=")[1]
+        main_env = dict(
+            kv.split("=", 1) for kv in
+            next(a for a in deploy["args"]
+                 if a.startswith("--set-env-vars=")).split("=", 1)[1].split(","))
+        read = main_env["STOOQ_DB_PATH"][len(mount):].lstrip("/")
+
+        self.assertEqual(
+            written, read,
+            f"загрузчик пишет объект {written!r}, а отчётный бот читает "
+            f"{read!r}. В общем бакете это РАЗНЫЕ файлы, и кольцо разомкнуто")
 
     def test_loader_gets_its_own_bucket_not_the_state_one(self) -> None:
         """Радиус поражения писателя не должен включать балансы и ключи брокера.
@@ -1308,7 +1383,7 @@ class DocumentHandlerTest(_IngestCase):
                          "временный файл остался в /tmp — а это RAM")
 
     def test_refusal_reaches_the_operator_instead_of_a_traceback(self) -> None:
-        with self.assertLogs("ramp.ingest", level="WARNING"):
+        with self.assertLogs("ombri.ingest", level="WARNING"):
             _bot, message = self._send("20260813_d.txt", "<html>капча</html>")
         summary = message.answers[-1][0]
         self.assertIn("применён", summary)
@@ -1418,7 +1493,7 @@ class CommandFailureTest(_IngestCase):
         import asyncio                                   # noqa: PLC0415
         message = _FakeMessage(_FakeBot(""), text="/status")
         with mock.patch.object(qi, "status", side_effect=RuntimeError("бум")), \
-                self.assertLogs("ramp.ingest", level="ERROR"):
+                self.assertLogs("ombri.ingest", level="ERROR"):
             asyncio.run(self.ib.cmd_status(message))
         self.assertIn("бум", message.answers[-1][0])
 
@@ -1521,6 +1596,86 @@ class DispatcherRoutingTest(unittest.TestCase):
 # ═════════════════════════════════════════════════════════════════════════════
 # Слои и изоляция от прода
 # ═════════════════════════════════════════════════════════════════════════════
+
+class TokenEnvRenameTest(unittest.TestCase):
+    """Переезд имени RAMP → OMBRI у ЗАГРУЗЧИКА (`§−100`).
+
+    Владелец переименовал секрет в `OMBRI_INGEST_BOT_TOKEN`. Переезд разнесён
+    во времени намеренно: главный бот работает и остаётся на `RAMP_BOT_TOKEN`,
+    трогать его имя переменной из пристройки — это ровно то срастание двух
+    ботов, которого весь модуль и избегает.
+
+    🔴 Отсюда три обязательства, и каждое проверяется ниже:
+    1. бот читает НОВОЕ имя;
+    2. ПРЕЖНЕЕ имя всё ещё принимается — иначе полуприменённая настройка
+       (код переехал, секрет нет) даёт «токен пуст» на живом секрете;
+    3. приём прежнего имени не молчалив: без предупреждения переезд не
+       закончится никогда, а «работает» перестанет означать «настроено».
+    """
+
+    _KEYS = ("OMBRI_INGEST_BOT_TOKEN", "RAMP_INGEST_BOT_TOKEN")
+
+    def setUp(self) -> None:
+        self._prev = {k: os.environ.get(k) for k in self._KEYS}
+
+        def _restore() -> None:
+            for key, value in self._prev.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+        self.addCleanup(_restore)
+        for key in self._KEYS:
+            os.environ.pop(key, None)
+
+    def test_new_name_is_the_primary_one(self) -> None:
+        import ingest_bot                                 # noqa: PLC0415
+
+        self.assertEqual(ingest_bot.TOKEN_ENV, "OMBRI_INGEST_BOT_TOKEN")
+        os.environ["OMBRI_INGEST_BOT_TOKEN"] = "111:NEW"
+        self.assertEqual(ingest_bot.read_bot_token(), "111:NEW")
+
+    def test_legacy_name_still_works(self) -> None:
+        import ingest_bot                                 # noqa: PLC0415
+
+        os.environ["RAMP_INGEST_BOT_TOKEN"] = "222:OLD"
+        with self.assertLogs("ombri.ingest", level="WARNING") as log:
+            self.assertEqual(ingest_bot.read_bot_token(), "222:OLD")
+        self.assertIn("OMBRI_INGEST_BOT_TOKEN", "".join(log.output),
+                      "приём прежнего имени обязан называть новое — иначе "
+                      "оператор не узнает, что именно переименовывать")
+
+    def test_new_name_wins_over_the_legacy_one(self) -> None:
+        """Обе заданы — берётся НОВАЯ, без предупреждения."""
+        import ingest_bot                                 # noqa: PLC0415
+
+        os.environ["OMBRI_INGEST_BOT_TOKEN"] = "111:NEW"
+        os.environ["RAMP_INGEST_BOT_TOKEN"] = "222:OLD"
+        self.assertEqual(ingest_bot.read_bot_token(), "111:NEW")
+
+    def test_neither_name_gives_empty_not_an_exception(self) -> None:
+        """Пусто — это пусто; отказ печатает `main`, и он объясняет причину."""
+        import ingest_bot                                 # noqa: PLC0415
+
+        self.assertEqual(ingest_bot.read_bot_token(), "")
+
+    def test_the_main_bot_variable_is_not_renamed_here(self) -> None:
+        """🔴 Пристройка НЕ переименовывает переменные работающего бота.
+
+        `tg_bot` читает `RAMP_BOT_TOKEN` на уровне модуля через
+        `os.environ[...]` — то есть отсутствие переменной роняет ИМПОРТ, а с
+        ним и старт прода. Переезд главного бота — отдельная операция, и
+        доказательство, что загрузчик её не делает, обязано быть тестом.
+        """
+        source = (Path(__file__).resolve().parents[1] / "src" / "tg_bot.py"
+                  ).read_text(encoding="utf-8")
+        self.assertIn('os.environ["RAMP_BOT_TOKEN"]', source)
+        # …при этом СРАВНИВАТЬ загрузчик обязан оба имени: главный бот когда-то
+        # переедет, и страж не должен ослепнуть в этот момент.
+        import ingest_bot                                 # noqa: PLC0415
+        self.assertEqual(set(ingest_bot.MAIN_TOKEN_ENVS),
+                         {"OMBRI_BOT_TOKEN", "RAMP_BOT_TOKEN"})
+
 
 class IsolationTest(unittest.TestCase):
     """Загрузчик обязан быть пристройкой, а не врезкой в работающий бот."""
