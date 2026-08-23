@@ -379,7 +379,7 @@ def _apply(path, *, kind: str, actor: str, publisher: Optional[QuotePublisher],
     name = path.name
     publisher = publisher or publisher_from_env()
 
-    with tempfile.TemporaryDirectory(prefix="ramp-ingest-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="ombri-ingest-") as tmp:
         local = Path(tmp) / "prices.sqlite"
         try:
             snapshot = publisher.download(local)
@@ -496,7 +496,7 @@ def status(*, publisher: Optional[QuotePublisher] = None,
            today: Optional[date] = None) -> StoreStatus:
     """Состояние базы: поколение, рынки, допуск C-1, недостающие даты."""
     publisher = publisher or publisher_from_env()
-    with tempfile.TemporaryDirectory(prefix="ramp-status-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="ombri-status-") as tmp:
         local = Path(tmp) / "prices.sqlite"
         try:
             snapshot = publisher.download(local)
@@ -712,7 +712,7 @@ def check_ticker(ticker: str, *,
     совпадает (ловушка №7, `STOOQ_CONVENTION §3.7`).
     """
     publisher = publisher or publisher_from_env()
-    with tempfile.TemporaryDirectory(prefix="ramp-check-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="ombri-check-") as tmp:
         local = Path(tmp) / "prices.sqlite"
         try:
             publisher.download(local)
@@ -743,7 +743,7 @@ def universe_report(*, publisher: Optional[QuotePublisher] = None) -> UniverseRe
             reason=(f"{name} не установлен — список факторов живёт в "
                     "`data_checks` и берётся ОТТУДА, а не копируется сюда. "
                     "Вторая копия однажды разошлась бы с первой молча."))
-    with tempfile.TemporaryDirectory(prefix="ramp-universe-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="ombri-universe-") as tmp:
         local = Path(tmp) / "prices.sqlite"
         try:
             publisher.download(local)
@@ -785,7 +785,7 @@ def prune(*, dry_run: bool, actor: str,
                     "нельзя удалять. Чистка без него срезала бы факторные ETF "
                     "и заблокировала ручной тир."))
 
-    with tempfile.TemporaryDirectory(prefix="ramp-prune-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="ombri-prune-") as tmp:
         local = Path(tmp) / "prices.sqlite"
         try:
             snapshot = publisher.download(local)

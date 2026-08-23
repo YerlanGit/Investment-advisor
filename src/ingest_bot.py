@@ -1,5 +1,5 @@
 """
-RAMP Ingest Bot — второй Telegram-бот, только для загрузки данных (IB-3…IB-7).
+OMBRI Ingest Bot — второй Telegram-бот, только для загрузки данных (IB-3…IB-7).
 
 Что это и чем он НЕ является
 ────────────────────────────
@@ -46,9 +46,41 @@ from env_config import env_int
 from services import quote_ingest as qi
 from services.quote_publisher import PublisherUnavailable, publisher_from_env
 
-logger = logging.getLogger("ramp.ingest")
+logger = logging.getLogger("ombri.ingest")
 
-BOT_TOKEN = os.getenv("RAMP_INGEST_BOT_TOKEN", "").strip()
+#: Токен ЭТОГО бота.  Проект переезжает с имени RAMP на OMBRI, поэтому имя
+#: переменной объявлено, а не вписано в четыре места: сообщение об ошибке,
+#: страж общего токена и два теста читают его отсюда.
+TOKEN_ENV = "OMBRI_INGEST_BOT_TOKEN"
+#: Прежнее имя той же переменной.  Читается ВТОРЫМ и с предупреждением: пока
+#: секрет в Secret Manager не переименован, бот обязан подниматься, а не
+#: молчать про «пустой токен», — но и делать вид, что всё в порядке, он не
+#: вправе, иначе переезд не закончится никогда.
+LEGACY_TOKEN_ENV = "RAMP_INGEST_BOT_TOKEN"
+
+#: Токен ГЛАВНОГО бота — под обоими именами.  Здесь он нужен ровно для одного:
+#: убедиться, что это НЕ ТОТ ЖЕ токен (`_refuse_shared_token`).  Главный бот
+#: этим модулем не настраивается и не переименовывается: он работает, и
+#: трогать его имя переменной из пристройки было бы ровно тем срастанием
+#: двух ботов, которого весь этот файл и избегает.
+MAIN_TOKEN_ENVS = ("OMBRI_BOT_TOKEN", "RAMP_BOT_TOKEN")
+
+
+def read_bot_token() -> str:
+    """Токен бота: новое имя, при его отсутствии — прежнее, с предупреждением."""
+    value = str(os.getenv(TOKEN_ENV, "") or "").strip()
+    if value:
+        return value
+    value = str(os.getenv(LEGACY_TOKEN_ENV, "") or "").strip()
+    if value:
+        logger.warning(
+            "%s пуст — взял устаревший %s. Переименуйте секрет в Secret Manager "
+            "(подстановка `_INGEST_BOT_TOKEN_SECRET` в cloudbuild.yaml).",
+            TOKEN_ENV, LEGACY_TOKEN_ENV)
+    return value
+
+
+BOT_TOKEN = read_bot_token()
 
 #: Потолок ожидания одной операции. Цикл — скачать базу, применить, залить;
 #: замер применения 0.2 с, остальное упирается в сеть. Пять минут с запасом,
@@ -135,7 +167,7 @@ _LOCK = asyncio.Lock()
 _BOT: Optional[Bot] = None
 
 _HELP = (
-    "🛠 <b>RAMP Ingest</b> — обновление базы котировок\n\n"
+    "🛠 <b>OMBRI Ingest</b> — обновление базы котировок\n\n"
     "<b>Как обновлять базу</b>\n"
     "1. скачайте дневной срез со stooq.com/db/ (<code>YYYYMMDD_d.txt</code>, ≈700 КБ)\n"
     "2. перешлите файл сюда\n"
@@ -366,7 +398,7 @@ async def _apply_document(message: Message, document, decision, *,
     оперативная память, и забытый файл там расходует ту же память, что нужна
     базе.
     """
-    with tempfile.TemporaryDirectory(prefix="ramp-upload-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="ombri-upload-") as tmp:
         target = Path(tmp) / Path(document.file_name).name
         await message.bot.download(document, destination=target)
         apply = (qi.apply_daily if decision.kind == "daily"
@@ -464,13 +496,16 @@ def _refuse_shared_token() -> None:
     нет (штатный деплой загрузчика), сравнивать нечего, и молчание здесь
     честное: гарантию даёт не эта функция, а разные секреты.
     """
-    main_token = str(os.getenv("RAMP_BOT_TOKEN", "") or "").strip()
-    if main_token and main_token == BOT_TOKEN:
-        raise RuntimeError(
-            "RAMP_INGEST_BOT_TOKEN совпадает с RAMP_BOT_TOKEN. Два бота на "
-            "одном токене дерутся за getUpdates: Telegram отвечает 409 обоим, "
-            "и после нескольких попыток ГЛАВНЫЙ бот падает — прод встанет из-за "
-            "загрузчика. Заведите второго бота у @BotFather и его токен.")
+    for name in MAIN_TOKEN_ENVS:
+        main_token = str(os.getenv(name, "") or "").strip()
+        if main_token and main_token == BOT_TOKEN:
+            raise RuntimeError(
+                f"токен загрузчика совпадает с {name} — токеном ГЛАВНОГО бота. "
+                "Два бота на одном токене дерутся за getUpdates: Telegram "
+                "отвечает 409 обоим, и после нескольких попыток ГЛАВНЫЙ бот "
+                "падает — прод встанет из-за загрузчика. Заведите второго бота "
+                "у @BotFather и положите ЕГО токен в "
+                f"{TOKEN_ENV}.")
 
 
 async def main() -> None:
@@ -485,8 +520,9 @@ async def main() -> None:
 
     if not BOT_TOKEN:
         raise RuntimeError(
-            "RAMP_INGEST_BOT_TOKEN пуст — второму боту нужен СВОЙ токен, "
-            "а не токен главного бота.")
+            f"{TOKEN_ENV} пуст — второму боту нужен СВОЙ токен, а не токен "
+            f"главного бота. (Прежнее имя {LEGACY_TOKEN_ENV} тоже принимается, "
+            "но лучше переименовать секрет.)")
     if not access.configured():
         raise RuntimeError(
             f"{access.ENV_NAME} пуст — говорить с ботом некому. Пустой список "
@@ -495,7 +531,7 @@ async def main() -> None:
     _refuse_shared_token()
 
     publisher = publisher_from_env()
-    logger.info("RAMP Ingest Bot: хранилище — %s, админов %d",
+    logger.info("OMBRI Ingest Bot: хранилище — %s, админов %d",
                 publisher.describe(), len(access.admin_ids()))
 
     # 🔴 `§−99`. Тяжёлое грузит ГЛАВНЫЙ поток и ДО первого `to_thread`.
@@ -570,5 +606,6 @@ async def main() -> None:
         _BOT = None
 
 
-__all__ = ["AdminOnlyMiddleware", "build_dispatcher", "main",
-           "preimport_worker_deps", "render_block", "run_scheduled_check"]
+__all__ = ["AdminOnlyMiddleware", "LEGACY_TOKEN_ENV", "MAIN_TOKEN_ENVS",
+           "TOKEN_ENV", "build_dispatcher", "main", "preimport_worker_deps",
+           "read_bot_token", "render_block", "run_scheduled_check"]
