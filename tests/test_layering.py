@@ -42,6 +42,10 @@ _PROJECT_ROOTS = {
     "html_renderer", "report_mocks", "report_charts", "pdf_charts",
     "batch_reports", "db_tokenomics", "entrypoint", "profile_manager",
     "env_config",
+    # Бот-загрузчик котировок (IB-3). Без записи здесь его импорты считались бы
+    # ВНЕШНИМИ, и проверка приватных кросс-импортов прошла бы мимо новых
+    # модулей, оставшись зелёной.
+    "ingest_bot", "ingest_entrypoint", "ingest_access",
 }
 
 #: `tg_bot` — слой доставки (L4). Импортировать его вправе только точка входа.
