@@ -41,6 +41,7 @@ from __future__ import annotations
 import ast
 import unittest
 from pathlib import Path
+from typing import Sequence
 
 _ENTRYPOINT = Path(__file__).resolve().parent.parent / "src" / "entrypoint.py"
 
@@ -62,18 +63,36 @@ def _func(tree: ast.Module, name: str) -> ast.AST:
 
 
 def _imported_modules(node: ast.AST) -> set[str]:
-    """Верхнеуровневые пакеты, которые импортирует поддерево `node`.
+    """ПОЛНЫЕ имена модулей, которые импортирует поддерево `node`.
 
-    `import agent.rag_engine` и `from agent.rag_engine import X` дают одно и
-    то же имя: важен ПАКЕТ, чьи модульные локи и участвуют в гонке.
+    Имя берётся целиком, а не до первой точки. Разница не косметическая:
+    `finance.data_checks` в реестре НЕ загружает `finance.stooq_provider`,
+    и сравнение по верхнему пакету («оба — `finance`») объявило бы второй
+    предзагруженным, хотя он приедет на поток как ни в чём не бывало.
     """
     out: set[str] = set()
     for sub in ast.walk(node):
         if isinstance(sub, ast.Import):
-            out.update(a.name.split(".")[0] for a in sub.names)
+            out.update(a.name for a in sub.names)
         elif isinstance(sub, ast.ImportFrom) and sub.module and sub.level == 0:
-            out.add(sub.module.split(".")[0])
+            out.add(sub.module)
     return out
+
+
+def _covered(module: str, registry: Sequence[str]) -> bool:
+    """Загрузит ли реестр модуль `module` до первого обращения потока?
+
+    Покрывает СВОЙ модуль и своих предков: `import chromadb.utils.embedding_
+    functions` исполняет и `chromadb`. Обратное неверно — родитель не тянет
+    потомка, — и именно это различие делает проверку небесполезной.
+    """
+    return any(r == module or r.startswith(module + ".") for r in registry)
+
+
+def _uncovered(modules: set[str], registry: Sequence[str],
+               stdlib: set[str]) -> list[str]:
+    return sorted(m for m in modules
+                  if m.split(".")[0] not in stdlib and not _covered(m, registry))
 
 
 def _lazy_imports_inside_functions(path: Path) -> set[str]:
@@ -91,28 +110,29 @@ def _lazy_imports_inside_functions(path: Path) -> set[str]:
             continue
         for sub in ast.walk(node):
             if isinstance(sub, ast.Import) and id(sub) not in top_level:
-                out.update(a.name.split(".")[0] for a in sub.names)
+                out.update(a.name for a in sub.names)
             elif isinstance(sub, ast.ImportFrom) and sub.module and sub.level == 0 \
                     and id(sub) not in top_level:
-                out.add(sub.module.split(".")[0])
+                out.add(sub.module)
     return out
 
 
+def _registry(path: Path, name: str) -> list[str]:
+    """Строки из кортежа-реестра `name` в модуле `path` — из AST, без импорта."""
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    for node in tree.body:
+        target_names = []
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            target_names = [node.target.id]
+        elif isinstance(node, ast.Assign):
+            target_names = [t.id for t in node.targets if isinstance(t, ast.Name)]
+        if name in target_names:
+            return [e.value for e in node.value.elts if isinstance(e, ast.Constant)]
+    raise AssertionError(f"{name} не найден в {path.name}")
+
+
 def _preload_registry() -> list[str]:
-    """Строки из `_BOOT_INGEST_HEAVY_IMPORTS` — читаем из AST, без импорта."""
-    for node in _tree().body:
-        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) \
-                and node.target.id == "_BOOT_INGEST_HEAVY_IMPORTS":
-            value = node.value
-            break
-        if isinstance(node, ast.Assign) and any(
-                isinstance(t, ast.Name) and t.id == "_BOOT_INGEST_HEAVY_IMPORTS"
-                for t in node.targets):
-            value = node.value
-            break
-    else:
-        raise AssertionError("_BOOT_INGEST_HEAVY_IMPORTS не найден в entrypoint.py")
-    return [e.value for e in value.elts if isinstance(e, ast.Constant)]
+    return _registry(_ENTRYPOINT, "_BOOT_INGEST_HEAVY_IMPORTS")
 
 
 def _starts_boot_thread(node: ast.AST) -> bool:
@@ -190,12 +210,11 @@ class BootImportOrderTest(unittest.TestCase):
         in_thread   = _imported_modules(_func(tree, _THREAD_TARGET))
         # `_upload_chroma_db_to_store` вызывается из того же потока.
         in_thread  |= _imported_modules(_func(tree, "_upload_chroma_db_to_store"))
-        preloaded   = {m.split(".")[0] for m in _preload_registry()}
         # stdlib-модули гонки не создают: они уже загружены интерпретатором
         # к моменту старта потока (и не тянут numpy).
         stdlib = {"os", "sys", "tempfile", "threading", "asyncio", "logging", "shutil",
                   "time", "json", "pathlib", "typing", "__future__", "importlib"}
-        missing = sorted(in_thread - preloaded - stdlib)
+        missing = _uncovered(in_thread, _preload_registry(), stdlib)
         self.assertEqual(
             missing, [],
             f"фоновый поток импортирует {missing} первым — главный поток обязан "
@@ -218,12 +237,11 @@ class BootImportOrderTest(unittest.TestCase):
         rag = _ENTRYPOINT.parent / "agent" / "rag_engine.py"
         if not rag.exists():                                  # pragma: no cover
             self.skipTest("agent/rag_engine.py отсутствует")
-        preloaded = {m.split(".")[0] for m in _preload_registry()}
         stdlib = {"os", "sys", "re", "math", "time", "json", "logging", "pathlib",
                   "datetime", "typing", "tempfile", "collections", "hashlib",
                   "itertools", "functools", "shutil", "uuid", "importlib"}
         lazy = _lazy_imports_inside_functions(rag)
-        missing = sorted(lazy - preloaded - stdlib)
+        missing = _uncovered(lazy, _preload_registry(), stdlib)
         self.assertEqual(
             missing, [],
             f"`agent.rag_engine` лениво импортирует {missing} — это исполнится НА "
@@ -249,6 +267,133 @@ class BootImportOrderTest(unittest.TestCase):
             f"`{_PREIMPORT}` обязана глотать ошибку импорта: RAG — фолбэк, "
             "а не условие старта бота",
         )
+
+
+class IngestBotWorkerImportsTest(unittest.TestCase):
+    """`§−99`: тот же инвариант — для второго бота.
+
+    У загрузчика нет демон-потока, зато есть `asyncio.to_thread`: каждая
+    команда уходит в РАБОЧИЙ поток пула. Под `_LOCK` стоят только приём файла
+    и чистка — `/status`, `/universe`, `/check` и плановая проверка идут мимо,
+    поэтому два потока могут войти в numpy одновременно. Разница с `§−98` не в
+    механизме, а в последствии: здесь исключение ловится, и вместо падения
+    оператор получает подменённый ответ («C-1 НЕ ПРОВЕРЕН», исчезнувший срок
+    до блокировки) — то есть дефект ТИШЕ и потому опаснее.
+    """
+
+    def setUp(self) -> None:
+        self.bot = _ENTRYPOINT.parent / "ingest_bot.py"
+        if not self.bot.exists():
+            self.skipTest("src/ingest_bot.py отсутствует")
+
+    def _chain_modules(self) -> set[str]:
+        """Ленивые импорты всей цепочки, которую бот зовёт из потоков."""
+        src = _ENTRYPOINT.parent
+        out: set[str] = set()
+        for rel in ("services/quote_ingest.py", "services/quote_publisher.py"):
+            path = src / rel
+            if path.exists():
+                out |= _lazy_imports_inside_functions(path)
+        return out
+
+    def test_registry_is_preloaded_before_any_thread_work(self):
+        """`preimport_worker_deps` вызывается в `main` до старта polling."""
+        tree = ast.parse(self.bot.read_text(encoding="utf-8"), filename=str(self.bot))
+        main = _func(tree, "main")
+        call_line = poll_line = None
+        for sub in ast.walk(main):
+            if isinstance(sub, ast.Call) and isinstance(sub.func, ast.Name) \
+                    and sub.func.id == "preimport_worker_deps":
+                call_line = sub.lineno
+            if isinstance(sub, ast.Call) and isinstance(sub.func, ast.Attribute) \
+                    and sub.func.attr == "start_polling":
+                poll_line = sub.lineno
+        self.assertIsNotNone(call_line,
+                             "`preimport_worker_deps()` не вызывается в `main` — "
+                             "рабочие потоки снова импортируют numpy наперегонки (§−99)")
+        self.assertIsNotNone(poll_line, "`start_polling` исчез из `main`")
+        self.assertLess(call_line, poll_line,
+                        "предзагрузка идёт ПОСЛЕ старта polling — команда может "
+                        "приехать раньше неё")
+
+    def test_every_lazy_import_of_the_chain_is_preloaded(self):
+        """Каждый ленивый импорт `quote_*` есть в реестре загрузчика."""
+        stdlib = {"os", "sys", "tempfile", "logging", "pathlib", "typing",
+                  "sqlite3", "json", "dataclasses", "datetime", "importlib",
+                  "asyncio", "html", "signal", "shutil", "time", "__future__"}
+        missing = _uncovered(self._chain_modules(),
+                             _registry(self.bot, "_WORKER_HEAVY_IMPORTS"), stdlib)
+        self.assertEqual(
+            missing, [],
+            f"цепочка загрузчика лениво импортирует {missing} — это исполнится в "
+            f"РАБОЧЕМ ПОТОКЕ. Добавь в `_WORKER_HEAVY_IMPORTS` (§−99)")
+
+    def test_numpy_is_preloaded_first(self):
+        registry = _registry(self.bot, "_WORKER_HEAVY_IMPORTS")
+        self.assertTrue(registry, "реестр загрузчика пуст")
+        self.assertEqual(registry[0], "numpy",
+                         "numpy грузится не первым — он общий корень гонки")
+
+    def test_preimport_never_raises(self):
+        tree = ast.parse(self.bot.read_text(encoding="utf-8"), filename=str(self.bot))
+        fn = _func(tree, "preimport_worker_deps")
+        self.assertTrue(
+            any(isinstance(n, ast.Try) for n in ast.walk(fn)),
+            "предзагрузка обязана глотать ошибку импорта: в офлайне "
+            "`google.cloud.storage` может отсутствовать вовсе")
+
+
+class SharedTokenIsRefusedTest(unittest.TestCase):
+    """`§−99`: один токен на два бота роняет ГЛАВНЫЙ бот — старт запрещён."""
+
+    def setUp(self) -> None:
+        if not (_ENTRYPOINT.parent / "ingest_bot.py").exists():
+            self.skipTest("src/ingest_bot.py отсутствует")
+
+    def test_guard_is_called_before_the_bot_object_is_built(self):
+        bot = _ENTRYPOINT.parent / "ingest_bot.py"
+        tree = ast.parse(bot.read_text(encoding="utf-8"), filename=str(bot))
+        main = _func(tree, "main")
+        guard_line = build_line = None
+        for sub in ast.walk(main):
+            if isinstance(sub, ast.Call) and isinstance(sub.func, ast.Name):
+                if sub.func.id == "_refuse_shared_token":
+                    guard_line = sub.lineno
+                elif sub.func.id == "Bot":
+                    build_line = sub.lineno
+        self.assertIsNotNone(guard_line,
+                             "`_refuse_shared_token()` не вызывается: копия секрета "
+                             "главного бота уронит прод (§−99)")
+        self.assertIsNotNone(build_line, "`Bot(...)` исчез из `main`")
+        self.assertLess(guard_line, build_line,
+                        "страж срабатывает ПОСЛЕ создания Bot — поздно")
+
+    def test_identical_token_refuses(self):
+        import importlib as _il
+        import os
+        prev = {k: os.environ.get(k) for k in
+                ("RAMP_BOT_TOKEN", "RAMP_INGEST_BOT_TOKEN", "INGEST_ADMIN_IDS")}
+        os.environ["RAMP_BOT_TOKEN"] = "111:SAME"
+        os.environ["RAMP_INGEST_BOT_TOKEN"] = "111:SAME"
+        os.environ["INGEST_ADMIN_IDS"] = "42"
+        try:
+            try:
+                ingest_bot = _il.import_module("ingest_bot")
+            except ModuleNotFoundError:                   # pragma: no cover
+                self.skipTest("aiogram не установлен")
+            ingest_bot = _il.reload(ingest_bot)
+            with self.assertRaises(RuntimeError) as ctx:
+                ingest_bot._refuse_shared_token()
+            self.assertIn("RAMP_BOT_TOKEN", str(ctx.exception))
+            # Разные токены — молчание, а не отказ.
+            os.environ["RAMP_BOT_TOKEN"] = "222:OTHER"
+            ingest_bot._refuse_shared_token()
+        finally:
+            for key, value in prev.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
 
 
 if __name__ == "__main__":                                        # pragma: no cover

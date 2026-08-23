@@ -15,17 +15,15 @@ GCP Cloud Run (long-polling) · Cloud Function (RAG-ингест) · ChromaDB ·
 ## Верификация (обязательна перед каждым пушем)
 
 ```bash
-PYTHONPATH=src python -m pytest tests/ -q          # → 1734 passed, 5 skipped, 2 xfailed
+PYTHONPATH=src python -m pytest tests/ -q          # → 1851 passed, 5 skipped, 2 xfailed
 ```
 
 - Префикс `PYTHONPATH=src` **ОБЯЗАТЕЛЕН** (`conftest.py`/`pyproject.toml` нет).
-- **Прогонов ДВА.** Второй — зеркало деплой-образа, в нём НЕТ каталога `design/`:
-  `cp -r src tests SYSTEM_PROMPT.md requirements*.txt <tmp>/ && cd <tmp>`, тот же
-  прогон → 1657 passed, 82 skipped, 2 xfailed.
-  Зелёный GitHub CI НЕ означает, что деплой пройдёт: CI видит полный чекаут,
-  Cloud Build — только образ. Разница 76 тестов — ровно те, что читают
-  `design/`, `docs/`, `CLAUDE.md`, `scripts/` и `cloud_function/`, то есть
-  отсутствующее в образе.
+- **Прогонов ДВА.** Второй — зеркало деплой-образа, без `design/`: `cp -r src tests
+  SYSTEM_PROMPT.md requirements*.txt <tmp>/ && cd <tmp>`, тот же прогон → 1768 passed,
+  88 skipped, 2 xfailed. Зелёный GitHub CI НЕ означает, что деплой пройдёт: CI видит
+  полный чекаут, Cloud Build — только образ, и разница — ровно тесты, читающие
+  `design/`, `docs/`, `CLAUDE.md`, `scripts/` и `cloud_function/`.
 - Правил `design/*.jsx` → **обязательно** `bash design/premium_v2/build.sh`.
 - Смоук-рендер тиров: `html_renderer.render_report_html(None, <user_id>, ...)`.
 - `freedom-etl/` гоняется ОТДЕЛЬНО (свои зависимости, в основную сюиту не входит):
@@ -45,8 +43,11 @@ PYTHONPATH=src python -m pytest tests/ -q          # → 1734 passed, 5 skipped,
   `NoSecondCopyTest` падает на литерале тикера в потребителе.
 - Старт контейнера роняют ДВЕ вещи. Разбор env на уровне модуля — ТОЛЬКО через
   `env_config.env_int`/`env_float`: голый `int(os.getenv(...))` роняет ИМПОРТ (AST-сканер).
-  И ТЯЖЁЛЫЙ импорт на фоновом потоке: демон RAG рвал numpy у главного потока (`§−98`),
-  новый импорт в теле потока обязан попасть в `entrypoint._preimport_boot_ingest_deps`.
+  И ТЯЖЁЛЫЙ импорт на ФОНОВОМ ПОТОКЕ — оба бота: демон RAG рвал numpy у главного
+  потока (`§−98`), у загрузчика то же делают потоки `to_thread` (`§−99`). Новый
+  ленивый импорт обязан попасть в реестр предзагрузки своего бота
+  (`entrypoint._BOOT_INGEST_HEAVY_IMPORTS` / `ingest_bot._WORKER_HEAVY_IMPORTS`).
+- У двух ботов РАЗНЫЕ токены: один на двоих — 409 у обоих и упавший ГЛАВНЫЙ бот (`§−99`).
 - `SYSTEM_PROMPT.md` лежит ТОЛЬКО в корне — он читается в рантайме и копируется Dockerfile.
 - `cloud_function/rag_engine.py` держится ИДЕНТИЧНЫМ `src/agent/rag_engine.py`.
 - Premium-бандлы `src/premium_assets/*` руками НЕ править — только через `build.sh`.
@@ -57,22 +58,25 @@ PYTHONPATH=src python -m pytest tests/ -q          # → 1734 passed, 5 skipped,
   и бумага в портфеле подменится (нота → `VWOB`: цена ETF, чужой тип, склейка разных бумаг).
 - Источник портфеля доезжает до `price_source` КАК ЕСТЬ. Свести неизвестный к `freedom` —
   значит молча отдать данные Tradernet не-клиенту Freedom (I-12); отказ делает провайдер.
-- Меняешь `analyze_all` → golden-фикстура (`tests/test_contracts_golden.py`) обязана совпасть.
-  Расхождение в фазе Арх-3 = ошибка разреза, а НЕ повод обновить эталон.
-- `analyze_all` — ОРКЕСТРАТОР: тело ≤ 150 строк, порядок стадий и их полнота пинятся
-  (`test_engine_orchestrator.py`). Новая логика = новая СТАДИЯ, а не блок в оркестраторе.
+- Меняешь `analyze_all` → golden-фикстура (`tests/test_contracts_golden.py`) обязана
+  совпасть; расхождение в фазе Арх-3 = ошибка разреза, а НЕ повод обновить эталон. Сам
+  `analyze_all` — ОРКЕСТРАТОР: тело ≤ 150 строк, порядок стадий и их полнота пинятся
+  (`test_engine_orchestrator.py`), новая логика = новая СТАДИЯ, а не блок в оркестраторе.
 - Эталон СЛЕП к порядку ключей словаря (`normalize` сортирует ради стабильности).
   Порядок, несущий смысл, пинится отдельным тестом — как `test_engine_benchmark_order.py`
   для профильного бенчмарка, чей первый ключ доезжает до подписи карточки (`§−64`).
-- `freedom-etl/` — ОТДЕЛЬНАЯ единица поставки: свой образ и свои зависимости.
-  В `src/` он не импортируется, `src/` в него не копируется; дублирование
-  хелперов env здесь осознанно — тот же случай, что `cloud_function/rag_engine.py`.
-- ДВА РАЗНЫХ ПРОЕКТА, не смешивать: `roadmap/manual_portfolio/` — ручной ввод и
-  Stooq как его источник; `roadmap/freedom_warehouse/` — Freedom API → своя БД.
-  У них разные юридические основания (I-12/I-14), поэтому `manual` не вправе
-  читать витрину с `origin='tradernet'` — как и сам Tradernet.
-- База котировок Stooq: пишет ТОЛЬКО `stooq_ingest` у оператора, бот открывает
-  `mode=ro` и читает ЛОКАЛЬНУЮ КОПИЮ (`stooq_store._local_copy`): SQLite поверх
+- ПРИСТРОЙКИ, которые прод (`entrypoint`, `tg_bot`) НЕ импортирует, иначе его
+  деплой начнёт от них зависеть: `ingest_bot`/`ingest_access`/`services/quote_*`
+  — бот-загрузчик, дефолт хранилища офлайн (`QUOTES_BACKEND=local`), дельта не
+  заводит бумаг (`test_phase51_ingest_bot.IsolationTest`); `freedom-etl/` — свой
+  образ и зависимости, `src/` в него не копируется. Дублирование хелперов env
+  там осознанно — тот же случай, что `cloud_function/rag_engine.py`.
+- ДВА РАЗНЫХ ПРОЕКТА, не смешивать: `roadmap/manual_portfolio/` (ручной ввод, источник
+  Stooq) и `roadmap/freedom_warehouse/` (Freedom API → своя БД). Основания разные
+  (I-12/I-14): `manual` не вправе читать витрину с `origin='tradernet'`, как и сам Tradernet.
+- База котировок Stooq: ПИШУТ двое — `stooq_ingest` у оператора и бот-загрузчик
+  (скачал → применил → залил ЦЕЛИКОМ, CAS по поколению; 412 = отказ, не ретрай).
+  Отчётный бот открывает `mode=ro` и читает ЛОКАЛЬНУЮ КОПИЮ (`stooq_store._local_copy`): SQLite поверх
   gcsfuse — сотни range-запросов на отчёт. Формы символа меняют НОТАЦИЮ, но не
   ПЛОЩАДКУ: `{base}.US` для иностранной бумаги подсунет ADR (`§−77`). Свежесть —
   в ТОРГОВЫХ днях рынка бумаги, не в календарных.

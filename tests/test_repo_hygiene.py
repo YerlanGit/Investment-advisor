@@ -26,6 +26,8 @@
 
 from __future__ import annotations
 
+import ast
+import re
 import subprocess
 import sys
 import unittest
@@ -40,7 +42,15 @@ _AUDIT_MD = _ROOT / "docs" / "audit" / "AUDIT.md"
 # Пороги — не «красиво», а «читаемо глазами в точке правки».
 # Замер после Арх-1 (2026-08-04): 122 строки, максимум 115 символов.
 # Запас оставлен намеренно: правила будут добавляться, журнал — нет.
-MAX_LINES = 200
+#
+# 🔴 `§−99`, потолок поднят 200 → 210 ОДИН раз и по делу. Запас съели не
+# пересказы раундов, ради которых гейт и стоит, а две новые ПОДСИСТЕМЫ: гонка
+# импорта на потоках (`§−98`, оба бота) и сам бот-загрузчик с его правилами про
+# токены и писателя базы. Перед подъёмом файл сжат там, где текст дублировался:
+# два правила про `analyze_all` сведены в одно, блок зеркала деплой-образа — с
+# семи строк до пяти. Замер после сжатия: 203 строки.
+# Гейт от этого не слабеет: дамп истории раунда — это сотни строк, а не десять.
+MAX_LINES = 210
 MAX_LINE_CHARS = 300
 
 
@@ -249,6 +259,102 @@ class TestMapIsGeneratedAndFreshTest(unittest.TestCase):
             "карта тестов устарела — перегенерируй `python scripts/gen_test_map.py`.\n"
             f"{proc.stdout}{proc.stderr}",
         )
+
+
+class TestsThatReadRepoFilesMustSkipInTheImageTest(unittest.TestCase):
+    """Тест, читающий файл ВНЕ образа, обязан сам себя пропустить (`§−99`).
+
+    🔴 Цена ошибки — весь деплой, а не один тест. Гейт `cloudbuild` гоняет
+    `unittest discover` ВНУТРИ образа, а образ несёт только то, что копирует
+    `Dockerfile`: `src/`, `tests/`, `SYSTEM_PROMPT.md` и requirements. Тест,
+    открывающий `cloudbuild.yaml` или `scripts/`, падает там `FileNotFoundError`
+    — сборка краснеет, и НЕ ДЕПЛОИТСЯ НИКТО, включая главный бот.
+
+    Так и случилось с `DeployStepTest` бота-загрузчика: пять падений в образе
+    при зелёном GitHub CI, потому что CI видит полный чекаут. Правило это в
+    `CLAUDE.md` есть, но названо было только про `design/` — а помнить его надо
+    про ЛЮБОЙ путь из корня репо. Поэтому здесь оно исполняемое.
+
+    Проверка намеренно ГРУБАЯ: достаточно, чтобы в теле класса или функции,
+    где путь строится, БЫЛ ВЫЗОВ `skipTest` (или `raise SkipTest`). Доказать
+    срабатывание по всем ветвям статически нельзя, а «есть ли вообще выход»
+    ловит ровно ту ошибку, которую люди и совершают, — забыли, а не написали
+    неверно.
+
+    🔴 Ищется именно ВЫЗОВ в AST, а не подстрока. Первая редакция этого гейта
+    считала слово `skipTest` в тексте узла — и пропустила собственную мутацию:
+    слово стояло в КОММЕНТАРИИ рядом. Тот же дефект, что `§−97` E-9, где
+    текстовые гейты читали комментарии; повторён здесь через неделю после того,
+    как был записан, — поэтому проверка теперь структурная.
+
+    Сам этот тест в образе пропускается: он читает `Dockerfile`, которого там
+    нет. Ловить он и должен на полном чекауте — до того, как образ собран.
+    """
+
+    #: `Path(...).parents[1] / "имя"` и `parent.parent / "имя"` — обе формы,
+    #: которыми тесты этого репозитория добираются до корня.
+    _PATH_RE = re.compile(r'(?:parents\[1\]|parent\.parent)\s*/\s*"([^"]+)"')
+
+    @staticmethod
+    def _has_skip(node: ast.AST) -> bool:
+        """Есть ли в поддереве ВЫЗОВ `skipTest` или `raise SkipTest`."""
+        for sub in ast.walk(node):
+            if isinstance(sub, ast.Call):
+                func = sub.func
+                if isinstance(func, ast.Attribute) and func.attr == "skipTest":
+                    return True
+                if isinstance(func, ast.Name) and func.id in ("skipTest",
+                                                              "SkipTest"):
+                    return True
+            if isinstance(sub, ast.Raise):
+                exc = sub.exc
+                name = getattr(exc, "func", exc)
+                if isinstance(name, ast.Attribute) and name.attr == "SkipTest":
+                    return True
+                if isinstance(name, ast.Name) and name.id == "SkipTest":
+                    return True
+        return False
+
+    def _image_manifest(self) -> set[str]:
+        """Что `Dockerfile` реально кладёт в образ — из него самого, не списком."""
+        dockerfile = _ROOT / "Dockerfile"
+        if not dockerfile.is_file():
+            self.skipTest("Dockerfile отсутствует (сам деплой-гейт)")
+        out: set[str] = set()
+        for line in dockerfile.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if not stripped.upper().startswith("COPY "):
+                continue
+            parts = stripped.split()[1:]
+            for token in parts[:-1]:                     # последний — назначение
+                if token.startswith("--"):
+                    continue
+                out.add(token.rstrip("/").split("/")[0])
+        return out
+
+    def test_every_repo_path_read_by_a_test_is_guarded(self) -> None:
+        manifest = self._image_manifest()
+        self.assertIn("src", manifest,
+                      "разбор Dockerfile сломался: в манифесте нет даже src/")
+        offenders: list[str] = []
+        for path in sorted((_ROOT / "tests").glob("*.py")):
+            source = path.read_text(encoding="utf-8")
+            tree = ast.parse(source, filename=str(path))
+            for node in ast.walk(tree):
+                if not isinstance(node, (ast.ClassDef, ast.FunctionDef,
+                                         ast.AsyncFunctionDef)):
+                    continue
+                body = ast.get_source_segment(source, node) or ""
+                names = set(self._PATH_RE.findall(body))
+                outside = {n for n in names if n.rstrip("/").split("/")[0]
+                           not in manifest}
+                if outside and not self._has_skip(node):
+                    offenders.append(f"{path.name}::{node.name} → {sorted(outside)}")
+        self.assertEqual(
+            offenders, [],
+            "эти тесты читают файлы, которых в деплой-образе НЕТ, и не умеют "
+            "пропуститься — в образе они упадут FileNotFoundError и завалят "
+            f"весь деплой (§−99):\n  " + "\n  ".join(offenders))
 
 
 if __name__ == "__main__":  # pragma: no cover
