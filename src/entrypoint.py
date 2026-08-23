@@ -13,6 +13,7 @@ freshest knowledge base without a redeploy.
 """
 
 import asyncio
+import importlib
 import logging
 import os
 
@@ -235,10 +236,80 @@ async def _health_server() -> None:
         await server.serve_forever()
 
 
+#: Что фоновый ингест тянет ПЕРВЫМ обращением — включая ЛЕНИВЫЕ импорты чужих
+#: модулей, которые исполняются уже на потоке.  `agent.rag_engine` импортирует
+#: `chromadb` внутри `FinancialRAG.__init__`, а `pymupdf4llm` — внутри
+#: `ingest_pdf`; оба, стало быть, грузятся НА ПОТОКЕ, и предзагрузки одного
+#: `agent.rag_engine` недостаточно — numpy приезжает именно из chromadb
+#: (onnxruntime) и из pandas главного потока.  Реестр перечисляет их явно:
+#: транзитивную ленивость нельзя вывести из кода `entrypoint`, её можно только
+#: назвать — и удержать тестом (`tests/test_phase58_boot_import_race.py`).
+_BOOT_INGEST_HEAVY_IMPORTS: tuple[str, ...] = (
+    "numpy",                       # общий корень гонки — грузим самым первым
+    "chromadb",                    # agent.rag_engine → FinancialRAG.__init__
+    "chromadb.utils.embedding_functions",
+    "pymupdf4llm",                 # agent.rag_engine → ingest_pdf
+    "agent.rag_engine",
+    "google.cloud.storage",
+)
+
+
+def _preimport_boot_ingest_deps() -> None:
+    """Загрузить В ГЛАВНОМ ПОТОКЕ всё тяжёлое, что нужно фоновому ингесту.
+
+    🔴 `§−98`, причина падений старта в проде.  `_boot_ingest_from_inbox`
+    крутится на ДЕМОН-ПОТОКЕ и первым делом импортирует `agent.rag_engine`
+    (chromadb → onnxruntime → numpy).  Главный поток в ту же секунду
+    импортирует `tg_bot` (pandas → sklearn → numpy).  Два потока входят в
+    ОДИН И ТОТ ЖЕ пакет одновременно, CPython разрывает взаимную блокировку
+    модульных локов, отдавая ОДНОМУ из них полуинициализированный модуль, и
+    импорт падает::
+
+        cannot import name 'NDArray' from partially initialized module
+        'numpy._typing' (most likely due to a circular import)
+
+    Кому не повезло — решает планировщик, поэтому дефект ПЛАВАЮЩИЙ:
+    - проиграл фоновый поток → в логе `RAG boot-ingest skipped (...)`, бот жив;
+    - проиграл ГЛАВНЫЙ → падает `from tg_bot import main`, исключение выходит
+      из `asyncio.run(_main())`, контейнер завершается с кодом 1, и Cloud Run
+      печатает «Default STARTUP TCP probe failed … The instance was not
+      started» — то есть бот НЕ ЗАПУСКАЕТСЯ.
+
+    Замер по логам ramp-bot 17.08: 17:51:26 и 18:53:49 — оба раза оба потока
+    напоролись на один и тот же numpy в одну и ту же секунду.
+
+    Лечение — не ретрай, а ПОРЯДОК: тяжёлые импорты делает главный поток, и
+    только потом стартует фоновый.  К моменту старта потока numpy, pandas и
+    chromadb уже целиком в `sys.modules`, гонке не на чем возникнуть.
+    Стоимость нулевая: на `--cpu=1` эти импорты и так не шли параллельно.
+
+    Отдельно про реестр `_BOOT_INGEST_HEAVY_IMPORTS`: одного
+    `import agent.rag_engine` НЕ ХВАТАЕТ.  Сам модуль лёгкий, а `chromadb`
+    он импортирует внутри `FinancialRAG.__init__`, `pymupdf4llm` — внутри
+    `ingest_pdf`; оба вызова делает поток, то есть numpy приезжал бы на поток
+    ровно как раньше.  Поэтому грузится ЦЕПОЧКА целиком и явным списком.
+    """
+    for what in _BOOT_INGEST_HEAVY_IMPORTS:
+        try:
+            importlib.import_module(what)
+        except Exception as exc:           # noqa: BLE001
+            # Не фатально: фоновый ингест сам обёрнут в try/except и просто
+            # не отработает.  Старт бота от RAG не зависит и зависеть не должен.
+            logger.info("RAG boot-ingest: предзагрузка %s не удалась (%s).", what, exc)
+
+
 async def _main() -> None:
     # Import here so the module-level bot setup only runs after the event loop
     # is already running (aiogram 3.x requires this).
     from tg_bot import main as bot_main  # noqa: PLC0415
+
+    # 🔴 `§−98`.  Порядок здесь — ЧАСТЬ КОНТРАКТА, а не оформление: сначала
+    # главный поток дотягивает все тяжёлые импорты (`tg_bot` выше и
+    # `_preimport_boot_ingest_deps` ниже), и только ПОТОМ поднимается
+    # демон-поток ингеста.  Разбор — в докстроке `_preimport_boot_ingest_deps`.
+    _preimport_boot_ingest_deps()
+    threading.Thread(target=_boot_ingest_from_inbox,
+                     name="rag-boot-ingest", daemon=True).start()
 
     await asyncio.gather(
         _health_server(),
@@ -260,8 +331,10 @@ if __name__ == "__main__":
     # INBOX, ingest them in-container on a DAEMON thread (never blocks the
     # startup probe or the bot).  Makes RAG work without a healthy Cloud
     # Function / Eventarc trigger.  Off switch: RAG_BOOT_INGEST=0.
-    threading.Thread(target=_boot_ingest_from_inbox,
-                     name="rag-boot-ingest", daemon=True).start()
+    #
+    # 🔴 `§−98`: поток поднимает `_main` ПОСЛЕ тяжёлых импортов, а не здесь.
+    # Отсюда он стартовал ОДНОВРЕМЕННО с `from tg_bot import main`, и два
+    # потока рвали импорт numpy друг у друга — контейнер падал на старте.
 
     # Playwright spawns child processes via asyncio subprocess.
     # On Linux/Cloud Run (Python 3.10+), the default child watcher raises
