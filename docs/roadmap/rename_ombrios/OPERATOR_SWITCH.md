@@ -24,6 +24,13 @@ export SERVICE="ramp-bot"          # имя сервиса Cloud Run НЕ мен
 gcloud config set project "$PROJECT_ID"
 ```
 
+🔴 **`export` живёт только до конца сессии.** Cloud Shell переподключается сам
+(вкладка в фоне, пауза, обрыв связи), и после этого `$PROJECT_ID` пуст —
+команда падает с `The project property is set to the empty string`, а
+`| wc -c` печатает `0`, что легко принять за пустой секрет. Инструкция
+проходится за несколько заходов, так что при возврате просто повторите обе
+строки `export`. `gcloud config set project` сохраняется и повтора не требует.
+
 Узнать сервис-аккаунт, под которым бежит бот (он должен получить доступ к
 новому секрету):
 
@@ -166,6 +173,7 @@ gcloud secrets get-iam-policy OMBRI_BOT_TOKEN --project="$PROJECT_ID"
 | `INVALID_ARGUMENT … member` | В команду попал буквальный `<RUNTIME_SA>` | Подставить адрес из §0 |
 | `ALREADY_EXISTS` на 2.1 | Секрет уже создан | Пропустить 2.1 |
 | `PERMISSION_DENIED` | Не тот проект в `gcloud config` | `gcloud config set project "$PROJECT_ID"` |
+| `The project property is set to the empty string` (и `wc -c` даёт `0`) | Cloud Shell переподключился, `$PROJECT_ID` потерян | Повторить обе строки `export` из §0 — это не пустой секрет |
 | Команда «висит», приглашение не возвращается | В `versions add` не попал префикс `printf … \|` — читается клавиатура | **Ctrl-C** (не Ctrl-D), затем §2.2 одной строкой |
 | В секрете оказался мусор вместо токена | Версия создана из набранного текста | Добавить верную версию (§2.2) — `:latest` укажет на неё; мусорную `gcloud secrets versions destroy N --secret=OMBRI_BOT_TOKEN` |
 
