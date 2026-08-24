@@ -69,6 +69,11 @@ echo "${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
 **Ничего, кроме секрета, не создаётся и не меняется.** Бакеты, сервис Cloud
 Run, Artifact Registry, VPC — не трогаются.
 
+🔴 **Команды выполняются ПО ОДНОЙ, сверху вниз.** Порядок здесь не
+формальность: выдать права можно только на существующий секрет, а секрет без
+версии пуст. Вставили блок целиком — получите `404 Secret … not found` от
+последней команды (см. §2.5).
+
 ### 2.1 Создать секрет
 
 ```bash
@@ -77,26 +82,39 @@ gcloud secrets create OMBRI_BOT_TOKEN \
   --project="$PROJECT_ID"
 ```
 
+Ожидаемо: `Created secret [OMBRI_BOT_TOKEN].`
+Если ответ `ALREADY_EXISTS` — секрет уже есть, переходите к 2.2.
+
 ### 2.2 Положить в него токен, не оставляя следов
 
 ```bash
-# Введите токен и нажмите Enter, затем Ctrl-D.
-# Ввод НЕ попадает в историю оболочки.
-gcloud secrets versions add OMBRI_BOT_TOKEN --data-file=- --project="$PROJECT_ID"
+read -rs OMBRI_TOKEN                       # ввод НЕ виден и НЕ пишется в историю
+printf '%s' "$OMBRI_TOKEN" | \
+  gcloud secrets versions add OMBRI_BOT_TOKEN --data-file=- --project="$PROJECT_ID"
+unset OMBRI_TOKEN                          # убрать значение из окружения
 ```
 
-🔴 Не используйте `echo "8787…" | gcloud …` — токен осядет в `~/.bash_history`.
+Вставьте токен, нажмите Enter — курсор просто перейдёт на следующую строку,
+это нормально.
 
-Проверка (покажет только длину, не значение):
+🔴 Не пишите `echo "8787…" | gcloud …` — токен осядет в `~/.bash_history`.
+`printf '%s'` вместо `echo` ещё и не добавляет перевод строки в конец
+значения (код его срезает, но чистое значение лучше).
+
+### 2.3 Проверить, что версия не пустая
 
 ```bash
 gcloud secrets versions access latest --secret=OMBRI_BOT_TOKEN \
   --project="$PROJECT_ID" | wc -c
 ```
 
-Ожидаемо: **46** символов, плюс-минус пара. Если 0 — версия пустая, повторите 2.2.
+Ожидаемо: **46** символов, плюс-минус пара. `0` — версия пустая, повторите 2.2.
+Само значение команда не печатает.
 
-### 2.3 Дать сервису право читать секрет
+### 2.4 Дать сервису право читать секрет
+
+Подставьте адрес из §0 вместо `<RUNTIME_SA>` — **буквально `<RUNTIME_SA>` не
+сработает**, это placeholder:
 
 ```bash
 gcloud secrets add-iam-policy-binding OMBRI_BOT_TOKEN \
@@ -105,9 +123,9 @@ gcloud secrets add-iam-policy-binding OMBRI_BOT_TOKEN \
   --project="$PROJECT_ID"
 ```
 
-🔴 **Если пропустить этот шаг, деплой упадёт** на привязке секретов, и прод
-останется на предыдущей ревизии. Бот при этом продолжит работать — но
-обновление не приедет, и причина будет неочевидной.
+🔴 **Если пропустить, деплой упадёт** на привязке секретов, и прод останется
+на предыдущей ревизии. Бот при этом продолжит работать — но обновление не
+приедет, и причина будет неочевидной.
 
 Проверка:
 
@@ -117,10 +135,25 @@ gcloud secrets get-iam-policy OMBRI_BOT_TOKEN --project="$PROJECT_ID"
 
 В выводе должен быть ваш `<RUNTIME_SA>` с ролью `secretAccessor`.
 
-### 2.4 Старый секрет НЕ удалять
+### 2.5 Если что-то пошло не так
+
+| Ошибка | Причина | Что делать |
+|---|---|---|
+| `404 … Secret [projects/…/secrets/OMBRI_BOT_TOKEN] not found` | Пропущен §2.1 — секрета ещё нет | Выполнить 2.1, затем 2.2, только потом 2.4 |
+| `INVALID_ARGUMENT … member` | В команду попал буквальный `<RUNTIME_SA>` | Подставить адрес из §0 |
+| `ALREADY_EXISTS` на 2.1 | Секрет уже создан | Пропустить 2.1 |
+| `PERMISSION_DENIED` | Не тот проект в `gcloud config` | `gcloud config set project "$PROJECT_ID"` |
+
+### 2.6 Старый секрет НЕ удалять
 
 `RAMP_BOT_TOKEN` остаётся в проекте: это ваш путь отката. Удалить его можно
 через неделю-другую после того, как новый бот отработает без нареканий.
+
+Убедиться, что оба на месте:
+
+```bash
+gcloud secrets list --project="$PROJECT_ID" --filter="name~BOT_TOKEN"
+```
 
 ---
 
@@ -250,14 +283,15 @@ gcloud logging read \
 
 ```
 □ 1. @BotFather → /revoke для @Ombri_bot → новый токен (никуда не копировать)
-□ 2. gcloud secrets create OMBRI_BOT_TOKEN
-□ 3. gcloud secrets versions add OMBRI_BOT_TOKEN --data-file=-   (ввод + Ctrl-D)
-□ 4. gcloud secrets add-iam-policy-binding … secretAccessor для <RUNTIME_SA>
-□ 5. Триггер: _BOT_TOKEN_SECRET=OMBRI_BOT_TOKEN И _BOT_USERNAME=Ombri_bot
-□ 6. Запустить сборку
-□ 7. Логи: «Starting bot id=» совпадает с новым токеном
-□ 8. Логи: нет предупреждения про «устаревший»
-□ 9. Telegram: /start у @Ombri_bot → меню, баланс, мандат на месте
-□ 10. Отчёт → «Применить идею» ведёт на t.me/Ombri_bot
-□ 11. @BotFather → revoke токена @KEN_investment_bot (бота НЕ удалять)
+□ 2. gcloud secrets create OMBRI_BOT_TOKEN              ← СНАЧАЛА это
+□ 3. read -rs OMBRI_TOKEN → printf | gcloud secrets versions add
+□ 4. gcloud secrets versions access latest … | wc -c    ← должно быть ~46
+□ 5. gcloud secrets add-iam-policy-binding … secretAccessor для реального SA
+□ 6. Триггер: _BOT_TOKEN_SECRET=OMBRI_BOT_TOKEN И _BOT_USERNAME=Ombri_bot
+□ 7. Запустить сборку
+□ 8. Логи: «Starting bot id=» совпадает с новым токеном
+□ 9. Логи: нет предупреждения про «устаревший»
+□ 10. Telegram: /start у @Ombri_bot → меню, баланс, мандат на месте
+□ 11. Отчёт → «Применить идею» ведёт на t.me/Ombri_bot
+□ 12. @BotFather → revoke токена @KEN_investment_bot (бота НЕ удалять)
 ```
