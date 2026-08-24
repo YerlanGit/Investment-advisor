@@ -87,15 +87,38 @@ gcloud secrets create OMBRI_BOT_TOKEN \
 
 ### 2.2 Положить в него токен, не оставляя следов
 
+**Команда первая.** Вставьте токен, нажмите Enter — ничего не отобразится,
+это и есть смысл флага `-s`:
+
 ```bash
-read -rs OMBRI_TOKEN                       # ввод НЕ виден и НЕ пишется в историю
-printf '%s' "$OMBRI_TOKEN" | \
-  gcloud secrets versions add OMBRI_BOT_TOKEN --data-file=- --project="$PROJECT_ID"
-unset OMBRI_TOKEN                          # убрать значение из окружения
+read -rs OMBRI_TOKEN
 ```
 
-Вставьте токен, нажмите Enter — курсор просто перейдёт на следующую строку,
-это нормально.
+Проверьте, что он записался (печатается ТОЛЬКО длина, ~46):
+
+```bash
+echo ${#OMBRI_TOKEN}
+```
+
+**Команда вторая — копируйте ОДНОЙ строкой, целиком:**
+
+```bash
+printf '%s' "$OMBRI_TOKEN" | gcloud secrets versions add OMBRI_BOT_TOKEN --data-file=- --project="$PROJECT_ID"
+```
+
+Ожидаемо: `Created version [1] of the secret [OMBRI_BOT_TOKEN].`
+
+**Команда третья** — убрать значение из окружения:
+
+```bash
+unset OMBRI_TOKEN
+```
+
+🔴 **Часть `printf '%s' "$OMBRI_TOKEN" |` обязательна.** Без неё
+`--data-file=-` читает С КЛАВИАТУРЫ: команда молча повиснет, а всё, что вы
+наберёте дальше, уйдёт в секрет как его содержимое. Признак — курсор мигает,
+приглашение оболочки не возвращается. Выход: **Ctrl-C** (прервёт до создания
+версии). Ctrl-D нажимать НЕ надо — он создаст версию с мусором.
 
 🔴 Не пишите `echo "8787…" | gcloud …` — токен осядет в `~/.bash_history`.
 `printf '%s'` вместо `echo` ещё и не добавляет перевод строки в конец
@@ -143,6 +166,8 @@ gcloud secrets get-iam-policy OMBRI_BOT_TOKEN --project="$PROJECT_ID"
 | `INVALID_ARGUMENT … member` | В команду попал буквальный `<RUNTIME_SA>` | Подставить адрес из §0 |
 | `ALREADY_EXISTS` на 2.1 | Секрет уже создан | Пропустить 2.1 |
 | `PERMISSION_DENIED` | Не тот проект в `gcloud config` | `gcloud config set project "$PROJECT_ID"` |
+| Команда «висит», приглашение не возвращается | В `versions add` не попал префикс `printf … \|` — читается клавиатура | **Ctrl-C** (не Ctrl-D), затем §2.2 одной строкой |
+| В секрете оказался мусор вместо токена | Версия создана из набранного текста | Добавить верную версию (§2.2) — `:latest` укажет на неё; мусорную `gcloud secrets versions destroy N --secret=OMBRI_BOT_TOKEN` |
 
 ### 2.6 Старый секрет НЕ удалять
 
@@ -284,7 +309,7 @@ gcloud logging read \
 ```
 □ 1. @BotFather → /revoke для @Ombri_bot → новый токен (никуда не копировать)
 □ 2. gcloud secrets create OMBRI_BOT_TOKEN              ← СНАЧАЛА это
-□ 3. read -rs OMBRI_TOKEN → printf | gcloud secrets versions add
+□ 3. read -rs OMBRI_TOKEN, затем ОДНОЙ строкой: printf '%s' "$OMBRI_TOKEN" | gcloud secrets versions add …
 □ 4. gcloud secrets versions access latest … | wc -c    ← должно быть ~46
 □ 5. gcloud secrets add-iam-policy-binding … secretAccessor для реального SA
 □ 6. Триггер: _BOT_TOKEN_SECRET=OMBRI_BOT_TOKEN И _BOT_USERNAME=Ombri_bot
