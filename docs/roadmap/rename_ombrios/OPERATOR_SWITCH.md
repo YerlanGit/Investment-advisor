@@ -173,6 +173,7 @@ gcloud secrets get-iam-policy OMBRI_BOT_TOKEN --project="$PROJECT_ID"
 | `INVALID_ARGUMENT … member` | В команду попал буквальный `<RUNTIME_SA>` | Подставить адрес из §0 |
 | `ALREADY_EXISTS` на 2.1 | Секрет уже создан | Пропустить 2.1 |
 | `PERMISSION_DENIED` | Не тот проект в `gcloud config` | `gcloud config set project "$PROJECT_ID"` |
+| Сборка падает сразу, до шага build, с жалобой на подстановку | Переменные добавлены в триггер ДО мержа кода — конфиг о них не знает (`MUST_MATCH`) | Убрать их из триггера, влить код в `main`, вернуть (§2.7) |
 | `The project property is set to the empty string` (и `wc -c` даёт `0`) | Cloud Shell переподключился, `$PROJECT_ID` потерян | Повторить обе строки `export` из §0 — это не пустой секрет |
 | Команда «висит», приглашение не возвращается | В `versions add` не попал префикс `printf … \|` — читается клавиатура | **Ctrl-C** (не Ctrl-D), затем §2.2 одной строкой |
 | В секрете оказался мусор вместо токена | Версия создана из набранного текста | Добавить верную версию (§2.2) — `:latest` укажет на неё; мусорную `gcloud secrets versions destroy N --secret=OMBRI_BOT_TOKEN` |
@@ -187,6 +188,40 @@ gcloud secrets get-iam-policy OMBRI_BOT_TOKEN --project="$PROJECT_ID"
 ```bash
 gcloud secrets list --project="$PROJECT_ID" --filter="name~BOT_TOKEN"
 ```
+
+---
+
+## 2.7 🔴 СНАЧАЛА влить код в `main`, и только потом трогать триггер
+
+**Порядок здесь обязателен, и нарушение ломает сборку.**
+
+Cloud Build по умолчанию работает в режиме `MUST_MATCH`: подстановка, которой
+нет в `cloudbuild.yaml`, — ошибка сборки, а не «просто лишняя переменная».
+Подстановки `_BOT_TOKEN_SECRET` и `_BOT_USERNAME` появились вместе с кодом
+переезда (`§−101`). Пока этот код не в `main`, конфиг о них не знает.
+
+Добавите их в триггер раньше мержа — **сборка упадёт до первого шага**, деплоя
+не будет, прод останется на старой ревизии.
+
+Правильная последовательность:
+
+```
+1. Влить ветку переезда в main (PR).
+2. Дать сборке отработать. Она НИЧЕГО не переключает: подстановки в конфиге
+   держат прежний секрет и прежний хэндл, бот остаётся @KEN_investment_bot.
+3. Убедиться, что бот жив: /start у @KEN_investment_bot отвечает.
+4. И только теперь — §3: добавить в триггер две подстановки и запустить сборку.
+```
+
+Проверить, что код доехал до `main`, можно по самому конфигу:
+
+```bash
+git -C <репозиторий> fetch origin main
+git -C <репозиторий> show origin/main:cloudbuild.yaml | grep -c "_BOT_TOKEN_SECRET"
+```
+
+Ноль — код ещё не в `main`, к §3 переходить рано. Ожидаемо **2** (объявление
+подстановки и её использование в шаге деплоя).
 
 ---
 
@@ -320,11 +355,13 @@ gcloud logging read \
 □ 3. read -rs OMBRI_TOKEN, затем ОДНОЙ строкой: printf '%s' "$OMBRI_TOKEN" | gcloud secrets versions add …
 □ 4. gcloud secrets versions access latest … | wc -c    ← должно быть ~46
 □ 5. gcloud secrets add-iam-policy-binding … secretAccessor для реального SA
-□ 6. Триггер: _BOT_TOKEN_SECRET=OMBRI_BOT_TOKEN И _BOT_USERNAME=Ombri_bot
-□ 7. Запустить сборку
-□ 8. Логи: «Starting bot id=» совпадает с новым токеном
-□ 9. Логи: нет предупреждения про «устаревший»
-□ 10. Telegram: /start у @Ombri_bot → меню, баланс, мандат на месте
-□ 11. Отчёт → «Применить идею» ведёт на t.me/Ombri_bot
-□ 12. @BotFather → revoke токена @KEN_investment_bot (бота НЕ удалять)
+□ 6. Влить ветку переезда в main и дождаться зелёной сборки  ← ДО триггера
+□ 7. Проверить, что бот жив: /start у @KEN_investment_bot отвечает
+□ 8. Триггер: _BOT_TOKEN_SECRET=OMBRI_BOT_TOKEN И _BOT_USERNAME=Ombri_bot
+□ 9. Запустить сборку
+□ 10. Логи: «Starting bot id=» совпадает с новым токеном
+□ 11. Логи: нет предупреждения про «устаревший»
+□ 12. Telegram: /start у @Ombri_bot → меню, баланс, мандат на месте
+□ 13. Отчёт → «Применить идею» ведёт на t.me/Ombri_bot
+□ 14. @BotFather → revoke токена @KEN_investment_bot (бота НЕ удалять)
 ```
