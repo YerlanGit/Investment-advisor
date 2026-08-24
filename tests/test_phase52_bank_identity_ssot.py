@@ -44,7 +44,7 @@ _SRC = _ROOT / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-os.environ.setdefault("RAMP_BOT_TOKEN", "0000000000:TEST-TOKEN-unit")
+os.environ.setdefault("OMBRI_BOT_TOKEN", "0000000000:TEST-TOKEN-unit")
 
 
 class RegistryIsTheSingleSourceTest(unittest.TestCase):

@@ -29,7 +29,7 @@ import requests
 logger = logging.getLogger("SEC_EDGAR")
 
 # ── SEC EDGAR HTTP config ────────────────────────────────────────────────────
-_SEC_HEADERS = {"User-Agent": "RAMP Advisory ramp-advisory@project.com"}
+_SEC_HEADERS = {"User-Agent": "OMBRIOS Advisory ombrios-advisory@project.com"}
 _SEC_TIMEOUT = 15  # seconds per request
 
 

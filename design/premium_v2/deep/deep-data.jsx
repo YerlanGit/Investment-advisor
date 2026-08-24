@@ -10,7 +10,7 @@ const DEEP = {
     generated: '23.06.2026 07:05 UTC+5',
     nav: 13692,
     positions: 11,
-    botUsername: 'KEN_investment_bot',
+    botUsername: 'Ombri_bot',
   },
 
   verdict: {

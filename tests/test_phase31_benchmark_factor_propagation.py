@@ -38,7 +38,7 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-os.environ.setdefault("RAMP_BOT_TOKEN", "0000000000:TEST-TOKEN-unit")
+os.environ.setdefault("OMBRI_BOT_TOKEN", "0000000000:TEST-TOKEN-unit")
 
 from finance.investment_logic import MAC3RiskEngine  # noqa: E402
 
@@ -109,7 +109,7 @@ class EngineBenchmarkBetasTest(unittest.TestCase):
 # ── Слой B — таблица факторов в tg_bot ───────────────────────────────────────
 
 def _import_tg_bot():
-    os.environ.setdefault("RAMP_BOT_TOKEN", "0000000000:TEST-TOKEN-unit")
+    os.environ.setdefault("OMBRI_BOT_TOKEN", "0000000000:TEST-TOKEN-unit")
     try:
         import tg_bot
         return tg_bot

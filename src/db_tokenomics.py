@@ -1,5 +1,5 @@
 """
-Tokenomics DB — async SQLite layer for RAMP user balances.
+Tokenomics DB — async SQLite layer for OMBRIOS user balances.
 Pricing (2026-07-17): 1 token = 2 500 KZT; pack 10 tokens = 25 000 KZT
 (source of truth for the user-facing copy: tg_bot.TOKEN_PRICE_KZT).
 New users receive 10 test tokens on first registration.

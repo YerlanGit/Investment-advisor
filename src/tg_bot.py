@@ -1,8 +1,8 @@
 """
-RAMP Telegram Bot — aiogram 3.x async entry point.
+OMBRI Telegram Bot — aiogram 3.x async entry point.
 
-Deep-link format: t.me/KEN_investment_bot?start=<source_slug>  (bot @username;
-  override via BOT_USERNAME env). `start=scn_<n>` → «Применить идею» → Scenario tier.
+Deep-link format: t.me/<bot>?start=<source_slug>  (хэндл — `branding.bot_username()`,
+  переопределяется env `BOT_USERNAME`). `start=scn_<n>` → «Применить идею» → Scenario tier.
 Analysis tiers:
   - base  : 1 token  → MAC3 CVaR + allocation table
   - deep  : 2 tokens → base + scenario analysis + fundamental signals
@@ -52,6 +52,7 @@ from aiogram.types import (
     Message,
 )
 
+import branding
 from env_config import env_int
 from db_tokenomics import (
     acquire_report_lock,
@@ -105,13 +106,48 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)-8s | %(name)s — %(message)s",
 )
-logger = logging.getLogger("ramp_bot")
+logger = logging.getLogger("ombri.bot")
 
-BOT_TOKEN: str = os.environ["RAMP_BOT_TOKEN"].strip()
-if not BOT_TOKEN or ":" not in BOT_TOKEN:
+#: Токен ЭТОГО бота. Проект переехал с имени RAMP на OMBRI (`§−101`), поэтому
+#: имя переменной объявлено, а не вписано в три места: сообщение об ошибке,
+#: страж общего токена у загрузчика и тесты читают его отсюда.
+TOKEN_ENV = "OMBRI_BOT_TOKEN"
+#: Прежнее имя той же переменной. Читается ВТОРЫМ и с предупреждением: пока
+#: секрет в Secret Manager не переименован, бот обязан подниматься. Молча
+#: принимать прежнее имя нельзя — тогда переезд не закончится никогда.
+LEGACY_TOKEN_ENV = "RAMP_BOT_TOKEN"
+
+
+def read_bot_token() -> str:
+    """Токен бота: новое имя, при его отсутствии — прежнее, с предупреждением.
+
+    🔴 Читается на уровне МОДУЛЯ, и это fail-closed по замыслу: бот без токена
+    не «работает частично», он не работает. Прежнее чтение было
+    `os.environ["RAMP_BOT_TOKEN"]` — отсутствие переменной роняло ИМПОРТ с
+    голым `KeyError`, по симптому неотличимым от гонки импортов (`§−98`).
+    Здесь причина названа прямо.
+    """
+    value = str(os.getenv(TOKEN_ENV, "") or "").strip()
+    if value:
+        return value
+    value = str(os.getenv(LEGACY_TOKEN_ENV, "") or "").strip()
+    if value:
+        logger.warning(
+            "%s пуст — взял устаревший %s. Переименуйте секрет в Secret Manager "
+            "и переключите подстановку `_BOT_TOKEN_SECRET` в cloudbuild.yaml.",
+            TOKEN_ENV, LEGACY_TOKEN_ENV)
+        return value
+    raise RuntimeError(
+        f"{TOKEN_ENV} не задан (прежнее имя {LEGACY_TOKEN_ENV} тоже пусто). "
+        "Боту нужен токен от @BotFather: в проде он приезжает из Secret "
+        "Manager через `--set-secrets`, локально — из .env.")
+
+
+BOT_TOKEN: str = read_bot_token()
+if ":" not in BOT_TOKEN:
     # Never echo any part of the secret — only its length on the error path.
     raise ValueError(
-        f"Invalid RAMP_BOT_TOKEN format — expected 'id:secret' (len={len(BOT_TOKEN)})"
+        f"Invalid {TOKEN_ENV} format — expected 'id:secret' (len={len(BOT_TOKEN)})"
     )
 # The numeric id BEFORE ':' is public (it's the bot's user id); the secret
 # AFTER ':' must never be logged.  Log only the public id segment.
@@ -1272,7 +1308,7 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
         await state.set_state(Onboarding.Q1)
         q    = QUESTIONS[0]
         sent = await message.answer(
-            "👋 *Добро пожаловать в RAMP — Risk & Asset Management Platform!*\n\n"
+            f"👋 *Добро пожаловать в {branding.project_name()} — Risk & Asset Management Platform!*\n\n"
             "Прежде чем начать, пройдите короткое анкетирование (6 вопросов), "
             "чтобы мы могли составить ваш персональный инвестиционный мандат.\n\n"
             + q["text"],
@@ -1336,7 +1372,7 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
                 return
             balance = await get_balance(user_id)
             await message.answer(
-                f"📊 *RAMP — Risk & Asset Management Platform*\n\n"
+                f"📊 *{branding.project_name()} — Risk & Asset Management Platform*\n\n"
                 f"Ваш баланс: *{balance} токен(а)*\n\n"
                 "Выберите тип анализа вашего портфеля:",
                 parse_mode=ParseMode.MARKDOWN,
@@ -1617,7 +1653,7 @@ async def cb_mandate_approve(callback: CallbackQuery, state: FSMContext) -> None
 
     balance = await get_balance(user_id)
     await callback.message.answer(
-        f"🎉 *Мандат утверждён! Добро пожаловать в RAMP.*\n\n"
+        f"🎉 *Мандат утверждён! Добро пожаловать в {branding.project_name()}.*\n\n"
         f"Ваш профиль: *{prof['name']}*\n"
         f"На ваш счёт зачислено *{balance} токен(а)*.\n\n"
         "Последний шаг: подключите источник данных о вашем портфеле.",
@@ -1709,7 +1745,7 @@ async def cb_connect_choice(callback: CallbackQuery, state: FSMContext) -> None:
         await state.update_data(slug=slug)
         await state.set_state(PortfolioConnection.Login)
         await callback.message.edit_text(
-            "⚠️ *Важно:* RAMP использует API исключительно для режима ЧТЕНИЯ (Read-Only) "
+            f"⚠️ *Важно:* {branding.project_name()} использует API исключительно для режима ЧТЕНИЯ (Read-Only) "
             "сырых данных для глубокого квантового анализа. "
             "Мы не имеем права совершать сделки. "
             "В целях безопасности, после ввода ключей, пожалуйста, "
@@ -3236,8 +3272,8 @@ async def cmd_grant(message: Message) -> None:
 
 async def cmd_support(message: Message) -> None:
     await message.answer(
-        "🛟 *Поддержка RAMP*\n\n"
-        "По всем вопросам пишите: @ramp_support_bot\n"
+        f"🛟 *Поддержка {branding.bot_name()}*\n\n"
+        f"По всем вопросам пишите: {branding.support_contact()}\n"
         "Часы работы: пн–пт, 09:00–18:00 (UTC+5).",
         parse_mode=ParseMode.MARKDOWN,
     )
@@ -3257,7 +3293,7 @@ async def msg_text_fallback(message: Message, state: FSMContext) -> None:
     except Exception:
         pass
     await message.answer(
-        "🔘 RAMP управляется кнопками — печатать ничего не нужно.\n\n"
+        f"🔘 {branding.bot_name()} управляется кнопками — печатать ничего не нужно.\n\n"
         "Нажмите /start, чтобы открыть меню анализа портфеля.",
         parse_mode=ParseMode.MARKDOWN,
     )
@@ -3410,7 +3446,7 @@ async def cmd_help(message: Message) -> None:
     price_str = f"{TOKEN_PRICE_KZT:,}".replace(",", " ")       # «2 500»
     pack_str  = f"{TOKEN_PACK_PRICE_KZT:,}".replace(",", " ")  # «25 000»
     await message.answer(
-        "🧭 *Помощь по RAMP*\n\n"
+        f"🧭 *Помощь по {branding.bot_name()}*\n\n"
         "*Отчёты (тиры):*\n"
         f"  📊 Базовый — {base_c} токен: риск-профиль, CVaR/Sharpe, состав, идеи.\n"
         f"  🎯 Сценарный — {scn_c} токен: вклад позиций в риск, 3 макро-режима, "
@@ -3880,7 +3916,7 @@ async def main() -> None:
         except Exception:
             pass
 
-    logger.info("RAMP Bot запущен.")
+    logger.info("%s Bot запущен.", branding.bot_name())
     watcher = asyncio.create_task(_watch_shutdown())
     try:
         for attempt in range(_CONFLICT_MAX_RETRIES):

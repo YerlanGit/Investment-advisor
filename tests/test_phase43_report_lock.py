@@ -217,7 +217,7 @@ class BotWiringTest(unittest.TestCase):
 # 5. Поведение гарда бота (функционально)
 # ──────────────────────────────────────────────────────────────────────────
 # tg_bot читает токен при импорте — подставляем на этапе коллекции.
-os.environ.setdefault("RAMP_BOT_TOKEN", "0000000000:TEST-TOKEN-unit")
+os.environ.setdefault("OMBRI_BOT_TOKEN", "0000000000:TEST-TOKEN-unit")
 
 
 class BotGuardBehaviourTest(ReportLockTestBase):

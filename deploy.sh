@@ -78,13 +78,17 @@ if [ "${1:-}" = "--setup-secrets" ]; then
         fi
     }
 
+    # §−101: бот читает OMBRI_BOT_TOKEN, при его отсутствии — прежнее имя.
+    # Заливаем ОБА: `load_secret` пропускает то, чего нет в .env, так что
+    # скрипт одинаково работает и до переименования секрета, и после.
+    load_secret "OMBRI_BOT_TOKEN"
     load_secret "RAMP_BOT_TOKEN"
     load_secret "FINTECH_MASTER_KEY"
     load_secret "ANTHROPIC_API_KEY"
 
     # Разрешить Cloud Run SA читать секреты
     SA_EMAIL="${PROJECT_ID}@appspot.gserviceaccount.com"
-    for SECRET in RAMP_BOT_TOKEN FINTECH_MASTER_KEY ANTHROPIC_API_KEY; do
+    for SECRET in OMBRI_BOT_TOKEN RAMP_BOT_TOKEN FINTECH_MASTER_KEY ANTHROPIC_API_KEY; do
         gcloud secrets add-iam-policy-binding "$SECRET" \
             --member="serviceAccount:${SA_EMAIL}" \
             --role="roles/secretmanager.secretAccessor" \

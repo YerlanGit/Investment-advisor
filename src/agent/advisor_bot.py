@@ -33,7 +33,7 @@ def simulate_user_registration(telegram_id):
     print("Регистрация завершена.\n")
 
 def handle_analyze_request(telegram_id):
-    print(f"\n--- АУДИТ ПОРТФЕЛЯ (RAMP) ДЛЯ ПОЛЬЗОВАТЕЛЯ: {telegram_id} ---")
+    print(f"\n--- АУДИТ ПОРТФЕЛЯ (OMBRIOS) ДЛЯ ПОЛЬЗОВАТЕЛЯ: {telegram_id} ---")
     
     keys = vault.get_user_keys(telegram_id)
     if not keys: return

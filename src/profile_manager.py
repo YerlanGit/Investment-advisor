@@ -14,6 +14,8 @@ Profiles (CFA / MiFID II-aligned):
 
 import copy
 
+import branding
+
 ASSET_KEYS: list[str] = [
     "Bonds", "Stocks_US", "GlobalETFs", "Commodities", "Crypto", "Stocks_KZ",
 ]
@@ -176,8 +178,8 @@ class RiskProfileManager:
             bench_display = profile.get("bench_name", profile.get("bench", "—"))
 
         lines = [
-            "🏛 *RAMP подобрал для вас оптимальную стратегию*\n",
-            f"На основе вашего профиля риска RAMP рекомендует стратегию *{name}*.\n",
+            f"🏛 *{branding.project_name()} подобрал для вас оптимальную стратегию*\n",
+            f"На основе вашего профиля риска {branding.project_name()} рекомендует стратегию *{name}*.\n",
             "📌 *Мы рекомендуем:*",
             f"  ›  Бенчмарк: *{bench_display}*",
             f"  ›  Целевая волатильность портфеля: *{vol_pct}% годовых*",
@@ -197,8 +199,8 @@ class RiskProfileManager:
 
         lines.append(
             "\n_Данный мандат является персональной инвестиционной стратегией, "
-            "разработанной RAMP на основе ваших ответов. Не является ИИР "
+            f"разработанной {branding.project_name()} на основе ваших ответов. Не является ИИР "
             "(индивидуальной инвестиционной рекомендацией)._\n"
-            "\nУтвердите мандат, чтобы начать работу с RAMP:"
+            f"\nУтвердите мандат, чтобы начать работу с {branding.project_name()}:"
         )
         return "\n".join(lines)

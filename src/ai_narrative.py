@@ -24,6 +24,7 @@ from typing import Optional
 
 # SSOT имён эмитентов (§−95).  L1 → импорт вниз разрешён; модуль на импорте
 # тянет только stdlib (chromadb/pymupdf4llm там ленивые).
+import branding
 from agent.rag_engine import (
     BANK_ORDER,
     bank_alias_regex,
@@ -310,7 +311,8 @@ def build_system_prompt() -> str:
         except FileNotFoundError:
             continue
     return ("You are an investment-advisory and risk-management assistant. "
-            "Output advisory-only text in Russian. Never mention 'RAMP'.")
+            "Output advisory-only text in Russian. Never mention the brand "
+            f"('{branding.project_name()}', '{branding.bot_name()}', 'RAMP').")
 
 
 # ── Sector figures fed to the LLM (SSOT — shared with the report panel) ──────
@@ -1451,7 +1453,8 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
             '  }\n'
             '}\n\n'
             "ПРАВИЛА:\n"
-            "- Русский язык. Без «RAMP».\n"
+            f"- Русский язык. Без названий бренда («{branding.project_name()}», "
+            f"«{branding.bot_name()}», «RAMP»).\n"
             "- ПРОСТОЙ ЯЗЫК — глоссарий замен:\n"
             "  CVaR → 'средний убыток в редкий плохой день (примерно раз в месяц)'\n"
             "  волатильность → 'нестабильность' или 'насколько прыгает портфель'\n"
@@ -1624,7 +1627,8 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
         '  "ai_action_impact": "≤300 знаков — количественный прогноз: CVaR/Vol/TE/Sharpe после плана"\n'
         '}\n\n'
         "ПРАВИЛА:\n"
-        "- ВСЕ тексты на РУССКОМ. Без «RAMP».\n"
+        f"- ВСЕ тексты на РУССКОМ. Без названий бренда («{branding.project_name()}», "
+        f"«{branding.bot_name()}», «RAMP»).\n"
         "- ПРОСТОЙ ЯЗЫК — глоссарий замен:\n"
         "  CVaR → 'средний убыток в редкий плохой день (примерно раз в месяц)'\n"
         "  волатильность → 'нестабильность' или 'насколько прыгает портфель'\n"

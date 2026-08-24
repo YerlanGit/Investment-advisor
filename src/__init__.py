@@ -1,4 +1,4 @@
-"""RAMP Telegram Bot — Python source root.
+"""OMBRIOS Telegram Bot — Python source root.
 
 L-2: the former "Claude Code porting workspace" exports (commands, parity_audit,
 port_manifest, query_engine, runtime, …) were removed.  `parity_audit` never

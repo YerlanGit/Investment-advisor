@@ -25,7 +25,7 @@
 > импорт), то есть когда карта действительно врёт.
 
 
-**Замер:** 84 тест-файлов · 59 модулей `src/` имеют хотя бы один адресный тест-импорт.
+**Замер:** 85 тест-файлов · 60 модулей `src/` имеют хотя бы один адресный тест-импорт.
 
 ## Модуль → тесты
 
@@ -34,6 +34,7 @@
 | `agent.gatekeeper` | 5 | `test_phase18_sprint5.py` · `test_phase32_report_logic_fixes.py` · `test_phase33_effect_reinvest_quality.py` · `test_phase42_instrument_ssot.py` · `test_phase44_live_report_fixes.py` |
 | `agent.rag_engine` | 5 | `test_phase21_recos.py` · `test_phase22_rag_boot.py` · `test_phase23_rag_inventory.py` · `test_phase52_bank_identity_ssot.py` · `test_phase54_rag_chunking_and_provenance.py` |
 | `ai_narrative` | 21 | `test_factor_decomposition.py` · `test_phase13_security.py` · `test_phase15_phase3.py` · `test_phase18_sprint5.py` · `test_phase19_block_audit.py` · `test_phase23_rag_inventory.py` · `test_phase31_benchmark_factor_propagation.py` · `test_phase32_report_logic_fixes.py` · `test_phase33_effect_reinvest_quality.py` · `test_phase36_report_audit_fixes.py` · `test_phase40_labels_and_boundary.py` · `test_phase44_live_report_fixes.py` · `test_phase46_p2_maintainability.py` · `test_phase48_report_verdict_audit.py` · `test_phase4_reporting.py` · `test_phase52_bank_identity_ssot.py` · `test_phase54_rag_chunking_and_provenance.py` · `test_phase5_rag_quality.py` · `test_phase7_logic_wiring.py` · `test_phase8_report_fixes.py` · `test_phase9_fpillar_stress.py` |
+| `branding` | 1 | `test_phase59_brand_rename.py` |
 | `db_tokenomics` | 5 | `test_manual_fsm_flow.py` · `test_phase12_beta_safety.py` · `test_phase20_sprint_refactor.py` · `test_phase29_multiuser_connection.py` · `test_phase43_report_lock.py` |
 | `entrypoint` | 1 | `test_phase22_rag_boot.py` |
 | `env_config` | 1 | `test_phase46_p2_maintainability.py` |
@@ -89,7 +90,7 @@
 | `services.macro_data` | 3 | `test_phase21_recos.py` · `test_phase4_reporting.py` · `test_phase50_report_layer_parity.py` |
 | `services.quote_publisher` | 1 | `test_phase51_ingest_bot.py` |
 | `services.report_storage` | 2 | `test_phase14_refactor.py` · `test_phase46_p2_maintainability.py` |
-| `tg_bot` | 14 | `test_manual_fsm_flow.py` · `test_phase12_beta_safety.py` · `test_phase16_sprint2.py` · `test_phase17_admin_grant.py` · `test_phase1_fixes.py` · `test_phase23_rag_inventory.py` · `test_phase24_scenario_report.py` · `test_phase26_report_fixes.py` · `test_phase29_multiuser_connection.py` · `test_phase31_benchmark_factor_propagation.py` · `test_phase43_report_lock.py` · `test_phase51_broker_outage_diagnosis.py` · `test_phase52_bank_identity_ssot.py` · `test_phase5_rag_quality.py` |
+| `tg_bot` | 15 | `test_manual_fsm_flow.py` · `test_phase12_beta_safety.py` · `test_phase16_sprint2.py` · `test_phase17_admin_grant.py` · `test_phase1_fixes.py` · `test_phase23_rag_inventory.py` · `test_phase24_scenario_report.py` · `test_phase26_report_fixes.py` · `test_phase29_multiuser_connection.py` · `test_phase31_benchmark_factor_propagation.py` · `test_phase43_report_lock.py` · `test_phase51_broker_outage_diagnosis.py` · `test_phase52_bank_identity_ssot.py` · `test_phase59_brand_rename.py` · `test_phase5_rag_quality.py` |
 
 ## Модули без прямого тест-импорта
 
