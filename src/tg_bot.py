@@ -143,6 +143,20 @@ def read_bot_token() -> str:
         "Manager через `--set-secrets`, локально — из .env.")
 
 
+def md_safe(text: str) -> str:
+    """Экранирует служебные символы legacy-Markdown в ПОДСТАВЛЯЕМОМ значении.
+
+    🔴 Telegram в режиме `Markdown` разбирает `_..._` где угодно, включая
+    середину слова. Хэндл вида `@OMBRI_support_bot` несёт ДВА подчёркивания —
+    они схлопываются в курсив, и пользователь видит `@OMBRIsupportbot`, то
+    есть КОПИРУЕТ несуществующий контакт. Непарное подчёркивание хуже:
+    Telegram отвечает 400 «can\'t parse entities», и сообщение не уходит
+    вовсе. Дефолтные имена бренда (`OMBRIOS`, `OMBRI`) безопасны, но значение
+    приходит из окружения и может быть любым — поэтому экранируем.
+    """
+    return re.sub(r"([_*`\[])", r"\\\1", text)
+
+
 BOT_TOKEN: str = read_bot_token()
 if ":" not in BOT_TOKEN:
     # Never echo any part of the secret — only its length on the error path.
@@ -3273,7 +3287,7 @@ async def cmd_grant(message: Message) -> None:
 async def cmd_support(message: Message) -> None:
     await message.answer(
         f"🛟 *Поддержка {branding.bot_name()}*\n\n"
-        f"По всем вопросам пишите: {branding.support_contact()}\n"
+        f"По всем вопросам пишите: {md_safe(branding.support_contact())}\n"
         "Часы работы: пн–пт, 09:00–18:00 (UTC+5).",
         parse_mode=ParseMode.MARKDOWN,
     )

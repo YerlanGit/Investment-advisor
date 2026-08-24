@@ -252,11 +252,65 @@ class BrandIsNotHardcodedTest(unittest.TestCase):
         self.assertIn("branding.support_contact()", source)
 
     def test_support_contact_moved_out_of_the_code(self) -> None:
-        """Контакт поддержки — в `branding`, а не в тексте команды."""
+        """Контакт поддержки — в `branding`, а не литералом в тексте команды.
+
+        Смотрим строковые ЛИТЕРАЛЫ, а не весь файл: упоминание хэндла в
+        докстринге объясняет, зачем нужно экранирование, и запрещать его
+        незачем. Запрещено брать хэндл ОТТУДА как значение.
+        """
+        tree = ast.parse((_SRC / "tg_bot.py").read_text(encoding="utf-8"))
+        docstrings = self._docstring_nodes(tree)
+        handle = re.compile(r"@\w*_?support_bot")
+        offenders = [
+            f"строка {node.lineno}: {node.value!r}"
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Constant) and isinstance(node.value, str)
+            and id(node) not in docstrings and handle.search(node.value)
+        ]
+        self.assertFalse(
+            offenders,
+            "хэндл поддержки живёт в `branding.support_contact()`, а не "
+            "литералом здесь:\n  " + "\n  ".join(offenders))
+
+
+class MarkdownSafeContactTest(unittest.TestCase):
+    """Хэндл с подчёркиваниями не должен разъезжаться в Markdown (`§−101`).
+
+    🔴 Найдено на заключительной проверке перед деплоем. Telegram в режиме
+    `Markdown` разбирает `_..._` в середине слова: `@OMBRI_support_bot`
+    показывался бы как `@OMBRIsupportbot` (курсивом «support»), и пользователь
+    копировал бы НЕСУЩЕСТВУЮЩИЙ контакт. Дефект был и до переезда — старый
+    `@ramp_support_bot` устроен так же, — но переезд его унаследовал бы.
+    """
+
+    def _tg_bot(self):
+        if _tg_bot_module is None:                        # pragma: no cover
+            self.skipTest("tg_bot не импортируется (нет aiogram?)")
+        return _tg_bot_module
+
+    def test_underscores_are_escaped(self) -> None:
+        tg_bot = self._tg_bot()
+
+        self.assertEqual(tg_bot.md_safe("@OMBRI_support_bot"),
+                         r"@OMBRI\_support\_bot")
+
+    def test_other_markdown_markers_are_escaped_too(self) -> None:
+        """Непарный `*` даёт 400 «can't parse entities» — сообщение не уйдёт."""
+        tg_bot = self._tg_bot()
+
+        self.assertEqual(tg_bot.md_safe("a_b*c`d[e"), r"a\_b\*c\`d\[e")
+
+    def test_plain_names_pass_through_unchanged(self) -> None:
+        """Экранирование не должно портить нормальные имена."""
+        tg_bot = self._tg_bot()
+
+        for name in ("OMBRIOS", "OMBRI", "Ombri_bot".replace("_", "")):
+            self.assertEqual(tg_bot.md_safe(name), name)
+
+    def test_the_support_command_escapes_the_contact(self) -> None:
+        """Гейт: контакт подставляется ЧЕРЕЗ `md_safe`, а не напрямую."""
         source = (_SRC / "tg_bot.py").read_text(encoding="utf-8")
-        self.assertNotIn("@ramp_support_bot", source)
-        self.assertNotIn("@OMBRI_support_bot", source,
-                         "хэндл поддержки живёт в `branding`, а не здесь")
+        self.assertIn("md_safe(branding.support_contact())", source)
 
 
 class StagedSwitchIsAtomicTest(unittest.TestCase):
