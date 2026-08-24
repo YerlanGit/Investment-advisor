@@ -93,8 +93,10 @@ telegram-id из env; апдейты от не-вайтлист юзеров д�
 (`kb_confirm("scenario", "idea")`, состояние `AnalysisFlow.awaiting_approval`).
 Дальше — обычный путь `cb_confirm`: **токен списывается в боте только после
 готового отчёта**. Логика сценарного тира не меняется — переиспользуется как есть.
-Имя бота приходит в отчёт через `pdf_payload.bot_username` (env `BOT_USERNAME`,
-default **`KEN_investment_bot`** — живой хэндл бота, R2#4) → `premium_payload.meta.botUsername`.
+Имя бота приходит в отчёт через `pdf_payload.bot_username` → SSOT
+`branding.bot_username()` (env `BOT_USERNAME`, default **`Ombri_bot`**; в деплое
+задаётся подстановкой `_BOT_USERNAME`, парной к `_BOT_TOKEN_SECRET`, `§−101`)
+→ `premium_payload.meta.botUsername`.
 
 ---
 

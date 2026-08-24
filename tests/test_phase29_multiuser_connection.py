@@ -187,9 +187,9 @@ class VaultHasUserTest(unittest.TestCase):
 
 
 def _import_tg_bot():
-    # tg_bot reads RAMP_BOT_TOKEN at import time — stub it for unit tests
+    # tg_bot reads OMBRI_BOT_TOKEN at import time — stub it for unit tests
     # (no Telegram call is ever made here).
-    os.environ.setdefault("RAMP_BOT_TOKEN", "0000000000:TEST-TOKEN-unit")
+    os.environ.setdefault("OMBRI_BOT_TOKEN", "0000000000:TEST-TOKEN-unit")
     try:
         import tg_bot
         return tg_bot

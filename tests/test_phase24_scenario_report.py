@@ -145,7 +145,7 @@ class ScenarioRenderRoutingTest(unittest.TestCase):
 
 class TierTariffTest(unittest.TestCase):
     def test_token_tariff(self):
-        os.environ.setdefault("RAMP_BOT_TOKEN", "dummy:token")
+        os.environ.setdefault("OMBRI_BOT_TOKEN", "dummy:token")
         import tg_bot
         self.assertEqual(tg_bot.TIER_COST["base"], 1)
         self.assertEqual(tg_bot.TIER_COST["scenario"], 1)

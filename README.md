@@ -90,7 +90,7 @@ Cloud Run** via `cloudbuild.yaml`:
 - **Durable state** — `tokenomics.db` and the Fernet `users_vault.db` live on a
   gcsfuse-mounted Cloud Storage volume (`/mnt/state`); the app refuses to boot
   if these point at ephemeral storage (`assert_persistent_state`).
-- **Secrets** — `RAMP_BOT_TOKEN`, `FINTECH_MASTER_KEY`, `ANTHROPIC_API_KEY`,
+- **Secrets** — `OMBRI_BOT_TOKEN` (прежнее имя `RAMP_BOT_TOKEN` ещё принимается), `FINTECH_MASTER_KEY`, `ANTHROPIC_API_KEY`,
   `FREEDOM_API_KEY/SECRET`, `FRED_API_KEY` are injected from Secret Manager,
   never baked into the image. `FINTECH_MASTER_KEY` supports `MultiFernet`
   rotation (`NEW_KEY,OLD_KEY`).
@@ -99,7 +99,7 @@ Cloud Run** via `cloudbuild.yaml`:
 
 ### Required environment
 
-See `.env.template`. Key variables: `RAMP_BOT_TOKEN`, `FINTECH_MASTER_KEY`,
+See `.env.template`. Key variables: `OMBRI_BOT_TOKEN`, `FINTECH_MASTER_KEY`,
 `ANTHROPIC_API_KEY`, `FREEDOM_API_KEY`, `FREEDOM_API_SECRET`, `FRED_API_KEY`,
 `TOKENOMICS_DB_PATH`, `VAULT_DB_PATH`, `REPORTING_CURRENCY`, `ADMIN_USER_IDS`.
 

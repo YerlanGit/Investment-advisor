@@ -18,6 +18,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import branding
+
 DASH = "–"
 
 
@@ -997,7 +999,8 @@ def build_design_data(payload: dict | None, tier: str = "base",
         "positions": _g(p, "holdings_count", default=DASH),
         # Bot @username for the «Применить идею» → Scenario deep-link (the report
         # is static HTML; charging the token happens bot-side after the handoff).
-        "botUsername": _txt(p, "bot_username") if _g(p, "bot_username") else "KEN_investment_bot",
+        "botUsername": (_txt(p, "bot_username") if _g(p, "bot_username")
+                       else branding.bot_username()),
         # §−95: эмитенты, реально лежащие в ChromaDB. Футер обоих тиров печатал
         # литерал «ChromaDB (GS / MS / JPM)» — база могла держать любые
         # одиннадцать банков, а отчёт называл три. Пусто → бандл пишет просто

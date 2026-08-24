@@ -1970,7 +1970,7 @@ const IdeaCard = ({
 // token itself.  So the button opens a two-step modal (pick 1 of 4 ideas →
 // confirm «Да/Нет»); «Да» deep-links to the Telegram bot, which runs the
 // Scenario-tier analysis and charges the 1 token there (t.me/<bot>?start=scn_N).
-const scenarioDeepLink = (bot, n) => `https://t.me/${encodeURIComponent(String(bot || 'KEN_investment_bot').replace(/^@/, ''))}` + `?start=scn_${String(n).replace(/[^0-9A-Za-z_]/g, '')}`;
+const scenarioDeepLink = (bot, n) => `https://t.me/${encodeURIComponent(String(bot || 'Ombri_bot').replace(/^@/, ''))}` + `?start=scn_${String(n).replace(/[^0-9A-Za-z_]/g, '')}`;
 const ApplyIdeaModal = ({
   ideas,
   botUsername,
@@ -2036,7 +2036,7 @@ const ApplyIdeaModal = ({
     className: "font-semibold"
   }, "1 токен"), ".")), /*#__PURE__*/React.createElement("p", {
     className: "text-[12px] text-ink-500 mt-3 leading-relaxed font-light"
-  }, "Откроется бот RAMP в Telegram и запустит сценарный анализ вашего портфеля. Токен списывается только после готового отчёта."), /*#__PURE__*/React.createElement("div", {
+  }, "Откроется бот OMBRI в Telegram и запустит сценарный анализ вашего портфеля. Токен списывается только после готового отчёта."), /*#__PURE__*/React.createElement("div", {
     className: "flex items-center gap-3 mt-5"
   }, /*#__PURE__*/React.createElement("button", {
     onClick: go,

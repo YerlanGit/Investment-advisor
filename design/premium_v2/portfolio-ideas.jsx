@@ -167,7 +167,7 @@ const IdeaCard = ({ idea, open, onToggle, isHighlight }) => {
 // confirm «Да/Нет»); «Да» deep-links to the Telegram bot, which runs the
 // Scenario-tier analysis and charges the 1 token there (t.me/<bot>?start=scn_N).
 const scenarioDeepLink = (bot, n) =>
-  `https://t.me/${encodeURIComponent(String(bot || 'KEN_investment_bot').replace(/^@/, ''))}`
+  `https://t.me/${encodeURIComponent(String(bot || 'Ombri_bot').replace(/^@/, ''))}`
   + `?start=scn_${String(n).replace(/[^0-9A-Za-z_]/g, '')}`;
 
 const ApplyIdeaModal = ({ ideas, botUsername, onClose }) => {
@@ -218,7 +218,7 @@ const ApplyIdeaModal = ({ ideas, botUsername, onClose }) => {
               </p>
             </div>
             <p className="text-[12px] text-ink-500 mt-3 leading-relaxed font-light">
-              Откроется бот RAMP в Telegram и запустит сценарный анализ вашего портфеля. Токен списывается только после готового отчёта.
+              Откроется бот OMBRI в Telegram и запустит сценарный анализ вашего портфеля. Токен списывается только после готового отчёта.
             </p>
             <div className="flex items-center gap-3 mt-5">
               <button onClick={go}

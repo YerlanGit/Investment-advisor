@@ -271,7 +271,7 @@ class RagExcerptCleanTest(unittest.TestCase):
     """_clean_rag_excerpt on the EXACT defect strings from the live report."""
 
     def _clean(self, text: str, **kw) -> str:
-        os.environ.setdefault("RAMP_BOT_TOKEN", "dummy:token")
+        os.environ.setdefault("OMBRI_BOT_TOKEN", "dummy:token")
         try:
             from tg_bot import _clean_rag_excerpt
         except BaseException as exc:   # pyo3 PanicException is a BaseException

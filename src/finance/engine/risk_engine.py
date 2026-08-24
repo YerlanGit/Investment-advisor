@@ -343,7 +343,7 @@ def _nearest_psd(mat: "np.ndarray", floor: float = 1e-12) -> "np.ndarray":
 
 class MAC3RiskEngine:
     """
-    Институциональный движок рисков (RAMP Style).
+    Институциональный движок рисков (OMBRIOS Style).
     Внедрены: Структурная ковариация (Barra/MAC3), Euler Risk Decomposition, CVaR.
     """
     # Все тикеры используют формат Tradernet "SYMBOL.EXCHANGE".

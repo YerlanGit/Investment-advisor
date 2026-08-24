@@ -24,7 +24,7 @@ import threading
 # yfinance был удалён 2026-04. Цены теперь берутся через Tradernet
 # (freedom_portfolio.history); кеш истории живёт в /tmp/freedom_history_cache.
 
-logger = logging.getLogger("ramp.entrypoint")
+logger = logging.getLogger("ombri.entrypoint")
 
 # ── ChromaDB sync from GCS ──────────────────────────────────────────────────
 CHROMA_LOCAL_PATH  = os.environ.get("CHROMA_LOCAL_PATH",  "/app/data/chroma_db")

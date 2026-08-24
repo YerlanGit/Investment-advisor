@@ -173,7 +173,7 @@ analyze_all()                      движок · src/finance/investment_logic.
 | Генерация пиков (LLM) | — | — | `_user_prompt`: DATA-DRIVEN + СВЕЖЕСТЬ ИДЕЙ (дневной якорь `YYYY-MM-DD` + дневной угол ротации `_IDEA_ROTATION_ANGLES`). Routing: BASE=`claude-sonnet-5`, DEEP=`claude-opus-4-8`, оба без `temperature` (400 при передаче) — дисперсию даёт директива+угол; env-override `claude-sonnet-4-6` возвращает temperature-band 0.5–0.85 |
 | Пост-фильтры пиков | — | — | `_remove_held_picks` → `_check_pick_contradictions` → `_backfill_empty_scenarios` → **`_remove_mandate_banned_picks`** (B1: класс с лимитом 0–0 в мандате — идея вычёркивается; классификация — по underlying, §3) |
 | Фолбэк-каталог (без API) | — | — | `_fallback_stock_picks`: 3 кандидата/слот + месячная ротация |
-| Кнопка «Применить идею» (BASE+DEEP) | `meta.botUsername` (env `BOT_USERNAME`, default `KEN_investment_bot`) | `pdf_payload.bot_username` → `premium_payload.meta.botUsername`; UI `ApplyIdeaModal` (`portfolio-ideas.jsx` / `deep/deep-plan.jsx`) | Модал → deep-link `t.me/<bot>?start=scn_<n>`. Статичный HTML НЕ списывает токен — списание в боте: `tg_bot.cmd_start` ловит `scn_` → сценарный тир через `kb_confirm("scenario")` |
+| Кнопка «Применить идею» (BASE+DEEP) | `meta.botUsername` (SSOT `branding.bot_username()`; env `BOT_USERNAME`, default `Ombri_bot`) | `pdf_payload.bot_username` → `premium_payload.meta.botUsername`; UI `ApplyIdeaModal` (`portfolio-ideas.jsx` / `deep/deep-plan.jsx`) | Модал → deep-link `t.me/<bot>?start=scn_<n>`. Статичный HTML НЕ списывает токен — списание в боте: `tg_bot.cmd_start` ловит `scn_` → сценарный тир через `kb_confirm("scenario")` |
 
 ### Реестр правил промпта (`ai_narrative._user_prompt`, оба тира — порядок инъекции)
 

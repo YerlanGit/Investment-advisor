@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import math
 import os
+
+import branding
 from typing import Optional
 
 import numpy as np
@@ -1508,10 +1510,10 @@ def build_payload(results: dict, tier: str,
                                   ((ai_summary or {}).get("rag_kb_banks") or [])],
         "ai_model_used":         model_display_name((ai_summary or {}).get("model_used", "")),
         # Bot @username for the report's «Применить идею» deep-link
-        # (t.me/<bot>?start=scn_<n>).  Env-configurable; strips a leading «@».
-        # Default is the LIVE bot handle so the link works even if BOT_USERNAME
-        # is unset (замечание R2#4 — ссылка вела на несуществующий RampBot).
-        "bot_username":          os.getenv("BOT_USERNAME", "KEN_investment_bot").lstrip("@"),
+        # (t.me/<bot>?start=scn_<n>).  Хэндл — SSOT `branding.bot_username()`
+        # (env `BOT_USERNAME`, дефолт — живой бот): отчёт статичен, и ссылка
+        # в уже выпущенном HTML задним числом не правится (R2#4).
+        "bot_username":          branding.bot_username(),
         "ai_action_impact":      (ai_summary or {}).get("ai_action_impact", ""),
         # Per-KPI AI notes (CVaR / Sharpe / MaxDD cards) — plain-language.
         "ai_cvar_note":          (ai_summary or {}).get("ai_cvar_note", ""),

@@ -1104,19 +1104,19 @@ class DeployStepTest(unittest.TestCase):
             "слева от `=` — имя переменной В КОНТЕЙНЕРЕ, справа — имя СЕКРЕТА; "
             "их путают, и тогда бот читает пустоту при живом секрете")
 
-    def test_the_rename_did_not_touch_the_main_bot_secrets(self) -> None:
-        """🔴 Главный бот работает — его секреты переездом не затронуты.
+    def test_the_rename_did_not_touch_the_other_secrets(self) -> None:
+        """🔴 Прочие секреты главного бота переездами не затронуты.
 
-        `--set-secrets` заменяет ВЕСЬ набор привязок. Опечатка здесь означает
-        не «не переименовали», а «главный бот остался без токена»: `tg_bot`
-        читает его через `os.environ[...]` на уровне модуля, то есть падает
-        ИМПОРТ и контейнер не стартует (`§−98` по симптому).
+        `--set-secrets` заменяет ВЕСЬ набор привязок: опечатка здесь означает
+        не «не переименовали», а «сервис остался без ключа». Токен вынесен в
+        подстановку (`§−101`, свой тест ниже), остальные три остаются
+        литералами и обязаны остаться на месте.
         """
         deploy = next(s for s in self.doc["steps"] if s["id"] == "deploy")
         secrets = next(a for a in deploy["args"] if a.startswith("--set-secrets"))
-        for expected in ("RAMP_BOT_TOKEN=RAMP_BOT_TOKEN:latest",
-                         "FINTECH_MASTER_KEY=FINTECH_MASTER_KEY:latest",
-                         "ANTHROPIC_API_KEY=ANTHROPIC_API_KEY:latest"):
+        for expected in ("FINTECH_MASTER_KEY=FINTECH_MASTER_KEY:latest",
+                         "ANTHROPIC_API_KEY=ANTHROPIC_API_KEY:latest",
+                         "FREEDOM_API_KEY=FREEDOM_API_KEY:latest"):
             self.assertIn(expected, secrets)
 
     def test_writer_and_reader_address_the_same_object_name(self) -> None:
@@ -1601,9 +1601,10 @@ class TokenEnvRenameTest(unittest.TestCase):
     """Переезд имени RAMP → OMBRI у ЗАГРУЗЧИКА (`§−100`).
 
     Владелец переименовал секрет в `OMBRI_INGEST_BOT_TOKEN`. Переезд разнесён
-    во времени намеренно: главный бот работает и остаётся на `RAMP_BOT_TOKEN`,
-    трогать его имя переменной из пристройки — это ровно то срастание двух
-    ботов, которого весь модуль и избегает.
+    во времени намеренно: сначала переехал загрузчик, отдельной операцией —
+    главный бот (`§−101`). Трогать имя переменной работающего бота из
+    пристройки было бы ровно тем срастанием двух ботов, которого весь
+    модуль и избегает.
 
     🔴 Отсюда три обязательства, и каждое проверяется ниже:
     1. бот читает НОВОЕ имя;
@@ -1659,22 +1660,25 @@ class TokenEnvRenameTest(unittest.TestCase):
 
         self.assertEqual(ingest_bot.read_bot_token(), "")
 
-    def test_the_main_bot_variable_is_not_renamed_here(self) -> None:
-        """🔴 Пристройка НЕ переименовывает переменные работающего бота.
+    def test_the_loader_does_not_configure_the_main_bot(self) -> None:
+        """🔴 Пристройка не настраивает главный бот — только сверяется с ним.
 
-        `tg_bot` читает `RAMP_BOT_TOKEN` на уровне модуля через
-        `os.environ[...]` — то есть отсутствие переменной роняет ИМПОРТ, а с
-        ним и старт прода. Переезд главного бота — отдельная операция, и
-        доказательство, что загрузчик её не делает, обязано быть тестом.
+        Главный бот переехал отдельной операцией (`§−101`) и читает токен
+        своим `tg_bot.read_bot_token()`. Загрузчику от него нужно РОВНО одно:
+        имена переменных, чтобы поймать общий токен. Оба имени обязаны
+        остаться в сверке — прежнее тоже: пока секрет в Secret Manager носит
+        старое имя, в контейнере главного бота может оказаться любое из двух,
+        и страж не должен ослепнуть.
         """
-        source = (Path(__file__).resolve().parents[1] / "src" / "tg_bot.py"
-                  ).read_text(encoding="utf-8")
-        self.assertIn('os.environ["RAMP_BOT_TOKEN"]', source)
-        # …при этом СРАВНИВАТЬ загрузчик обязан оба имени: главный бот когда-то
-        # переедет, и страж не должен ослепнуть в этот момент.
         import ingest_bot                                 # noqa: PLC0415
         self.assertEqual(set(ingest_bot.MAIN_TOKEN_ENVS),
                          {"OMBRI_BOT_TOKEN", "RAMP_BOT_TOKEN"})
+        # …и он именно СВЕРЯЕТСЯ: своего имени переменной главному боту
+        # загрузчик не назначает.
+        source = (Path(__file__).resolve().parents[1] / "src" / "ingest_bot.py"
+                  ).read_text(encoding="utf-8")
+        self.assertNotIn("os.environ[", source,
+                         "загрузчик не вправе требовать переменные главного бота")
 
 
 class IsolationTest(unittest.TestCase):
