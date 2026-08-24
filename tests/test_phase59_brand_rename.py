@@ -325,6 +325,8 @@ class StagedSwitchIsAtomicTest(unittest.TestCase):
 
     _LEGACY_SECRET = "RAMP_BOT_TOKEN"
     _LEGACY_HANDLE = "KEN_investment_bot"
+    _CURRENT_SECRET = "OMBRI_BOT_TOKEN"
+    _CURRENT_HANDLE = "Ombri_bot"
 
     def setUp(self) -> None:
         try:
@@ -370,16 +372,32 @@ class StagedSwitchIsAtomicTest(unittest.TestCase):
             "статичен — задним числом ссылку не поправить.")
 
     def test_the_deploy_does_not_bind_a_secret_that_may_not_exist(self) -> None:
-        """Ступенчатость: дефолт указывает на СУЩЕСТВУЮЩИЙ секрет.
+        """🔴 Дефолт обязан называть СУЩЕСТВУЮЩИЙ секрет.
 
         Привязка к несуществующему секрету роняет ВЕСЬ деплой — прод остаётся
-        на старой ревизии. Дефолт в репозитории обязан быть тем именем,
-        которое в проекте уже заведено; переключение — правка подстановки
-        (здесь или в триггере), а не мерж.
+        на предыдущей ревизии, а причина неочевидна. Тест не может заглянуть в
+        Secret Manager, поэтому пинит ИЗВЕСТНОЕ заведённое имя: сменить его
+        можно только вместе с созданием секрета и выдачей рантайм-аккаунту
+        `secretAccessor` (`OPERATOR_SWITCH.md §2`).
+
+        Оба имени в проекте существуют: `OMBRI_BOT_TOKEN` — рабочее (`§−102`),
+        `RAMP_BOT_TOKEN` оставлен как путь отката и намеренно не удалён.
         """
-        self.assertEqual(self.subs["_BOT_TOKEN_SECRET"], self._LEGACY_SECRET,
-                         "секрет OMBRI_BOT_TOKEN ещё не заведён в проекте — "
-                         "дефолт менять только вместе с ним")
+        self.assertIn(self.subs["_BOT_TOKEN_SECRET"],
+                      {self._CURRENT_SECRET, self._LEGACY_SECRET},
+                      "имя секрета, которого нет в проекте, уронит деплой: "
+                      "сначала заведите секрет и выдайте права, потом меняйте")
+
+    def test_the_pair_is_switched_to_the_new_bot(self) -> None:
+        """Переезд состоялся и зафиксирован в файле (`§−102`).
+
+        До переключения дефолты держали прежнюю пару, и это было ПРАВИЛЬНО:
+        секрета нового бота ещё не существовало. Теперь бот работает как
+        `@Ombri_bot`, и файл обязан говорить то же самое — иначе репозиторий
+        расходится с проектом, а откат выглядит как норма.
+        """
+        self.assertEqual(self.subs["_BOT_TOKEN_SECRET"], self._CURRENT_SECRET)
+        self.assertEqual(self.subs["_BOT_USERNAME"], self._CURRENT_HANDLE)
 
     def test_the_loader_secret_is_untouched(self) -> None:
         """Переезд главного бота не задевает загрузчика (`§−100`)."""
