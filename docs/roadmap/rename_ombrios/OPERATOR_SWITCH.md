@@ -131,7 +131,29 @@ unset OMBRI_TOKEN
 `printf '%s'` вместо `echo` ещё и не добавляет перевод строки в конец
 значения (код его срезает, но чистое значение лучше).
 
-### 2.3 Проверить, что версия не пустая
+### 2.3 🔴 Проверить токен У TELEGRAM — ДО записи в секрет
+
+Длина ничего не доказывает: отозванный токен имеет ту же длину, что и живой.
+Спросите Telegram, пока значение ещё в переменной:
+
+```bash
+curl -s "https://api.telegram.org/bot${OMBRI_TOKEN}/getMe"; echo
+```
+
+Ждём `{"ok":true,"result":{"id":…,"username":"Ombri_bot",…}}`.
+
+* `"ok":false,"error_code":401` — токен отозван или неверен. **В секрет не
+  пишем**, берём актуальный в BotFather (§1).
+* `username` не тот, кому вы пишете, — тогда правится подстановка
+  `_BOT_USERNAME`, а не токен.
+
+Почему это стоит отдельным шагом: `logger.info("Starting bot id=…")` печатается
+при импорте модуля, ДО первого обращения к Telegram. Мёртвый токен даёт ровно
+такую же строку в логах, как живой, и по ней переезд выглядит успешным, пока
+бот молчит в чате. Проверка `getMe` — единственная, которая это ловит; в логах
+признаком служит `set_my_commands failed`.
+
+### 2.3a Проверить, что версия не пустая
 
 ```bash
 gcloud secrets versions access latest --secret=OMBRI_BOT_TOKEN \
@@ -140,6 +162,19 @@ gcloud secrets versions access latest --secret=OMBRI_BOT_TOKEN \
 
 Ожидаемо: **46** символов, плюс-минус пара. `0` — версия пустая, повторите 2.2.
 Само значение команда не печатает.
+
+### 2.3b Проверить, что в СЕКРЕТЕ лежит рабочий токен
+
+Предыдущая проверка касалась буфера обмена, эта — хранилища:
+
+```bash
+T=$(gcloud secrets versions access latest --secret=OMBRI_BOT_TOKEN --project="$PROJECT_ID")
+curl -s "https://api.telegram.org/bot${T}/getMe"; echo
+unset T
+```
+
+`"ok":true` — можно идти дальше. Иначе версия секрета битая: добавьте новую
+(§2.2) и повторите.
 
 ### 2.4 Дать сервису право читать секрет
 
@@ -175,6 +210,8 @@ gcloud secrets get-iam-policy OMBRI_BOT_TOKEN --project="$PROJECT_ID"
 | `PERMISSION_DENIED` | Не тот проект в `gcloud config` | `gcloud config set project "$PROJECT_ID"` |
 | Сборка падает сразу, до шага build, с жалобой на подстановку | Переменные добавлены в триггер ДО мержа кода — конфиг о них не знает (`MUST_MATCH`) | Убрать их из триггера, влить код в `main`, вернуть (§2.7) |
 | `The project property is set to the empty string` (и `wc -c` даёт `0`) | Cloud Shell переподключился, `$PROJECT_ID` потерян | Повторить обе строки `export` из §0 — это не пустой секрет |
+| Бот молчит в Telegram, хотя в логах есть `Starting bot id=` | Токен отозван/неверен: эта строка печатается ДО обращения к Telegram | `getMe` (§2.3); в логах ищите `set_my_commands failed` |
+| Секрет обновили, а бот всё равно молчит | Работающий контейнер держит прежнее значение | Поднять новую ревизию: `gcloud run services update ramp-bot --region=us-central1 --update-secrets=OMBRI_BOT_TOKEN=OMBRI_BOT_TOKEN:latest` |
 | Команда «висит», приглашение не возвращается | В `versions add` не попал префикс `printf … \|` — читается клавиатура | **Ctrl-C** (не Ctrl-D), затем §2.2 одной строкой |
 | В секрете оказался мусор вместо токена | Версия создана из набранного текста | Добавить верную версию (§2.2) — `:latest` укажет на неё; мусорную `gcloud secrets versions destroy N --secret=OMBRI_BOT_TOKEN` |
 
@@ -353,7 +390,8 @@ gcloud logging read \
 □ 1. @BotFather → /revoke для @Ombri_bot → новый токен (никуда не копировать)
 □ 2. gcloud secrets create OMBRI_BOT_TOKEN              ← СНАЧАЛА это
 □ 3. read -rs OMBRI_TOKEN, затем ОДНОЙ строкой: printf '%s' "$OMBRI_TOKEN" | gcloud secrets versions add …
-□ 4. gcloud secrets versions access latest … | wc -c    ← должно быть ~46
+□ 4. curl …/getMe с ТОКЕНОМ → "ok":true            ← ДО записи в секрет
+□ 4a. curl …/getMe со значением ИЗ СЕКРЕТА → "ok":true
 □ 5. gcloud secrets add-iam-policy-binding … secretAccessor для реального SA
 □ 6. Влить ветку переезда в main и дождаться зелёной сборки  ← ДО триггера
 □ 7. Проверить, что бот жив: /start у @KEN_investment_bot отвечает
