@@ -1172,20 +1172,64 @@ class DeployStepTest(unittest.TestCase):
         """
         self.assertNotEqual(self.doc["substitutions"]["_QUOTES_BUCKET"],
                             self.doc["substitutions"]["_STATE_BUCKET"])
-        step = next(s for s in self.doc["steps"] if s["id"] == "deploy-ingest-bot")
-        body = "\n".join(step["args"])
+        body = self._step_body()
+        grant = self._granting_part(body)
         # 🔴 Проверяются ОБА написания. Мутация показала, что проверка одного
         # лишь ЗНАЧЕНИЯ пропускает ссылку на подстановку `${_STATE_BUCKET}` —
         # то есть ровно ту форму, в которой её и написали бы в YAML.
-        self.assertNotIn(self.doc["substitutions"]["_STATE_BUCKET"], body)
-        self.assertNotIn("_STATE_BUCKET", body)
+        #
+        # 🔴 §−103: проверка сузилась со ВСЕГО шага до его ВЫДАЮЩЕЙ части —
+        # вызова `gcloud run deploy`. Прежняя редакция падала на ДИАГНОСТИКЕ:
+        # шаг печатает, замкнуто ли кольцо, и для этого обязан НАЗВАТЬ оба
+        # бакета. Гейт, срабатывающий на объяснении, учит удалять объяснения
+        # (`§−97` E-9) — здесь он потребовал бы убрать ровно ту проверку, что
+        # ловит разомкнутое кольцо. Радиус поражения задаётся флагами
+        # `--set-env-vars` / `--add-volume` / `--service-account`, и они все
+        # внутри `grant`; `echo` не выдаёт ничего.
+        self.assertNotIn(self.doc["substitutions"]["_STATE_BUCKET"], grant)
+        self.assertNotIn("_STATE_BUCKET", grant)
         self.assertIn("ingest_entrypoint.py", body)
 
     def test_loader_does_not_mount_the_state_volume(self) -> None:
+        body = self._step_body()
+        grant = self._granting_part(body)
+        self.assertNotIn("--add-volume", body)      # тома нет НИГДЕ в шаге
+        self.assertNotIn("/mnt/state", grant)
+
+    def test_ring_is_reported_at_deploy_time(self) -> None:
+        """§−103 · деплой обязан СКАЗАТЬ, замкнуто ли кольцо.
+
+        Полный путь объекта состоит из трёх частей — бакет, префикс, имя, — а
+        `test_object_name_matches_what_the_report_bot_reads` пинит только две
+        последние: бакет сознательно оставлен решением владельца. Из-за этого
+        дефолт репозитория (`_QUOTES_BUCKET` ≠ `_STATE_BUCKET`) даёт РАЗОМКНУТОЕ
+        кольцо, и ни один гейт этого не ловит. Цена молчания измерена в `§−100`:
+        срезы применяются, оба бота живы, а отчёт читает другой файл.
+
+        Раз доказать равенство нельзя, деплой обязан хотя бы ПРОИЗНЕСТИ вердикт
+        там, где конфигурация становится живой.
+        """
+        body = self._step_body()
+        self.assertIn("_QUOTES_BUCKET", body)
+        self.assertIn("_STATE_BUCKET", body)
+        self.assertIn("КОЛЬЦО ЗАМКНУТО", body)
+        self.assertIn("КОЛЬЦО РАЗОМКНУТО", body)
+        # Вердикт обязан быть УСЛОВНЫМ, а не печататься всегда одинаково.
+        self.assertRegex(body, r'if\s+\[\s+"\$\{_QUOTES_BUCKET\}"\s*=\s*"\$\{_STATE_BUCKET\}"\s+\]')
+
+    def _step_body(self) -> str:
         step = next(s for s in self.doc["steps"] if s["id"] == "deploy-ingest-bot")
-        body = "\n".join(step["args"])
-        self.assertNotIn("--add-volume", body)
-        self.assertNotIn("/mnt/state", body)
+        return "\n".join(step["args"])
+
+    @staticmethod
+    def _granting_part(body: str) -> str:
+        """Часть шага, которая РЕАЛЬНО что-то выдаёт: вызов `gcloud run deploy`.
+
+        Всё до него — проверки и печать; выдать доступ `echo` не может.
+        """
+        idx = body.find("gcloud run deploy")
+        assert idx >= 0, "в шаге нет вызова `gcloud run deploy`"
+        return body[idx:]
 
 
 

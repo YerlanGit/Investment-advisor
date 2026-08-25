@@ -96,10 +96,20 @@ class HighPriorityTargetTest(unittest.TestCase):
         self.assertAlmostEqual(target["MSFT"], 0.30, places=6)   # unchanged
         self.assertAlmostEqual(target["BND"],  0.30, places=6)   # unchanged
         # User #5 — the idea breakdown spells out the direction.
-        self.assertEqual(len(acts), 1)
-        self.assertEqual(acts[0]["ticker"], "AAPL")
-        self.assertEqual(acts[0]["side"], "sell")
-        self.assertEqual(acts[0]["delta_pp"], -10.0)
+        # §−102: строк ДВЕ, а не одна. Продажа освобождает 10 пп, и у них
+        # обязан быть адресат даже когда реинвестировать не во что
+        # (`bl_records=None`): прежде хвост молча исчезал из панели, и именно
+        # эту дыру модель заполняла выдуманной покупкой. Раскладка сделки не
+        # изменилась — двигается по-прежнему ТОЛЬКО AAPL.
+        sell = [a for a in acts if not a.get("is_cash")]
+        cash = [a for a in acts if a.get("is_cash")]
+        self.assertEqual(len(sell), 1)
+        self.assertEqual(sell[0]["ticker"], "AAPL")
+        self.assertEqual(sell[0]["side"], "sell")
+        self.assertEqual(sell[0]["delta_pp"], -10.0)
+        self.assertEqual(len(cash), 1, "высвобожденные 10 пп остались без адресата")
+        self.assertAlmostEqual(cash[0]["delta_pp"], 10.0, places=1)
+        self.assertAlmostEqual(sum(a["delta_pp"] for a in acts), 0.0, places=6)
 
     def test_falls_back_to_bl_when_no_actionable_rows(self):
         from finance.simulate import high_priority_target_weights

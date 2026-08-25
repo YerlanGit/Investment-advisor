@@ -55,8 +55,13 @@ const VarianceRow = ({ r, maxAbs }) => {
     <div className="py-2.5">
       <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-3">
         {/* label (+ % on mobile) */}
+        {/* §−102: у ярлыка источника стоял `truncate`, и «Идиосинкратический
+            (специфика бумаг)» (249 px) обрезался до 132 px на 320 px и до
+            202 px на 390 px — половина названия строки риска терялась.
+            Название источника риска — не декор: обрезать его нельзя, поэтому
+            переносим по словам. */}
         <div className="flex items-baseline justify-between gap-2 sm:block sm:w-[35%] sm:shrink-0 min-w-0">
-          <span className="text-[11.5px] text-ink-800 font-medium leading-tight truncate">{r.source}</span>
+          <span className="text-[11.5px] text-ink-800 font-medium leading-snug break-words">{r.source}</span>
           <span className={`sm:hidden text-[12px] num font-semibold tabular-nums shrink-0 ${pctCls}`}>{r.pct}%</span>
         </div>
         {/* track */}

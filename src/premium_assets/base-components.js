@@ -1124,7 +1124,7 @@ const SectorMixCard = ({
   }, /*#__PURE__*/React.createElement(SectorBar, {
     sectors: sectors
   })), /*#__PURE__*/React.createElement("div", {
-    className: "grid grid-cols-2 gap-x-5 gap-y-2.5 mt-5"
+    className: "grid grid-cols-1 min-[380px]:grid-cols-2 gap-x-5 gap-y-2.5 mt-5"
   }, sectors.map(s => /*#__PURE__*/React.createElement("div", {
     key: s.name,
     className: "flex items-center gap-2.5"
@@ -1134,9 +1134,9 @@ const SectorMixCard = ({
       background: s.hue
     }
   }), /*#__PURE__*/React.createElement("div", {
-    className: "flex-1 min-w-0 text-[11px] text-ink-700 font-medium truncate"
+    className: "flex-1 min-w-0 text-[11px] text-ink-700 font-medium leading-snug break-words"
   }, s.name), /*#__PURE__*/React.createElement("div", {
-    className: "text-[12px] font-semibold num text-ink-900 tabular-nums"
+    className: "text-[12px] font-semibold num text-ink-900 tabular-nums shrink-0"
   }, s.pct, "%")))));
 };
 

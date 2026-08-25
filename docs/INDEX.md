@@ -152,7 +152,7 @@ Telegram /start
 
 ---
 
-## 3. `tests/` — pytest-сьюты (34 файла; CI: `python -m pytest tests/ -q`)
+## 3. `tests/` — pytest-сьюты (CI: `python -m pytest tests/ -q`; карта модулей — `tests/TEST_MAP.md`)
 
 | Файл | Что покрывает |
 |---|---|
@@ -184,6 +184,9 @@ Telegram /start
 | `test_phase28_risk_methodology_audit.py` | **Аудит методологии + правки P-1…P-8 (2026-07-13)**: LETF-decay инварианты (daily-reset −24.6% vs наивные −4%), реестр плеч + контрактный drag/fee, χ²/Fisher-ДИ, `var_reliability`, SE(β)+Vasicek (флаг), F/C-N/A для LETF-обёрток, path-dependent стресс, каверт-чипы + SEC-покрытие по весу; 1 xfail — спецификация weighted-profitability. → `docs/audit/risk-methodology-audit.md` |
 | `test_factor_decomposition.py` | Факторная декомпозиция дисперсии + двойники. |
 | `test_freedom_auth.py` / `_client.py` / `_history.py` / `_models.py` | Tradernet: подпись, клиент, история, модели. |
+| `layout_probe.py` | **Стенд headless-замера вёрстки** (не тест): `measure` — содержимое, уехавшее ЗА экран; `measure_clipped` — текст, срезанный ВНУТРИ своей колонки и недоступный прокруткой (`§−102`); `dom_text` — весь видимый текст после монтирования. Ширины 320/360/390/414. Требует playwright+Chromium, иначе гейты сами себя пропускают. |
+| `test_phase33_effect_reinvest_quality.py` | Качество реинвеста Effect: conviction-гейт, внешний ETF-рукав, и (`§−102`) инвариант «панель сходится»: Σ `delta_pp` по всем строкам = 0, у высвобожденного веса есть адресат. |
+| `test_phase55_mobile_and_dom_gates.py` | Мобильный замер в CI + «ключ доехал ДО ГЛАЗ» по DOM. Оба детектора проверены контрольным опытом. |
 | `fetch_logs.py` · `query.txt` | Вспомогательные (не тесты). |
 
 ---
