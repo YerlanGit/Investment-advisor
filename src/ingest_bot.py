@@ -226,15 +226,76 @@ def render_block(text: str, *, limit: int = _TG_LIMIT) -> str:
     доставляется ВООБЩЕ — а доставка сводки и есть смысл этого бота: правило 9
     существует ровно ради того, чтобы человек УЗНАЛ про недокачанный файл.
     `html.escape` снимает вопрос целиком: в `<pre>` уезжает текст, а не разметка.
+
+    🔴 §−104: обрезка шла ДО `html.escape`, а экранирование РАСШИРЯЕТ текст —
+    `&` становится `&amp;` (×5), `<` становится `&lt;` (×4). Замер: 3 900
+    символов на входе давали **19 554** на выходе, то есть в 4.8 раза выше
+    потолка Telegram. Гард, заведённый ровно ради «не превысить длину», длину
+    НЕ ОГРАНИЧИВАЛ, а 400-й убивает сообщение целиком. Ограничивать надо
+    РЕЗУЛЬТАТ, а не вход.
     """
-    body = str(text or "")
+    body = html.escape(str(text or ""))
     if len(body) > limit:
-        body = body[:limit] + "\n… сообщение обрезано, полный вывод в логах"
-    return f"<pre>{html.escape(body)}</pre>"
+        body = body[:limit]
+        # Обрезать экранированный текст можно только МЕЖДУ сущностями: хвост
+        # вида `&am` — это сломанная разметка, то есть тот же 400-й с другой
+        # стороны. Если в конце висит незакрытая `&…`, отступаем до неё.
+        tail = body.rfind("&")
+        if tail != -1 and ";" not in body[tail:]:
+            body = body[:tail]
+        body += "\n… сообщение обрезано, полный вывод в логах"
+    return f"<pre>{body}</pre>"
+
+
+def _plain_fallback(html_text: str) -> str:
+    """Тот же текст БЕЗ разметки — для второй ступени доставки."""
+    out = html_text
+    for tag in ("<pre>", "</pre>", "<b>", "</b>", "<code>", "</code>",
+                "<i>", "</i>"):
+        out = out.replace(tag, "")
+    return html.unescape(out)[:_TG_LIMIT]
+
+
+async def _deliver(message: Message, html_text: str, *,
+                   reply_markup=None) -> bool:
+    """Доставить ответ, чего бы это ни стоило. Возврат — дошло ли.
+
+    🔴 §−104. Прежде КАЖДЫЙ вызов `message.answer` стоял ВНЕ `try`, включая
+    финальную строку `_guarded`. Любой отказ Telegram — 400 на разметке, 400 на
+    длине — вылетал из хендлера, аiogram писал его в лог, а оператор получал
+    МОЛЧАНИЕ: ни ответа, ни ошибки, ни намёка. Симптом, с которым владелец и
+    пришёл: «`/help`, `/universe`, `/prune` не отвечают».
+
+    Молчание — худший из возможных ответов бота, чей единственный смысл в том,
+    чтобы человек УЗНАЛ состояние базы. Поэтому доставка — лестница: HTML →
+    голый текст → короткое уведомление. Ступень ниже отказывается от того, что
+    могло сломать ступень выше, и последняя не может не пройти.
+    """
+    try:
+        await message.answer(html_text, parse_mode=ParseMode.HTML,
+                             reply_markup=reply_markup)
+        return True
+    except Exception as exc:                            # noqa: BLE001
+        logger.warning("HTML не доставлен (%s) — пробую голым текстом", exc)
+    try:
+        await message.answer(_plain_fallback(html_text),
+                             reply_markup=reply_markup)
+        return True
+    except Exception as exc:                            # noqa: BLE001
+        logger.warning("голый текст не доставлен (%s) — пробую уведомление", exc)
+    try:
+        await message.answer(
+            "Ответ не удалось доставить в чат — он целиком в логах сервиса. "
+            "Скорее всего он слишком длинный или содержит разметку, "
+            "которую Telegram не принял.")
+        return True
+    except Exception as exc:                            # noqa: BLE001
+        logger.error("оператор остался БЕЗ ответа: %s", exc)
+    return False
 
 
 async def _send_block(message: Message, text: str) -> None:
-    await message.answer(render_block(text), parse_mode=ParseMode.HTML)
+    await _deliver(message, render_block(text))
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -242,11 +303,11 @@ async def _send_block(message: Message, text: str) -> None:
 # ═════════════════════════════════════════════════════════════════════════════
 
 async def cmd_start(message: Message) -> None:
-    await message.answer(_HELP, parse_mode=ParseMode.HTML)
+    await _deliver(message, _HELP)
 
 
 async def cmd_help(message: Message) -> None:
-    await message.answer(_HELP, parse_mode=ParseMode.HTML)
+    await _deliver(message, _HELP)
 
 
 async def _guarded(message: Message, work, *args) -> None:
@@ -283,8 +344,7 @@ async def cmd_check(message: Message) -> None:
     """`/check BRK.B` — найдёт ли отчёт эту бумагу и под какой формой символа."""
     parts = (message.text or "").split()
     if len(parts) < 2:
-        await message.answer("Формат: <code>/check AAPL.US</code>",
-                             parse_mode=ParseMode.HTML)
+        await _deliver(message, "Формат: <code>/check AAPL.US</code>")
         return
     ticker = parts[1]
     await _guarded(message, lambda: qi.format_probe(qi.check_ticker(ticker)))
@@ -315,8 +375,7 @@ async def cmd_prune(message: Message) -> None:
                                  callback_data="prune:go"),
             InlineKeyboardButton(text="Отмена", callback_data="prune:no"),
         ]])
-    await message.answer(render_block(text), parse_mode=ParseMode.HTML,
-                         reply_markup=markup)
+    await _deliver(message, render_block(text), reply_markup=markup)
 
 
 async def cb_prune(callback: CallbackQuery) -> None:
@@ -340,7 +399,7 @@ async def cb_prune(callback: CallbackQuery) -> None:
         except Exception as exc:                        # noqa: BLE001
             logger.exception("prune упал")
             text = f"🔴 не смог вычистить: {exc}"
-    await callback.message.answer(render_block(text), parse_mode=ParseMode.HTML)
+    await _deliver(callback.message, render_block(text))
 
 
 def _actor(event) -> str:
@@ -412,9 +471,9 @@ async def _apply_document(message: Message, document, decision, *,
 
 async def msg_fallback(message: Message) -> None:
     """Бот принимает ФАЙЛЫ. Текст — только команды, остальное мягко отбивается."""
-    await message.answer(
-        "Пришлите файл дневного среза <code>YYYYMMDD_d.txt</code> — или /help.",
-        parse_mode=ParseMode.HTML)
+    await _deliver(
+        message,
+        "Пришлите файл дневного среза <code>YYYYMMDD_d.txt</code> — или /help.")
 
 
 # ═════════════════════════════════════════════════════════════════════════════

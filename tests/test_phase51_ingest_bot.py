@@ -1365,6 +1365,130 @@ class _FakeMessage:
         return None
 
 
+class _RejectingMessage(_FakeMessage):
+    """Telegram, который отвечает 400 — как настоящий на битой разметке.
+
+    `reject` — предикат по `(text, parse_mode)`. Всё, что он пропустил,
+    считается доставленным.
+    """
+
+    def __init__(self, reject, **kw):
+        super().__init__(_FakeBot(""), **kw)
+        self._reject = reject
+
+    async def answer(self, text, **kwargs):
+        if self._reject(text, kwargs.get("parse_mode")):
+            raise RuntimeError("Bad Request: can't parse entities")
+        return await super().answer(text, **kwargs)
+
+
+@unittest.skipUnless(_HAS_AIOGRAM, "aiogram не установлен (офлайн-разработка)")
+class DeliveryNeverGoesSilentTest(_IngestCase):
+    """§−104 · МОЛЧАНИЕ — худший ответ бота, чей смысл в доставке сводки.
+
+    🔴 Живой симптом (владелец, 25.08): «`/help`, `/universe`, `/prune` — бот
+    молчит и ничего не отвечает», при работающих `/status` и `/missing`.
+
+    Причина структурная: КАЖДЫЙ вызов `message.answer` стоял ВНЕ `try`, включая
+    финальную строку `_guarded`. Любой отказ Telegram — 400 на разметке, 400 на
+    длине — вылетал из хендлера, aiogram писал его в лог, а оператор не получал
+    НИЧЕГО: ни ответа, ни ошибки. Работали ровно те команды, чей текст короткий
+    и простой; молчали три с самыми рискованными полезными нагрузками — сырая
+    разметка `_HELP`, самые длинные списки и единственная инлайн-клавиатура.
+    """
+
+    def test_html_rejected_falls_back_to_plain_text(self):
+        import asyncio                                   # noqa: PLC0415
+        import ingest_bot                                # noqa: PLC0415
+        msg = _RejectingMessage(lambda _t, pm: pm is not None)
+        asyncio.run(ingest_bot._deliver(msg, "<pre>сводка</pre>"))
+        self.assertTrue(msg.answers, "оператор остался БЕЗ ответа")
+        text, kwargs = msg.answers[-1]
+        self.assertIsNone(kwargs.get("parse_mode"))
+        self.assertIn("сводка", text)
+        self.assertNotIn("<pre>", text)
+
+    def test_handler_never_raises_when_delivery_fails(self):
+        """Хендлер не имеет права уронить ответ вместе с собой."""
+        import asyncio                                   # noqa: PLC0415
+        import ingest_bot                                # noqa: PLC0415
+        for name, handler in (("/help", ingest_bot.cmd_help),
+                              ("/status", ingest_bot.cmd_status),
+                              ("/universe", ingest_bot.cmd_universe),
+                              ("/prune", ingest_bot.cmd_prune)):
+            with self.subTest(command=name):
+                msg = _RejectingMessage(lambda _t, _pm: True, text=name)
+                try:
+                    asyncio.run(handler(msg))
+                except Exception as exc:                # noqa: BLE001
+                    self.fail(f"{name}: исключение вылетело из хендлера "
+                              f"({type(exc).__name__}) → оператор видит молчание")
+
+    def test_every_answer_in_the_module_goes_through_the_ladder(self):
+        """Гейт по КОДУ: новая точка доставки обязана идти через `_deliver`.
+
+        Иначе дефект отрастает по одной строке за раз — ровно так он и возник.
+        Ловится доставка С РАЗМЕТКОЙ: короткой служебной реплике без неё
+        отказать нечем.
+        """
+        import ingest_bot                                # noqa: PLC0415
+        src = Path(ingest_bot.__file__).read_text(encoding="utf-8")
+        # Тело самой лестницы исключается: три её `answer` и ЕСТЬ реализация.
+        lines, inside = [], False
+        for ln in src.splitlines():
+            if ln.startswith("async def _deliver("):
+                inside = True
+                continue
+            if inside and ln.startswith(("def ", "async def ", "class ")):
+                inside = False
+            if not inside:
+                lines.append(ln)
+        offenders = [ln.strip() for ln in lines
+                     if ".answer(" in ln and "_deliver" not in ln
+                     and "parse_mode" in ln]
+        self.assertEqual(
+            offenders, [],
+            "доставка с разметкой мимо `_deliver` — она молча умрёт на 400: "
+            + "; ".join(offenders))
+
+
+@unittest.skipUnless(_HAS_AIOGRAM, "aiogram не установлен (офлайн-разработка)")
+class RenderBlockBoundsTheResultTest(unittest.TestCase):
+    """§−104 · гард длины обязан ограничивать ОТДАННОЕ, а не входное.
+
+    Обрезка шла ДО `html.escape`, а экранирование расширяет: `&` → `&amp;`
+    (×5). Замер: 3 900 символов на входе давали **19 554** на выходе — в 4.8
+    раза выше потолка Telegram 4096. То есть гард, заведённый ровно ради «не
+    превысить длину», её не ограничивал, а 400-й убивает сообщение целиком.
+    """
+
+    TELEGRAM_MAX = 4096
+
+    def test_escaped_result_fits_telegram(self):
+        import ingest_bot                                # noqa: PLC0415
+        for label, body in (("амперсанды", "&" * 4000),
+                            ("угловые скобки", "<x>" * 1400),
+                            ("кавычки", '"' * 4000),
+                            ("обычный текст", "щ" * 4000)):
+            with self.subTest(case=label):
+                out = ingest_bot.render_block(body)
+                self.assertLessEqual(
+                    len(out), self.TELEGRAM_MAX,
+                    f"{label}: отдано {len(out)} симв. при потолке "
+                    f"{self.TELEGRAM_MAX} — Telegram ответит 400")
+
+    def test_truncation_does_not_split_an_html_entity(self):
+        """Хвост вида `&am` — сломанная разметка, то есть тот же 400-й."""
+        import ingest_bot                                # noqa: PLC0415
+        out = ingest_bot.render_block("&" * 4000)
+        head = out[len("<pre>"):].split("\n")[0]
+        self.assertNotRegex(head, r"&[a-z]{0,5}$")
+
+    def test_short_text_is_untouched(self):
+        import ingest_bot                                # noqa: PLC0415
+        self.assertEqual(ingest_bot.render_block("привет"), "<pre>привет</pre>")
+
+
 @unittest.skipUnless(_HAS_AIOGRAM, "aiogram не установлен (офлайн-разработка)")
 class DocumentHandlerTest(_IngestCase):
     """🔴 Раньше ядро бота не имело НИ ОДНОГО теста.

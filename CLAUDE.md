@@ -15,12 +15,12 @@ GCP Cloud Run (long-polling) · Cloud Function (RAG-ингест) · ChromaDB ·
 ## Верификация (обязательна перед каждым пушем)
 
 ```bash
-PYTHONPATH=src python -m pytest tests/ -q          # → 1900 passed, 2 xfailed (+7 skipped без playwright)
+PYTHONPATH=src python -m pytest tests/ -q          # → 1906 passed, 2 xfailed (+7 skipped без playwright)
 ```
 
 - Префикс `PYTHONPATH=src` **ОБЯЗАТЕЛЕН** (`conftest.py`/`pyproject.toml` нет).
 - **Прогонов ДВА.** Второй — зеркало деплой-образа, без `design/`: `cp -r src tests
-  SYSTEM_PROMPT.md requirements*.txt <tmp>/ && cd <tmp>`, тот же прогон → 1808 passed,
+  SYSTEM_PROMPT.md requirements*.txt <tmp>/ && cd <tmp>`, тот же прогон → 1814 passed,
   92 skipped, 2 xfailed. Зелёный GitHub CI НЕ означает, что деплой пройдёт: CI видит
   полный чекаут, Cloud Build — только образ, и разница — ровно тесты, читающие
   `design/`, `docs/`, `CLAUDE.md`, `scripts/` и `cloud_function/`.
@@ -122,9 +122,8 @@ PYTHONPATH=src python -m pytest tests/ -q          # → 1900 passed, 2 xfailed 
 - **Разность двух чисел модель не считает** — наклон против бенчмарка приезжает
   готовой строкой `summary.factor_tilt_text` (`§−97` E-5).
 - **У высвобожденного веса ВСЕГДА есть адресат**: гейт реинвеста по ОСТАТКУ, не по факту «есть ли покупка»; Σ `delta_pp` панели = 0, иначе адресат достаётся ИИ (`§−102`).
-- Мобильная вёрстка — ПО ЗАМЕРУ (320/360/390/414), мимо свёрнутых аккордеонов, метрик ДВЕ:
-  `measure` (уход ЗА экран; `scrollWidth` обнулён страничным `overflow-x:hidden`, `§−97` E-6) и
-  `measure_clipped` (срез ВНУТРИ колонки: 1 px из 141, `§−102`). Лечит РАСКЛАДКА, не кегль.
+- Мобильная вёрстка — ПО ЗАМЕРУ (320/360/390/414), мимо свёрнутых аккордеонов, метрик ДВЕ: `measure` (уход ЗА экран; `scrollWidth` обнулён страничным `overflow-x:hidden`, `§−97` E-6) и `measure_clipped` (срез ВНУТРИ колонки: 1 px из 141, `§−102`). Лечит РАСКЛАДКА, не кегль.
+- **Молчание — худший ответ бота**: доставка — ЛЕСТНИЦА (разметка → голый текст → уведомление), гард длины ограничивает ОТДАННОЕ, подменённый Telegram обязан УМЕТЬ ОТКАЗЫВАТЬ (`§−104`).
 - Крупное изменение → строка «Было/Стало» в `docs/audit/AUDIT.md`.
 
 ## Зависимости
