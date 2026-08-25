@@ -21,6 +21,7 @@ from __future__ import annotations
 import importlib.util
 import os
 import re
+import shutil
 import sqlite3
 import sys
 import tempfile
@@ -294,14 +295,19 @@ class ApplyDailyTest(_IngestCase):
         self.assertEqual(outcome.result.rejected.get("вне рабочего набора"), 1)
 
     def test_partial_download_leaves_the_store_untouched(self) -> None:
-        """Правило 9: недокачанный будний файл отвергается ЦЕЛИКОМ."""
+        """Правило 9: неполный будний файл отвергается ЦЕЛИКОМ.
+
+        §−105 развёл ДВЕ причины отказа; здесь проверяется ИНВАРИАНТ, общий
+        для обеих: база и её поколение не тронуты. Какая именно причина
+        названа — предмет `test_rule9_*` в `test_stooq_price_store`.
+        """
         with mock.patch.object(si, "MIN_US_ROWS", 5000):
             before_gen = self.publisher._generation()
             before_bars = _bars(self.db)
             outcome = qi.apply_daily(self.daily(20260814), actor="1",
                                      publisher=self.publisher)
         self.assertFalse(outcome.ok)
-        self.assertIn("недокачанным", outcome.reason)
+        self.assertIn("База не тронута", outcome.reason)
         self.assertEqual(self.publisher._generation(), before_gen)
         self.assertEqual(_bars(self.db), before_bars)
 
@@ -1363,6 +1369,125 @@ class _FakeMessage:
 
     async def edit_reply_markup(self, **_kw):
         return None
+
+
+class SnapshotCacheTest(unittest.TestCase):
+    """§−105 · повторная команда не обязана снова тянуть базу по сети.
+
+    🔴 Замер: КАЖДАЯ команда скачивала базу ЦЕЛИКОМ — `/status`, `/universe`,
+    `/check`, `/prune` по одному полному скачиванию на нажатие. В GCS это сеть,
+    и отсюда «работают, только долго».
+
+    Кэш ключуется ПОКОЛЕНИЕМ, которое GCS отдаёт в метаданных `get_blob` без
+    скачивания тела. Три свойства обязаны держаться одновременно, и каждое
+    здесь проверяется: тело не качается повторно; смена поколения кэш
+    инвалидирует; кэш отдаёт КОПИЮ, потому что `_apply` скачанный файл мутирует.
+    """
+
+    def setUp(self):
+        self._dir = tempfile.TemporaryDirectory(prefix="ombri-cache-")
+        self.root = Path(self._dir.name)
+        self.addCleanup(self._dir.cleanup)
+        self.source = self.root / "src.sqlite"
+        self.source.write_bytes(b"BASE" * 2048)
+        self.body_calls = 0
+        self._env = mock.patch.dict(
+            os.environ, {"INGEST_SNAPSHOT_CACHE_DIR": str(self.root / "cache"),
+                         "INGEST_SNAPSHOT_CACHE_MAX_MB": "64"})
+        self._env.start(); self.addCleanup(self._env.stop)
+
+    def _publisher(self, generation: int = 111):
+        from services.quote_publisher import GcsQuotePublisher  # noqa: PLC0415
+        outer = self
+
+        class _Blob:
+            def __init__(self, gen):
+                self.generation = gen
+                self.size = outer.source.stat().st_size
+
+            def download_to_filename(self, path):
+                outer.body_calls += 1
+                shutil.copyfile(outer.source, path)
+
+        class _Bucket:
+            def get_blob(self, _name):
+                return _Blob(pub.generation)
+
+        pub = GcsQuotePublisher("test-bucket", "stooq/")
+        pub.generation = generation
+        pub._bucket = lambda: _Bucket()
+        return pub
+
+    def test_same_generation_is_served_without_a_second_download(self):
+        pub = self._publisher()
+        for i in range(3):
+            snap = pub.download(self.root / f"d{i}.sqlite")
+            self.assertEqual(snap.generation, 111)
+        self.assertEqual(self.body_calls, 1,
+                         "база скачана повторно при неизменном поколении")
+
+    def test_new_generation_invalidates_the_cache(self):
+        pub = self._publisher()
+        pub.download(self.root / "a.sqlite")
+        pub.generation = 222
+        snap = pub.download(self.root / "b.sqlite")
+        self.assertEqual(snap.generation, 222)
+        self.assertEqual(self.body_calls, 2,
+                         "новое поколение обязано вытеснить кэш — иначе под "
+                         "запись уедет устаревшая база")
+
+    def test_cache_hands_out_a_copy_not_its_own_file(self):
+        """`_apply` мутирует скачанное — выдача файла кэша отравила бы его."""
+        pub = self._publisher()
+        first = self.root / "work.sqlite"
+        pub.download(first)
+        original = first.stat().st_size
+        first.write_bytes(b"MUTATED")
+        second = pub.download(self.root / "again.sqlite")
+        self.assertEqual(second.size, original)
+
+    def test_cache_can_be_switched_off_entirely(self):
+        """Нулевой потолок = кэш ВЫКЛЮЧЕН (не «без ограничения»)."""
+        with mock.patch.dict(os.environ, {"INGEST_SNAPSHOT_CACHE_MAX_MB": "0"}):
+            pub = self._publisher()
+            pub.download(self.root / "x.sqlite")
+            pub.download(self.root / "y.sqlite")
+        self.assertEqual(self.body_calls, 2)
+
+    def test_database_above_the_cap_is_not_cached(self):
+        """🔴 `/tmp` в Cloud Run — это RAM, у загрузчика её 512 МиБ.
+
+        В пике живут ДВА файла: копия кэша и рабочая копия команды. База выше
+        потолка обязана идти мимо кэша, иначе оптимизация роняет контейнер —
+        цена ошибки тут выше цены самой оптимизации.
+        """
+        self.source.write_bytes(b"X" * (2 * 1024 * 1024))    # 2 МБ
+        with mock.patch.dict(os.environ, {"INGEST_SNAPSHOT_CACHE_MAX_MB": "1"}):
+            pub = self._publisher()
+            pub.download(self.root / "big1.sqlite")
+            pub.download(self.root / "big2.sqlite")
+        self.assertEqual(
+            self.body_calls, 2,
+            "база выше потолка попала в кэш — защита памяти снята")
+
+    def test_database_below_the_cap_is_cached(self):
+        """Парная проверка: иначе тест выше проходил бы и при мёртвом кэше."""
+        with mock.patch.dict(os.environ, {"INGEST_SNAPSHOT_CACHE_MAX_MB": "8"}):
+            pub = self._publisher()
+            pub.download(self.root / "s1.sqlite")
+            pub.download(self.root / "s2.sqlite")
+        self.assertEqual(self.body_calls, 1)
+
+    def test_broken_cache_dir_never_fails_the_command(self):
+        """Сбой кэша — не ошибка: отчёт о базе важнее оптимизации."""
+        blocker = self.root / "blocked"
+        blocker.write_text("не каталог", encoding="utf-8")
+        with mock.patch.dict(os.environ,
+                             {"INGEST_SNAPSHOT_CACHE_DIR": str(blocker)}):
+            pub = self._publisher()
+            snap = pub.download(self.root / "z.sqlite")
+        self.assertEqual(snap.generation, 111)
+        self.assertTrue((self.root / "z.sqlite").is_file())
 
 
 class _RejectingMessage(_FakeMessage):

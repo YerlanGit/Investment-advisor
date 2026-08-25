@@ -15,7 +15,7 @@ GCP Cloud Run (long-polling) · Cloud Function (RAG-ингест) · ChromaDB ·
 ## Верификация (обязательна перед каждым пушем)
 
 ```bash
-PYTHONPATH=src python -m pytest tests/ -q          # → 1906 passed, 2 xfailed (+7 skipped без playwright)
+PYTHONPATH=src python -m pytest tests/ -q          # → 1914 passed, 2 xfailed (+7 skipped без playwright)
 ```
 
 - Префикс `PYTHONPATH=src` **ОБЯЗАТЕЛЕН** (`conftest.py`/`pyproject.toml` нет).

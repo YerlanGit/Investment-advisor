@@ -400,9 +400,93 @@ class GcsQuotePublisher:
                 "бутстрап на машине оператора — бот её с нуля не создаёт.")
         dest = Path(dest)
         dest.parent.mkdir(parents=True, exist_ok=True)
-        blob.download_to_filename(str(dest))
-        return Snapshot(path=dest, generation=int(blob.generation),
+        generation = int(blob.generation)
+        if not self._serve_from_cache(blob, generation, dest):
+            blob.download_to_filename(str(dest))
+            self._remember(dest, generation)
+        return Snapshot(path=dest, generation=generation,
                         size=dest.stat().st_size)
+
+    # ── кэш снимка по ПОКОЛЕНИЮ (§−105) ──────────────────────────────────
+    #
+    # 🔴 Замер: КАЖДАЯ команда скачивала базу ЦЕЛИКОМ. `/status`, `/universe`,
+    # `/check`, `/prune` — по одному полному скачиванию на нажатие, и в GCS это
+    # сеть, а не копия файла. Отсюда и «работают, только долго».
+    #
+    # Лечение — тот же приём, которым отчётный бот уже пользуется
+    # (`stooq_store._local_copy`): держать копию и переиспользовать её, пока
+    # ИСТОЧНИК НЕ ИЗМЕНИЛСЯ. Признак изменения здесь строже, чем там: не
+    # размер с временем правки, а ПОКОЛЕНИЕ объекта, которое GCS отдаёт в
+    # метаданных `get_blob` — без скачивания тела.
+    #
+    # 🔴 Кэш отдаёт КОПИЮ, а не свой файл. `quote_ingest._apply` скачанную
+    # базу МУТИРУЕТ (в этом весь смысл цикла read-modify-write), и выдача
+    # самого файла кэша отравила бы его первой же дельтой.
+    #
+    # 🔴 Корректность CAS не меняется. Публикация идёт с `if_generation_match`
+    # ровно того поколения, что вернул `download`; переиспользование копии
+    # РАЗРЕШЕНО только когда это поколение совпадает с живым. Разъехалось —
+    # качаем заново. То есть кэш не может подсунуть устаревшую базу под запись.
+
+    def _cache_limits(self) -> tuple[Optional[Path], int]:
+        """`(каталог кэша, потолок МБ)`; `None` — кэш выключен.
+
+        Потолок нужен, потому что `/tmp` в Cloud Run — это ОПЕРАТИВНАЯ ПАМЯТЬ,
+        а у загрузчика её 512 МиБ. В пике живут ДВА файла: копия кэша и
+        рабочая копия команды. 150 МБ по умолчанию оставляют запас на обе при
+        базе 58.6 МБ и отключают кэш там, где он опаснее пользы.
+        """
+        raw = str(os.getenv("INGEST_SNAPSHOT_CACHE_DIR", "/tmp/ombri-snapshot")).strip()
+        max_mb = env_int("INGEST_SNAPSHOT_CACHE_MAX_MB", 150, lo=0, hi=4000)
+        # Пустой каталог ИЛИ нулевой потолок — кэш ВЫКЛЮЧЕН. Ноль как «без
+        # ограничения» читался бы ровно наоборот и снимал бы защиту памяти
+        # там, где её просили включить строже всего.
+        if not raw or max_mb <= 0:
+            return None, 0
+        return Path(raw), max_mb
+
+    def _cache_path(self, directory: Path, generation: int) -> Path:
+        """Поколение — в ИМЕНИ файла: подмена атомарна, а сверка не читает тело."""
+        return directory / f"{self._bucket_name}_{generation}.sqlite"
+
+    def _serve_from_cache(self, blob, generation: int, dest: Path) -> bool:
+        """Отдать копию из кэша, если поколение то же. Любой сбой — не ошибка."""
+        directory, max_mb = self._cache_limits()
+        if directory is None:
+            return False
+        try:
+            size = int(getattr(blob, "size", 0) or 0)
+            if size > max_mb * 1024 * 1024:
+                return False
+            cached = self._cache_path(directory, generation)
+            if not cached.is_file() or cached.stat().st_size != size:
+                return False
+            shutil.copyfile(cached, dest)
+            logger.info("снимок поколения %s взят из кэша — сеть не потребовалась",
+                        generation)
+            return True
+        except Exception as exc:                        # noqa: BLE001
+            logger.info("кэш снимка не сработал (%s) — качаю из бакета", exc)
+            return False
+
+    def _remember(self, src: Path, generation: int) -> None:
+        """Запомнить свежескачанный снимок и убрать снимки прошлых поколений."""
+        directory, max_mb = self._cache_limits()
+        if directory is None:
+            return
+        try:
+            if src.stat().st_size > max_mb * 1024 * 1024:
+                return
+            directory.mkdir(parents=True, exist_ok=True)
+            cached = self._cache_path(directory, generation)
+            tmp = cached.with_suffix(".part")
+            shutil.copyfile(src, tmp)
+            tmp.replace(cached)                 # атомарная подмена
+            for stale in directory.glob(f"{self._bucket_name}_*.sqlite"):
+                if stale != cached:
+                    stale.unlink(missing_ok=True)
+        except Exception as exc:                        # noqa: BLE001
+            logger.info("снимок не закэширован (%s) — команда не пострадала", exc)
 
     def upload(self, src: Path, *, if_generation_match: int) -> UploadResult:
         blob = self._blob(DB_OBJECT_NAME)
