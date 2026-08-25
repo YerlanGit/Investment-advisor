@@ -231,12 +231,17 @@ const SectorMixCard = ({ sectors }) => {
     <div className="mt-4">
       <SectorBar sectors={sectors}/>
     </div>
-    <div className="grid grid-cols-2 gap-x-5 gap-y-2.5 mt-5">
+    {/* §−102: легенда стояла в ДВЕ колонки на любой ширине.  На 320 px это
+        оставляло имени сектора 43 px, и «Semiconductors» (89 px) /
+        «EM_Kazakhstan» (85 px) обрезались до неузнаваемости — при том что
+        рядом висит цветной маркер, читаемый ТОЛЬКО вместе с именем.
+        Ниже 380 px раскладка становится одноколоночной, имя переносится. */}
+    <div className="grid grid-cols-1 min-[380px]:grid-cols-2 gap-x-5 gap-y-2.5 mt-5">
       {sectors.map(s => (
         <div key={s.name} className="flex items-center gap-2.5">
           <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background:s.hue }}/>
-          <div className="flex-1 min-w-0 text-[11px] text-ink-700 font-medium truncate">{s.name}</div>
-          <div className="text-[12px] font-semibold num text-ink-900 tabular-nums">{s.pct}%</div>
+          <div className="flex-1 min-w-0 text-[11px] text-ink-700 font-medium leading-snug break-words">{s.name}</div>
+          <div className="text-[12px] font-semibold num text-ink-900 tabular-nums shrink-0">{s.pct}%</div>
         </div>
       ))}
     </div>

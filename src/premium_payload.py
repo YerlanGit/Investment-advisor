@@ -681,13 +681,31 @@ def _eff_fmt(key: str, v: Any) -> str:
     return f"{x * 100:.1f}%"          # %-metric stored as a fraction
 
 
+def _plural_ru(n: int, one: str, few: str, many: str) -> str:
+    """Русская форма числительного по МОДУЛЮ n (1 пункт · 2 пункта · 8 пунктов).
+
+    §−102: карточка «Индекс риска» печатала родительный падеж ЛИТЕРАЛОМ
+    («пункта»), и живой отчёт 24.08 показывал «−8 пункта».  Форма — функция
+    числа, а не константа строки.
+    """
+    n = abs(int(n))
+    if n % 100 in (11, 12, 13, 14):
+        return many
+    last = n % 10
+    if last == 1:
+        return one
+    if last in (2, 3, 4):
+        return few
+    return many
+
+
 def _eff_delta(key: str, v: Any) -> str:
     """Format the delta (already in display units: pp / points / ratio)."""
     x = _eff_to_num(v)
     if x is None:
         return DASH
     if key == "risk_index":
-        return f"{x:+.0f} пункта"
+        return f"{x:+.0f} {_plural_ru(round(x), 'пункт', 'пункта', 'пунктов')}"
     if key == "sharpe":
         return f"{x:+.2f}"
     return f"{x:+.1f} пп"

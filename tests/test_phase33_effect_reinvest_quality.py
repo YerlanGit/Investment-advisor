@@ -294,5 +294,205 @@ class EffectActionsNamePropagationTest(unittest.TestCase):
         self.assertIn("гособлигации", ief["name"])
 
 
+class EffectPanelClosesArithmeticTest(unittest.TestCase):
+    """§−102 (live DEEP 24.08) · у высвобожденного веса ВСЕГДА есть адресат.
+
+    🔴 Дефект. Лестница реинвеста и честная строка «Кэш» стояли за БИНАРНЫМ
+    гейтом «в плане НЕТ ни одной покупки» (`not have_buy`). План живого отчёта
+    нёс ОДНУ символическую покупку — GOOGL +0.66 пп, — и этого хватило, чтобы
+    пропустить весь блок: панель показала −20.61 пп продаж против +0.66 пп
+    покупок, а 19.95 пп (это ~20% NAV) исчезли из отчёта БЕЗ АДРЕСАТА.
+
+    🔴 Цена. Дыру заполнила модель: `ai_effect_comment` и `ai_action_comment`
+    написали «высвобожденный вес движок направляет в качественные
+    диверсификаторы вне техно», чего движок не делал — вес уходил в кэш.
+    Это ровно `§−90` A-5: запрет в промпте («не выдумывай адресат») неисполним,
+    пока состояние движка до модели не доехало.
+
+    Инвариант, который здесь пинится: Σ delta_pp по ВСЕМ строкам панели = 0.
+    Продажи, покупки и кэш обязаны сходиться — панель, где 20% NAV просто
+    испаряются, арифметически неполна независимо от того, кто её читает.
+    """
+
+    #: Книга и план — с живого DEEP 24.08.2026, числа не подогнаны.
+    _BASE = {"MSTR": .079, "TLT": .069, "ORCL": .046, "AAPL": .100, "CRCL": .029,
+             "SLV": .028, "USAR": .047, "META": .108, "GOOGL": .045,
+             "MSFT": .188, "NVDA": .134}
+    _SECTOR = {"MSTR": "Technology", "GOOGL": "Technology", "MSFT": "Technology",
+               "NVDA": "Semiconductors", "META": "Technology", "AAPL": "Technology",
+               "ORCL": "Technology", "CRCL": "Other", "USAR": "Other",
+               "TLT": "Bonds", "SLV": "Gold"}
+    _ROWS = [{"ticker": "MSTR",  "action": "Sell", "delta_w_pp": -6.62},
+             {"ticker": "TLT",   "action": "Trim", "delta_w_pp": -5.78},
+             {"ticker": "ORCL",  "action": "Sell", "delta_w_pp": -3.84},
+             {"ticker": "AAPL",  "action": "Trim", "delta_w_pp": -1.39},
+             {"ticker": "CRCL",  "action": "Sell", "delta_w_pp": -1.25},
+             {"ticker": "SLV",   "action": "Trim", "delta_w_pp": -1.18},
+             {"ticker": "USAR",  "action": "Sell", "delta_w_pp": -0.41},
+             {"ticker": "META",  "action": "Trim", "delta_w_pp": -0.14},
+             {"ticker": "GOOGL", "action": "Buy",  "delta_w_pp":  0.66}]
+
+    def _actions(self):
+        from finance.simulate import high_priority_target_weights
+        bl = [{"ticker": t, "delta_w_pp": 1.0, "action": "Buy", "target_w": w}
+              for t, w in self._BASE.items()]
+        _t, _tk, actions = high_priority_target_weights(
+            self._BASE, self._ROWS, bl, sector_by_ticker=self._SECTOR)
+        return actions
+
+    def test_freed_weight_has_a_destination_even_when_the_plan_has_a_buy(self):
+        actions = self._actions()
+        self.assertTrue(
+            any(a.get("is_cash") for a in actions),
+            "план с ОДНОЙ покупкой снова спрятал адресат высвобожденного веса: "
+            "строки «Кэш» нет, и 19.95 пп NAV исчезли из панели")
+
+    def test_sum_of_all_moves_is_zero(self):
+        total = sum(a["delta_pp"] for a in self._actions())
+        self.assertAlmostEqual(
+            total, 0.0, places=1,
+            msg=f"панель не сходится: Σ delta_pp = {total:+.2f} пп. "
+                "Продажи, покупки и кэш обязаны давать ноль")
+
+    def test_cash_row_carries_the_whole_unabsorbed_remainder(self):
+        actions = self._actions()
+        cash = [a for a in actions if a.get("is_cash")][0]
+        sells = -sum(a["delta_pp"] for a in actions if a["delta_pp"] < 0)
+        buys  = sum(a["delta_pp"] for a in actions
+                    if a["delta_pp"] > 0 and not a.get("is_cash"))
+        self.assertAlmostEqual(cash["delta_pp"], sells - buys, places=1)
+
+    def test_net_buying_plan_is_funded_from_cash_and_says_so(self):
+        """Зеркальный случай: план покупает больше, чем продаёт.
+
+        Деньги приходят ИЗ кэша, и это тоже адресат — панель обязана сойтись
+        и здесь, иначе инвариант держится только на одной ветке.
+        """
+        from finance.simulate import high_priority_target_weights
+        rows = [{"ticker": "MSTR",  "action": "Sell", "delta_w_pp": -1.0},
+                {"ticker": "GOOGL", "action": "Buy",  "delta_w_pp":  4.0}]
+        bl = [{"ticker": t, "delta_w_pp": 1.0, "action": "Buy", "target_w": w}
+              for t, w in self._BASE.items()]
+        _t, _tk, actions = high_priority_target_weights(
+            self._BASE, rows, bl, sector_by_ticker=self._SECTOR)
+        cash = [a for a in actions if a.get("is_cash")]
+        self.assertTrue(cash, "финансирование покупок не названо")
+        self.assertLess(cash[0]["delta_pp"], 0, "приход ИЗ кэша обязан быть отрицательным")
+        self.assertAlmostEqual(sum(a["delta_pp"] for a in actions), 0.0, places=1)
+
+    def test_residual_still_reaches_real_diversifiers_not_only_cash(self):
+        """Гейт стал ОСТАТОЧНЫМ, а не «есть ли покупка вообще».
+
+        Иначе лечение вырождается в противоположную крайность: план с одной
+        покупкой всегда сваливал бы ВЕСЬ остаток в кэш, хотя честный
+        диверсификатор с рейтингом Buy в книге есть. Реинвест обязан
+        отработать на ОСТАТКЕ — и только непоглощённый хвост идёт в кэш.
+        """
+        from finance.simulate import high_priority_target_weights
+        # GLD: план рейтингует Buy, но |Δw| = 0 → он НЕ среди торгуемых строк,
+        # значит кандидат реинвеста; сектор Gold вне заблокированного техно.
+        rows = self._ROWS + [{"ticker": "GLD", "action": "Buy", "delta_w_pp": 0.0}]
+        base = dict(self._BASE, GLD=.052)
+        sector = dict(self._SECTOR, GLD="Gold")
+        bl = [{"ticker": "GLD", "delta_w_pp": 9.0, "action": "Buy"}]
+        _t, _tk, actions = high_priority_target_weights(
+            base, rows, bl, sector_by_ticker=sector)
+        bought = {a["ticker"] for a in actions
+                  if a["delta_pp"] > 0 and not a.get("is_cash")}
+        self.assertIn(
+            "GLD", bought,
+            "остаток не дошёл до диверсификатора: гейт снова читает «есть ли "
+            "покупка», а не «сколько веса осталось непоглощённым»")
+        self.assertAlmostEqual(sum(a["delta_pp"] for a in actions), 0.0, places=1)
+
+    def test_residual_is_split_proportionally_not_by_gross_sells(self):
+        """Лестница делит ОСТАТОК, а не всю выручку от продаж.
+
+        Если долю каждого кандидата считать от ВАЛОВЫХ продаж, первый же
+        кандидат выбирает весь остаток, и второй диверсификатор получает ноль —
+        реинвест концентрируется вместо того, чтобы разносить.
+        """
+        from finance.simulate import high_priority_target_weights
+        base   = {"MSTR": .30, "MSFT": .30, "GLD": .20, "AGGX": .20}
+        sector = {"MSTR": "Technology", "MSFT": "Technology",
+                  "GLD": "Gold", "AGGX": "Bonds"}
+        rows = [{"ticker": "MSTR", "action": "Sell", "delta_w_pp": -20.0},
+                {"ticker": "MSFT", "action": "Buy",  "delta_w_pp":  10.0},
+                {"ticker": "GLD",  "action": "Buy",  "delta_w_pp":   0.0},
+                {"ticker": "AGGX", "action": "Buy",  "delta_w_pp":   0.0}]
+        bl = [{"ticker": "GLD", "delta_w_pp": 5.0, "action": "Buy"},
+              {"ticker": "AGGX", "delta_w_pp": 5.0, "action": "Buy"}]
+        _t, _tk, actions = high_priority_target_weights(
+            base, rows, bl, sector_by_ticker=sector)
+        got = {a["ticker"]: a["delta_pp"] for a in actions if a["delta_pp"] > 0}
+        for t in ("GLD", "AGGX"):
+            self.assertGreater(
+                got.get(t, 0.0), 0.0,
+                f"{t} остался без веса: доля кандидата считается от валовых "
+                f"продаж, а не от остатка — получили {got}")
+        self.assertAlmostEqual(sum(a["delta_pp"] for a in actions), 0.0, places=1)
+
+    def test_cash_row_is_labelled_by_direction_in_the_payload(self):
+        """«В кэш» и «Из кэша» — разные факты; один ярлык на оба лжёт."""
+        from pdf_payload import _build_expected_effect
+        out_in = _build_expected_effect({"high_priority_actions": [
+            {"ticker": "Кэш", "action": "Cash", "side": "buy",
+             "delta_pp": 19.95, "is_cash": True}]})
+        out_from = _build_expected_effect({"high_priority_actions": [
+            {"ticker": "Кэш", "action": "Cash", "side": "sell",
+             "delta_pp": -3.0, "is_cash": True}]})
+        self.assertEqual(out_in["high_priority_actions"][0]["side"], "В кэш")
+        self.assertEqual(out_from["high_priority_actions"][0]["side"], "Из кэша")
+
+    def test_prompt_receives_cash_as_a_named_destination(self):
+        """R-5/§−102: `reinvest_destination` — ГОТОВАЯ строка для модели.
+
+        Пока кэша в ней не было, модель дописывала адресат сама.
+        """
+        from ai_narrative import _reinvest_destination
+        dest = _reinvest_destination({"expected_effect": {"high_priority_actions": [
+            {"ticker": "Кэш",   "side": "buy", "delta_pp": 19.95, "is_cash": True},
+            {"ticker": "GOOGL", "side": "buy", "delta_pp": 0.66},
+        ]}})
+        self.assertIn("Кэш", dest)
+        self.assertIn("19.9", dest)
+        self.assertIn("GOOGL", dest)
+
+    def test_prompt_permits_naming_cash_instead_of_inventing_buys(self):
+        """`§−97` E-7: правила, которого нет в промпте, модель не исполняет.
+
+        Прежняя редакция утверждала «движок покупает конкретные
+        диверсификаторы» — и УЧИЛА не называть кэш даже тогда, когда кэш и
+        есть настоящий адресат.
+        """
+        import ai_narrative
+        spec = ai_narrative._deep_prompt_spec() if hasattr(
+            ai_narrative, "_deep_prompt_spec") else None
+        if spec is None:
+            import inspect
+            spec = inspect.getsource(ai_narrative)
+        self.assertIn("«Кэш» — ПОЛНОПРАВНЫЙ адресат", spec)
+        self.assertNotIn("движок покупает конкретные", spec)
+
+
+class RiskIndexDeltaPluralTest(unittest.TestCase):
+    """§−102 · «−8 пункта» в живом отчёте 24.08.
+
+    Форма числительного — функция ЧИСЛА, а не константа строки: карточка
+    печатала родительный падеж литералом и была права ровно для 2–4.
+    """
+
+    def test_plural_forms(self):
+        from premium_payload import _eff_delta
+        cases = {-8: "пунктов", -5: "пунктов", -2: "пункта", -1: "пункт",
+                 1: "пункт", 2: "пункта", 4: "пункта", 5: "пунктов",
+                 11: "пунктов", 12: "пунктов", 21: "пункт", 22: "пункта"}
+        for n, want in cases.items():
+            with self.subTest(n=n):
+                self.assertTrue(
+                    _eff_delta("risk_index", n).endswith(want),
+                    f"{n} → {_eff_delta('risk_index', n)!r}, ожидалось «…{want}»")
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

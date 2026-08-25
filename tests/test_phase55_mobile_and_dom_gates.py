@@ -122,6 +122,59 @@ class MobileLayoutIsMeasuredTest(unittest.TestCase):
             "на настоящем отчёте ничего не доказывает")
 
 
+class MobileLabelsAreNotClippedTest(unittest.TestCase):
+    """§−102 · подпись обязана быть ЧИТАЕМА, а не только «в пределах экрана».
+
+    `MobileLayoutIsMeasuredTest` выше меряет уход ЗА экран и на живых отчётах
+    24–25.08 честно давал ноль. При этом в том же DEEP на 320 px:
+
+        Real GDP growth (SAAR)        нужно 141 px — дано   1 px
+        10Y Breakeven Inflation Rate  нужно 167 px — дано   7 px
+        Идиосинкратический (…)        нужно 249 px — дано 132 px
+
+    Ни один из них за экран не уезжал: их срезало ВНУТРИ своей колонки
+    (`truncate` + `min-w-0` рядом с `whitespace-nowrap`-соседями). Читатель
+    получал величину и тренд без имени показателя — то есть число без факта,
+    к которому оно относится. Метрика, структурно слепая к целому классу
+    дефектов, повторяет ошибку `§−97` E-6; поэтому вторая метрика — здесь.
+    """
+
+    def test_no_text_is_clipped_beyond_reach(self) -> None:
+        _requires_browser(self)
+        for tier in ("base", "deep"):
+            path = _RenderedReports.path(tier)
+            for width, clipped in layout_probe.measure_clipped(path).items():
+                with self.subTest(tier=tier, width=width):
+                    self.assertEqual(
+                        clipped, [],
+                        f"{tier} на {width}px: текст срезан и недоступен "
+                        f"прокруткой — " + "; ".join(
+                            f"{c['text']!r} нужно {c['need']}px, дано {c['got']}px"
+                            for c in clipped))
+
+    def test_the_detector_itself_catches_a_known_clip(self) -> None:
+        """🔴 Инструмент проверки сам обязан быть проверен (`§−68`, `§−91`).
+
+        Контрольный опыт: заведомо срезанная подпись обязана быть найдена.
+        Без него «0 обрезанных» не значит ничего.
+        """
+        _requires_browser(self)
+        src = Path(_RenderedReports.path("base")).read_text(encoding="utf-8")
+        mutant = _RenderedReports.dir() / "mutant_clip.html"
+        mutant.write_text(
+            src.replace(
+                "</body>",
+                '<div style="width:40px;overflow-x:hidden">'
+                '<span style="display:block;white-space:nowrap;overflow-x:hidden;'
+                'width:40px">ЗОНД-ОБРЕЗКИ-ОЧЕНЬ-ДЛИННАЯ-ПОДПИСЬ</span></div></body>', 1),
+            encoding="utf-8")
+        found = layout_probe.measure_clipped(str(mutant), widths=(320,))[320]
+        self.assertTrue(
+            any("ЗОНД-ОБРЕЗКИ" in c["text"] for c in found),
+            "детектор не увидел заведомо срезанную подпись — значит его «ноль» "
+            "на настоящем отчёте ничего не доказывает")
+
+
 class ContractKeyReachesTheEyesTest(unittest.TestCase):
     """R-7 · значение ключа обязано оказаться в ВИДИМОМ тексте страницы.
 

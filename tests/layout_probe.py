@@ -22,7 +22,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-__all__ = ["WIDTHS", "chromium_path", "measure", "dom_text"]
+__all__ = ["WIDTHS", "chromium_path", "measure", "measure_clipped", "dom_text"]
 
 #: Ширины телефонов, на которых проект обязуется быть чистым.
 WIDTHS = (320, 360, 390, 414)
@@ -101,6 +101,67 @@ def measure(html_path: str, widths=WIDTHS) -> dict:
                     "() => document.querySelectorAll('body *').length > 200",
                     timeout=15000)
                 out[w] = page.evaluate(_PROBE)
+                page.close()
+        finally:
+            browser.close()
+    return out
+
+
+#: 🔴 §−102. ВТОРАЯ мобильная метрика — ОБРЕЗАННЫЙ ТЕКСТ.
+#:
+#: `measure()` ловит содержимое, уехавшее ЗА экран. Но текст, срезанный ВНУТРИ
+#: своей колонки, за экран не выходит — и потому проходит мимо: замер 25.08 на
+#: живом DEEP показал «0 переполнений» и одновременно `Real GDP growth (SAAR)`,
+#: втиснутый в 1 px из нужных 141. Читатель видел величину и тренд без всякого
+#: признака того, ЧЕЙ это показатель. Метрика, которая не может дать ненулевой
+#: ответ на реальный дефект, — не метрика (`§−97` E-6, тот же класс).
+#:
+#: Считаются только ЛИСТЬЯ с текстом: у контейнера `scrollWidth > clientWidth`
+#: означает прокрутку своего содержимого (осознанная рамка), а у листа —
+#: ПОТЕРЮ букв. `overflow-x: auto/scroll` не в счёт: там текст доступен
+#: прокруткой. Ловим ровно `hidden`/`clip` — то, откуда текст не достать.
+_CLIP_PROBE = """
+() => {
+  const out = [];
+  document.querySelectorAll('body *').forEach(el => {
+    if (el.children.length > 0) return;                 // только текстовые листья
+    const txt = (el.textContent || '').trim();
+    if (txt.length < 3) return;
+    const r = el.getBoundingClientRect();
+    if (r.width === 0 || r.height === 0) return;
+    const cs = getComputedStyle(el);
+    if (cs.display === 'none' || cs.visibility === 'hidden') return;
+    for (let p = el; p; p = p.parentElement) {          // свёрнутый аккордеон — не дефект
+      if (p.tagName === 'DETAILS' && !p.open) return;
+    }
+    if (cs.overflowX !== 'hidden' && cs.overflowX !== 'clip') return;
+    if (el.scrollWidth <= el.clientWidth + 1) return;
+    out.push({need: el.scrollWidth, got: el.clientWidth,
+              cls: String(el.className && el.className.baseVal !== undefined
+                            ? el.className.baseVal : (el.className || '')).slice(0, 70),
+              text: txt.slice(0, 48)});
+  });
+  return out.slice(0, 15);
+}
+"""
+
+
+def measure_clipped(html_path: str, widths=WIDTHS) -> dict:
+    """{ширина: [{need, got, cls, text}]} — текстовые листья, у которых
+    содержимое срезано и НЕДОСТУПНО прокруткой."""
+    from playwright.sync_api import sync_playwright
+
+    out: dict[int, list] = {}
+    with sync_playwright() as pw:
+        browser = _launch(pw)
+        try:
+            for w in widths:
+                page = browser.new_page(viewport={"width": w, "height": 900})
+                page.goto("file://" + str(Path(html_path).resolve()))
+                page.wait_for_function(
+                    "() => document.querySelectorAll('body *').length > 200",
+                    timeout=15000)
+                out[w] = page.evaluate(_CLIP_PROBE)
                 page.close()
         finally:
             browser.close()

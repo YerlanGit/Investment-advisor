@@ -318,6 +318,13 @@
     "ticker": "MSFT.US"
    },
    {
+    "action": "Cash",
+    "delta_pp": -1.87,
+    "is_cash": true,
+    "side": "sell",
+    "ticker": "Кэш"
+   },
+   {
     "action": "Trim",
     "delta_pp": -0.74,
     "side": "sell",

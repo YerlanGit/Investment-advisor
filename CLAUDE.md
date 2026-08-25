@@ -15,12 +15,12 @@ GCP Cloud Run (long-polling) · Cloud Function (RAG-ингест) · ChromaDB ·
 ## Верификация (обязательна перед каждым пушем)
 
 ```bash
-PYTHONPATH=src python -m pytest tests/ -q          # → 1861 passed, 5 skipped, 2 xfailed
+PYTHONPATH=src python -m pytest tests/ -q          # → 1899 passed, 2 xfailed (+7 skipped без playwright)
 ```
 
 - Префикс `PYTHONPATH=src` **ОБЯЗАТЕЛЕН** (`conftest.py`/`pyproject.toml` нет).
 - **Прогонов ДВА.** Второй — зеркало деплой-образа, без `design/`: `cp -r src tests
-  SYSTEM_PROMPT.md requirements*.txt <tmp>/ && cd <tmp>`, тот же прогон → 1775 passed,
+  SYSTEM_PROMPT.md requirements*.txt <tmp>/ && cd <tmp>`, тот же прогон → 1808 passed,
   91 skipped, 2 xfailed. Зелёный GitHub CI НЕ означает, что деплой пройдёт: CI видит
   полный чекаут, Cloud Build — только образ, и разница — ровно тесты, читающие
   `design/`, `docs/`, `CLAUDE.md`, `scripts/` и `cloud_function/`.
@@ -121,9 +121,10 @@ PYTHONPATH=src python -m pytest tests/ -q          # → 1861 passed, 5 skipped,
   модели. Обратное тоже — правила вне промпта модель не исполняет (`§−97` E-7).
 - **Разность двух чисел модель не считает** — наклон против бенчмарка приезжает
   готовой строкой `summary.factor_tilt_text` (`§−97` E-5).
-- Мобильная вёрстка правится ПО ЗАМЕРУ (headless 320/360/390/414), а не на глаз;
-  детектор меряет по границе КОМПОНЕНТА — `scrollWidth` обнулён страничным
-  `overflow-x: hidden` (`§−97` E-6) — и отсеивает свёрнутые аккордеоны.
+- **У высвобожденного веса ВСЕГДА есть адресат**: гейт реинвеста по ОСТАТКУ, не по факту «есть ли покупка»; Σ `delta_pp` панели = 0, иначе адресат достаётся ИИ (`§−102`).
+- Мобильная вёрстка — ПО ЗАМЕРУ (320/360/390/414), мимо свёрнутых аккордеонов, метрик ДВЕ:
+  `measure` (уход ЗА экран; `scrollWidth` обнулён страничным `overflow-x:hidden`, `§−97` E-6) и
+  `measure_clipped` (срез ВНУТРИ колонки: 1 px из 141, `§−102`). Лечит РАСКЛАДКА, не кегль.
 - Крупное изменение → строка «Было/Стало» в `docs/audit/AUDIT.md`.
 
 ## Зависимости

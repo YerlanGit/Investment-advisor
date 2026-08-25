@@ -701,8 +701,12 @@ def _build_expected_effect(raw: Optional[dict]) -> dict:
             # 2026-07-18: freed weight parked as CASH (de-risking an
             # over-concentrated book) — label it «В кэш», keep it on the buy
             # side so it renders as the destination of the freed weight.
-            _side_ru = ("В кэш" if a.get("is_cash")
-                        else _SIDE_RU.get(_key, _key))
+            # §−102: зеркальный случай — план покупает больше, чем продаёт, и
+            # разницу финансирует кэш.  Тот же ряд с обратным знаком обязан
+            # читаться «Из кэша», иначе строка «В кэш −5.0 пп» противоречит
+            # сама себе.
+            _side_ru = (("В кэш" if _safe_float(a.get("delta_pp"), 0.0) >= 0 else "Из кэша")
+                        if a.get("is_cash") else _SIDE_RU.get(_key, _key))
             _mapped.append({
                 "ticker":   str(a.get("ticker", "")),
                 "side":     _side_ru,

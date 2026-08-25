@@ -425,8 +425,22 @@ def high_priority_target_weights(
         # (genuine diversifiers), and whatever can't be reinvested that way STAYS
         # AS CASH (honest de-risking — lower gross exposure, lower concentration).
         # Buying more of the crowded sector to «show a buy side» is misleading.
-        have_buy = any(a["side"] == "buy" for a in actions)
-        if sell_proceeds > 1e-6 and not have_buy and bl_records:
+        # 🔴 §−102 (2026-08-25, live DEEP 24.08): гейт был БИНАРНЫЙ — «в плане
+        # НЕТ ни одной покупки» (`not have_buy`).  План, где уже есть ОДНА
+        # символическая покупка, пропускал и лестницу реинвеста, и честную
+        # строку «Кэш»: панель показывала −20.61пп продаж против +0.66пп
+        # покупок, а 19.95пп высвобожденного веса НЕ ИМЕЛИ АДРЕСАТА ВООБЩЕ.
+        # Дыру заполняла модель («вес идёт в качественные диверсификаторы вне
+        # техно»), чего движок не делал: вес уходил в кэш.  Это ровно правило
+        # «запрет в промпте неисполним без факта» (`§−90` A-5) — промпт
+        # запрещал выдумывать адресат, но движок настоящего не сообщал.
+        # Гейт теперь ОСТАТОЧНЫЙ: через ту же лестницу идёт то, что покупки
+        # самого плана не поглотили, а непоглощённый хвост становится строкой
+        # «Кэш».  Инвариант панели — Σ delta_pp по всем строкам = 0.
+        buys_absorbed = sum(a["delta_pp"] for a in actions if a["delta_pp"] > 0) / 100.0
+        residual  = sell_proceeds - buys_absorbed
+        remaining = residual
+        if residual > 1e-6 and bl_records:
             # Identify the over-concentrated top sector of the CURRENT book so we
             # never reinvest back into it (incl. the correlated tech super-group).
             # ONLY engaged when we HAVE real sector data AND the top sector is
@@ -496,13 +510,14 @@ def high_priority_target_weights(
             buys = buys[:3]
             conv = sum(float(b.get("delta_w_pp") or 0.0) for b in buys)
             _PER_BUY_CAP = 0.12          # ≤+12pp per name so a reinvest can't create NEW concentration
-            remaining = sell_proceeds
+            # `remaining` инициализирован ОСТАТКОМ выше (§−102): лестница делит
+            # то, что покупки самого плана не поглотили, а не все продажи.
             for b in buys:
                 if remaining <= 1e-6:
                     break
                 t = str(b.get("ticker"))
                 share = (float(b.get("delta_w_pp") or 0.0) / conv) if conv > 0 else 1.0 / len(buys)
-                add = min(sell_proceeds * share, _PER_BUY_CAP, remaining)
+                add = min(residual * share, _PER_BUY_CAP, remaining)
                 if add <= 1e-9:
                     continue
                 target[t] = float(base.get(t, 0.0)) + add
@@ -547,20 +562,35 @@ def high_priority_target_weights(
                         "asset_key":   str(c.get("asset_key") or ""),
                     })
 
-            # Whatever can't be reinvested into a diversifier stays as CASH — the
-            # honest, mandate-consistent outcome for an over-concentrated book:
-            # the panel shows it via lower after-vol / lower IT-share / lower
-            # concentration (freed weight simply leaves the risky book).  We
-            # surface it as an explicit «cash» pseudo-move so the buy side isn't
-            # empty and the reader sees the de-risking is intentional.
-            if remaining > 1e-4:
-                actions.append({
-                    "ticker":   "Кэш",
-                    "action":   "Cash",
-                    "side":     "buy",
-                    "delta_pp": round(remaining * 100.0, 2),
-                    "is_cash":  True,
-                })
+        # Whatever no diversifier absorbed stays as CASH — the honest,
+        # mandate-consistent outcome for an over-concentrated book: the panel
+        # shows it via lower after-vol / lower IT-share / lower concentration
+        # (freed weight simply leaves the risky book).  We surface it as an
+        # explicit «cash» pseudo-move so the buy side isn't empty and the
+        # reader sees the de-risking is intentional.
+        #
+        # 🔴 §−102: этот блок ВЫНЕСЕН из-под `if … and bl_records`.  Он обязан
+        # отработать и когда лестницы не было вовсе (нет `bl_records`), и когда
+        # план уже нёс свои покупки — иначе высвобожденный вес пропадает из
+        # панели молча, и адресат достаётся фантазии модели.  Зеркальный случай
+        # (план покупает больше, чем продаёт) закрывается той же строкой с
+        # обратным знаком: деньги приходят ИЗ кэша, и это тоже надо назвать.
+        if remaining > 1e-4:
+            actions.append({
+                "ticker":   "Кэш",
+                "action":   "Cash",
+                "side":     "buy",
+                "delta_pp": round(remaining * 100.0, 2),
+                "is_cash":  True,
+            })
+        elif remaining < -1e-4:
+            actions.append({
+                "ticker":   "Кэш",
+                "action":   "Cash",
+                "side":     "sell",
+                "delta_pp": round(remaining * 100.0, 2),
+                "is_cash":  True,
+            })
 
         # Largest moves first so the panel leads with the most impactful idea.
         actions.sort(key=lambda a: abs(a["delta_pp"]), reverse=True)

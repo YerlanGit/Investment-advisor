@@ -130,12 +130,23 @@ const RegimeBlock = ({ r }) => {
           {r.drivers.map((d,i) => {
             const tt = d.trendTone === 'pos' ? 'text-sage-600'
                      : d.trendTone === 'neg' ? 'text-rust-600' : 'text-ink-700';
+            // 🔴 §−102 (замер 320/360/390/414): строка была ОДНИМ рядом
+            // `1fr_auto_auto_auto`, а три `auto`-колонки несут
+            // `whitespace-nowrap`.  На 320 px они съедали всю ширину, и
+            // колонка ИМЕНИ схлопывалась до 1–7 px: «Real GDP growth (SAAR)»
+            // показывался как 1 px, «10Y Breakeven Inflation Rate» — как 7 px.
+            // Читатель видел величину и тренд без единого признака того, ЧЕЙ
+            // это показатель.  Детектор переполнения этого не ловит: элемент
+            // не выходит за экран, он ОБРЕЗАН внутри своей колонки.
+            // Лечится раскладкой, а не размером шрифта: до `sm` строка
+            // разворачивается в две (имя | значение / тренд | свежесть), и у
+            // имени есть пол ширины на десктопе.
             return (
-            <div key={i} className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-2 sm:gap-3 py-1.5 border-b border-ink-900/5 last:border-0">
-              <span className="text-[11.5px] text-ink-700 truncate min-w-0">{d.name}</span>
-              <span className={`text-[11.5px] num font-semibold whitespace-nowrap ${tt}`}>{d.val}</span>
+            <div key={i} className="grid grid-cols-[minmax(0,1fr)_auto] sm:grid-cols-[minmax(6.5rem,1fr)_auto_auto_auto] items-center gap-x-2 gap-y-0.5 sm:gap-3 py-1.5 border-b border-ink-900/5 last:border-0">
+              <span className="text-[11.5px] text-ink-700 leading-snug break-words">{d.name}</span>
+              <span className={`text-[11.5px] num font-semibold whitespace-nowrap justify-self-end sm:justify-self-auto ${tt}`}>{d.val}</span>
               <span className={`text-[9.5px] font-mono whitespace-nowrap ${d.trendTone === 'flat' ? 'text-ink-400' : tt}`}>{d.trend}</span>
-              <span className={`text-[8.5px] font-mono font-bold tracking-wider px-1.5 py-0.5 rounded-full whitespace-nowrap ${d.tone==='warn'?'bg-gold-400/18 text-gold-700':'bg-sage-500/12 text-sage-600'}`}>{d.state}</span>
+              <span className={`text-[8.5px] font-mono font-bold tracking-wider px-1.5 py-0.5 rounded-full whitespace-nowrap justify-self-end sm:justify-self-auto ${d.tone==='warn'?'bg-gold-400/18 text-gold-700':'bg-sage-500/12 text-sage-600'}`}>{d.state}</span>
             </div>
             );
           })}
