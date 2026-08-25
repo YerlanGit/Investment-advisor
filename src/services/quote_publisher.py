@@ -317,7 +317,11 @@ class GcsQuotePublisher:
         self._client = client
 
     def describe(self) -> str:
-        return f"gs://{self._bucket_name}/{self._prefix}"
+        # §−103: ПОЛНЫЙ путь объекта, а не бакет с префиксом. `/status` — то
+        # единственное место, где оператор может СВЕРИТЬ кольцо глазами с
+        # `STOOQ_DB_PATH` отчётного бота, и для этого ему нужен весь путь:
+        # расхождение живёт как раз в третьей части, в имени объекта.
+        return f"gs://{self._bucket_name}/{self._prefix}{DB_OBJECT_NAME}"
 
     def _bucket(self):
         if self._client is None:
@@ -327,8 +331,48 @@ class GcsQuotePublisher:
                 raise PublisherUnavailable(
                     "google-cloud-storage не установлен — GCS-бэкенд "
                     "недоступен. Офлайн-режим: QUOTES_BACKEND=local") from exc
-            self._client = storage.Client()
+            # 🔴 §−103. `storage.Client()` поднимает `DefaultCredentialsError`,
+            # а не `PublisherUnavailable`, и весь смысл этого типа («не
+            # настроено» ≠ «сломано») мимо него утекал: оператор вместо
+            # русского диагноза получал английский стектрейс со ссылкой на
+            # доки Google. Это ТРИ САМЫХ ВЕРОЯТНЫХ отказа первого запуска в
+            # GCS, и все три надо назвать своим именем, а не общим.
+            try:
+                self._client = storage.Client()
+            except Exception as exc:                    # noqa: BLE001
+                raise PublisherUnavailable(
+                    "нет учётных данных GCP. В Cloud Run это значит, что "
+                    "сервису не задан service-account (`--service-account`, "
+                    "подстановка `_INGEST_SA`); локально — что не сделан "
+                    f"`gcloud auth application-default login`. Причина: {exc}"
+                ) from exc
         return self._client.bucket(self._bucket_name)
+
+    def _describe_access_failure(self, exc: Exception) -> PublisherUnavailable:
+        """403/404 от GCS — это КОНФИГУРАЦИЯ, а не поломка (`§−103`).
+
+        Различать их обязательно: 404 значит «не тот бакет или префикс», 403 —
+        «бакет тот, но у сервис-аккаунта нет прав на объект». Лечение у них
+        РАЗНОЕ, и одинаковое сообщение отправило бы оператора чинить не то.
+        """
+        text = f"{type(exc).__name__}: {exc}"
+        code = getattr(exc, "code", None)
+        blob = "403" in text or code == 403 or "Forbidden" in text
+        gone = "404" in text or code == 404 or "Not Found" in text
+        if blob:
+            return PublisherUnavailable(
+                f"нет доступа к {self.describe()} (403). У сервис-аккаунта "
+                "загрузчика нет прав на объекты этого префикса — нужна роль "
+                "`roles/storage.objectAdmin`, ограниченная условием IAM на "
+                f"`{self._prefix}`. Причина: {text}")
+        if gone:
+            return PublisherUnavailable(
+                f"бакет или префикс не найден: {self.describe()} (404). "
+                "Проверьте `_QUOTES_BUCKET` и `QUOTES_PREFIX` — имя объекта "
+                "обязано совпадать с тем, что читает отчётный бот в "
+                f"`STOOQ_DB_PATH`. Причина: {text}")
+        return PublisherUnavailable(
+            f"хранилище {self.describe()} недоступно. Причина: {text}")
 
     def _blob(self, name: str):
         return self._bucket().blob(self._prefix + name)
@@ -343,7 +387,13 @@ class GcsQuotePublisher:
         ошибку, — и при одном операторе оно практически недостижимо. Названо
         здесь, чтобы не выглядеть недосмотром.
         """
-        blob = self._bucket().get_blob(self._prefix + DB_OBJECT_NAME)
+        try:
+            blob = self._bucket().get_blob(self._prefix + DB_OBJECT_NAME)
+        except PublisherUnavailable:
+            raise
+        except Exception as exc:                        # noqa: BLE001
+            # §−103: 403/404 приезжают отсюда и обязаны быть названы.
+            raise self._describe_access_failure(exc) from exc
         if blob is None:
             raise PublisherUnavailable(
                 f"в {self.describe()} нет {DB_OBJECT_NAME}. Базу собирает "
