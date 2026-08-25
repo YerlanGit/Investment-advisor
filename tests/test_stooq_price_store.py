@@ -355,12 +355,33 @@ class IngestRulesTest(_TempDirMixin, unittest.TestCase):
 
     def test_rule9_truncated_weekday_file_is_rejected_whole(self) -> None:
         """🔴 Правило 9. Частично скачанный файл опаснее битого: он выглядит
-        нормально и делает дыру в истории сразу у ВСЕХ бумаг."""
+        нормально и делает дыру в истории сразу у ВСЕХ бумаг.
+
+        §−105: строк ЗАМЕТНАЯ доля порога — это именно НЕДОКАЧ, и лечится он
+        повторным скачиванием того же файла.
+        """
         path = write_daily(self.tmp, 20260807,
-                           [row(f"T{i}.US", 20260807) for i in range(10)])
+                           [row(f"T{i}.US", 20260807) for i in range(3000)])
         batch = si.parse_daily_file(path, min_us_rows=5000)
         self.assertIsNotNone(batch.fatal)
         self.assertIn("недокачанным", batch.fatal)
+        self.assertIn("заново", batch.fatal)
+
+    def test_rule9_names_a_wrong_file_as_wrong_and_not_as_truncated(self) -> None:
+        """🔴 §−105. Под одним отказом жили ДВЕ причины с ПРОТИВОПОЛОЖНЫМ лечением.
+
+        Живой повод: владелец грузил файл 17 КБ (≈240 строк) при полном срезе
+        рынка ≈850 КБ / ~12 000 строк. Совет «скачайте заново» отправляет
+        человека по кругу: тот же файл заново качать бессмысленно, нужен
+        ДРУГОЙ. Тот же класс, что `§−94` — три причины под одной маской.
+        """
+        path = write_daily(self.tmp, 20260807,
+                           [row(f"T{i}.US", 20260807) for i in range(240)])
+        batch = si.parse_daily_file(path, min_us_rows=5000)
+        self.assertIsNotNone(batch.fatal)
+        self.assertIn("НЕ ТОТ ФАЙЛ", batch.fatal)
+        self.assertNotIn("недокачан", batch.fatal)
+        self.assertIn("240", batch.fatal)
 
     def test_rule9_does_not_fire_on_closed_market(self) -> None:
         """🔴 Форма правила — «0 < принято < порога».
