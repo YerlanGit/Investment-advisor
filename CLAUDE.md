@@ -15,12 +15,12 @@ GCP Cloud Run (long-polling) · Cloud Function (RAG-ингест) · ChromaDB ·
 ## Верификация (обязательна перед каждым пушем)
 
 ```bash
-PYTHONPATH=src python -m pytest tests/ -q          # → 1914 passed, 2 xfailed (+7 skipped без playwright)
+PYTHONPATH=src python -m pytest tests/ -q          # → 1916 passed, 2 xfailed (+7 skipped без playwright)
 ```
 
 - Префикс `PYTHONPATH=src` **ОБЯЗАТЕЛЕН** (`conftest.py`/`pyproject.toml` нет).
 - **Прогонов ДВА.** Второй — зеркало деплой-образа, без `design/`: `cp -r src tests
-  SYSTEM_PROMPT.md requirements*.txt <tmp>/ && cd <tmp>`, тот же прогон → 1814 passed,
+  SYSTEM_PROMPT.md requirements*.txt <tmp>/ && cd <tmp>`, тот же прогон → 1824 passed,
   92 skipped, 2 xfailed. Зелёный GitHub CI НЕ означает, что деплой пройдёт: CI видит
   полный чекаут, Cloud Build — только образ, и разница — ровно тесты, читающие
   `design/`, `docs/`, `CLAUDE.md`, `scripts/` и `cloud_function/`.
@@ -80,7 +80,7 @@ PYTHONPATH=src python -m pytest tests/ -q          # → 1914 passed, 2 xfailed 
 - ДВА РАЗНЫХ ПРОЕКТА, не смешивать: `roadmap/manual_portfolio/` (ручной ввод, источник
   Stooq) и `roadmap/freedom_warehouse/` (Freedom API → своя БД). Основания разные
   (I-12/I-14): `manual` не вправе читать витрину с `origin='tradernet'`, как и сам Tradernet.
-- База котировок Stooq: ПИШУТ двое — `stooq_ingest` у оператора и бот-загрузчик
+- База котировок Stooq: ПИШУТ двое — `stooq_ingest` у оператора и бот-загрузчик. Ядро у них ОДНО (`parse_daily_file`+`apply_batch`, `allow_new=False`), ДАННЫЕ обязаны совпадать побитово (гейт), байты файла — НЕТ: `generation` это CAS-токен, `ingest_runs` — журнал (`§−106`)
   (скачал → применил → залил ЦЕЛИКОМ, CAS по поколению; 412 = отказ, не ретрай).
   Отчётный бот открывает `mode=ro` и читает ЛОКАЛЬНУЮ КОПИЮ (`stooq_store._local_copy`): SQLite поверх
   gcsfuse — сотни range-запросов на отчёт. Формы символа меняют НОТАЦИЮ, но не
