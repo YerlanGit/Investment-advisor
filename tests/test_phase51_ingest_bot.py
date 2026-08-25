@@ -1371,6 +1371,269 @@ class _FakeMessage:
         return None
 
 
+class RejectionAnomalyTest(_IngestCase):
+    """§−107 · отказ, которого РАНЬШЕ НЕ БЫЛО, обязан быть назван тревогой.
+
+    🔴 Живой разбор 25.08. Срез за 24.08 дал «чужая дата» 166 и «нет цены
+    закрытия» 43, а в ЧЕТЫРЁХ предыдущих прогонах таких строк не было НИ ОДНОЙ;
+    «индекс/FX» вырос с ~57 до 154; записался 631 бар вместо привычных 800.
+    Сводка всё это честно печатала — и всё равно читалась как успех: `✅
+    применён`. Чтобы понять, что копия файла битая, оператору пришлось вручную
+    поднять `ingest_runs` и сравнить пять прогонов глазами.
+
+    Сравнивать было С ЧЕМ: история лежит в той же базе. Факт был, вывода из
+    него никто не делал — тот же класс, что «пустая коллекция ≠ всё хорошо»
+    (`§−90` A-3).
+    """
+
+    _HDR = ("<TICKER>,<PER>,<DATE>,<TIME>,<OPEN>,<HIGH>,<LOW>,<CLOSE>,<VOL>,"
+            "<OPENINT>")
+
+    def _store(self):
+        from services.quote_publisher import LocalQuotePublisher  # noqa: PLC0415
+        root = self.root / "anom"
+        root.mkdir(parents=True, exist_ok=True)
+        db = root / "prices.sqlite"
+        conn = si.connect(db)
+        si.ensure_schema(conn)
+        cache: dict = {}
+        for t in self._tickers():
+            iid = si._instrument_id(conn, t, cache, allow_new=True)
+            conn.execute(
+                "INSERT INTO daily_bars(instrument_id,trade_date,open,high,"
+                "low,close,volume) VALUES(?,?,?,?,?,?,?)",
+                (iid, 20260817, 10.0, 10.1, 9.9, 10.0, 1000.0))
+        si._bump_generation(conn)
+        conn.commit()
+        conn.close()
+        return root, LocalQuotePublisher(root)
+
+    @staticmethod
+    def _tickers():
+        return [f"T{i:03d}.US" for i in range(40)]
+
+    def _file(self, root: Path, day: int, *, stale: int = 0,
+              noclose: int = 0, indices: int = 5) -> str:
+        rows = []
+        for i, t in enumerate(self._tickers()):
+            d = day - 1 if i < stale else day
+            close = "" if stale <= i < stale + noclose else "10.05"
+            rows.append(f"{t},D,{d},000000,10,10.1,9.9,{close},1000,0")
+        rows += [f"^IDX{i},D,{day},000000,1,1,1,1,0,0" for i in range(indices)]
+        path = root / f"{day}_d.txt"
+        path.write_text("\r\n".join([self._HDR, *rows]) + "\r\n",
+                        encoding="utf-8")
+        return str(path)
+
+    def _run(self, pub, root, day, **kw):
+        with mock.patch.object(si, "MIN_US_ROWS", 0):
+            return qi.apply_daily(self._file(root, day, **kw), actor="op",
+                                  publisher=pub)
+
+    def test_new_rejection_category_raises_a_warning(self):
+        root, pub = self._store()
+        for day in (20260818, 20260819, 20260820, 20260821):
+            out = self._run(pub, root, day)
+            self.assertEqual(out.warnings, (), f"{day}: тревога на здоровом файле")
+        out = self._run(pub, root, 20260824, stale=12, noclose=4)
+        text = "\n".join(out.warnings)
+        self.assertIn("чужая дата", text)
+        self.assertIn("не было НИ ОДНОЙ", text)
+        self.assertIn("перекачайте", text,
+                      "тревога обязана говорить, ЧТО делать, а не только что не так")
+
+    def test_steady_rejections_are_not_flagged(self):
+        """Индексы отбраковываются КАЖДЫЙ день — это норма, а не тревога."""
+        root, pub = self._store()
+        for day in (20260818, 20260819, 20260820, 20260821, 20260824):
+            out = self._run(pub, root, day, indices=5)
+            self.assertEqual(out.warnings, (),
+                             f"{day}: постоянный отказ принят за аномалию")
+
+    def test_spike_against_history_is_flagged(self):
+        root, pub = self._store()
+        for day in (20260818, 20260819, 20260820, 20260821):
+            self._run(pub, root, day, indices=5)
+        out = self._run(pub, root, 20260824, indices=30)      # 6× от нормы
+        self.assertTrue(any("индекс/FX" in w for w in out.warnings),
+                        f"всплеск не назван: {out.warnings}")
+
+    def test_history_is_the_RECENT_runs_not_the_oldest(self):
+        """«Норма» — это ПОСЛЕДНИЕ прогоны, а не первые попавшиеся.
+
+        Разница видна только когда прогонов больше окна: если брать самые
+        старые, то давно ушедшая аномалия навсегда останется «нормой» и
+        заглушит настоящую. Здесь три старых прогона шумные, пять свежих —
+        чистые, и всплеск обязан быть назван по СВЕЖИМ.
+        """
+        root, pub = self._store()
+        day = 20260801
+        for _ in range(3):                     # старая «норма»: шумно
+            self._run(pub, root, day, indices=30); day += 1
+        for _ in range(5):                     # свежая норма: чисто
+            self._run(pub, root, day, indices=5); day += 1
+        out = self._run(pub, root, day, indices=30)
+        self.assertTrue(
+            any("индекс/FX" in w for w in out.warnings),
+            "всплеск не назван — сверка смотрит на СТАРЫЕ прогоны вместо свежих: "
+            f"{out.warnings}")
+
+    def test_silent_when_there_is_no_history_to_compare_with(self):
+        """Одному прогону верить не за что — молчание честнее догадки."""
+        root, pub = self._store()
+        out = self._run(pub, root, 20260818, stale=12)
+        self.assertEqual(out.warnings, ())
+
+    def test_unreadable_history_never_blocks_the_upload(self):
+        """Сверка полезна, но заливка от неё зависеть не вправе."""
+        root, pub = self._store()
+        for day in (20260818, 20260819):
+            self._run(pub, root, day)
+        with mock.patch.object(qi, "_rejection_anomaly",
+                               side_effect=AssertionError("сверка не должна ронять")):
+            with self.assertRaises(AssertionError):
+                self._run(pub, root, 20260820)
+        # а с испорченным JSON истории — молча и успешно
+        conn = si.connect(root / "prices.sqlite")
+        conn.execute("UPDATE ingest_runs SET rejected='не json'")
+        conn.commit()
+        conn.close()
+        out = self._run(pub, root, 20260821, stale=12)
+        self.assertTrue(out.ok, out.reason)
+
+
+class LocalCliAndBotProduceTheSameBaseTest(_IngestCase):
+    """§−106 · у базы ДВА писателя, и они обязаны писать ОДНО И ТО ЖЕ.
+
+    🔴 `CLAUDE.md`: «База котировок Stooq: ПИШУТ двое — `stooq_ingest` у
+    оператора и бот-загрузчик». Пути в них РАЗНЫЕ: CLI зовёт `apply_inbox`
+    (папка, много файлов, сортировка по дате), бот — `parse_daily_file` +
+    `apply_batch` (один файл). До этого раунда совпадение результата было
+    ДОПУЩЕНИЕМ: `apply_inbox` тестировался, паритет — нет.
+
+    Цена расхождения: содержимое базы начинает зависеть от того, КТО её
+    обновлял, и разойтись пути могут молча — оба «успешны», числа разные.
+
+    Что здесь пинится — ДАННЫЕ (`daily_bars`, `instruments`), а не байты
+    файла. Байты совпадать НЕ ОБЯЗАНЫ и не должны: `meta.generation` — это
+    CAS-токен, а `ingest_runs.started_at` — журнал операции; обе записи по
+    смыслу фиксируют МОМЕНТ, и одинаковыми они были бы только если бы CAS
+    не работал.
+    """
+
+    def _seed(self, target: Path) -> None:
+        """База из двух бумаг с одним днём истории — общий старт обоих путей."""
+        conn = si.connect(target)
+        si.ensure_schema(conn)
+        cache: dict = {}
+        for sym in ("AAA.US", "BBB.US"):
+            iid = si._instrument_id(conn, sym, cache, allow_new=True)
+            conn.execute(
+                "INSERT INTO daily_bars(instrument_id,trade_date,open,high,"
+                "low,close,volume) VALUES(?,?,?,?,?,?,?)",
+                (iid, 20260813, 10.0, 10.1, 9.9, 10.0, 1000.0))
+        si._bump_generation(conn)
+        conn.commit()
+        conn.close()
+
+    @staticmethod
+    def _digest(db: Path, table: str, cols: str) -> str:
+        import hashlib                                  # noqa: PLC0415
+        conn = sqlite3.connect(db)
+        try:
+            h = hashlib.sha256()
+            for r in conn.execute(f"SELECT {cols} FROM {table} ORDER BY {cols}"):
+                h.update(repr(tuple(r)).encode())
+            return h.hexdigest()
+        finally:
+            conn.close()
+
+    def test_both_writers_produce_identical_data(self) -> None:
+        from services.quote_publisher import LocalQuotePublisher  # noqa: PLC0415
+
+        rows = [f"{t},D,20260814,000000,10,10.1,9.9,10.05,1000,0"
+                for t in ("AAA.US", "BBB.US", "ZZZ.US")]
+        body = "\r\n".join(
+            ["<TICKER>,<PER>,<DATE>,<TIME>,<OPEN>,<HIGH>,<LOW>,<CLOSE>,<VOL>,"
+             "<OPENINT>", *rows]) + "\r\n"
+
+        # ── путь А: локальный CLI ────────────────────────────────────────
+        cli_root = self.root / "cli"
+        (cli_root / "inbox").mkdir(parents=True)
+        cli_db = cli_root / "prices.sqlite"
+        self._seed(cli_db)
+        (cli_root / "inbox" / "20260814_d.txt").write_text(body, encoding="utf-8")
+        conn = si.connect(cli_db)
+        cli_result = si.apply_inbox(conn, cli_root / "inbox",
+                                    cli_root / "applied", cli_root / "rejected",
+                                    min_us_rows=0)
+        conn.close()
+
+        # ── путь Б: бот ──────────────────────────────────────────────────
+        bot_root = self.root / "bot"
+        bot_root.mkdir(parents=True)
+        self._seed(bot_root / "prices.sqlite")
+        drop = self.root / "20260814_d.txt"
+        drop.write_text(body, encoding="utf-8")
+        with mock.patch.object(si, "MIN_US_ROWS", 0):
+            outcome = qi.apply_daily(str(drop), actor="bot",
+                                     publisher=LocalQuotePublisher(bot_root))
+        self.assertTrue(outcome.ok, outcome.reason)
+
+        # ── сравнение ────────────────────────────────────────────────────
+        self.assertEqual(cli_result.rows_written, outcome.result.rows_written,
+                         "писатели записали РАЗНОЕ число баров")
+        for table, cols in (
+                ("daily_bars",
+                 "instrument_id,trade_date,open,high,low,close,volume"),
+                ("instruments",
+                 "id,source,source_symbol,market,currency,convention")):
+            with self.subTest(table=table):
+                self.assertEqual(
+                    self._digest(cli_db, table, cols),
+                    self._digest(bot_root / "prices.sqlite", table, cols),
+                    f"{table} разошлась между локальным CLI и ботом — "
+                    "содержимое базы стало зависеть от того, КТО её обновлял")
+
+    def test_neither_writer_admits_new_instruments_on_a_daily_slice(self) -> None:
+        """Общее ядро обоих путей: `allow_new=False` на дневной дельте (`§−88`).
+
+        Проверяется у ОБОИХ, потому что параметр задаётся вызывающим, и
+        разойтись они могут именно здесь.
+        """
+        from services.quote_publisher import LocalQuotePublisher  # noqa: PLC0415
+
+        body = ("<TICKER>,<PER>,<DATE>,<TIME>,<OPEN>,<HIGH>,<LOW>,<CLOSE>,"
+                "<VOL>,<OPENINT>\r\n"
+                "ZZZ.US,D,20260814,000000,10,10.1,9.9,10.05,1000,0\r\n")
+        for label, run in (("cli", "cli"), ("bot", "bot")):
+            with self.subTest(writer=label):
+                root = self.root / f"new_{label}"
+                root.mkdir(parents=True)
+                db = root / "prices.sqlite"
+                self._seed(db)
+                before = sqlite3.connect(db).execute(
+                    "SELECT COUNT(*) FROM instruments").fetchone()[0]
+                if run == "cli":
+                    (root / "inbox").mkdir()
+                    (root / "inbox" / "20260814_d.txt").write_text(
+                        body, encoding="utf-8")
+                    conn = si.connect(db)
+                    si.apply_inbox(conn, root / "inbox", None, None,
+                                   min_us_rows=0)
+                    conn.close()
+                else:
+                    drop = root / "20260814_d.txt"
+                    drop.write_text(body, encoding="utf-8")
+                    with mock.patch.object(si, "MIN_US_ROWS", 0):
+                        qi.apply_daily(str(drop), actor="bot",
+                                       publisher=LocalQuotePublisher(root))
+                after = sqlite3.connect(db).execute(
+                    "SELECT COUNT(*) FROM instruments").fetchone()[0]
+                self.assertEqual(after, before,
+                                 f"{label}: дельта завела новую бумагу")
+
+
 class SnapshotCacheTest(unittest.TestCase):
     """§−105 · повторная команда не обязана снова тянуть базу по сети.
 
