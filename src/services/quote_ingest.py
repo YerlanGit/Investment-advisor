@@ -37,6 +37,7 @@ MP-08.5, покрыт тестами и **уже лежит в деплой-об
 
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 import tempfile
@@ -362,6 +363,71 @@ def _rollback_warning(conn: sqlite3.Connection,
 # Операции
 # ═════════════════════════════════════════════════════════════════════════════
 
+#: Сколько прошлых прогонов берётся за «норму» при сверке отказов.
+#: Пять — это рабочая неделя: меньше даёт шум одного плохого дня, больше
+#: затягивает в норму то, что уже перестало быть нормой.
+REJECTION_HISTORY_RUNS = env_int("INGEST_REJECTION_HISTORY", 5, lo=2, hi=60)
+
+#: Во сколько раз отказ должен превысить исторический максимум, чтобы стать
+#: тревогой.  Категория, которой РАНЬШЕ НЕ БЫЛО ВООБЩЕ, тревожна при любом
+#: ненулевом числе — там сравнивать не с чем.
+REJECTION_SPIKE_FACTOR = env_int("INGEST_REJECTION_SPIKE", 3, lo=2, hi=100)
+
+
+def _rejection_anomaly(conn: sqlite3.Connection,
+                       rejected: dict) -> list[str]:
+    """Сверить отказы ЭТОГО файла с недавними прогонами (`§−107`).
+
+    🔴 Повод — живой разбор 25.08. Дневной срез за 24.08 дал «чужая дата» 166
+    и «нет цены закрытия» 43, тогда как в ЧЕТЫРЁХ предыдущих прогонах таких
+    строк не было НИ ОДНОЙ, а «индекс/FX» вырос с ~57 до 154. Записалось 631
+    бара вместо привычных 800. Сводка всё это честно печатала — и всё равно
+    выглядела успешной: `✅ применён`. Чтобы понять, что копия файла битая,
+    оператору пришлось вручную поднять историю и сравнить пять прогонов.
+
+    Сравнивать было С ЧЕМ: `ingest_runs` лежит в той же базе и хранит разбивку
+    отказов JSON-ом. То есть факт был, а вывода из него никто не делал — тот же
+    класс, что «пустая коллекция ≠ всё хорошо» (`§−90` A-3).
+
+    Зовётся ДО `apply_batch`, поэтому текущий прогон в историю ещё не попал.
+    Любая ошибка чтения истории — молчание, а не отказ: сверка полезна, но
+    заливка от неё не зависит.
+    """
+    if not rejected:
+        return []
+    try:
+        rows = conn.execute(
+            "SELECT rejected FROM ingest_runs WHERE kind='apply' "
+            "ORDER BY id DESC LIMIT ?", (REJECTION_HISTORY_RUNS,)).fetchall()
+    except sqlite3.Error:
+        return []
+    history: list[dict] = []
+    for row in rows:
+        try:
+            parsed = json.loads(row["rejected"] or "{}")
+        except (TypeError, ValueError):
+            continue
+        if isinstance(parsed, dict):
+            history.append(parsed)
+    if len(history) < 2:            # одному прогону верить не за что
+        return []
+
+    out: list[str] = []
+    for rule, count in sorted(rejected.items(), key=lambda kv: -kv[1]):
+        seen = [int(h.get(rule, 0) or 0) for h in history]
+        peak = max(seen)
+        if peak == 0:
+            out.append(
+                f"⚠️ «{rule}»: {count} строк, а в предыдущих {len(history)} "
+                "прогонах таких не было НИ ОДНОЙ. Похоже, копия файла "
+                "неполная — перекачайте и пришлите заново (повтор безвреден).")
+        elif count >= peak * REJECTION_SPIKE_FACTOR:
+            out.append(
+                f"⚠️ «{rule}»: {count} строк против {peak} максимум за "
+                f"последние {len(history)} прогонов — рост в {count / peak:.1f}×.")
+    return out
+
+
 def _refuse(kind: str, name: str, reason: str, *,
             conflict: bool = False, warnings: Sequence[str] = ()) -> ApplyOutcome:
     return ApplyOutcome(ok=False, kind=kind, file_name=name, reason=reason,
@@ -412,6 +478,10 @@ def _apply(path, *, kind: str, actor: str, publisher: Optional[QuotePublisher],
 
             if batch.fatal:
                 return _refuse(kind, name, batch.fatal, warnings=warnings)
+
+            # §−107: сверка ДО записи — иначе текущий прогон попадёт в свою же
+            # «норму» и разбавит её.
+            warnings.extend(_rejection_anomaly(conn, batch.rejected))
 
             result = si.apply_batch(
                 conn, batch,
