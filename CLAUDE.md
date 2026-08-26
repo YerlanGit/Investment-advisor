@@ -15,13 +15,13 @@ GCP Cloud Run (long-polling) · Cloud Function (RAG-ингест) · ChromaDB ·
 ## Верификация (обязательна перед каждым пушем)
 
 ```bash
-PYTHONPATH=src python -m pytest tests/ -q          # → 1921 passed, 2 xfailed (+7 skipped без playwright)
+PYTHONPATH=src python -m pytest tests/ -q          # → 1935 passed, 2 xfailed (+7 skipped без playwright)
 ```
 
 - Префикс `PYTHONPATH=src` **ОБЯЗАТЕЛЕН** (`conftest.py`/`pyproject.toml` нет).
 - **Прогонов ДВА.** Второй — зеркало деплой-образа, без `design/`: `cp -r src tests
   SYSTEM_PROMPT.md requirements*.txt <tmp>/ && cd <tmp>`, тот же прогон → 1830 passed,
-  92 skipped, 2 xfailed. Зелёный GitHub CI НЕ означает, что деплой пройдёт: CI видит
+  105 skipped, 2 xfailed. Зелёный GitHub CI НЕ означает, что деплой пройдёт: CI видит
   полный чекаут, Cloud Build — только образ, и разница — ровно тесты, читающие
   `design/`, `docs/`, `CLAUDE.md`, `scripts/` и `cloud_function/`.
 - Правил `design/*.jsx` → **обязательно** `bash design/premium_v2/build.sh`.
@@ -192,7 +192,8 @@ payload (`pdf_payload.PAYLOAD_CONTRACT`) → design-data (`test_phase19_block_au
 **`docs/audit/AUDIT.md`** — НАВИГАТОР (доска задач · оценка · правила · индекс
 раундов · протокол обновления). Читается целиком, он маленький.
 Полные записи раундов — `docs/audit/rounds/` (файл по диапазону номеров).
-Ссылку вида `§−45` ищи так: `grep -n "^## −45\." docs/audit/rounds/*.md`.
+Ссылку вида `§−45` ищи так: `grep -n "^## −45\." docs/audit/rounds/*.md`
+(одна строка на раунд — `docs/audit/rounds/INDEX.md`).
 🔴 Нумерация раундов НЕ меняется: на неё ссылаются ~540 мест.
 Свежий сквозной аудит — `docs/audit/AUDIT_360_2026-08-17.md`
 (там же КАРТА ПРОИСХОЖДЕНИЯ ДАННЫХ: что снаружи, что считается). Предыдущий —

@@ -38,6 +38,20 @@ _CLAUDE_MD = _ROOT / "CLAUDE.md"
 _SCRIPTS = _ROOT / "scripts"
 _TEST_MAP = _ROOT / "tests" / "TEST_MAP.md"
 _AUDIT_MD = _ROOT / "docs" / "audit" / "AUDIT.md"
+#: §−108: индекс раундов переехал из `AUDIT.md §4` сюда — он занимал 23%
+#: навигатора, который читается ЦЕЛИКОМ в каждой сессии, будучи при этом
+#: данными для ПОИСКА. Гейт полноты переехал ВМЕСТЕ с данными: правило,
+#: оставленное без гейта, отрастает обратно (`§−54`, `§−91`).
+_ROUNDS_INDEX = _ROOT / "docs" / "audit" / "rounds" / "INDEX.md"
+
+
+def _indexed_rounds() -> set:
+    """Номера раундов, перечисленные в индексе. Нет файла — пустое множество."""
+    import re
+    if not _ROUNDS_INDEX.exists():
+        return set()
+    return set(re.findall(r"\|\s*`§−([\d.]+)`\s*\|",
+                          _ROUNDS_INDEX.read_text(encoding="utf-8")))
 
 # Пороги — не «красиво», а «читаемо глазами в точке правки».
 # Замер после Арх-1 (2026-08-04): 122 строки, максимум 115 символов.
@@ -170,11 +184,11 @@ class AuditJournalStaysNavigableTest(unittest.TestCase):
         for f in rounds_dir.glob("ROUNDS_*.md"):
             have |= set(re.findall(r"^## −([\d.]+)\.",
                                    f.read_text(encoding="utf-8"), re.M))
-        indexed = set(re.findall(r"\|\s*`§−([\d.]+)`\s*\|", self.text))
+        indexed = _indexed_rounds()
         missing = sorted(have - indexed, key=float, reverse=True)
         self.assertFalse(
             missing,
-            f"раунды есть в rounds/, но их нет в индексе AUDIT.md §4: {missing}. "
+            f"раунды есть в rounds/, но их нет в {_ROUNDS_INDEX.name}: {missing}. "
             "Ненайденный раунд — это висячая ссылка из кода (так §−76…§−89 "
             "прожили 14 раундов без секции).")
 
@@ -188,7 +202,7 @@ class AuditJournalStaysNavigableTest(unittest.TestCase):
         for f in rounds_dir.glob("ROUNDS_*.md"):
             have |= set(re.findall(r"^## −([\d.]+)\.",
                                    f.read_text(encoding="utf-8"), re.M))
-        indexed = set(re.findall(r"\|\s*`§−([\d.]+)`\s*\|", self.text))
+        indexed = _indexed_rounds()
         self.assertFalse(sorted(indexed - have, key=float),
                          "индекс ссылается на раунды, которых нет в rounds/")
 
