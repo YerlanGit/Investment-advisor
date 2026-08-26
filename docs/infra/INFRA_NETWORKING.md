@@ -55,6 +55,104 @@ gcloud run services update ramp-bot --region=$REGION \
   --vpc-connector=ramp-egress-conn --vpc-egress=all-traffic
 ```
 
+---
+
+## 1.1 Пошагово, с ожидаемым ответом (регламент оператора)
+
+> Дописано 26.08 перед реальным включением. Порядок и «что должно ответить»
+> важнее самих команд: половина ошибок предыдущих запусков — не в командах.
+
+### 🔴 Сначала цена, потом команды
+
+`ECONOMICS.md §2.2` считает этот блок в **≈ $50/мес** (коннектор ~$14, Cloud NAT
+~$32 + трафик, статический IP ~$3) при текущем фиксе ≈ $55–75. То есть
+включение почти УДВАИВАЕТ постоянные расходы, а платёжного шлюза в боте ещё нет
+(`tg_bot.py` отвечает «обратитесь к администратору»). Точка безубыточности
+уезжает с ≈14 платных токенов в месяц примерно к ≈25.
+
+Это не возражение против R-9 — блок по IP реален и сам не пройдёт. Это цифра,
+которую надо знать ДО, а не увидеть в счёте. Дешёвые альтернативы, если они
+доступны: попросить брокера внести адрес в вайтлист (бесплатно, но зависит от
+брокера) либо поднять один e2-micro как прокси (дешевле, но это ваш SPOF).
+
+### 🔴 Радиус изменения — весь исходящий трафик ГЛАВНОГО бота
+
+`--vpc-egress=all-traffic` уводит через NAT ВСЁ: брокера, Anthropic, FRED,
+Telegram. Ошибка в NAT гасит бота целиком, а не только котировки. Команда
+отката держите открытой в соседней вкладке:
+
+```bash
+gcloud run services update ramp-bot --region=us-central1 \
+  --clear-vpc-connector --update-env-vars=STATIC_EGRESS=off
+```
+
+### Шаги
+
+| # | Команда | Ожидается |
+|---|---|---|
+| 1 | `gcloud services enable vpcaccess.googleapis.com compute.googleapis.com` | тишина либо `Operation … finished successfully` |
+| 2 | `gcloud compute networks create ramp-egress-net --subnet-mode=custom` | `Created … networks/ramp-egress-net` |
+| 3 | `gcloud compute networks subnets create ramp-egress-subnet --network=ramp-egress-net --region=us-central1 --range=10.8.0.0/28` | `Created … subnetworks/ramp-egress-subnet` |
+| 4 | `gcloud compute networks vpc-access connectors create ramp-egress-conn --region=us-central1 --subnet=ramp-egress-subnet --min-instances=2 --max-instances=3 --machine-type=e2-micro` | **идёт 3–7 минут**, в конце `state: READY` |
+| 5 | `gcloud compute addresses create ramp-egress-ip --region=us-central1` | `Created … addresses/ramp-egress-ip` |
+| 6 | `gcloud compute routers create ramp-egress-router --network=ramp-egress-net --region=us-central1` | `Created … routers/ramp-egress-router` |
+| 7 | `gcloud compute routers nats create ramp-egress-nat --router=ramp-egress-router --region=us-central1 --nat-custom-subnet-ip-ranges=ramp-egress-subnet --nat-external-ip-pool=ramp-egress-ip` | `Updated … routers/ramp-egress-router` |
+| 8 | привязка (ниже) | новая ревизия, `STATIC_EGRESS=on` |
+
+🔴 **Шаг 4 не мгновенный.** Коннектор создаётся минутами; `state: CREATING` —
+норма, не ошибка. Дождитесь `READY`, иначе шаг 8 привяжет несуществующее.
+
+```bash
+gcloud compute networks vpc-access connectors describe ramp-egress-conn \
+  --region=us-central1 --format='value(state)'
+```
+
+**Шаг 8 — привязка И объявление одной командой:**
+
+```bash
+gcloud run services update ramp-bot --region=us-central1 \
+  --vpc-connector=ramp-egress-conn --vpc-egress=all-traffic \
+  --update-env-vars=STATIC_EGRESS=on
+```
+
+🔴 `--update-env-vars`, а НЕ `--set-env-vars`: второй заменяет ВЕСЬ набор и снёс
+бы `PREMIUM_REPORT_ENABLED`, `STOOQ_DB_PATH` и ещё 11 переменных. Эта грабля уже
+однажды выключила Premium V2 в проде.
+
+🔴 `STATIC_EGRESS=on` — не косметика, а ВТОРАЯ половина привязки. Без неё сервис
+получает статический IP и продолжает рапортовать обратное: диагностика отказа
+брокера печатает пользователю «работаю без статического исходящего IP».
+Скрипт `setup_static_egress.sh` делает обе половины сам; равенство двух дорог
+закреплено тестом `StaticEgressIsAnnouncedByBOTHPathsTest`.
+
+### Приёмка
+
+```bash
+echo -n "новый исходящий IP: "
+gcloud compute addresses describe ramp-egress-ip --region=us-central1 --format='value(address)'
+
+gcloud run services describe ramp-bot --region=us-central1 \
+  --format='value(spec.template.metadata.annotations)' | tr ',' '\n' | grep -i vpc
+
+gcloud run services describe ramp-bot --region=us-central1 --format=export \
+  | grep -A1 STATIC_EGRESS
+```
+
+Затем — **живой отчёт**: `/start` в боте. Приёмка это построенный отчёт, а не
+успешный `gcloud`. В логах не должно быть `Cloudflare WAF … 403`:
+
+```bash
+gcloud run services logs read ramp-bot --region=us-central1 --limit=50 \
+  | grep -i "cloudflare\|WAF" || echo "чисто"
+```
+
+### Чтобы деплой не сбросил привязку
+
+В Build Trigger задать подстановку **`_VPC_CONNECTOR=ramp-egress-conn`**.
+Без неё шаг `configure-egress` — no-op, и очередной деплой оставит сервис на
+общем пуле, а `STATIC_EGRESS` вернётся в `off` (его ставит шаг `deploy`).
+То есть без подстановки настройка живёт до первой сборки.
+
 **Проверка.** `/start` → отчёт формируется; в логах нет `Cloudflare WAF … 403`.
 Если WAF всё ещё челленджит новый IP — попросите брокера вайтлистнуть его, либо
 поднимите NAT в другом регионе/подсети.

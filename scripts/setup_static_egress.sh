@@ -91,10 +91,22 @@ if ! exists "gcloud compute routers nats describe $NAT --router=$ROUTER --region
 else warn "Cloud NAT $NAT уже есть"; fi
 
 # ── 5. Привязать коннектор к Cloud Run + весь egress через VPC ────────────────
+# 🔴 `STATIC_EGRESS=on` — не украшение, а ВТОРАЯ половина привязки.
+# Дефолт `off` ставит шаг `deploy` в `cloudbuild.yaml`; повышает его до `on`
+# шаг `configure-egress` — но ТОЛЬКО когда задан `_VPC_CONNECTOR`. Скрипт,
+# запущенный вручную, до этого шага не доходит, и без строки ниже сервис
+# получал бы статический IP, продолжая РАПОРТОВАТЬ обратное: диагностика
+# отказа брокера печатала бы пользователю «работаю без статического
+# исходящего IP» (`tg_bot._ramp_fallback_reason`, ветка `waf_block`).
+# Ложное обоснование опаснее отсутствующего — оно убеждает не проверять
+# (`§−64`, `§−97` D-5). Равенство со шагом сборки закреплено тестом.
+# `--update-env-vars`, а НЕ `--set-env-vars`: второй заменяет ВЕСЬ набор и
+# снёс бы `PREMIUM_REPORT_ENABLED`, `STOOQ_DB_PATH` и остальные 12 переменных.
 gcloud run services update "$SERVICE" \
   --region="$REGION" --project="$PROJECT_ID" \
-  --vpc-connector="$CONNECTOR" --vpc-egress=all-traffic --quiet
-info "Сервис $SERVICE переключён на статический egress"
+  --vpc-connector="$CONNECTOR" --vpc-egress=all-traffic \
+  --update-env-vars=STATIC_EGRESS=on --quiet
+info "Сервис $SERVICE переключён на статический egress (STATIC_EGRESS=on)"
 
 echo ""
 info "ГОТОВО.  Статический исходящий IP бота: ${GREEN}${STATIC_IP}${NC}"

@@ -42,28 +42,40 @@ def fetch_live_portfolio(api_key: str):
         return None
 
 
-# Запуск теста
-result = fetch_live_portfolio(API_KEY)
+# 🔴 Исполняемая часть ОБЯЗАНА жить под `__main__`.
+#
+# До 26.08 строка `result = fetch_live_portfolio(API_KEY)` стояла на уровне
+# модуля: любой импорт файла — включая сбор тестов голым `pytest` — стрелял
+# живым HTTPS-запросом к брокеру с подставным ключом `"ваш_api_key"`.
+#
+# `Dockerfile` копирует `src/` целиком, поэтому файл уезжает в ПРОД-ОБРАЗ, а
+# запросы уходили бы с боевого исходящего адреса — того самого, который
+# Cloudflare-WAF брокера блокирует (`R-9`). Проект платит за статический IP
+# ради обхода этого блока; слать с него мусор — работать против себя.
+#
+# Закреплено `tests/test_repo_hygiene.NoNetworkAtImportTest`.
+if __name__ == "__main__":
+    result = fetch_live_portfolio(API_KEY)
 
-if result:
-    if "error" in result:
-        print(f"API вернул ошибку: {result['error']}")
-    else:
-        res_data = result.get("result", result)
-        positions = res_data.get("pos", res_data.get("portfolio", []))
-
-        if not positions:
-            print("--- Внимание: Список позиций пуст ---")
-            print("Ответ сервера:", json.dumps(res_data, indent=2))
-            print(
-                "\nПроверьте: выбран ли правильный счет и есть ли на нем купленные активы?"
-            )
+    if result:
+        if "error" in result:
+            print(f"API вернул ошибку: {result['error']}")
         else:
-            df = pd.DataFrame(positions)
-            print("--- Обнаружены следующие колонки в API ---")
-            print(df.columns.tolist())
+            res_data = result.get("result", result)
+            positions = res_data.get("pos", res_data.get("portfolio", []))
 
-            # Автоматический маппинг: ищем подходящие колонки
-            # Обычно: 'i' или 't' - тикер, 'q' - количество, 'mkt_p' - цена
-            print("\n--- Первые 2 позиции для анализа ---")
-            print(df.head(2))
+            if not positions:
+                print("--- Внимание: Список позиций пуст ---")
+                print("Ответ сервера:", json.dumps(res_data, indent=2))
+                print(
+                    "\nПроверьте: выбран ли правильный счет и есть ли на нем купленные активы?"
+                )
+            else:
+                df = pd.DataFrame(positions)
+                print("--- Обнаружены следующие колонки в API ---")
+                print(df.columns.tolist())
+
+                # Автоматический маппинг: ищем подходящие колонки
+                # Обычно: 'i' или 't' - тикер, 'q' - количество, 'mkt_p' - цена
+                print("\n--- Первые 2 позиции для анализа ---")
+                print(df.head(2))

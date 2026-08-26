@@ -371,5 +371,124 @@ class TestsThatReadRepoFilesMustSkipInTheImageTest(unittest.TestCase):
             f"весь деплой (§−99):\n  " + "\n  ".join(offenders))
 
 
+#: 🔴 Сетевые вызовы, которые НЕ имеют права случиться на импорте модуля.
+_NET_ROOTS = {"requests", "httpx", "aiohttp", "urllib", "socket"}
+
+
+def _reaches_network(node: ast.AST) -> bool:
+    """Содержит ли поддерево обращение к сетевой библиотеке."""
+    for n in ast.walk(node):
+        if not isinstance(n, ast.Call):
+            continue
+        f = n.func
+        while isinstance(f, ast.Attribute):
+            f = f.value
+        if isinstance(f, ast.Name) and f.id in _NET_ROOTS:
+            return True
+    return False
+
+
+def _is_main_guard(stmt: ast.AST) -> bool:
+    """`if __name__ == "__main__":` — легитимная защита исполняемой части."""
+    if not isinstance(stmt, ast.If):
+        return False
+    return any(isinstance(n, ast.Name) and n.id == "__name__"
+               for n in ast.walk(stmt.test))
+
+
+class NoNetworkAtImportTest(unittest.TestCase):
+    """🔴 Импорт модуля из `src/` не имеет права ходить в сеть.
+
+    Найдено аудитом 26.08: `src/test_live_api.py` выполнял
+    `result = fetch_live_portfolio(API_KEY)` НА УРОВНЕ МОДУЛЯ — то есть любой
+    импорт файла стрелял живым HTTPS-запросом к `tradernet.kz`, с подставным
+    ключом `"ваш_api_key"`.
+
+    Почему это не мелочь именно здесь. `Dockerfile` копирует `src/` целиком,
+    значит файл уезжает в ПРОД-ОБРАЗ. Запросы с невалидным ключом уходили бы к
+    брокеру с боевого исходящего адреса — того самого, который Cloudflare-WAF
+    брокера и блокирует (`R-9`, `INFRA_NETWORKING §1`). Проект платит ≈$50/мес
+    за статический IP ради обхода этого блока; отправлять с него мусорный
+    трафик — работать против собственной задачи.
+
+    `cloudbuild.yaml` при этом ОБЪЯВЛЯЕТ сюиту сетевно-изолированной
+    («no live calls leave the builder»). Утверждение держалось на том, что
+    шаблон `test_phase*.py` этот файл не подхватывает — то есть на совпадении
+    имён, а не на гейте. Голый `pytest src/` подхватывает и падает на
+    `ProxyError` прямо при СБОРЕ тестов (проверено).
+
+    Гейт смотрит на верхний уровень модуля, пропуская `if __name__`: там
+    исполняемая часть законна.
+    """
+
+    def test_no_module_calls_the_network_while_being_imported(self) -> None:
+        src = _ROOT / "src"
+        if not src.is_dir():
+            self.skipTest("src/ отсутствует")
+        offenders: list[str] = []
+        for path in sorted(src.rglob("*.py")):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            net_fns = {n.name for n in tree.body
+                       if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+                       and _reaches_network(n)}
+            for stmt in tree.body:
+                if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                     ast.ClassDef)) or _is_main_guard(stmt):
+                    continue
+                direct = _reaches_network(stmt)
+                local = any(isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                            and n.func.id in net_fns for n in ast.walk(stmt))
+                if direct or local:
+                    offenders.append(
+                        f"{path.relative_to(_ROOT)}:{stmt.lineno}")
+        self.assertEqual(
+            offenders, [],
+            "модуль ходит в сеть на импорте — оберни исполняемую часть в "
+            f"`if __name__ == \"__main__\":`. Нарушители: {offenders}")
+
+    def test_the_detector_itself_catches_a_known_call(self) -> None:
+        """🔴 Контрольный опыт (`§−68`): «ноль нарушителей» обязан что-то значить.
+
+        Живьём детектор уже сработал — он и нашёл `test_live_api.py:46` до
+        починки. Но это доказательство исчезает вместе с дефектом, поэтому
+        здесь оно закреплено синтетикой: три образца, два из которых законны.
+        """
+        caught = ast.parse("import requests\nr = requests.post('http://x')\n")
+        indirect = ast.parse("import requests\n"
+                             "def go():\n    return requests.get('http://x')\n"
+                             "r = go()\n")
+        guarded = ast.parse("import requests\n"
+                            "def go():\n    return requests.get('http://x')\n"
+                            'if __name__ == "__main__":\n    go()\n')
+        inside = ast.parse("import requests\n"
+                           "def go():\n    return requests.get('http://x')\n")
+
+        def scan(tree):
+            net = {n.name for n in tree.body
+                   if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+                   and _reaches_network(n)}
+            out = []
+            for stmt in tree.body:
+                if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                     ast.ClassDef)) or _is_main_guard(stmt):
+                    continue
+                if _reaches_network(stmt) or any(
+                        isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                        and n.func.id in net for n in ast.walk(stmt)):
+                    out.append(stmt.lineno)
+            return out
+
+        self.assertTrue(scan(caught), "прямой сетевой вызов не пойман")
+        self.assertTrue(scan(indirect),
+                        "вызов через локальную функцию не пойман — а именно так "
+                        "и выглядел настоящий дефект")
+        self.assertEqual(scan(guarded), [],
+                         "`if __name__` — законная защита, гейт не имеет права "
+                         "на неё ругаться")
+        self.assertEqual(scan(inside), [],
+                         "сетевой вызов ВНУТРИ функции законен: он случится "
+                         "только когда функцию позовут")
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

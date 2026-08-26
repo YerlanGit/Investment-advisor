@@ -30,6 +30,7 @@
 from __future__ import annotations
 
 import ast
+import re
 import unittest
 from pathlib import Path
 
@@ -199,6 +200,63 @@ class ContractsLayerTest(unittest.TestCase):
 
     def test_keys_frozen_set_matches_annotations(self) -> None:
         self.assertEqual(set(RESULTS_KEYS), set(AnalyzeResults.__annotations__))
+
+
+class ConsumerListCountsOnlyLIVEModulesTest(unittest.TestCase):
+    """🔴 Контракт не имеет права числить МЁРТВЫЙ модуль среди потребителей.
+
+    Докстрока `AnalyzeResults` сама предсказала эту гниль: «список пришлось
+    править ОТДЕЛЬНЫМ раундом, потому что он устарел в момент того же коммита —
+    иллюстрация правила "замер без исполняемого гейта разъезжается"». Он
+    разъехался снова: аудит 26.08 нашёл `agent/advisor_bot` в списке из девяти
+    при НУЛЕ импортёров во всём репозитории.
+
+    Цена ошибки — не косметика. Список читают перед правкой `analyze_all`,
+    чтобы понять радиус изменения. Мёртвый модуль в нём завышает связность
+    контракта и заставляет закладываться на потребителя, которого нет.
+
+    Гейт узкий намеренно: он не пересчитывает ОБРАЩЕНИЯ к ключам (это тот
+    самый лукавый счётчик, от которого отказался `TEST_MAP`), а проверяет одно
+    проверяемое утверждение — каждый названный потребитель ЖИВ.
+    """
+
+    #: Точки входа: их не импортируют, их запускают.
+    _ENTRYPOINTS = {"tg_bot", "entrypoint", "ingest_bot", "ingest_entrypoint"}
+
+    def _listed(self) -> list[str]:
+        import re                                        # noqa: PLC0415
+
+        doc = AnalyzeResults.__doc__ or ""
+        head = doc.split("`total=True`")[0]
+        return [m.replace("/", ".") for m in
+                re.findall(r"`([\w/]+)`\s*\(\d+\)", head)]
+
+    def test_the_docstring_actually_lists_consumers(self) -> None:
+        """Гейт бесполезен, если список не распознан: пустой ⇒ нечего проверять."""
+        listed = self._listed()
+        self.assertGreaterEqual(len(listed), 5,
+                                f"список потребителей не разобран: {listed}")
+        self.assertIn("pdf_payload", listed)
+
+    def test_every_listed_consumer_is_reachable(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        src = root / "src"
+        if not src.is_dir():
+            self.skipTest("src/ отсутствует")
+        blob = "\n".join(f.read_text(encoding="utf-8")
+                         for f in src.rglob("*.py"))
+        dead = []
+        for mod in self._listed():
+            short = mod.split(".")[-1]
+            if short in self._ENTRYPOINTS:
+                continue
+            if not re.search(rf"^\s*(?:import|from)\s+[\w.]*\b{re.escape(short)}\b",
+                             blob, re.MULTILINE):
+                dead.append(mod)
+        self.assertEqual(
+            dead, [],
+            "контракт числит потребителями модули, которых никто не импортирует "
+            f"— радиус изменения `analyze_all` завышен: {dead}")
 
 
 if __name__ == "__main__":  # pragma: no cover

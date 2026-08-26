@@ -189,6 +189,80 @@ class BotThreadCapTest(unittest.TestCase):
         self.assertEqual(len(lines), 1)
 
 
+class StaticEgressIsAnnouncedByBOTHPathsTest(unittest.TestCase):
+    """🔴 R-9. Привязка коннектора и ОБЪЯВЛЕНИЕ о ней — одно действие, не два.
+
+    `STATIC_EGRESS` существует ради одной строки в сообщении пользователю:
+    когда брокер отбивает запрос по IP, бот обязан сказать, настроен ли
+    статический адрес. Дефолт `off` ставит шаг `deploy`, поднимает до `on` шаг
+    `configure-egress` — но ТОЛЬКО когда задан `_VPC_CONNECTOR`.
+
+    Дорог сюда ДВЕ: сборка и ручной запуск `scripts/setup_static_egress.sh`.
+    Первая редакция скрипта привязывала коннектор и переменную НЕ ТРОГАЛА.
+    Значит после ручного запуска сервис получал статический IP и продолжал
+    РАПОРТОВАТЬ обратное — «работаю без статического исходящего IP». Ложное
+    обоснование опаснее отсутствующего: оно убеждает не проверять (`§−64`,
+    `§−97` D-5), и владелец искал бы причину блока там, где её уже нет.
+
+    Гейт держит обе дороги на одном утверждении.
+    """
+
+    def setUp(self) -> None:
+        self.cb = _ROOT / "cloudbuild.yaml"
+        self.sh = _ROOT / "scripts" / "setup_static_egress.sh"
+        # Ни `cloudbuild.yaml`, ни `scripts/` в образ не копируются.
+        if not self.cb.exists() or not self.sh.exists():
+            self.skipTest("cloudbuild.yaml/scripts отсутствуют (деплой-образ)")
+        self.cb_text = self.cb.read_text(encoding="utf-8")
+        self.sh_text = self.sh.read_text(encoding="utf-8")
+
+    def _attach_line(self) -> str:
+        r"""Строка ВЫЗОВА `gcloud run services update` со склейкой продолжений.
+
+        Продолжения склеиваются до поиска: аргументы разнесены через `\`, и
+        построчный поиск проверял бы четверть команды.
+        """
+        joined = re.sub(r"\\\n\s*", " ", self.sh_text)
+        for line in joined.splitlines():
+            if "gcloud run services update" in line \
+                    and not line.lstrip().startswith("#"):
+                return line
+        self.fail("в скрипте нет привязки коннектора к Cloud Run")
+
+    def test_the_script_announces_what_it_just_enabled(self) -> None:
+        attach = self._attach_line()
+        self.assertIn("--vpc-connector=", attach, "скрипт не привязывает коннектор")
+        self.assertIn("STATIC_EGRESS=on", attach,
+                      "коннектор привязан, а бот об этом не узнает — "
+                      "диагностика будет врать пользователю")
+
+    def test_the_script_does_not_wipe_the_other_env_vars(self) -> None:
+        """🔴 `--set-env-vars` заменяет ВЕСЬ набор: 13 переменных бота исчезли бы.
+
+        Эта грабля уже однажды выключила Premium V2 в проде.
+        """
+        attach = self._attach_line()
+        self.assertIn("--update-env-vars=", attach)
+        self.assertNotIn("--set-env-vars=", attach)
+
+    def test_the_build_step_says_the_same_thing(self) -> None:
+        """Вторая дорога обязана объявлять ТО ЖЕ, иначе они разойдутся молча."""
+        self.assertIn("--update-env-vars=STATIC_EGRESS=on", self.cb_text)
+        self.assertIn("STATIC_EGRESS=off", self.cb_text,
+                      "дефолт не задан — неизвестное значение читается как off, "
+                      "но полагаться на умолчание здесь нельзя")
+
+    def test_the_bot_actually_reads_it_and_fails_closed(self) -> None:
+        """Переменная без потребителя — мёртвый ключ (`§−90` A-2, `§−91`).
+
+        И читается она fail-closed: всё, что не `on`, значит «не настроен».
+        Обратное умолчание молча выглядело бы как «всё в порядке».
+        """
+        bot = (_SRC / "tg_bot.py").read_text(encoding="utf-8")
+        self.assertIn('os.getenv("STATIC_EGRESS", "off")', bot)
+        self.assertIn('!= "on"', bot)
+
+
 class OutageMessageWiringTest(unittest.TestCase):
     """Сообщение собирается ИЗ причины, а не литералом в теле обработчика."""
 
