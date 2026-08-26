@@ -2487,7 +2487,13 @@ class SchedulerScriptMatchesTheRouteTest(unittest.TestCase):
 
         expr = re.search(r'sed "(s/\$\{HEADER_NAME\}=[^"]+)"', self.body)
         self.assertIsNotNone(expr, "выражение маскировки не найдено")
-        secret = "8ce299ff41c799946b9917f76232eb7e9fe476e668ca803fd92dddc4de5710d3"
+        # 🔴 Значение СИНТЕТИЧЕСКОЕ, и это часть урока раунда. Первая редакция
+        # взяла сюда НАСТОЯЩИЙ токен из утёкшего вывода — он к тому моменту был
+        # ротирован и мёртв, но попал в репозиторий и в историю git, где живёт
+        # вечно. Тест проверяет РЕГУЛЯРКУ, а ей всё равно, какие именно 64 hex
+        # она маскирует. Настоящий секрет не добавлял доказательности — только
+        # риск. Формат строки отказа ниже дословный, он и есть предмет проверки.
+        secret = "0" * 24 + "deadbeef" + "0" * 32
         leak = ("ERROR: (gcloud.scheduler.jobs.update.http) unrecognized "
                 f"arguments: --headers=x-ingest-task-token={secret} "
                 "(did you mean '--clear-headers'?)")

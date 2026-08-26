@@ -55,6 +55,23 @@ class RegistryIsTheSingleSourceTest(unittest.TestCase):
         for bank in ("JPMorgan", "Goldman Sachs", "Citi", "Jefferies", "Barclays"):
             self.assertIn(bank, BANK_ORDER)
 
+    def test_amundi_is_registered(self) -> None:
+        """🔴 `§−111`. Amundi формально не инвестбанк, и его легко «прибрать»
+        как чужеродную строку. Реестр здесь про ИЗДАТЕЛЯ ИССЛЕДОВАНИЯ.
+
+        Цена удаления измерена: до этой строки отчёт Amundi ингестился,
+        участвовал в поиске и влиял на выводы, а в блоке «ИСТОЧНИКИ» не
+        назывался — `_extract_bank` отдавал `Unknown`, а `_kb_banks` его
+        отбрасывала. Содержимое использовалось, авторство терялось.
+        """
+        from agent.rag_engine import BANK_ORDER, FinancialRAG
+        self.assertIn("Amundi", BANK_ORDER)
+        self.assertEqual(
+            FinancialRAG._extract_bank("amundi_outlook_2026.pdf", ""), "Amundi")
+        self.assertEqual(
+            FinancialRAG._extract_bank("note.pdf", "Amundi Institute · Views"),
+            "Amundi", "обложка тоже обязана называть эмитента")
+
     def test_no_consumer_keeps_its_own_issuer_list(self) -> None:
         """Литеральный перечень имён у потребителя = пятая копия. Потребители
         обязаны СТРОИТЬ свои regex из реестра."""
