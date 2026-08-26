@@ -2341,5 +2341,206 @@ class IsolationTest(unittest.TestCase):
             self.assertIn(name, test_layering._PROJECT_ROOTS)
 
 
+# ═════════════════════════════════════════════════════════════════════════════
+# IB-7 — расписание и радиус писателя (ручная обвязка GCP)
+# ═════════════════════════════════════════════════════════════════════════════
+
+_SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
+
+
+class SchedulerScriptMatchesTheRouteTest(unittest.TestCase):
+    """🔴 Скрипт и маршрут обязаны говорить об ОДНОМ адресе.
+
+    Маршрут `POST /tasks/check` готов с IB-7, но расписания не было — и
+    напоминание не приходило НИКОГДА. Скрипт эту дыру закрывает; теперь
+    появляется вторая, тише первой: путь и заголовок продублированы в bash, а
+    дубль расходится молча. Расхождение здесь не даёт ни ошибки, ни симптома —
+    планировщик получает 200 «OK» с пробы `GET /`, задание зелёное, а проверка
+    не выполняется. Тот же класс, что `§−100`: оба конца живы, кольцо разорвано.
+    """
+
+    def setUp(self) -> None:
+        path = _SCRIPTS / "setup_ingest_scheduler.sh"
+        # `scripts/` в образ не копируется — см. шапку `test_repo_hygiene`.
+        if not path.is_file():
+            self.skipTest("scripts/ отсутствует (деплой-гейт)")
+        self.body = path.read_text(encoding="utf-8")
+        import ingest_entrypoint                          # noqa: PLC0415
+        self.entry = ingest_entrypoint
+
+    def _assignment(self, name: str) -> str:
+        """Значение bash-присваивания `NAME=...` — РАБОЧАЯ строка, а не файл.
+
+        🔴 Проверка «путь встречается где-то в скрипте» была слабой, и мутация
+        это доказала: `/tasks/check` стоит в скрипте ТРИЖДЫ — в комментарии, в
+        тексте отказа и в самом URI. Подмена в URI оставляла две других копии
+        на месте, тест не замечал ничего, а задание стучалось бы по чужому
+        адресу. Пробу `GET /` сервис отдаёт 200 на ЛЮБОЙ путь, кроме своего —
+        значит задание было бы вечно-зелёным, а проверка не выполнялась бы.
+        """
+        match = re.search(rf"^{name}=(.+)$", self.body, re.MULTILINE)
+        self.assertIsNotNone(match, f"присваивание {name} не найдено")
+        return match.group(1)
+
+    def test_the_job_targets_the_path_the_service_actually_serves(self) -> None:
+        self.assertIn(self.entry.TASK_PATH, self._assignment("TARGET_URI"),
+                      "скрипт стучится не туда, куда слушает сервис")
+
+    def test_the_header_name_is_the_one_the_route_checks(self) -> None:
+        """Заголовок с опечаткой = 401 на каждом запуске, и молча."""
+        self.assertIn(self.entry.TASK_TOKEN_HEADER,
+                      self._assignment("HEADER_NAME"))
+
+    def test_the_job_is_built_from_the_pinned_variables(self) -> None:
+        """🔴 Пина переменной мало: аргумент обязан брать ИМЕННО её.
+
+        Вторая мутация показала дыру в первой редакции: `--uri=` можно вписать
+        мимо `TARGET_URI`, и тогда пин сторожит переменную, которой никто не
+        пользуется. Гейт, охраняющий неиспользуемое значение, зелен всегда.
+        """
+        self.assertIn('--uri="$TARGET_URI"', self.body,
+                      "адрес задания собран мимо проверяемой переменной")
+        self.assertIn('--headers="${HEADER_NAME}=', self.body,
+                      "заголовок собран мимо проверяемой переменной")
+
+    def test_the_job_uses_POST(self) -> None:
+        """`_handle_task` отвечает 405 на всё, кроме POST."""
+        self.assertIn("--http-method=POST", self.body)
+
+    def test_the_call_is_authenticated(self) -> None:
+        """Сервис задеплоен `--no-allow-unauthenticated`: без OIDC — 403."""
+        self.assertIn("--oidc-service-account-email", self.body)
+        self.assertIn("--oidc-token-audience", self.body)
+
+    def test_the_secret_is_read_from_secret_manager_not_hardcoded(self) -> None:
+        self.assertIn("gcloud secrets versions access", self.body)
+
+    def test_the_secret_is_never_printed(self) -> None:
+        """🔴 Значение секрета не имеет права попасть в вывод скрипта.
+
+        Оператор гоняет его в Cloud Shell, а вывод уходит в историю сессии и в
+        скриншоты. Печатать разрешено ИМЯ секрета, но не значение.
+        """
+        for line in self.body.splitlines():
+            stripped = line.strip()
+            if re.match(r"^(echo|info|warn|die)\b", stripped):
+                self.assertNotIn(
+                    "TASK_TOKEN", stripped,
+                    f"значение секрета уходит в вывод: {stripped[:70]}")
+
+    def test_the_default_schedule_runs_on_weekends_too(self) -> None:
+        """🔴 Порог свежести — КАЛЕНДАРНЫЙ, значит выходные его тоже съедают.
+
+        `stooq_store.market_staleness_days` считает в календарных днях от
+        `today`, а не в торговых сессиях. Расписание «по будням» отдало бы
+        двое суток запаса как раз в тот промежуток, когда файл забывают чаще
+        всего — в пятницу вечером.
+        """
+        match = re.search(r'SCHEDULE="\$\{SCHEDULE:-([^}]+)\}"', self.body)
+        self.assertIsNotNone(match, "дефолт расписания не найден")
+        fields = match.group(1).split()
+        self.assertEqual(len(fields), 5, "расписание не пятипольное")
+        self.assertEqual(fields[4], "*",
+                         "день недели ограничен — выходные останутся без проверки")
+
+
+class IamVerifierCatchesAWideRadiusTest(unittest.TestCase):
+    """🔴 Инструмент проверки сам обязан быть проверен (`§−68`).
+
+    `verify_ingest_iam.sh` — единственный способ узнать, стоит ли условие IAM
+    на префиксе `stooq/`: репозиторий это проверить не может, шаг деплоя лишь
+    ПЕЧАТАЕТ команду. Если сам скрипт зелёный всегда, он не компенсирующий
+    контроль, а его имитация. Поэтому здесь пять политик и ожидаемый вердикт
+    по каждой — включая ту, которую легче всего проглядеть: доступ ЕСТЬ,
+    условия НЕТ, бот при этом работает штатно.
+    """
+
+    _SA = "ramp-ingest@test-project.iam.gserviceaccount.com"
+    _MEMBER = f"serviceAccount:{_SA}"
+    _NARROW = ("resource.name.startsWith('projects/_/buckets/"
+               "ramp-bot-state/objects/stooq/')")
+
+    def setUp(self) -> None:
+        self.script = _SCRIPTS / "verify_ingest_iam.sh"
+        if not self.script.is_file():
+            self.skipTest("scripts/ отсутствует (деплой-гейт)")
+        if shutil.which("bash") is None:
+            self.skipTest("bash недоступен")
+        self.tmp = tempfile.TemporaryDirectory(prefix="ombri-iam-")
+        self.root = Path(self.tmp.name)
+        stub = self.root / "bin"
+        stub.mkdir()
+        # Подставной `gcloud`: политики приезжают из файлов, названных в
+        # окружении. Ходить в GCP тест не имеет права.
+        (stub / "gcloud").write_text(
+            "#!/usr/bin/env bash\n"
+            'case "$*" in\n'
+            '  *"config get-value project"*) echo "test-project" ;;\n'
+            '  *"storage buckets get-iam-policy"*) cat "$FAKE_BUCKET" ;;\n'
+            '  *"projects get-iam-policy"*) cat "$FAKE_PROJECT" ;;\n'
+            '  *) echo "{}" ;;\n'
+            "esac\n", encoding="utf-8")
+        (stub / "gcloud").chmod(0o755)
+        self.stub = stub
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _policy(self, name: str, bindings: list) -> str:
+        import json                                       # noqa: PLC0415
+
+        path = self.root / f"{name}.json"
+        path.write_text(json.dumps({"bindings": bindings}), encoding="utf-8")
+        return str(path)
+
+    def _run(self, bucket: list, project: list):
+        import subprocess                                 # noqa: PLC0415
+
+        env = dict(os.environ)
+        env["PATH"] = f"{self.stub}:{env.get('PATH', '')}"
+        env["FAKE_BUCKET"] = self._policy("bucket", bucket)
+        env["FAKE_PROJECT"] = self._policy("project", project)
+        return subprocess.run(["bash", str(self.script)], env=env,
+                              capture_output=True, text=True, timeout=120)
+
+    def test_a_narrow_condition_passes(self) -> None:
+        out = self._run([{"role": "roles/storage.objectAdmin",
+                          "members": [self._MEMBER],
+                          "condition": {"title": "stooq-only",
+                                        "expression": self._NARROW}}], [])
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+
+    def test_write_access_WITHOUT_a_condition_is_caught(self) -> None:
+        """Самый тихий случай: бот работает, симптома нет, радиус — весь бакет."""
+        out = self._run([{"role": "roles/storage.objectAdmin",
+                          "members": [self._MEMBER]}], [])
+        self.assertEqual(out.returncode, 1, "доступ без условия признан узким")
+        self.assertIn("БЕЗ УСЛОВИЯ", out.stdout)
+
+    def test_a_condition_naming_the_wrong_bucket_is_caught(self) -> None:
+        """Опечатка copy-paste: префикс верный, бакет чужой — не сужает ничего."""
+        wrong = self._NARROW.replace("ramp-bot-state", "ramp-bot-quotes")
+        out = self._run([{"role": "roles/storage.objectAdmin",
+                          "members": [self._MEMBER],
+                          "condition": {"title": "oops", "expression": wrong}}], [])
+        self.assertEqual(out.returncode, 1, "условие на чужой бакет принято")
+
+    def test_a_project_level_grant_overrides_the_bucket_condition(self) -> None:
+        """🔴 Проверка одного бакета этого НЕ ВИДИТ — потому и читаются обе политики."""
+        out = self._run(
+            [{"role": "roles/storage.objectAdmin", "members": [self._MEMBER],
+              "condition": {"title": "stooq-only", "expression": self._NARROW}}],
+            [{"role": "roles/storage.admin", "members": [self._MEMBER]}])
+        self.assertEqual(out.returncode, 1, "грант на проекте пропущен")
+        self.assertIn("ПРОЕКТА", out.stdout)
+
+    def test_no_write_access_at_all_is_a_failure_not_a_success(self) -> None:
+        """«Прав нет» — это неработающий загрузчик, а не безопасность."""
+        out = self._run([{"role": "roles/storage.objectViewer",
+                          "members": [self._MEMBER]}], [])
+        self.assertEqual(out.returncode, 1)
+        self.assertIn("НЕТ прав", out.stdout)
+
+
 if __name__ == "__main__":                               # pragma: no cover
     unittest.main()
