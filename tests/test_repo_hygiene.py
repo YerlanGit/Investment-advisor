@@ -490,5 +490,112 @@ class NoNetworkAtImportTest(unittest.TestCase):
                          "только когда функцию позовут")
 
 
+#: Имена, которые объявляют СЕКРЕТ, а не вычисленный эталон.
+_SECRET_NAMES = ("secret", "token", "password", "passwd", "apikey",
+                 "api_key", "private_key", "credential")
+
+
+def _looks_like_a_pasted_secret(value: str) -> bool:
+    """Длинная hex-строка — признак ВСТАВЛЕННОГО значения, а не вычисленного."""
+    v = value.strip()
+    return len(v) >= 32 and all(c in "0123456789abcdefABCDEF" for c in v)
+
+
+class NoRealSecretsInTestsTest(unittest.TestCase):
+    """🔴 «Секрет не печатается» и «секрет не попадает в репозиторий» — РАЗНЫЕ
+    утверждения, и `§−110` закрыл гейтом только первое.
+
+    В том же раунде тест маскировки взял образцом НАСТОЯЩИЙ токен из утёкшего
+    вывода gcloud. К моменту коммита он был ротирован и мёртв, но попал в
+    историю git, где живёт вечно и откуда его не убрать, не переписав общую
+    ветку. Тест проверял РЕГУЛЯРКУ — ей безразлично, какие именно 64 hex она
+    маскирует, — то есть настоящий секрет не добавлял доказательности, только
+    риск.
+
+    Гейт узкий и потому без ложных срабатываний: он ловит не «длинный hex», а
+    его ПРИСВАИВАНИЕ переменной с секретным именем. Вычисленные эталоны хешей
+    (`expected = "cb50fa13…"` в `test_freedom_auth`) выводятся из видимых рядом
+    входов и секретами не являются — гейт их не трогает.
+
+    Обходится осознанно: соберите значение выражением
+    (`"0" * 24 + "deadbeef" + …`), и по нему сразу видно, что оно синтетическое.
+    """
+
+    def _offenders(self, root: Path) -> list[str]:
+        out: list[str] = []
+        for path in sorted(root.rglob("*.py")):
+            try:
+                tree = ast.parse(path.read_text(encoding="utf-8"))
+            except SyntaxError:                          # pragma: no cover
+                continue
+            for node in ast.walk(tree):
+                targets = []
+                if isinstance(node, ast.Assign):
+                    targets = node.targets
+                elif isinstance(node, ast.AnnAssign):
+                    targets = [node.target]
+                else:
+                    continue
+                names = [t.id.lower() for t in targets if isinstance(t, ast.Name)]
+                if not any(k in n for n in names for k in _SECRET_NAMES):
+                    continue
+                v = node.value
+                if isinstance(v, ast.Constant) and isinstance(v.value, str) \
+                        and _looks_like_a_pasted_secret(v.value):
+                    try:
+                        where = path.relative_to(_ROOT)
+                    except ValueError:       # синтетика контрольного опыта
+                        where = path
+                    out.append(f"{where}:{node.lineno}")
+        return out
+
+    def test_no_secret_shaped_literal_is_committed(self) -> None:
+        found: list[str] = []
+        for name in ("tests", "src", "scripts", "cloud_function"):
+            root = _ROOT / name
+            if root.is_dir():
+                found += self._offenders(root)
+        self.assertEqual(
+            found, [],
+            "в репозиторий закоммичено значение, похожее на секрет — замените "
+            f"синтетическим, собранным выражением: {found}")
+
+    def test_the_detector_itself_catches_a_pasted_secret(self) -> None:
+        """🔴 Контрольный опыт: «ноль нарушителей» обязан что-то значить.
+
+        Первая проверка этого класса была `grep` по длинным hex — она нашла
+        сначала `node_modules`, а `head` срезал настоящую находку. Проверка,
+        чей результат зависит от порядка строк, не проверка.
+        """
+        import tempfile                                  # noqa: PLC0415
+
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            (d / "bad.py").write_text(
+                'secret = "8ce299ff41c799946b9917f76232eb7e9fe476e6"\n',
+                encoding="utf-8")
+            (d / "also_bad.py").write_text(
+                'API_TOKEN = "cb50fa1321a1574c9564e4441a00429171567b3c"\n',
+                encoding="utf-8")
+            (d / "ok_expectation.py").write_text(
+                'expected = "cb50fa1321a1574c9564e4441a00429171567b3c"\n',
+                encoding="utf-8")
+            (d / "ok_synthetic.py").write_text(
+                'secret = "0" * 24 + "deadbeef"\n', encoding="utf-8")
+            (d / "ok_short.py").write_text(
+                'token = "abc123"\n', encoding="utf-8")
+
+            found = self._offenders(d)
+            names = sorted(f.rsplit("/", 1)[-1].split(":")[0] for f in found)
+            self.assertIn("bad.py", names, "прямой секрет не пойман")
+            self.assertIn("also_bad.py", names, "секрет под именем TOKEN не пойман")
+            self.assertNotIn("ok_expectation.py", names,
+                             "вычисленный эталон хеша — не секрет, гейт не имеет "
+                             "права на него ругаться")
+            self.assertNotIn("ok_synthetic.py", names,
+                             "значение, собранное выражением, заведомо синтетическое")
+            self.assertNotIn("ok_short.py", names, "короткая строка — не секрет")
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
