@@ -23,6 +23,44 @@
 
 ---
 
+## 0.5 Откуда это запускать
+
+🔴 **Скрипты живут в РЕПОЗИТОРИИ, а Cloud Shell стартует в пустом `~`.**
+Строка `./scripts/verify_ingest_iam.sh` без этого уточнения даёт
+`No such file or directory` — и это не ошибка оператора, а недосказанность
+инструкции (найдено живым запуском 26.08).
+
+**Путь А — с репозиторием** (нужен, если будете гонять скрипты повторно):
+
+```bash
+cd ~ && git clone https://github.com/YerlanGit/Investment-advisor.git
+cd Investment-advisor && git checkout claude/comprehensive-project-audit-a44y73
+chmod +x scripts/verify_ingest_iam.sh scripts/setup_ingest_scheduler.sh
+./scripts/verify_ingest_iam.sh
+```
+
+**Путь Б — без репозитория.** Обе операции одноразовые, поэтому ручные
+последовательности из §2.3 и §3.2 самодостаточны: их можно вставить в Cloud
+Shell как есть. Для проверки IAM это не «упрощённый вариант» — та же логика,
+включая чтение политики ПРОЕКТА.
+
+**Что сначала.** Узнайте, как сервис называется и под кем бежит — остальное
+из этого выводится:
+
+```bash
+gcloud run services list --format='table(metadata.name,region)'
+gcloud run services describe ramp-ingest-bot --region=us-central1 \
+  --format='value(spec.template.spec.serviceAccountName)'
+```
+
+🔴 Личность писателя **спрашивается у сервиса**, а не собирается из имени.
+Угаданное имя, разошедшееся с реальным, даёт вердикт «прав нет вовсе»: он
+fail-closed, но НЕ ТОТ — оператор пойдёт выдавать права, которые в порядке, а
+настоящий радиус останется непроверенным. `verify_ingest_iam.sh` спрашивает
+сам; в ручном варианте подставьте вывод команды выше.
+
+---
+
 ## 1. Что уже сделано и трогать не нужно
 
 Заведено владельцем 23.08 (`§−100`), подтверждено живым прогоном 25–26.08 (`§−103`…`§−107`):
@@ -78,6 +116,35 @@ chmod +x scripts/setup_ingest_scheduler.sh
 
 ### 2.3 Как завести — руками, если скрипт запускать не хотите
 
+🔴 **Блок ниже выполняется ЦЕЛИКОМ, а не по одной команде.** Переменные
+(`SCHEDULER_SA`, `SERVICE_URL`) объявляются здесь же и в следующей команде уже
+нужны. Живой прогон 26.08: оператор выполнил только `service-accounts create`,
+переменная осталась пустой, и следующий шаг отказал
+`INVALID_ARGUMENT: Invalid service account ()` — пустые скобки и есть подпись
+этого случая. Первую строку той ошибки (`For a binding with condition…`)
+читать не надо, она generic-подсказка gcloud и к делу не относится.
+
+Если выполняете по шагам — сначала объявите и ПРОВЕРЬТЕ переменные:
+
+```bash
+PROJECT_ID=$(gcloud config get-value project)
+PROJECT_NUMBER=$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')
+REGION=us-central1
+INGEST_SERVICE=ramp-ingest-bot
+SCHEDULER_SA="ramp-scheduler@${PROJECT_ID}.iam.gserviceaccount.com"
+SCHEDULER_AGENT="service-${PROJECT_NUMBER}@gcp-sa-cloudscheduler.iam.gserviceaccount.com"
+SERVICE_URL=$(gcloud run services describe "$INGEST_SERVICE" --region="$REGION" \
+  --format='value(status.url)')
+
+for v in PROJECT_ID PROJECT_NUMBER REGION INGEST_SERVICE \
+         SCHEDULER_SA SCHEDULER_AGENT SERVICE_URL; do
+  printf '%-17s = %s\n' "$v" "${!v}"
+  [ -n "${!v}" ] || echo "   🔴 ПУСТО — дальше не идите"
+done
+```
+
+Ни одной строки «ПУСТО» — можно продолжать.
+
 ```bash
 PROJECT_ID=$(gcloud config get-value project)
 PROJECT_NUMBER=$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')
@@ -117,6 +184,39 @@ gcloud scheduler jobs create http ramp-ingest-check \
   --attempt-deadline=600s --max-retry-attempts=1
 ```
 
+**Если gcloud спросит про условие** на шаге 3 (`Condition … [1] None …`) —
+выбирайте `None`. Право «постучаться в сервис» сужать нечем, а условие здесь
+только сломает вызов.
+
+### 2.3а 🔴 Проверьте маршрут ДО того, как заведёте расписание
+
+Смысл порядка: если маршрут отвечает правильно руками, расписание — уже просто
+будильник. Заведёте задание первым — отлаживать придётся через логи
+планировщика, где не видно тела ответа.
+
+```bash
+TASK_TOKEN=$(gcloud secrets versions access latest --secret=INGEST_TASK_TOKEN)
+curl -s -w '\nHTTP %{http_code}\n' -X POST "${SERVICE_URL}/tasks/check" \
+  -H "Authorization: Bearer $(gcloud auth print-identity-token)" \
+  -H "x-ingest-task-token: ${TASK_TOKEN}"
+```
+
+Ответ маршрута — это ДИАГНОЗ, а не «ок/не ок»:
+
+| Ответ | Что значит |
+|---|---|
+| `тихо` · 200 | ✅ вся цепочка жива, базе нечего сказать (наблюдалось 26.08) |
+| `отправлено N` · 200 | ✅ жива, и вам пришло сообщение: база близка к порогу |
+| `неверный секрет` · 401 | секрет в контейнере ≠ секрет в Secret Manager → пересоберите сервис |
+| `INGEST_TASK_TOKEN не задан…` · 503 | секрет не доехал в контейнер (деплой без `--set-secrets`) |
+| `только POST` · 405 | попали в маршрут, но методом GET |
+| `OK` · 200 | 🔴 попали НЕ ТУДА: это проба `GET /`, она отвечает `OK` на любой чужой путь |
+| `бот ещё не запущен` · 200 | контейнер поднимается, повторите через полминуты |
+| `403` от Cloud Run | вашему аккаунту не хватает `run.invoker` на сервисе |
+
+Строка `OK` — самая коварная: она выглядит успехом. Ровно её и сторожит тест
+`SchedulerScriptMatchesTheRouteTest`.
+
 🔴 **Путь `/tasks/check` и заголовок `x-ingest-task-token` — не украшение.**
 Оба закреплены тестом `SchedulerScriptMatchesTheRouteTest` против
 `ingest_entrypoint.TASK_PATH` / `TASK_TOKEN_HEADER`. Ошибётесь в пути — сервис
@@ -141,11 +241,114 @@ gcloud scheduler jobs create http ramp-ingest-check \
 | `MAX_RETRIES=1` | ретрай после уже доставленного сообщения = дубль на телефоне. Пропущенная проверка стоит ноль: следующая придёт завтра, запас — 3 дня |
 | Пока `_BOT is None` (первые секунды старта) проверка вернёт «бот ещё не запущен» и промолчит | окно измеряется секундами, а `--min-instances=1` держит контейнер живым |
 
+### 2.5а Что НЕ является ошибкой, и чего в выводе не показывать
+
+Оба пункта найдены живым прогоном 26.08.
+
+🔴 **`status: code: -1` — это НЕ отказ.** Он присутствует уже в ответе на
+`jobs create`, когда задание не выполнялось ни разу. Значит `-1` означает
+«завершённой попытки ещё не записано», а не «попытка провалилась». Признак,
+по которому это видно, — отсутствие `lastAttemptTime`: `--format=yaml(...)`
+печатает только существующие поля. Не чините то, что не сломано.
+
+🔴 **`jobs create` и `jobs describe` печатают заголовок с секретом ОТКРЫТЫМ.**
+Это прямое следствие того, что Cloud Scheduler хранит заголовки в конфиге
+задания (см. 2.5). Вывод этих команд нельзя вставлять в переписку, тикеты и
+скриншоты целиком — берите только `state`, `lastAttemptTime`, `status`.
+Инструкция называла хранение в двух местах, но не называла это следствие, и на
+нём обожглись: секрет ушёл в переписку и потребовал ротации (§2.5б).
+
+### 2.5б Ротация секрета маршрута
+
+```bash
+openssl rand -hex 32 | gcloud secrets versions add INGEST_TASK_TOKEN --data-file=-
+VER=$(gcloud secrets versions list INGEST_TASK_TOKEN --limit=1 --format='value(name)')
+
+gcloud run services update ramp-ingest-bot --region=us-central1 \
+  --update-secrets=INGEST_TASK_TOKEN=INGEST_TASK_TOKEN:${VER}
+
+TASK_TOKEN=$(gcloud secrets versions access latest --secret=INGEST_TASK_TOKEN)
+gcloud scheduler jobs update http ramp-ingest-check --location=us-central1 \
+  --update-headers="x-ingest-task-token=${TASK_TOKEN}" 2>&1 \
+  | sed "s/x-ingest-task-token=[^ ,)]*/x-ingest-task-token=***/g"
+```
+
+🔴 **`--update-headers`, а НЕ `--headers`.** Флаг у `create` и `update` РАЗНЫЙ:
+`jobs update http` не знает `--headers` и отвечает `unrecognized arguments`,
+**печатая нераспознанный аргумент целиком** — вместе с токеном. То есть
+неверный флаг не просто ломает обновление, он РОНЯЕТ СЕКРЕТ В ВЫВОД.
+Обожглись живьём 26.08 дважды подряд: сначала на флаге, потом на утечке из-за
+него.
+
+🔴 Отсюда и `| sed`: правило «не печатать секрет» недостаточно, потому что
+печатает не ваша команда, а СООБЩЕНИЕ ОБ ОШИБКЕ. Любой вызов, несущий токен в
+аргументах, гоните через маскировку. `scripts/setup_ingest_scheduler.sh`
+делает это сам (обёртка `_masked`), и три гейта не дают вернуть ни флаг, ни
+обход маскировки.
+
+🔴 **`--update-secrets`, а НЕ `--set-secrets`.** Второй заменяет ВЕСЬ набор
+секретов, а у сервиса есть ещё `OMBRI_INGEST_BOT_TOKEN` — потеряете токен бота,
+и загрузчик перестанет отвечать в Telegram. Та же грабля, что однажды выключила
+Premium V2 в проде.
+
+🔴 **У секрета ТРИ держателя, а не два.** Secret Manager, контейнер сервиса и
+**конфиг задания планировщика**. Ротация обязана обновить все три, и третий
+забывается легче всего: он не участвует ни в одной ручной проверке.
+
+**Проверка `curl` к третьему держателю СЛЕПА ПО ПОСТРОЕНИЮ.** Она ходит своим
+токеном и о том, что лежит в задании, не знает ничего. Живой прогон 26.08:
+`curl` дал ожидаемые «старый 401 / новый 200», а планировщик после этого
+четырежды получил **401** — задание продолжало слать ДОРОТАЦИОННЫЙ токен.
+Проверка, которая не может дать отрицательный ответ на целый класс дефекта, —
+не проверка (тот же разбор, что `§−97` E-6 и `§−102`).
+
+Поэтому проверяются ТРИ конца:
+
+| Что | Чем | Ожидается |
+|---|---|---|
+| старый токен мёртв | `curl` со старым значением | `неверный секрет` · **401** |
+| контейнер знает новый | `curl` с новым значением | `тихо` · **200** |
+| **задание знает новый** | сверка хэшей (ниже) | строки совпали |
+
+```bash
+echo -n "в задании: "
+gcloud scheduler jobs describe ramp-ingest-check --location=us-central1 --format=json \
+  | python3 -c "import json,sys,hashlib;h=json.load(sys.stdin)['httpTarget']['headers'].get('x-ingest-task-token','');print(hashlib.sha256(h.encode()).hexdigest()[:16])"
+echo -n "в секрете: "
+gcloud secrets versions access latest --secret=INGEST_TASK_TOKEN \
+  | python3 -c "import sys,hashlib;print(hashlib.sha256(sys.stdin.read().strip().encode()).hexdigest()[:16])"
+```
+
+Сравниваются ХЭШИ, а не значения: вывод этой команды безопасно показывать.
+
+🔴 **Окончательный критерий всё равно один — §2.6:** запрос в логах сервиса со
+статусом **200** и `User-Agent: Google-Cloud-Scheduler`. Он покрывает все три
+конца сразу, потому что проходит ровно тем путём, которым ходит расписание.
+`401` там означает «секрет разошёлся» (запрос дошёл до приложения), `403` —
+«не пустили в сервис» (OIDC или `run.invoker`). Разница в коде и есть диагноз.
+
 ### 2.6 Проверка
 
 ```bash
 gcloud scheduler jobs run ramp-ingest-check --location=us-central1
-gcloud run services logs read ramp-ingest-bot --region=us-central1 --limit=20
+sleep 90
+gcloud logging read \
+  'resource.type="cloud_run_revision" AND resource.labels.service_name="ramp-ingest-bot" AND httpRequest.requestUrl:"tasks/check"' \
+  --limit=10 --freshness=2h \
+  --format='value(timestamp,httpRequest.status,httpRequest.userAgent)'
+```
+
+🔴 **Приёмка — это `User-Agent: Google-Cloud-Scheduler` со статусом 200.**
+Ручной `curl` из §2.3а доказывает исправность МАРШРУТА, но ничего не говорит о
+звене «планировщик → сервис»: там свои OIDC, аудитория и права. Отличить одно
+от другого можно только по User-Agent, поэтому проверять надо именно его, а не
+факт «в логах что-то есть».
+
+Логи самого бота — второй, независимый конец той же проверки:
+
+```bash
+gcloud run services logs read ramp-ingest-bot --region=us-central1 --limit=30 \
+  | grep -i "плановая проверка"
 ```
 
 🔴 **Успех при здоровой базе — это МОЛЧАНИЕ в Telegram.** Что проверка дошла,
@@ -199,6 +402,50 @@ chmod +x scripts/verify_ingest_iam.sh
 Все четыре сценария плюс здоровый закреплены тестом
 `IamVerifierCatchesAWideRadiusTest` — на подставном `gcloud`, без похода в GCP.
 Скрипт, который зелен всегда, был бы имитацией контроля, а не контролем.
+
+### 3.2а Та же проверка без репозитория
+
+Вставляется в Cloud Shell целиком. Логика та же, включая политику ПРОЕКТА.
+
+```bash
+BUCKET=ramp-bot-state; PREFIX=stooq/
+INGEST_SERVICE=ramp-ingest-bot; REGION=us-central1
+PROJECT_ID=$(gcloud config get-value project)
+INGEST_SA=$(gcloud run services describe "$INGEST_SERVICE" --region="$REGION" \
+  --format='value(spec.template.spec.serviceAccountName)')
+echo "Писатель (спрошен у сервиса): $INGEST_SA"
+gcloud storage buckets get-iam-policy "gs://$BUCKET" --format=json > /tmp/b.json
+gcloud projects get-iam-policy "$PROJECT_ID" --format=json > /tmp/p.json
+BUCKET="$BUCKET" PREFIX="$PREFIX" MEMBER="serviceAccount:$INGEST_SA" python3 <<'PY'
+import json, os, sys
+bucket, prefix, member = os.environ["BUCKET"], os.environ["PREFIX"], os.environ["MEMBER"]
+WRITE = {"roles/owner","roles/editor","roles/storage.admin","roles/storage.objectAdmin",
+         "roles/storage.objectCreator","roles/storage.objectUser",
+         "roles/storage.legacyBucketWriter","roles/storage.legacyBucketOwner",
+         "roles/storage.legacyObjectOwner"}
+NEEDLE = f"buckets/{bucket}/objects/{prefix}"
+load = lambda f: json.load(open(f, encoding="utf-8"))
+binds = lambda pol: [b for b in pol.get("bindings", []) if member in (b.get("members") or [])]
+problems, narrow = [], []
+for b in binds(load("/tmp/b.json")):
+    if b.get("role") not in WRITE: continue
+    cond = b.get("condition") or {}; expr = str(cond.get("expression", ""))
+    if not expr:
+        problems.append(f"🔴 {b['role']} на бакете БЕЗ УСЛОВИЯ — писатель достаёт до балансов и ключей")
+    elif NEEDLE not in expr:
+        problems.append(f"🔴 {b['role']}: условие не подтверждает путь «{NEEDLE}». Выражение: {expr}")
+    else:
+        narrow.append(f"{b['role']} · условие «{cond.get('title') or '—'}»")
+for b in binds(load("/tmp/p.json")):
+    if b.get("role") in WRITE:
+        problems.append(f"🔴 {b['role']} на уровне ПРОЕКТА — перекрывает условие на бакете целиком")
+for l in narrow:   print("  ✅", l)
+for l in problems: print("  ", l)
+if problems: print("\n🔴 РАДИУС ШИРЕ ОБЪЯВЛЕННОГО — см. §3.3"); sys.exit(1)
+if not narrow: print("\n🔴 У писателя НЕТ прав на запись — неработающий загрузчик, а не безопасность"); sys.exit(1)
+print("\n✅ Радиус узок: писатель ограничен префиксом и до балансов не достаёт")
+PY
+```
 
 ### 3.3 Если условие потерялось
 

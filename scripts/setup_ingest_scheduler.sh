@@ -136,20 +136,34 @@ COMMON_ARGS=(
   --time-zone="$TIME_ZONE"
   --uri="$TARGET_URI"
   --http-method=POST
-  --headers="${HEADER_NAME}=${TASK_TOKEN}"
   --oidc-service-account-email="$SCHEDULER_SA"
   --oidc-token-audience="$SERVICE_URL"
   --attempt-deadline="$ATTEMPT_DEADLINE"
   --max-retry-attempts="$MAX_RETRIES"
 )
 
+# 🔴 Заголовок вынесен ИЗ общего набора: флаг у `create` и `update` РАЗНЫЙ.
+# `jobs update http` не знает `--headers` и отвечает «unrecognized arguments»,
+# ПЕЧАТАЯ нераспознанный аргумент целиком — то есть роняя секрет в вывод.
+# Обожглись живьём 26.08: сначала на самом флаге, потом на утечке из-за него.
+_masked() {
+  # Любой вызов, несущий токен, идёт через это. Правило «скрипт не печатает
+  # секрет» недостаточно: печатает не скрипт, а СООБЩЕНИЕ ОБ ОШИБКЕ gcloud.
+  "$@" 2>&1 | sed "s/${HEADER_NAME}=[^ ,)]*/${HEADER_NAME}=***/g"
+  return "${PIPESTATUS[0]}"
+}
+
 if exists "gcloud scheduler jobs describe $JOB --location=$REGION --project=$PROJECT_ID"; then
-  gcloud scheduler jobs update http "$JOB" "${COMMON_ARGS[@]}" --quiet >/dev/null
+  _masked gcloud scheduler jobs update http "$JOB" "${COMMON_ARGS[@]}" \
+    --update-headers="${HEADER_NAME}=${TASK_TOKEN}" --quiet >/dev/null \
+    || die "Не удалось обновить задание $JOB (секрет в выводе скрыт)."
   info "Задание $JOB обновлено"
 else
-  gcloud scheduler jobs create http "$JOB" "${COMMON_ARGS[@]}" \
+  _masked gcloud scheduler jobs create http "$JOB" "${COMMON_ARGS[@]}" \
+    --headers="${HEADER_NAME}=${TASK_TOKEN}" \
     --description="Плановая проверка свежести базы котировок (IB-7)" \
-    --quiet >/dev/null
+    --quiet >/dev/null \
+    || die "Не удалось создать задание $JOB (секрет в выводе скрыт)."
   info "Задание $JOB создано"
 fi
 
@@ -159,14 +173,25 @@ echo "   Цель:  POST ${TARGET_URI}"
 echo "   Вызов: OIDC от ${SCHEDULER_SA}"
 echo ""
 warn "Секрет маршрута ТЕПЕРЬ ЛЕЖИТ В ДВУХ МЕСТАХ: Secret Manager и конфиг
-   задания (его видно в \`gcloud scheduler jobs describe $JOB\`).  Ротация =
-   обновить секрет, пересобрать сервис И перезапустить этот скрипт."
+   задания.  🔴 \`jobs describe\` и \`jobs create\` печатают его ОТКРЫТЫМ —
+   не вставляйте их вывод целиком в переписку, тикеты и скриншоты.
+   Ротация: новая версия секрета → \`gcloud run services update … --update-secrets\`
+   (НЕ --set-secrets: он заменяет ВЕСЬ набор и снесёт токен бота) → этот скрипт."
 echo ""
 echo "Проверка — разовый прогон прямо сейчас:"
 echo "   gcloud scheduler jobs run $JOB --location=$REGION"
-echo "   gcloud scheduler jobs describe $JOB --location=$REGION --format='value(status)'"
 echo ""
-echo "🔴 Что считать успехом.  При ЗДОРОВОЙ базе бот НИЧЕГО не пришлёт —"
-echo "   молчание здесь штатный исход.  Что проверка дошла, видно в логах:"
-echo "   gcloud run services logs read $INGEST_SERVICE --region=$REGION --limit=20"
+echo "🔴 НЕ проверяйте по полю status: при живом задании там стоит code:-1,"
+echo "   потому что \`-1\` означает «завершённой попытки не записано», а не отказ."
+echo "   Приёмка — ЗАПРОС В ЛОГАХ СЕРВИСА с User-Agent планировщика:"
+echo "     gcloud logging read \\"
+echo "       'resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"$INGEST_SERVICE\" AND httpRequest.requestUrl:\"tasks/check\"' \\"
+echo "       --limit=10 --freshness=2h --format='value(timestamp,httpRequest.status,httpRequest.userAgent)'"
+echo "   Нужна строка со статусом 200 и User-Agent Google-Cloud-Scheduler:"
+echo "   ручной curl доказывает исправность МАРШРУТА и молчит о звене"
+echo "   «планировщик → сервис», где свои OIDC, аудитория и права."
+echo ""
+echo "🔴 В Telegram при ЗДОРОВОЙ базе не придёт ничего — молчание штатный исход."
+echo "   Второй конец той же проверки — логи бота:"
+echo "   gcloud run services logs read $INGEST_SERVICE --region=$REGION --limit=30"
 echo "   ищите строку «плановая проверка: всё в порядке, молчу»."
