@@ -181,7 +181,7 @@
 
 Читатели (замер по обращениям к ключам, а не по совпадению строк):
 `pdf_payload` (30 ключей), `ai_narrative` (16), `finance/data_lineage` (15),
-`agent/advisor_bot` (6), `finance/portfolio_series` (6), `tg_bot` (6),
+`finance/portfolio_series` (6), `tg_bot` (6),
 `agent/gatekeeper` (4), `finance/scenario_report` (4).
 
 **Было:** ни dataclass, ни TypedDict, ни валидации. Чтобы узнать, что лежит в
