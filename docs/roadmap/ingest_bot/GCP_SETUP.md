@@ -23,6 +23,44 @@
 
 ---
 
+## 0.5 Откуда это запускать
+
+🔴 **Скрипты живут в РЕПОЗИТОРИИ, а Cloud Shell стартует в пустом `~`.**
+Строка `./scripts/verify_ingest_iam.sh` без этого уточнения даёт
+`No such file or directory` — и это не ошибка оператора, а недосказанность
+инструкции (найдено живым запуском 26.08).
+
+**Путь А — с репозиторием** (нужен, если будете гонять скрипты повторно):
+
+```bash
+cd ~ && git clone https://github.com/YerlanGit/Investment-advisor.git
+cd Investment-advisor && git checkout claude/comprehensive-project-audit-a44y73
+chmod +x scripts/verify_ingest_iam.sh scripts/setup_ingest_scheduler.sh
+./scripts/verify_ingest_iam.sh
+```
+
+**Путь Б — без репозитория.** Обе операции одноразовые, поэтому ручные
+последовательности из §2.3 и §3.2 самодостаточны: их можно вставить в Cloud
+Shell как есть. Для проверки IAM это не «упрощённый вариант» — та же логика,
+включая чтение политики ПРОЕКТА.
+
+**Что сначала.** Узнайте, как сервис называется и под кем бежит — остальное
+из этого выводится:
+
+```bash
+gcloud run services list --format='table(metadata.name,region)'
+gcloud run services describe ramp-ingest-bot --region=us-central1 \
+  --format='value(spec.template.spec.serviceAccountName)'
+```
+
+🔴 Личность писателя **спрашивается у сервиса**, а не собирается из имени.
+Угаданное имя, разошедшееся с реальным, даёт вердикт «прав нет вовсе»: он
+fail-closed, но НЕ ТОТ — оператор пойдёт выдавать права, которые в порядке, а
+настоящий радиус останется непроверенным. `verify_ingest_iam.sh` спрашивает
+сам; в ручном варианте подставьте вывод команды выше.
+
+---
+
 ## 1. Что уже сделано и трогать не нужно
 
 Заведено владельцем 23.08 (`§−100`), подтверждено живым прогоном 25–26.08 (`§−103`…`§−107`):
@@ -199,6 +237,50 @@ chmod +x scripts/verify_ingest_iam.sh
 Все четыре сценария плюс здоровый закреплены тестом
 `IamVerifierCatchesAWideRadiusTest` — на подставном `gcloud`, без похода в GCP.
 Скрипт, который зелен всегда, был бы имитацией контроля, а не контролем.
+
+### 3.2а Та же проверка без репозитория
+
+Вставляется в Cloud Shell целиком. Логика та же, включая политику ПРОЕКТА.
+
+```bash
+BUCKET=ramp-bot-state; PREFIX=stooq/
+INGEST_SERVICE=ramp-ingest-bot; REGION=us-central1
+PROJECT_ID=$(gcloud config get-value project)
+INGEST_SA=$(gcloud run services describe "$INGEST_SERVICE" --region="$REGION" \
+  --format='value(spec.template.spec.serviceAccountName)')
+echo "Писатель (спрошен у сервиса): $INGEST_SA"
+gcloud storage buckets get-iam-policy "gs://$BUCKET" --format=json > /tmp/b.json
+gcloud projects get-iam-policy "$PROJECT_ID" --format=json > /tmp/p.json
+BUCKET="$BUCKET" PREFIX="$PREFIX" MEMBER="serviceAccount:$INGEST_SA" python3 <<'PY'
+import json, os, sys
+bucket, prefix, member = os.environ["BUCKET"], os.environ["PREFIX"], os.environ["MEMBER"]
+WRITE = {"roles/owner","roles/editor","roles/storage.admin","roles/storage.objectAdmin",
+         "roles/storage.objectCreator","roles/storage.objectUser",
+         "roles/storage.legacyBucketWriter","roles/storage.legacyBucketOwner",
+         "roles/storage.legacyObjectOwner"}
+NEEDLE = f"buckets/{bucket}/objects/{prefix}"
+load = lambda f: json.load(open(f, encoding="utf-8"))
+binds = lambda pol: [b for b in pol.get("bindings", []) if member in (b.get("members") or [])]
+problems, narrow = [], []
+for b in binds(load("/tmp/b.json")):
+    if b.get("role") not in WRITE: continue
+    cond = b.get("condition") or {}; expr = str(cond.get("expression", ""))
+    if not expr:
+        problems.append(f"🔴 {b['role']} на бакете БЕЗ УСЛОВИЯ — писатель достаёт до балансов и ключей")
+    elif NEEDLE not in expr:
+        problems.append(f"🔴 {b['role']}: условие не подтверждает путь «{NEEDLE}». Выражение: {expr}")
+    else:
+        narrow.append(f"{b['role']} · условие «{cond.get('title') or '—'}»")
+for b in binds(load("/tmp/p.json")):
+    if b.get("role") in WRITE:
+        problems.append(f"🔴 {b['role']} на уровне ПРОЕКТА — перекрывает условие на бакете целиком")
+for l in narrow:   print("  ✅", l)
+for l in problems: print("  ", l)
+if problems: print("\n🔴 РАДИУС ШИРЕ ОБЪЯВЛЕННОГО — см. §3.3"); sys.exit(1)
+if not narrow: print("\n🔴 У писателя НЕТ прав на запись — неработающий загрузчик, а не безопасность"); sys.exit(1)
+print("\n✅ Радиус узок: писатель ограничен префиксом и до балансов не достаёт")
+PY
+```
 
 ### 3.3 Если условие потерялось
 

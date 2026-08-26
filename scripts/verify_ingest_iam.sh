@@ -28,6 +28,8 @@ set -euo pipefail
 BUCKET="${BUCKET:-ramp-bot-state}"
 PREFIX="${PREFIX:-stooq/}"
 INGEST_SA_NAME="${INGEST_SA_NAME:-ramp-ingest}"
+INGEST_SERVICE="${INGEST_SERVICE:-ramp-ingest-bot}"
+REGION="${REGION:-us-central1}"
 
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'
 info() { echo -e "${GREEN}✅ $*${NC}"; }
@@ -39,7 +41,22 @@ command -v python3 >/dev/null || die "python3 не найден."
 PROJECT_ID=$(gcloud config get-value project 2>/dev/null | tr -d '[:space:]')
 [ -n "$PROJECT_ID" ] && [ "$PROJECT_ID" != "(unset)" ] \
   || die "GCP проект не выбран: gcloud config set project <ID>"
-INGEST_SA="${INGEST_SA:-${INGEST_SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com}"
+# 🔴 Личность писателя СПРАШИВАЕТСЯ У СЕРВИСА, а не собирается из имени.
+# Угаданное имя, разошедшееся с реальным, даёт вердикт «прав нет вовсе» — он
+# fail-closed, но НЕ ТОТ: оператор пойдёт чинить права, которые в порядке, а
+# настоящий радиус останется непроверенным. Проверять надо ту личность, под
+# которой сервис РЕАЛЬНО бежит. Сборка из имени — фолбэк на случай, когда
+# сервис ещё не задеплоен.
+if [ -z "${INGEST_SA:-}" ]; then
+  INGEST_SA=$(gcloud run services describe "$INGEST_SERVICE" \
+    --region="$REGION" --project="$PROJECT_ID" \
+    --format='value(spec.template.spec.serviceAccountName)' 2>/dev/null || true)
+fi
+if [ -z "${INGEST_SA:-}" ]; then
+  INGEST_SA="${INGEST_SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
+  warn "Сервис $INGEST_SERVICE не опрошен — личность собрана из имени.
+   Если она разойдётся с реальной, вердикт ниже будет про ЧУЖОЙ аккаунт."
+fi
 
 echo "Проект:      $PROJECT_ID"
 echo "Бакет:       gs://$BUCKET"

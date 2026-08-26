@@ -2476,6 +2476,10 @@ class IamVerifierCatchesAWideRadiusTest(unittest.TestCase):
             "#!/usr/bin/env bash\n"
             'case "$*" in\n'
             '  *"config get-value project"*) echo "test-project" ;;\n'
+            # Личность писателя скрипт спрашивает у САМОГО сервиса, а не
+            # собирает из имени: угаданное имя дало бы вердикт про чужой
+            # аккаунт. Подставной сервис отвечает тем же SA, что в политиках.
+            '  *"run services describe"*) echo "$FAKE_SA" ;;\n'
             '  *"storage buckets get-iam-policy"*) cat "$FAKE_BUCKET" ;;\n'
             '  *"projects get-iam-policy"*) cat "$FAKE_PROJECT" ;;\n'
             '  *) echo "{}" ;;\n'
@@ -2498,6 +2502,7 @@ class IamVerifierCatchesAWideRadiusTest(unittest.TestCase):
 
         env = dict(os.environ)
         env["PATH"] = f"{self.stub}:{env.get('PATH', '')}"
+        env["FAKE_SA"] = self._SA
         env["FAKE_BUCKET"] = self._policy("bucket", bucket)
         env["FAKE_PROJECT"] = self._policy("project", project)
         return subprocess.run(["bash", str(self.script)], env=env,
@@ -2540,6 +2545,38 @@ class IamVerifierCatchesAWideRadiusTest(unittest.TestCase):
                           "members": [self._MEMBER]}], [])
         self.assertEqual(out.returncode, 1)
         self.assertIn("НЕТ прав", out.stdout)
+
+    def test_the_identity_checked_is_the_one_the_service_actually_runs_as(self) -> None:
+        """🔴 Проверять надо ТУ личность, под которой сервис бежит.
+
+        Первая редакция собирала адрес из имени `ramp-ingest@…`. Разойдись оно
+        с реальным — скрипт не нашёл бы ни одной привязки и сказал «прав нет
+        вовсе»: вердикт fail-closed, но НЕ ТОТ. Оператор пошёл бы выдавать
+        права, которые в порядке, а настоящий радиус остался бы непроверенным.
+        Здесь сервис бежит под НЕОЖИДАННЫМ аккаунтом, и узкое условие стоит
+        именно на нём — скрипт обязан это увидеть.
+        """
+        odd = "unexpected-writer@test-project.iam.gserviceaccount.com"
+        import json                                       # noqa: PLC0415
+        import subprocess                                 # noqa: PLC0415
+
+        env = dict(os.environ)
+        env["PATH"] = f"{self.stub}:{env.get('PATH', '')}"
+        env["FAKE_SA"] = odd
+        bucket = self.root / "bucket.json"
+        bucket.write_text(json.dumps({"bindings": [
+            {"role": "roles/storage.objectAdmin",
+             "members": [f"serviceAccount:{odd}"],
+             "condition": {"title": "stooq-only", "expression": self._NARROW}}]}),
+            encoding="utf-8")
+        project = self.root / "project.json"
+        project.write_text(json.dumps({"bindings": []}), encoding="utf-8")
+        env["FAKE_BUCKET"], env["FAKE_PROJECT"] = str(bucket), str(project)
+        out = subprocess.run(["bash", str(self.script)], env=env,
+                             capture_output=True, text=True, timeout=120)
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertIn(odd, out.stdout,
+                      "скрипт проверил не ту личность, под которой бежит сервис")
 
 
 if __name__ == "__main__":                               # pragma: no cover
