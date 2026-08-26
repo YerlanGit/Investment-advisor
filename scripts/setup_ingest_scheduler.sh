@@ -136,20 +136,34 @@ COMMON_ARGS=(
   --time-zone="$TIME_ZONE"
   --uri="$TARGET_URI"
   --http-method=POST
-  --headers="${HEADER_NAME}=${TASK_TOKEN}"
   --oidc-service-account-email="$SCHEDULER_SA"
   --oidc-token-audience="$SERVICE_URL"
   --attempt-deadline="$ATTEMPT_DEADLINE"
   --max-retry-attempts="$MAX_RETRIES"
 )
 
+# 🔴 Заголовок вынесен ИЗ общего набора: флаг у `create` и `update` РАЗНЫЙ.
+# `jobs update http` не знает `--headers` и отвечает «unrecognized arguments»,
+# ПЕЧАТАЯ нераспознанный аргумент целиком — то есть роняя секрет в вывод.
+# Обожглись живьём 26.08: сначала на самом флаге, потом на утечке из-за него.
+_masked() {
+  # Любой вызов, несущий токен, идёт через это. Правило «скрипт не печатает
+  # секрет» недостаточно: печатает не скрипт, а СООБЩЕНИЕ ОБ ОШИБКЕ gcloud.
+  "$@" 2>&1 | sed "s/${HEADER_NAME}=[^ ,)]*/${HEADER_NAME}=***/g"
+  return "${PIPESTATUS[0]}"
+}
+
 if exists "gcloud scheduler jobs describe $JOB --location=$REGION --project=$PROJECT_ID"; then
-  gcloud scheduler jobs update http "$JOB" "${COMMON_ARGS[@]}" --quiet >/dev/null
+  _masked gcloud scheduler jobs update http "$JOB" "${COMMON_ARGS[@]}" \
+    --update-headers="${HEADER_NAME}=${TASK_TOKEN}" --quiet >/dev/null \
+    || die "Не удалось обновить задание $JOB (секрет в выводе скрыт)."
   info "Задание $JOB обновлено"
 else
-  gcloud scheduler jobs create http "$JOB" "${COMMON_ARGS[@]}" \
+  _masked gcloud scheduler jobs create http "$JOB" "${COMMON_ARGS[@]}" \
+    --headers="${HEADER_NAME}=${TASK_TOKEN}" \
     --description="Плановая проверка свежести базы котировок (IB-7)" \
-    --quiet >/dev/null
+    --quiet >/dev/null \
+    || die "Не удалось создать задание $JOB (секрет в выводе скрыт)."
   info "Задание $JOB создано"
 fi
 

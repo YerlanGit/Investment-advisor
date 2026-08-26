@@ -2382,6 +2382,24 @@ class SchedulerScriptMatchesTheRouteTest(unittest.TestCase):
         self.assertIsNotNone(match, f"присваивание {name} не найдено")
         return match.group(1)
 
+    def _invocation(self, verb: str) -> str:
+        """Строка ВЫЗОВА `gcloud scheduler jobs <verb> http`, а не упоминания.
+
+        🔴 Первая редакция искала подстроку по всему файлу и находила её в
+        КОММЕНТАРИИ, объясняющем разницу флагов. Ровно та же ошибка, что уже
+        ловилась мутацией на `TASK_PATH`: текст файла — не то же самое, что
+        исполняемая строка. Гейт обязан смотреть на вторую.
+        """
+        # Продолжения строк склеиваются ПЕРЕД поиском: аргументы вызова
+        # разнесены по строкам через `\`, и построчный поиск увидел бы только
+        # первую из них — то есть проверял бы четверть команды.
+        joined = re.sub(r"\\\n\s*", " ", self.body)
+        for line in joined.splitlines():
+            if f"gcloud scheduler jobs {verb} http" in line \
+                    and not line.lstrip().startswith("#"):
+                return line
+        self.fail(f"вызов jobs {verb} http не найден")
+
     def test_the_job_targets_the_path_the_service_actually_serves(self) -> None:
         self.assertIn(self.entry.TASK_PATH, self._assignment("TARGET_URI"),
                       "скрипт стучится не туда, куда слушает сервис")
@@ -2427,6 +2445,60 @@ class SchedulerScriptMatchesTheRouteTest(unittest.TestCase):
                 self.assertNotIn(
                     "TASK_TOKEN", stripped,
                     f"значение секрета уходит в вывод: {stripped[:70]}")
+
+    def test_create_and_update_use_THEIR_OWN_header_flag(self) -> None:
+        """🔴 Флаг заголовков у `create` и `update` РАЗНЫЙ, и это не мелочь.
+
+        Первая редакция гнала один набор аргументов в обе ветки.
+        `gcloud scheduler jobs update http` не знает `--headers` — он отвечает
+        `unrecognized arguments` и ПЕЧАТАЕТ нераспознанный аргумент целиком.
+        А в этом аргументе лежит секрет. То есть неверный флаг не просто ломал
+        обновление задания: он РОНЯЛ СЕКРЕТ В ВЫВОД. Обожглись живьём 26.08 —
+        сначала на флаге, потом на утечке из-за него.
+        """
+        update, create = self._invocation("update"), self._invocation("create")
+        self.assertIn("--update-headers=", update,
+                      "обновление задания пойдёт с флагом, которого у него нет")
+        self.assertNotIn("--headers=", update.replace("--update-headers=", ""),
+                         "в ветку обновления попал флаг создания")
+        self.assertIn("--headers=", create,
+                      "создание задания осталось без заголовка")
+
+    def test_commands_carrying_the_secret_mask_their_output(self) -> None:
+        """🔴 «Скрипт не печатает секрет» — недостаточное правило.
+
+        Печатает не скрипт, а СООБЩЕНИЕ ОБ ОШИБКЕ gcloud: неуспешный вызов
+        возвращает свои аргументы обратно. Поэтому вызовы, несущие токен,
+        обязаны идти через маскирующую обёртку.
+        """
+        self.assertIn("_masked()", self.body, "обёртки маскировки нет")
+        for verb in ("update", "create"):
+            self.assertTrue(
+                self._invocation(verb).lstrip().startswith("_masked "),
+                f"jobs {verb} http вызывается в обход маскировки")
+
+    def test_the_mask_actually_removes_a_real_leak(self) -> None:
+        """🔴 Контрольный опыт: обёртка проверяется на СТРОКЕ, которая утекла.
+
+        Регулярка, которая ничего не ловит, — не защита, а её имитация.
+        Строка ниже — дословный формат отказа gcloud, наблюдавшийся 26.08.
+        """
+        import subprocess                                 # noqa: PLC0415
+
+        expr = re.search(r'sed "(s/\$\{HEADER_NAME\}=[^"]+)"', self.body)
+        self.assertIsNotNone(expr, "выражение маскировки не найдено")
+        secret = "8ce299ff41c799946b9917f76232eb7e9fe476e668ca803fd92dddc4de5710d3"
+        leak = ("ERROR: (gcloud.scheduler.jobs.update.http) unrecognized "
+                f"arguments: --headers=x-ingest-task-token={secret} "
+                "(did you mean '--clear-headers'?)")
+        script = (f'HEADER_NAME=x-ingest-task-token\n'
+                  f'printf %s "$LEAK" | sed "{expr.group(1)}"\n')
+        out = subprocess.run(["bash", "-c", script], capture_output=True,
+                             text=True, timeout=60, env={**os.environ, "LEAK": leak})
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertNotIn(secret, out.stdout, "секрет пережил маскировку")
+        self.assertIn("x-ingest-task-token=***", out.stdout,
+                      "маскировка не сработала на реальной строке отказа")
 
     def test_the_default_schedule_runs_on_weekends_too(self) -> None:
         """🔴 Порог свежести — КАЛЕНДАРНЫЙ, значит выходные его тоже съедают.
