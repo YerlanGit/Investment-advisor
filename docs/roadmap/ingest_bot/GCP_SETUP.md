@@ -116,6 +116,35 @@ chmod +x scripts/setup_ingest_scheduler.sh
 
 ### 2.3 Как завести — руками, если скрипт запускать не хотите
 
+🔴 **Блок ниже выполняется ЦЕЛИКОМ, а не по одной команде.** Переменные
+(`SCHEDULER_SA`, `SERVICE_URL`) объявляются здесь же и в следующей команде уже
+нужны. Живой прогон 26.08: оператор выполнил только `service-accounts create`,
+переменная осталась пустой, и следующий шаг отказал
+`INVALID_ARGUMENT: Invalid service account ()` — пустые скобки и есть подпись
+этого случая. Первую строку той ошибки (`For a binding with condition…`)
+читать не надо, она generic-подсказка gcloud и к делу не относится.
+
+Если выполняете по шагам — сначала объявите и ПРОВЕРЬТЕ переменные:
+
+```bash
+PROJECT_ID=$(gcloud config get-value project)
+PROJECT_NUMBER=$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')
+REGION=us-central1
+INGEST_SERVICE=ramp-ingest-bot
+SCHEDULER_SA="ramp-scheduler@${PROJECT_ID}.iam.gserviceaccount.com"
+SCHEDULER_AGENT="service-${PROJECT_NUMBER}@gcp-sa-cloudscheduler.iam.gserviceaccount.com"
+SERVICE_URL=$(gcloud run services describe "$INGEST_SERVICE" --region="$REGION" \
+  --format='value(status.url)')
+
+for v in PROJECT_ID PROJECT_NUMBER REGION INGEST_SERVICE \
+         SCHEDULER_SA SCHEDULER_AGENT SERVICE_URL; do
+  printf '%-17s = %s\n' "$v" "${!v}"
+  [ -n "${!v}" ] || echo "   🔴 ПУСТО — дальше не идите"
+done
+```
+
+Ни одной строки «ПУСТО» — можно продолжать.
+
 ```bash
 PROJECT_ID=$(gcloud config get-value project)
 PROJECT_NUMBER=$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')
@@ -154,6 +183,39 @@ gcloud scheduler jobs create http ramp-ingest-check \
   --oidc-token-audience="$SERVICE_URL" \
   --attempt-deadline=600s --max-retry-attempts=1
 ```
+
+**Если gcloud спросит про условие** на шаге 3 (`Condition … [1] None …`) —
+выбирайте `None`. Право «постучаться в сервис» сужать нечем, а условие здесь
+только сломает вызов.
+
+### 2.3а 🔴 Проверьте маршрут ДО того, как заведёте расписание
+
+Смысл порядка: если маршрут отвечает правильно руками, расписание — уже просто
+будильник. Заведёте задание первым — отлаживать придётся через логи
+планировщика, где не видно тела ответа.
+
+```bash
+TASK_TOKEN=$(gcloud secrets versions access latest --secret=INGEST_TASK_TOKEN)
+curl -s -w '\nHTTP %{http_code}\n' -X POST "${SERVICE_URL}/tasks/check" \
+  -H "Authorization: Bearer $(gcloud auth print-identity-token)" \
+  -H "x-ingest-task-token: ${TASK_TOKEN}"
+```
+
+Ответ маршрута — это ДИАГНОЗ, а не «ок/не ок»:
+
+| Ответ | Что значит |
+|---|---|
+| `тихо` · 200 | ✅ вся цепочка жива, базе нечего сказать (наблюдалось 26.08) |
+| `отправлено N` · 200 | ✅ жива, и вам пришло сообщение: база близка к порогу |
+| `неверный секрет` · 401 | секрет в контейнере ≠ секрет в Secret Manager → пересоберите сервис |
+| `INGEST_TASK_TOKEN не задан…` · 503 | секрет не доехал в контейнер (деплой без `--set-secrets`) |
+| `только POST` · 405 | попали в маршрут, но методом GET |
+| `OK` · 200 | 🔴 попали НЕ ТУДА: это проба `GET /`, она отвечает `OK` на любой чужой путь |
+| `бот ещё не запущен` · 200 | контейнер поднимается, повторите через полминуты |
+| `403` от Cloud Run | вашему аккаунту не хватает `run.invoker` на сервисе |
+
+Строка `OK` — самая коварная: она выглядит успехом. Ровно её и сторожит тест
+`SchedulerScriptMatchesTheRouteTest`.
 
 🔴 **Путь `/tasks/check` и заголовок `x-ingest-task-token` — не украшение.**
 Оба закреплены тестом `SchedulerScriptMatchesTheRouteTest` против
