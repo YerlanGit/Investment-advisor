@@ -241,11 +241,75 @@ curl -s -w '\nHTTP %{http_code}\n' -X POST "${SERVICE_URL}/tasks/check" \
 | `MAX_RETRIES=1` | ретрай после уже доставленного сообщения = дубль на телефоне. Пропущенная проверка стоит ноль: следующая придёт завтра, запас — 3 дня |
 | Пока `_BOT is None` (первые секунды старта) проверка вернёт «бот ещё не запущен» и промолчит | окно измеряется секундами, а `--min-instances=1` держит контейнер живым |
 
+### 2.5а Что НЕ является ошибкой, и чего в выводе не показывать
+
+Оба пункта найдены живым прогоном 26.08.
+
+🔴 **`status: code: -1` — это НЕ отказ.** Он присутствует уже в ответе на
+`jobs create`, когда задание не выполнялось ни разу. Значит `-1` означает
+«завершённой попытки ещё не записано», а не «попытка провалилась». Признак,
+по которому это видно, — отсутствие `lastAttemptTime`: `--format=yaml(...)`
+печатает только существующие поля. Не чините то, что не сломано.
+
+🔴 **`jobs create` и `jobs describe` печатают заголовок с секретом ОТКРЫТЫМ.**
+Это прямое следствие того, что Cloud Scheduler хранит заголовки в конфиге
+задания (см. 2.5). Вывод этих команд нельзя вставлять в переписку, тикеты и
+скриншоты целиком — берите только `state`, `lastAttemptTime`, `status`.
+Инструкция называла хранение в двух местах, но не называла это следствие, и на
+нём обожглись: секрет ушёл в переписку и потребовал ротации (§2.5б).
+
+### 2.5б Ротация секрета маршрута
+
+```bash
+openssl rand -hex 32 | gcloud secrets versions add INGEST_TASK_TOKEN --data-file=-
+VER=$(gcloud secrets versions list INGEST_TASK_TOKEN --limit=1 --format='value(name)')
+
+gcloud run services update ramp-ingest-bot --region=us-central1 \
+  --update-secrets=INGEST_TASK_TOKEN=INGEST_TASK_TOKEN:${VER}
+
+TASK_TOKEN=$(gcloud secrets versions access latest --secret=INGEST_TASK_TOKEN)
+gcloud scheduler jobs update http ramp-ingest-check --location=us-central1 \
+  --headers="x-ingest-task-token=${TASK_TOKEN}"
+```
+
+🔴 **`--update-secrets`, а НЕ `--set-secrets`.** Второй заменяет ВЕСЬ набор
+секретов, а у сервиса есть ещё `OMBRI_INGEST_BOT_TOKEN` — потеряете токен бота,
+и загрузчик перестанет отвечать в Telegram. Та же грабля, что однажды выключила
+Premium V2 в проде.
+
+**Ротация не считается сделанной, пока СТАРЫЙ токен не перестал работать.**
+Новая ревизия могла не подняться, и тогда «новый работает» ничего не доказывает
+— работали бы оба. Проверяются ОБА конца:
+
+| Токен | Ожидаемый ответ |
+|---|---|
+| старый | `неверный секрет` · **401** |
+| новый | `тихо` · **200** |
+
+Наблюдалось живьём 26.08 именно так.
+
 ### 2.6 Проверка
 
 ```bash
 gcloud scheduler jobs run ramp-ingest-check --location=us-central1
-gcloud run services logs read ramp-ingest-bot --region=us-central1 --limit=20
+sleep 90
+gcloud logging read \
+  'resource.type="cloud_run_revision" AND resource.labels.service_name="ramp-ingest-bot" AND httpRequest.requestUrl:"tasks/check"' \
+  --limit=10 --freshness=2h \
+  --format='value(timestamp,httpRequest.status,httpRequest.userAgent)'
+```
+
+🔴 **Приёмка — это `User-Agent: Google-Cloud-Scheduler` со статусом 200.**
+Ручной `curl` из §2.3а доказывает исправность МАРШРУТА, но ничего не говорит о
+звене «планировщик → сервис»: там свои OIDC, аудитория и права. Отличить одно
+от другого можно только по User-Agent, поэтому проверять надо именно его, а не
+факт «в логах что-то есть».
+
+Логи самого бота — второй, независимый конец той же проверки:
+
+```bash
+gcloud run services logs read ramp-ingest-bot --region=us-central1 --limit=30 \
+  | grep -i "плановая проверка"
 ```
 
 🔴 **Успех при здоровой базе — это МОЛЧАНИЕ в Telegram.** Что проверка дошла,
