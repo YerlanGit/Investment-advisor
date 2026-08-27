@@ -343,14 +343,59 @@ class FinancialRAG:
         `ms_strategy_2026.pdf` двусмысленным не бывает.
         """
         fname = str(filename or "").lower()
-        cover = f"{fname}\n{str(md_text or '')[:1500]}".lower()
-        for bank in BANK_ORDER:
-            if re.search(bank_alias_regex(bank), cover):
-                return bank
-            short = bank_short_regex(bank)
-            if short and re.search(short, fname):
-                return bank
-        return "Unknown"
+        cover = str(md_text or "")[:1500].lower()
+
+        # 🔴 §−112. ИМЯ ФАЙЛА РЕШАЕТ ПЕРВЫМ, и только потом обложка.
+        #
+        # Прежняя редакция склеивала имя и обложку в одну строку и возвращала
+        # первый банк по ПОРЯДКУ ОБЪЯВЛЕНИЯ. Порядок — не свидетельство: он
+        # заведён против перехвата «J.P. Morgan» «Morgan Stanley», а решал
+        # авторство. Любое упоминание конкурента на обложке перебивало имя
+        # файла, если тот банк стоит в реестре раньше.
+        #
+        # Замер на живой базе 26.08: из 38 отчётов 25 приписаны Goldman Sachs,
+        # и минимум 12 из них — чужие (Barclays, HSBC, JPMorgan, Jefferies).
+        # У Jefferies при этом НОЛЬ документов при наличии его отчёта. Это
+        # хуже `Unknown`: отчёт НАЗЫВАЕТ источником банк, который цитируемое
+        # исследование не писал.
+        #
+        # Имя файла — конвенция оператора, самое надёжное свидетельство.
+        # Обложка — запасной вариант, и там побеждает НАИБОЛЕЕ РАННЕЕ
+        # упоминание: издатель называет себя первым, а конкурента цитирует
+        # ниже. Порядок объявления остаётся тай-брейком при равной позиции —
+        # ради него он и заведён.
+        found = cls._first_named(fname, include_short=True)
+        if found:
+            return found
+        return cls._first_named(cover, include_short=False) or "Unknown"
+
+    @classmethod
+    def _first_named(cls, text: str, *, include_short: bool) -> str:
+        """Банк, упомянутый в `text` РАНЬШЕ прочих. `""` — ни одного.
+
+        `include_short` — короткие формы (`gs`, `ms`, `jpm`) ищутся ТОЛЬКО в
+        имени файла: «MS» в прозе это Microsoft или миллисекунды (`§−14` C-8).
+        """
+        if not text:
+            return ""
+        best: tuple[int, int, str] | None = None
+        for order, bank in enumerate(BANK_ORDER):
+            spots = []
+            m = re.search(bank_alias_regex(bank), text)
+            if m:
+                spots.append(m.start())
+            if include_short:
+                short = bank_short_regex(bank)
+                if short:
+                    m = re.search(short, text)
+                    if m:
+                        spots.append(m.start())
+            if not spots:
+                continue
+            cand = (min(spots), order, bank)
+            if best is None or cand[:2] < best[:2]:
+                best = cand
+        return best[2] if best else ""
 
     @staticmethod
     def _extract_tickers(text: str) -> str:

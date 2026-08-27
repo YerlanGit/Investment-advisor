@@ -141,6 +141,75 @@ class FilenameConventionTest(unittest.TestCase):
             self.assertEqual(FinancialRAG._extract_bank(fname, ""), "Unknown", fname)
 
 
+class FilenameOutranksTheCoverPageTest(unittest.TestCase):
+    """🔴 `§−112`. Имя файла — свидетельство сильнее обложки, и порядок решает.
+
+    Прежняя редакция склеивала имя и обложку в ОДНУ строку и возвращала первый
+    банк по ПОРЯДКУ ОБЪЯВЛЕНИЯ. Порядок заведён против перехвата «J.P. Morgan»
+    «Morgan Stanley» — а решал авторство: любое упоминание конкурента на
+    обложке перебивало имя файла, если тот банк объявлен раньше.
+
+    Замер на живой базе 26.08: из 38 отчётов **25 приписаны Goldman Sachs**, и
+    минимум 12 из них чужие — Barclays, HSBC, JPMorgan. У Jefferies при этом
+    НОЛЬ документов при наличии его отчёта в INBOX.
+
+    Цена ошибки выше, чем у `Unknown`. `Unknown` отбрасывается и отчёт молчит;
+    здесь отчёт НАЗЫВАЕТ источником банк, который цитируемое исследование не
+    писал. Это ровно то, против чего заведён инвариант «отчёт не называет
+    источник, которого нет в базе» (`§−95`), в зеркальной форме.
+    """
+
+    #: Обложка, где конкуренты упомянуты РАНЬШЕ владельца имени файла.
+    _NOISY = "We compare our view with Goldman Sachs and Morgan Stanley estimates."
+
+    def test_filename_wins_over_a_competitor_named_on_the_cover(self) -> None:
+        from agent.rag_engine import FinancialRAG
+        for fname, expected in (
+                ("Barclays_Equity_Market_Review_08062026.pdf", "Barclays"),
+                ("HSBC Labor Market 08062026.PDF",             "HSBC"),
+                ("JPM_The_J_P__Morgan_View_2026-05-29.pdf",    "JPMorgan"),
+                ("Citi_08_2026_Global_Quantitative.pdf",       "Citi"),
+                ("26_august_AMUNDI_CMA_H2 2026 Update.pdf",    "Amundi"),
+        ):
+            with self.subTest(fname=fname):
+                self.assertEqual(
+                    FinancialRAG._extract_bank(fname, self._NOISY), expected,
+                    "обложка перебила имя файла — отчёт назовёт чужого автора")
+
+    def test_the_cover_still_works_when_the_filename_is_silent(self) -> None:
+        """Обложка не отключена — она ЗАПАСНОЙ вариант, а не отменённый."""
+        from agent.rag_engine import FinancialRAG
+        self.assertEqual(
+            FinancialRAG._extract_bank("report.pdf", "Barclays Capital Inc."),
+            "Barclays")
+
+    def test_the_cover_prefers_the_EARLIEST_mention(self) -> None:
+        """Издатель называет себя первым, конкурента цитирует ниже."""
+        from agent.rag_engine import FinancialRAG
+        self.assertEqual(
+            FinancialRAG._extract_bank(
+                "note.pdf", "HSBC Global Research. We differ from Goldman Sachs."),
+            "HSBC")
+
+    def test_declaration_order_still_breaks_ties(self) -> None:
+        """🔴 Порядок объявления не удалён — он остался ТАМ, ГДЕ НУЖЕН.
+
+        «J.P. Morgan» и «Morgan Stanley» пересекаются, и без порядка второй
+        перехватывал бы первого. Позиция у них одна — решает порядок.
+        """
+        from agent.rag_engine import FinancialRAG
+        self.assertEqual(
+            FinancialRAG._extract_bank("note.pdf", "J.P. Morgan Securities LLC"),
+            "JPMorgan")
+
+    def test_short_forms_stay_out_of_the_cover_page(self) -> None:
+        """`§−14` C-8: «MS» в прозе это Microsoft или миллисекунды."""
+        from agent.rag_engine import FinancialRAG
+        self.assertEqual(
+            FinancialRAG._extract_bank("report.pdf", "latency was 20 ms today"),
+            "Unknown")
+
+
 class ConsumersAgreeTest(unittest.TestCase):
     """Связь потребителей — то, чего не было ни в одном тесте."""
 
