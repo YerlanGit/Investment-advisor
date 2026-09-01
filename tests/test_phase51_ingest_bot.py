@@ -629,6 +629,121 @@ class SummaryTest(_IngestCase):
                         f"строки допуска нет вовсе:\n{text}")
 
 
+class PartialDayIsNamedTest(_IngestCase):
+    """🔴 `§−113`. Пять дней подряд срез клал 631 бар в базу из 803 бумаг.
+
+    Сводка печатала «баров записано 631» и «C-1 факторы 10/10 ✅», и оба
+    утверждения были правдой — ни одно из них не было ОТВЕТОМ. У числа не было
+    знаменателя, а у допуска — свежести: все тринадцать тикеров C-1 замерли на
+    первом же дне и продолжали числиться зелёными.
+
+    Тот же класс, что `§−90` A-3 («пустая коллекция ≠ всё хорошо») и `§−90`
+    («статус — вердикт, а не оформление»): факт был, вывода не было.
+    """
+
+    def test_written_bars_carry_a_denominator(self) -> None:
+        outcome = qi.apply_daily(self.daily(20260813, ["SPY.US"]),
+                                 actor="1", publisher=self.publisher)
+        text = qi.format_summary(outcome)
+        self.assertEqual((outcome.universe_total, outcome.missed_total), (2, 1))
+        self.assertIn("1 из 2 бумаг базы", text)
+
+    def test_papers_without_a_bar_are_named_not_counted(self) -> None:
+        """Имя позволяет открыть файл; число не говорит даже, где смотреть."""
+        outcome = qi.apply_daily(self.daily(20260813, ["SPY.US"]),
+                                 actor="1", publisher=self.publisher)
+        text = qi.format_summary(outcome)
+        self.assertIn("без бара за 20260813", text)
+        self.assertIn("AAPL.US", text)
+        self.assertEqual(outcome.missed, ("AAPL.US",))
+
+    def test_a_full_day_says_nothing_extra(self) -> None:
+        """Молчание на здоровом дне обязательно: строка, которая есть всегда,
+        перестаёт читаться раньше, чем понадобится."""
+        outcome = qi.apply_daily(self.daily(20260813), actor="1",
+                                 publisher=self.publisher)
+        self.assertEqual(outcome.missed_total, 0)
+        self.assertNotIn("без бара за", qi.format_summary(outcome))
+
+    def test_the_plateau_stays_visible_after_the_spike_detector_goes_quiet(
+            self) -> None:
+        """🔴 Главное свойство. Детектор `§−107` ловит СКАЧОК отбраковки: на
+        второй одинаковый день он молчит, потому что первый уже стал нормой.
+        Знаменатель обязан говорить КАЖДЫЙ раз — иначе провал 800 → 631
+        держится сколько угодно дней под зелёной сводкой.
+        """
+        first = qi.apply_daily(self.daily(20260813, ["SPY.US"]),
+                               actor="1", publisher=self.publisher)
+        second = qi.apply_daily(self.daily(20260814, ["SPY.US"]),
+                                actor="1", publisher=self.publisher)
+        self.assertTrue(second.ok)
+        self.assertEqual(second.warnings, (),
+                         "детектор всплеска на плато молчит — это его свойство")
+        self.assertIn("AAPL.US", qi.format_summary(second))
+        self.assertIn("1 из 2 бумаг базы", qi.format_summary(second))
+        self.assertIn("AAPL.US", qi.format_summary(first))
+
+    def test_a_stale_factor_is_not_a_green_tick(self) -> None:
+        """Фактор В БАЗЕ, но замерший, к следующему отчёту так же непригоден,
+        как отсутствующий: в профиле STRICT это BLOCK, а не деградация."""
+        with mock.patch.object(qi, "_engine_universe",
+                               return_value=(("SPY.US",), ())):
+            outcome = qi.apply_daily(self.daily(20260813, ["AAPL.US"]),
+                                     actor="1", publisher=self.publisher)
+        self.assertEqual(outcome.c1.factors_ok, 1)      # история есть
+        self.assertTrue(outcome.c1.complete)            # состав полон
+        self.assertFalse(outcome.c1.usable)             # но допуск НЕ пройден
+        self.assertEqual(outcome.c1.stale_factors, ("SPY.US",))
+        text = qi.format_summary(outcome)
+        self.assertIn("C-1 факторы ........... 1/1 🔴", text)
+        self.assertIn("ПРОТУХЛИ", text)
+        self.assertIn("SPY.US 20260812", text)
+
+    def test_a_fresh_factor_keeps_the_green_tick(self) -> None:
+        """Обратная мутация: строгость не должна кричать на здоровой базе."""
+        with mock.patch.object(qi, "_engine_universe",
+                               return_value=(("SPY.US",), ())):
+            outcome = qi.apply_daily(self.daily(20260813), actor="1",
+                                     publisher=self.publisher)
+        self.assertTrue(outcome.c1.usable)
+        text = qi.format_summary(outcome)
+        self.assertIn("C-1 факторы ........... 1/1 ✅", text)
+        self.assertNotIn("ПРОТУХЛИ", text)
+
+    def test_a_market_that_did_not_trade_is_not_called_missing(self) -> None:
+        """🔴 Рынок без единого бара за день был ЗАКРЫТ, а не сломан.
+
+        Форма условия та же, что у правила 9 (`0 < принято < порога`): ноль
+        означает выходной. Без оговорки про рынок праздник в США печатал бы
+        «без бара 803 бумаги», то есть самая громкая тревога приходилась бы на
+        самый штатный день.
+        """
+        conn = si.connect(self.db)
+        path = self.root / "btc.v.txt"
+        path.write_text(_history_text("BTC.V", self.seed_days), encoding="utf-8")
+        si.apply_batch(conn, si.parse_history_file(path, window_days=9000),
+                       kind="bootstrap", allow_new=True)
+        conn.close()
+
+        outcome = qi.apply_daily(self.daily(20260813, ["SPY.US", "AAPL.US"]),
+                                 actor="1", publisher=self.publisher)
+        self.assertEqual(outcome.universe_total, 3)     # BTC.V в базе есть
+        self.assertEqual(outcome.missed_total, 0)       # но крипта не торговала
+        self.assertNotIn("BTC.V", qi.format_summary(outcome))
+
+    def test_status_says_how_many_papers_got_the_last_day(self) -> None:
+        """`MAX(trade_date)` двигает ОДНА бумага, поэтому «последний день» без
+        доли свежих не отличает полный день от пятой его части."""
+        qi.apply_daily(self.daily(20260813, ["SPY.US"]), actor="1",
+                       publisher=self.publisher)
+        state = qi.status(publisher=self.publisher)
+        market = state.markets[0]
+        self.assertEqual((market.instruments, market.fresh), (2, 1))
+        text = qi.format_status(state)
+        self.assertIn("свежих 1", text)
+        self.assertIn("без бара за 20260813", text)
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # IB-3 — доступ
 # ═════════════════════════════════════════════════════════════════════════════
@@ -784,6 +899,35 @@ class UniverseReportTest(_IngestCase):
         self.assertEqual({p.bars for p in report.factors}, {3})
         self.assertIn("3 баров", qi.format_universe(report))
 
+    def test_a_factor_that_stopped_updating_loses_the_green_tick(self) -> None:
+        """🔴 `§−113`. Именно эта команда вскрыла дефект — и сама же печатала
+        «10/10 ✅» над тринадцатью строками с датой позавчера.
+
+        Свежесть меряется последним днём РЫНКА В БАЗЕ, а не часами: иначе
+        выходные и праздники давали бы тревогу на здоровой базе.
+        """
+        qi.apply_daily(self.daily(20260813, ["AAPL.US"]), actor="1",
+                       publisher=self.publisher)
+        with mock.patch.object(qi, "_engine_universe",
+                               return_value=(_FACTORS, ())):
+            report = qi.universe_report(publisher=self.publisher)
+        stale = {p.ticker for p in report.factors if p.stale}
+        self.assertEqual(stale, {"SPY.US"})             # AAPL.US обновился
+        self.assertTrue(report.complete)                # состав полон
+        self.assertFalse(report.usable)                 # допуск НЕ пройден
+        text = qi.format_universe(report)
+        self.assertIn("ПРОТУХ", text)
+        self.assertIn("факторы 2/2 🔴", text)
+
+    def test_a_fresh_universe_keeps_the_green_tick(self) -> None:
+        """Обратная мутация: строгость не должна кричать на здоровой базе."""
+        qi.apply_daily(self.daily(20260813), actor="1", publisher=self.publisher)
+        with mock.patch.object(qi, "_engine_universe",
+                               return_value=(_FACTORS, ())):
+            report = qi.universe_report(publisher=self.publisher)
+        self.assertTrue(report.usable)
+        self.assertNotIn("ПРОТУХ", qi.format_universe(report))
+
     def test_without_pandas_it_refuses_instead_of_copying_the_list(self) -> None:
         """🔴 Вторая копия списка факторов однажды разошлась бы с первой молча."""
         with mock.patch.object(qi, "_engine_universe",
@@ -801,6 +945,22 @@ class CheckTickerTest(_IngestCase):
         self.assertEqual(probe.source_symbol, "SPY.US")
         self.assertEqual(probe.bars, 3)
         self.assertFalse(probe.substituted)
+
+    def test_a_paper_behind_its_market_is_told_so(self) -> None:
+        """«Последний бар 20260824» само по себе не говорит, отстала бумага или
+        нет: ответ даёт только сравнение с последним днём её рынка."""
+        qi.apply_daily(self.daily(20260813, ["AAPL.US"]), actor="1",
+                       publisher=self.publisher)
+        probe = qi.check_ticker("SPY.US", publisher=self.publisher)
+        self.assertTrue(probe.stale)
+        self.assertEqual((probe.last_bar, probe.market_latest),
+                         (20260812, 20260813))
+        self.assertIn("ОТСТАЛА", qi.format_probe(probe))
+
+    def test_a_paper_level_with_its_market_is_not_alarmed_about(self) -> None:
+        probe = qi.check_ticker("SPY.US", publisher=self.publisher)
+        self.assertFalse(probe.stale)
+        self.assertNotIn("ОТСТАЛА", qi.format_probe(probe))
 
     def test_unknown_ticker_says_so_and_suggests_the_fix(self) -> None:
         probe = qi.check_ticker("NOSUCH.US", publisher=self.publisher)
