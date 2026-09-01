@@ -15,13 +15,13 @@ GCP Cloud Run (long-polling) · Cloud Function (RAG-ингест) · ChromaDB ·
 ## Верификация (обязательна перед каждым пушем)
 
 ```bash
-PYTHONPATH=src python -m pytest tests/ -q          # → 1960 passed, 2 xfailed (+7 skipped без playwright)
+PYTHONPATH=src python -m pytest tests/ -q          # → 1966 passed, 2 xfailed (+7 skipped без playwright)
 ```
 
 - Префикс `PYTHONPATH=src` **ОБЯЗАТЕЛЕН** (`conftest.py`/`pyproject.toml` нет).
 - **Прогонов ДВА.** Второй — зеркало деплой-образа, без `design/`: `cp -r src tests
   SYSTEM_PROMPT.md requirements*.txt <tmp>/ && cd <tmp>`, тот же прогон → 1847 passed,
-  120 skipped, 2 xfailed. Зелёный GitHub CI НЕ означает, что деплой пройдёт: CI видит
+  126 skipped, 2 xfailed. Зелёный GitHub CI НЕ означает, что деплой пройдёт: CI видит
   полный чекаут, Cloud Build — только образ, и разница — ровно тесты, читающие
   `design/`, `docs/`, `CLAUDE.md`, `scripts/` и `cloud_function/`.
 - Правил `design/*.jsx` → **обязательно** `bash design/premium_v2/build.sh`.
