@@ -103,11 +103,30 @@ class C1Coverage:
     benchmarks_ok: int = 0
     benchmarks_total: int = 0
     missing_factors: tuple[str, ...] = ()
+    #: Бумаги C-1, чей последний бар СТАРШЕ последнего дня их рынка в базе.
+    #: 🔴 Наличие истории и её свежесть — РАЗНЫЕ вопросы, и допуск обязан
+    #: отвечать на оба. `coverage_report` возвращает `MAX(trade_date)` и
+    #: сравнивает его только с `None`, поэтому «10/10 ✅» четыре дня подряд
+    #: стояло над факторами, замершими на 20260824 (`§−113`).
+    stale: tuple[tuple[str, int], ...] = ()
+    stale_factors: tuple[str, ...] = ()
+    #: Последний день базы, с которым сравнивали.  Без него список протухших
+    #: нечитаем: «SPY.US 20260824» не говорит, много это или мало.
+    as_of: Optional[int] = None
     note: Optional[str] = None
 
     @property
     def complete(self) -> bool:
         return self.checked and self.factors_ok == self.factors_total
+
+    @property
+    def usable(self) -> bool:
+        """Допуск пройден: факторы и НА МЕСТЕ, и СВЕЖИЕ.
+
+        Отдельно от `complete`, потому что вопросы разные: `complete` про
+        состав, `usable` — про пригодность к следующему отчёту.
+        """
+        return self.complete and not self.stale_factors
 
 
 @dataclass(frozen=True)
@@ -118,6 +137,10 @@ class MarketState:
     bars: int
     stale_days: Optional[int] = None
     days_left: Optional[int] = None
+    #: Бумаг рынка, у которых ЕСТЬ бар за `latest`.  `instruments` отвечает на
+    #: другой вопрос — «сколько бумаг рынка есть в базе вообще», и на нём
+    #: частичный день неотличим от полного (`§−113`).
+    fresh: int = 0
 
 
 @dataclass(frozen=True)
@@ -156,6 +179,14 @@ class ApplyOutcome:
     c1: Optional[C1Coverage] = None
     missing_dates: tuple[int, ...] = ()
     days_left: Optional[int] = None
+    #: Дата файла и то, чего она НЕ покрыла: сколько бумаг базы остались без
+    #: бара за этот день и первые из них поимённо.  Голое «записано 631» этого
+    #: не говорит, и просадка 800 → 631 держалась пять дней под зелёной
+    #: галочкой (`§−113`).
+    file_date: Optional[int] = None
+    universe_total: int = 0
+    missed_total: int = 0
+    missed: tuple[str, ...] = ()
     warnings: tuple[str, ...] = ()
 
 
@@ -268,8 +299,80 @@ def _markets(conn: sqlite3.Connection, *,
         out.append(MarketState(market=str(row["market"]), latest=latest,
                                instruments=int(row["instruments"]),
                                bars=int(row["bars"]),
-                               stale_days=stale, days_left=left))
+                               stale_days=stale, days_left=left,
+                               fresh=_fresh_count(conn, str(row["market"]),
+                                                  latest)))
     return tuple(out)
+
+
+def _fresh_count(conn: sqlite3.Connection, market: str,
+                 latest: Optional[int]) -> int:
+    """Бумаг рынка, у которых есть бар ровно за `latest`.
+
+    🔴 `MAX(trade_date)` по рынку двигает ОДНА свежая бумага, поэтому рынок
+    выглядит обновлённым, даже когда обновилась пятая его часть.  Это и
+    случилось: срез клал 631 бар в базу из 803 бумаг, а сводка честно писала
+    «последний день 20260828» (`§−113`).
+    """
+    if latest is None:
+        return 0
+    row = conn.execute(
+        "SELECT COUNT(*) AS n FROM daily_bars b "
+        "JOIN instruments i ON i.id = b.instrument_id "
+        "WHERE i.market = ? AND b.trade_date = ?",
+        (market, int(latest))).fetchone()
+    return int(row["n"]) if row else 0
+
+
+#: Условие «бумага рынка, ТОРГОВАВШЕГО в этот день, осталась без бара».
+#:
+#: 🔴 Оговорка про рынок обязательна, и она же — форма правила 9 (`0 < принято
+#: < порога`): рынок, у которого в этот день НЕТ НИ ОДНОГО бара, был закрыт, а
+#: не сломан.  Без неё праздник в США печатал бы «без бара 803 бумаги», а
+#: суббота при крипте в базе — «без бара все американские»: самая громкая
+#: тревога приходилась бы на самый штатный день.
+_MISSED_WHERE = (
+    "i.market IN (SELECT i2.market FROM daily_bars b2 "
+    "             JOIN instruments i2 ON i2.id = b2.instrument_id "
+    "             WHERE b2.trade_date = ?) "
+    "AND NOT EXISTS (SELECT 1 FROM daily_bars b "
+    "                WHERE b.instrument_id = i.id AND b.trade_date = ?)")
+
+
+def _missed_for_date(conn: sqlite3.Connection, trade_date: int, *,
+                     limit: int = 10) -> tuple[int, tuple[str, ...]]:
+    """Бумаги базы БЕЗ бара за эту дату: сколько всего и первые поимённо.
+
+    Имена важнее числа.  Число не различает три РАЗНЫЕ причины — бумаги нет в
+    файле, у неё чужая дата, у неё сменилась форма символа, — а имя позволяет
+    открыть файл и посмотреть.  Ограничение `limit` намеренное: сводка уходит
+    в Telegram, и список на 172 строки в ней не поместится.
+    """
+    total = int(conn.execute(
+        f"SELECT COUNT(*) AS n FROM instruments i WHERE {_MISSED_WHERE}",
+        (int(trade_date), int(trade_date))).fetchone()["n"])
+    if not total:
+        return 0, ()
+    rows = conn.execute(
+        f"SELECT i.source_symbol AS sym FROM instruments i "
+        f"WHERE {_MISSED_WHERE} ORDER BY i.source_symbol LIMIT ?",
+        (int(trade_date), int(trade_date), int(limit))).fetchall()
+    return total, tuple(str(r["sym"]) for r in rows)
+
+
+def _latest_by_market(conn: sqlite3.Connection) -> dict[str, int]:
+    """`{рынок: последний его день в базе}` — без счёта свежих.
+
+    Отдельно от `_markets`, потому что допуску C-1 нужен ровно этот словарь, а
+    `_markets` попутно считает свежих по каждому рынку: платить за это дважды
+    на каждой заливке незачем.
+    """
+    rows = conn.execute(
+        "SELECT i.market AS market, MAX(b.trade_date) AS latest "
+        "FROM daily_bars b JOIN instruments i ON i.id = b.instrument_id "
+        "GROUP BY i.market").fetchall()
+    return {str(r["market"]): int(r["latest"])
+            for r in rows if r["latest"] is not None}
 
 
 def _dates_present(conn: sqlite3.Connection,
@@ -298,12 +401,31 @@ def _c1(conn: sqlite3.Connection) -> C1Coverage:
                           note=f"{name} не установлен — допуск не подтверждён")
     coverage = si.coverage_report(conn, list(factor_etfs) + list(benchmark_etfs))
     missing = tuple(t for t in factor_etfs if not coverage.get(t))
+    latest_by_market = _latest_by_market(conn)
+    factors = set(factor_etfs)
+    stale: list[tuple[str, int]] = []
+    stale_factors: list[str] = []
+    for ticker, last in coverage.items():
+        if not last:
+            continue
+        # Сопоставление берётся у SSOT (`resolve_symbol`), а не выводится из
+        # формы тикера: второй сопоставитель — ловушка, на которой проект уже
+        # обжигался (`AUDIT §−80`).
+        found = si.resolve_symbol(conn, ticker)
+        newest = latest_by_market.get(str(found["market"])) if found else None
+        if newest is None or int(last) >= newest:
+            continue
+        stale.append((str(ticker), int(last)))
+        if ticker in factors:
+            stale_factors.append(str(ticker))
+    as_of = max(latest_by_market.values(), default=None)
     return C1Coverage(
         checked=True,
         factors_ok=len(factor_etfs) - len(missing), factors_total=len(factor_etfs),
         benchmarks_ok=sum(1 for t in benchmark_etfs if coverage.get(t)),
         benchmarks_total=len(benchmark_etfs),
-        missing_factors=missing)
+        missing_factors=missing, stale=tuple(stale),
+        stale_factors=tuple(stale_factors), as_of=as_of)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -489,6 +611,10 @@ def _apply(path, *, kind: str, actor: str, publisher: Optional[QuotePublisher],
                 allow_new=(kind == "history"))
             coverage = _c1(conn)
             markets = _markets(conn, today=today)
+            universe_total = _instrument_count(conn)
+            missed_total, missed = (
+                _missed_for_date(conn, batch.file_date)
+                if batch.file_date is not None else (0, ()))
         finally:
             conn.close()
 
@@ -530,7 +656,9 @@ def _apply(path, *, kind: str, actor: str, publisher: Optional[QuotePublisher],
     return ApplyOutcome(
         ok=True, kind=kind, file_name=name, published=True, store_touched=True,
         generation=upload.generation, result=result, c1=coverage,
-        missing_dates=missing, days_left=days_left, warnings=tuple(warnings))
+        missing_dates=missing, days_left=days_left,
+        file_date=batch.file_date, universe_total=universe_total,
+        missed_total=missed_total, missed=missed, warnings=tuple(warnings))
 
 
 def apply_daily(path, *, actor: str, publisher: Optional[QuotePublisher] = None,
@@ -614,12 +742,25 @@ def _c1_lines(coverage: Optional[C1Coverage]) -> list[str]:
         return []
     if not coverage.checked:
         return [f"  ⚠️ C-1 НЕ ПРОВЕРЕН: {coverage.note}"]
-    mark = "✅" if coverage.complete else "🔴"
+    # 🔴 Галочка — ВЕРДИКТ, а не оформление (правило проекта). Фактор, который
+    # есть в базе, но замер на позавчера, к следующему отчёту непригоден так же,
+    # как отсутствующий, — значит зелёной галочки над ним быть не может.
+    mark = "✅" if coverage.usable else "🔴"
     lines = [f"  C-1 факторы ........... "
              f"{coverage.factors_ok}/{coverage.factors_total} {mark}",
              f"  C-1 бенчмарки ......... "
              f"{coverage.benchmarks_ok}/{coverage.benchmarks_total}"]
     lines += [f"    🔴 нет истории: {t}" for t in coverage.missing_factors]
+    if coverage.stale:
+        shown = coverage.stale[:6]
+        listed = ", ".join(f"{t} {d}" for t, d in shown)
+        tail = ("" if len(coverage.stale) <= len(shown)
+                else f" … и ещё {len(coverage.stale) - len(shown)}")
+        lines.append(f"    🔴 ПРОТУХЛИ (последний день базы "
+                     f"{coverage.as_of}): {listed}{tail}")
+        lines.append("    ↑ бумага есть, но её бар СТАРШЕ последнего дня базы. "
+                     "После 5 торговых дней провайдер её отклонит, а в профиле "
+                     "STRICT потеря фактора = BLOCK вместо отчёта.")
     return lines
 
 
@@ -641,7 +782,12 @@ def format_summary(outcome: ApplyOutcome) -> str:
     lines.append(f"✅ применён {outcome.file_name}")
     if result is not None:
         lines.append(f"  строк прочитано ....... {result.rows_read}")
-        lines.append(f"  баров записано ........ {result.rows_written}")
+        written = str(result.rows_written)
+        if outcome.universe_total:
+            share = 100.0 * result.rows_written / outcome.universe_total
+            written += (f" из {outcome.universe_total} бумаг базы "
+                        f"({share:.0f} %)")
+        lines.append(f"  баров записано ........ {written}")
         if outcome.kind == "history":
             lines.append(f"  инструментов заведено . {result.instruments_added}")
         if result.rejected:
@@ -649,6 +795,16 @@ def format_summary(outcome: ApplyOutcome) -> str:
             for rule, count in sorted(result.rejected.items(),
                                       key=lambda kv: -kv[1]):
                 lines.append(f"    {rule:.<26} {count}")
+        if outcome.missed_total and outcome.file_date is not None:
+            listed = " ".join(outcome.missed)
+            tail = ("" if outcome.missed_total <= len(outcome.missed)
+                    else f" … и ещё {outcome.missed_total - len(outcome.missed)}")
+            lines.append(f"  🔴 без бара за {outcome.file_date}: "
+                         f"{outcome.missed_total} из {outcome.universe_total}"
+                         f" — {listed}{tail}")
+            lines.append("     Проверьте эти тикеры В САМОМ ФАЙЛЕ: строки нет / "
+                         "у неё чужая дата / сменилась форма символа — причины "
+                         "разные, лечение тоже.")
         if result.rows_written == 0:
             lines.append("  ⚠️ ни один бар не лёг — день в журнал НЕ записан")
     lines += _c1_lines(outcome.c1)
@@ -669,7 +825,13 @@ def format_status(state: StoreStatus) -> str:
     for market in state.markets:
         age = "—" if market.stale_days is None else f"{market.stale_days} дн."
         lines.append(f"  {market.market:.<22} последний день {market.latest} "
-                     f"(возраст {age}, бумаг {market.instruments})")
+                     f"(возраст {age}, бумаг {market.instruments}, "
+                     f"свежих {market.fresh})")
+        if market.latest is not None and market.fresh < market.instruments:
+            lines.append(f"    🔴 без бара за {market.latest}: "
+                         f"{market.instruments - market.fresh} из "
+                         f"{market.instruments} — рынок «свежий» по одной "
+                         "бумаге, а обновилась часть")
     if state.days_left is not None:
         mark = "🔴" if state.days_left <= 2 else "  "
         lines.append(f"{mark} до блокировки ручного тира: {state.days_left} дн.")
@@ -715,6 +877,16 @@ class TickerProbe:
     match_kind: Optional[str] = None
     last_bar: Optional[int] = None
     bars: int = 0
+    #: Последний день ЕЁ рынка в базе.  Без него `last_bar` не читается: дата
+    #: сама по себе не говорит, отстала бумага или нет (`§−113`).
+    market_latest: Optional[int] = None
+
+    @property
+    def stale(self) -> bool:
+        """Бумага есть, но её бар СТАРШЕ последнего дня рынка."""
+        return bool(self.found and self.last_bar is not None
+                    and self.market_latest is not None
+                    and self.last_bar < self.market_latest)
 
     @property
     def substituted(self) -> bool:
@@ -740,6 +912,16 @@ class UniverseReport:
     def complete(self) -> bool:
         return bool(self.factors) and self.factors_ok == len(self.factors)
 
+    @property
+    def usable(self) -> bool:
+        """Допуск пройден: факторы и НА МЕСТЕ, и СВЕЖИЕ.
+
+        🔴 Именно эта команда вскрыла `§−113` — и она же печатала «10/10 ✅»
+        над тринадцатью строками с датой позавчера. Состав и пригодность —
+        разные вопросы, и галочка отвечает на второй.
+        """
+        return self.complete and not any(p.stale for p in self.factors)
+
 
 @dataclass(frozen=True)
 class PruneOutcome:
@@ -756,19 +938,25 @@ class PruneOutcome:
     generation: Optional[int] = None
 
 
-def _probe(conn: sqlite3.Connection, ticker: str) -> TickerProbe:
+def _probe(conn: sqlite3.Connection, ticker: str, *,
+           latest_by_market: Optional[dict] = None) -> TickerProbe:
     found = si.resolve_symbol(conn, ticker)
     if found is None:
         return TickerProbe(ticker=str(ticker), found=False)
     row = conn.execute(
         "SELECT COUNT(*) AS n, MAX(trade_date) AS last FROM daily_bars "
         "WHERE instrument_id=?", (int(found["id"]),)).fetchone()
+    # Словарь передаётся, когда тикеров много (`/universe`): группировка по
+    # рынку одна на весь отчёт, а не одна на бумагу.
+    latest = (latest_by_market if latest_by_market is not None
+              else _latest_by_market(conn))
     return TickerProbe(
         ticker=str(ticker), found=True, source_symbol=str(found["sym"]),
         market=str(found["market"]), currency=str(found["ccy"]),
         match_kind=str(found["kind"]),
         bars=int(row["n"] or 0) if row else 0,
-        last_bar=int(row["last"]) if row and row["last"] is not None else None)
+        last_bar=int(row["last"]) if row and row["last"] is not None else None,
+        market_latest=latest.get(str(found["market"])))
 
 
 def check_ticker(ticker: str, *,
@@ -821,10 +1009,13 @@ def universe_report(*, publisher: Optional[QuotePublisher] = None) -> UniverseRe
         except PublisherUnavailable as exc:
             return UniverseReport(ok=False, reason=str(exc))
         try:
+            latest = _latest_by_market(conn)
             return UniverseReport(
                 ok=True,
-                factors=tuple(_probe(conn, t) for t in factor_etfs),
-                benchmarks=tuple(_probe(conn, t) for t in benchmark_etfs))
+                factors=tuple(_probe(conn, t, latest_by_market=latest)
+                              for t in factor_etfs),
+                benchmarks=tuple(_probe(conn, t, latest_by_market=latest)
+                                 for t in benchmark_etfs))
         finally:
             conn.close()
 
@@ -976,7 +1167,7 @@ def build_reminder(state: StoreStatus) -> Optional[str]:
 def format_universe(report: UniverseReport) -> str:
     if not report.ok:
         return f"🔴 покрытие не проверено\n   {report.reason}"
-    mark = "✅" if report.complete else "🔴"
+    mark = "✅" if report.usable else "🔴"
     lines = [f"🎯 допуск C-1 · факторы {report.factors_ok}/{len(report.factors)} "
              f"{mark} · бенчмарки {report.benchmarks_ok}/{len(report.benchmarks)}"]
     for probe in report.factors + report.benchmarks:
@@ -986,8 +1177,13 @@ def format_universe(report: UniverseReport) -> str:
         note = ""
         if probe.substituted:
             note = f"  ⚠️ подмена площадки → {probe.source_symbol}"
+        if probe.stale:
+            note += f"  🔴 ПРОТУХ: рынок дошёл до {probe.market_latest}"
         lines.append(f"  {probe.ticker:.<12} {probe.bars:>5} баров, "
                      f"последний {probe.last_bar}{note}")
+    if any(p.stale for p in report.factors):
+        lines.append("🔴 фактор В БАЗЕ, но отстал от рынка: после 5 торговых "
+                     "дней провайдер его отклонит, а STRICT даст BLOCK.")
     if not report.complete:
         lines.append("🔴 в профиле STRICT потеря ЛЮБОГО фактора даёт BLOCK — "
                      "ручной тир отдаст отказ вместо отчёта.")
@@ -1008,6 +1204,10 @@ def format_probe(probe: TickerProbe) -> str:
              f"  рынок / валюта ........ {probe.market} / {probe.currency}",
              f"  баров в базе .......... {probe.bars}",
              f"  последний бар ......... {probe.last_bar}"]
+    if probe.stale:
+        lines.append(f"  🔴 ОТСТАЛА: рынок в базе дошёл до {probe.market_latest}, "
+                     "а её последний бар старше. Свежесть считается в ТОРГОВЫХ "
+                     "днях рынка; после 5 подряд провайдер бумагу отклонит.")
     if probe.substituted:
         lines.append("  ⚠️ ПОДМЕНА ПЛОЩАДКИ: это другая биржа, другая цена и, "
                      "возможно, другая валюта. Решение ваше, но оно обязано "
