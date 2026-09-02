@@ -859,8 +859,18 @@ def format_status(state: StoreStatus) -> str:
         listed = " ".join(str(d) for d in state.missing_dates[:12])
         lines.append(f"  ⚠️ не хватает дней: {len(state.missing_dates)} — {listed}")
     if state.last_run:
-        lines.append(f"  последняя операция .... {state.last_run.get('file')} "
-                     f"({state.last_run.get('rows_written')} баров)")
+        # 🔴 Строка печаталась одним шаблоном «N баров» на ЛЮБУЮ операцию, а
+        # чистка баров не пишет — и `/status` честно сообщал «prune (None
+        # баров)». Ключ есть, он просто другой: у чистки это `removed`.
+        # Показывать `None` как число — тот же класс, что «пустая коллекция ≠
+        # всё хорошо» (`§−90` A-3): вместо факта выводится артефакт шаблона.
+        run = state.last_run
+        if str(run.get("kind") or "") == "prune":
+            detail = f"удалено бумаг: {run.get('removed', '—')}"
+        else:
+            written = run.get("rows_written")
+            detail = f"{written} баров" if written is not None else "баров нет"
+        lines.append(f"  последняя операция .... {run.get('file')} ({detail})")
     return "\n".join(lines)
 
 

@@ -1256,6 +1256,23 @@ class MissingAnswerTest(_IngestCase):
         text = qi.format_missing(qi.status(publisher=self.publisher))
         self.assertIn("✅", text)
 
+    def test_the_last_operation_is_described_by_its_own_kind(self) -> None:
+        """🔴 `/status` печатал «prune (None баров)»: шаблон один на все
+        операции, а чистка баров не пишет — у неё ключ `removed`.
+
+        `None`, выведенный как число, — это артефакт шаблона вместо факта, тот
+        же класс, что «пустая коллекция ≠ всё хорошо» (`§−90` A-3).
+        """
+        prune_run = {"file": "prune", "kind": "prune", "removed": 11281}
+        text = qi.format_status(_state(last_run=prune_run))
+        self.assertIn("prune (удалено бумаг: 11281)", text)
+        self.assertNotIn("None баров", text)          # ровно то, что печаталось
+
+        apply_run = {"file": "20260831_d.txt", "kind": "daily",
+                     "rows_written": 800}
+        self.assertIn("20260831_d.txt (800 баров)",
+                      qi.format_status(_state(last_run=apply_run)))
+
     def test_missing_days_are_listed_as_files_to_resend(self) -> None:
         qi.apply_daily(self.daily(20260813), actor="1", publisher=self.publisher)
         conn = si.connect(self.db)
