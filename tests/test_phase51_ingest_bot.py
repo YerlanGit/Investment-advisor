@@ -744,6 +744,65 @@ class PartialDayIsNamedTest(_IngestCase):
         self.assertIn("без бара за 20260813", text)
 
 
+class MangledDailyNameTest(_IngestCase):
+    """🔴 `§−114`. Живой инцидент 31.08: браузер сохранил повторную загрузку
+    дневного среза как `20260831_d 2.txt`. Строгое имя не совпало, бот принял
+    файл за ИСТОРИЮ — а история имеет право заводить бумаги — и завёл 11 281
+    бумагу с одним баром каждая, опубликовав базу. Это `§−88` через другую
+    дверь: дельту тогда закрыли, вход истории остался открыт.
+
+    Две линии защиты, обе fail-closed:
+      * по ИМЕНИ — ещё до скачивания (`classify_upload`);
+      * по СОДЕРЖИМОМУ — правило 10 в парсере истории: одна бумага, иначе
+        файл не история. Вторая линия не зависит от формы искажения имени.
+    """
+
+    def test_a_duplicate_download_name_is_refused_with_the_right_name(self) -> None:
+        for name in ("20260831_d 2.txt", "20260831_d (1).txt",
+                     "20260831_d_2.txt", "20260831_d-copy.txt"):
+            decision = qi.classify_upload(name, 700_000)
+            self.assertIsNone(decision.kind, name)
+            self.assertIn("20260831_d.txt", decision.reason, name)
+            self.assertIn("ИСТОРИИ", decision.reason, name)
+
+    def test_a_real_history_name_is_still_history(self) -> None:
+        """Обратная мутация: имя бумаги не начинается с восьми цифр."""
+        self.assertEqual(qi.classify_upload("aapl.us.txt", 100_000).kind, "history")
+        self.assertEqual(qi.classify_upload("brk-b.us.txt", 100_000).kind, "history")
+
+    def test_a_strict_daily_name_is_still_daily(self) -> None:
+        self.assertEqual(qi.classify_upload("20260831_d.txt", 700_000).kind, "daily")
+
+    def test_a_multi_symbol_file_is_refused_as_history_and_the_base_is_untouched(
+            self) -> None:
+        """🔴 Главная проверка: даже если имя прошло, содержимое не пройдёт."""
+        source = self.root / "renamed-by-hand.txt"          # имя — «история»
+        source.write_text(_daily_text(20260813, ["MSFT.US", "NVDA.US", "AMD.US"]),
+                          encoding="utf-8")
+        before = self.instruments()
+        generation = self.publisher.download(self.root / "g.sqlite").generation
+
+        outcome = qi.apply_history(source, actor="1", publisher=self.publisher)
+
+        self.assertFalse(outcome.ok)
+        self.assertFalse(outcome.store_touched)
+        self.assertIn("3 разных бумаг", outcome.reason)
+        self.assertIn("20260813_d.txt", outcome.reason)     # дата — из файла
+        self.assertEqual(self.instruments(), before)          # ни одной новой
+        self.assertEqual(
+            self.publisher.download(self.root / "g2.sqlite").generation,
+            generation)                                       # не публиковалась
+
+    def test_a_single_symbol_history_still_enrols_the_paper(self) -> None:
+        """Обратная мутация: штатный добор одной бумаги не сломан."""
+        source = self.root / "msft.us.txt"
+        source.write_text(_history_text("MSFT.US", (20260810, 20260811)),
+                          encoding="utf-8")
+        outcome = qi.apply_history(source, actor="1", publisher=self.publisher)
+        self.assertTrue(outcome.ok, outcome.reason)
+        self.assertEqual(outcome.result.instruments_added, 1)
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # IB-3 — доступ
 # ═════════════════════════════════════════════════════════════════════════════

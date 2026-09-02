@@ -15,12 +15,12 @@ GCP Cloud Run (long-polling) · Cloud Function (RAG-ингест) · ChromaDB ·
 ## Верификация (обязательна перед каждым пушем)
 
 ```bash
-PYTHONPATH=src python -m pytest tests/ -q          # → 1966 passed, 2 xfailed (+7 skipped без playwright)
+PYTHONPATH=src python -m pytest tests/ -q          # → 1971 passed, 2 xfailed (+7 skipped без playwright)
 ```
 
 - Префикс `PYTHONPATH=src` **ОБЯЗАТЕЛЕН** (`conftest.py`/`pyproject.toml` нет).
 - **Прогонов ДВА.** Второй — зеркало деплой-образа, без `design/`: `cp -r src tests
-  SYSTEM_PROMPT.md requirements*.txt <tmp>/ && cd <tmp>`, тот же прогон → 1847 passed,
+  SYSTEM_PROMPT.md requirements*.txt <tmp>/ && cd <tmp>`, тот же прогон → 1852 passed,
   126 skipped, 2 xfailed. Зелёный GitHub CI НЕ означает, что деплой пройдёт: CI видит
   полный чекаут, Cloud Build — только образ, и разница — ровно тесты, читающие
   `design/`, `docs/`, `CLAUDE.md`, `scripts/` и `cloud_function/`.
@@ -80,8 +80,8 @@ PYTHONPATH=src python -m pytest tests/ -q          # → 1966 passed, 2 xfailed 
 - ДВА РАЗНЫХ ПРОЕКТА, не смешивать: `roadmap/manual_portfolio/` (ручной ввод, источник
   Stooq) и `roadmap/freedom_warehouse/` (Freedom API → своя БД). Основания разные
   (I-12/I-14): `manual` не вправе читать витрину с `origin='tradernet'`, как и сам Tradernet.
-- База котировок Stooq: ПИШУТ двое — `stooq_ingest` у оператора и бот-загрузчик. Ядро у них ОДНО (`parse_daily_file`+`apply_batch`, `allow_new=False`), ДАННЫЕ обязаны совпадать побитово (гейт), байты файла — НЕТ: `generation` это CAS-токен, `ingest_runs` — журнал (`§−106`)
-  (скачал → применил → залил ЦЕЛИКОМ, CAS по поколению; 412 = отказ, не ретрай).
+- База котировок Stooq: ПИШУТ двое — `stooq_ingest` у оператора и бот-загрузчик. Ядро у них ОДНО (`parse_daily_file`+`apply_batch`, `allow_new=False`), ДАННЫЕ обязаны совпадать побитово (гейт), байты файла — НЕТ: `generation` это CAS-токен, `ingest_runs` — журнал (`§−106`).
+  (скачал → применил → залил ЦЕЛИКОМ, CAS по поколению; 412 = отказ, не ретрай). Файл истории — ОДНА бумага (правило 10), имя среза — СТРОГОЕ: `_d 2.txt` ушёл веткой истории и завёл 11 281 бумагу (`§−114`), чинит `/prune`.
   Отчётный бот открывает `mode=ro` и читает ЛОКАЛЬНУЮ КОПИЮ (`stooq_store._local_copy`): SQLite поверх
   gcsfuse — сотни range-запросов на отчёт. Формы символа меняют НОТАЦИЮ, но не
   ПЛОЩАДКУ: `{base}.US` для иностранной бумаги подсунет ADR (`§−77`). Свежесть —
