@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sqlite3
 import tempfile
 from dataclasses import dataclass, field
@@ -67,6 +68,12 @@ MAX_UPLOAD_BYTES = env_int("INGEST_MAX_FILE_BYTES", 2_000_000,
 MIN_SIZE_RATIO = 0.9
 
 _CONVENTIONAL_SUFFIX = ".txt"
+
+#: Имя, которое ХОТЕЛО быть дневным срезом, но строгому образцу не соответствует:
+#: `20260831_d 2.txt`, `20260831_d (1).txt`, `20260831_d_2.txt`. Так браузер и
+#: Telegram помечают повторную загрузку. Строгое имя проверяется РАНЬШЕ, поэтому
+#: сюда доходит только испорченное (`§−114`).
+_MANGLED_DAILY_RE = re.compile(r"^(\d{8})_d", re.IGNORECASE)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -223,6 +230,18 @@ def classify_upload(file_name: str, size_bytes: Optional[int]) -> UploadDecision
     trade_date = si.file_date_of(name)
     if trade_date is not None:
         return UploadDecision("daily", trade_date=trade_date)
+    mangled = _MANGLED_DAILY_RE.match(name)
+    if mangled:
+        # 🔴 §−114. Молча принять такой файл как ИСТОРИЮ значит завести в базе
+        # все ~12 000 бумаг среза с одним баром каждая — так и случилось 31.08.
+        # Отказ ДО скачивания: причина видна по имени, файл качать незачем.
+        return UploadDecision(
+            None, reason=(
+                f"это дневной срез с испорченным именем: «{name}». Браузер и "
+                "Telegram дописывают « 2» / «(1)» к повторной загрузке, а без "
+                "строгого имени YYYYMMDD_d.txt файл ушёл бы в ветку ИСТОРИИ и "
+                "завёл бы в базе все ~12 000 бумаг среза. Переименуйте в "
+                f"{mangled.group(1)}_d.txt и пришлите заново"))
     return UploadDecision("history")
 
 
