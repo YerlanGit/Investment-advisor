@@ -298,6 +298,32 @@ async def _send_block(message: Message, text: str) -> None:
     await _deliver(message, render_block(text))
 
 
+async def _await_with_notice(message: Message, work, *, notice: str):
+    """Дождаться долгой операции, предупредив оператора на таймауте.
+
+    🔴 `§−115`. `asyncio.to_thread` НЕ отменяется: `wait_for` снимает ОЖИДАНИЕ,
+    а поток продолжает работать и может опубликовать базу уже ПОСЛЕ сообщения о
+    таймауте. Прежняя редакция печатала «не уложилась» как ИТОГ, хотя итога ещё
+    не было, и тут же выходила из `async with _LOCK` — то есть отпускала замок
+    поверх ЖИВОЙ записи. Данные спасал CAS, но картина у оператора была неверной:
+    он видел отказ там, где операция шла, и жал повтор.
+
+    Поэтому таймаут здесь — ПРЕДУПРЕЖДЕНИЕ, а не результат. Ожидание
+    продолжается (значит, замок держится до конца работы), а настоящий итог
+    приходит следом, в тот же чат. Это та же лестница, что в `_deliver`
+    (`§−104`): промолчать хуже, чем сказать неполно.
+    """
+    task = asyncio.ensure_future(work)
+    try:
+        # `shield` обязателен: без него `wait_for` отменяет саму задачу, и
+        # повторное ожидание получило бы `CancelledError` вместо результата.
+        return await asyncio.wait_for(asyncio.shield(task),
+                                      timeout=APPLY_TIMEOUT_S)
+    except asyncio.TimeoutError:
+        await _deliver(message, render_block(notice))
+        return await task
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # Хендлеры
 # ═════════════════════════════════════════════════════════════════════════════
@@ -389,13 +415,17 @@ async def cb_prune(callback: CallbackQuery) -> None:
         return
     async with _LOCK:
         try:
-            outcome = await asyncio.wait_for(
+            outcome = await _await_with_notice(
+                callback.message,
                 asyncio.to_thread(qi.prune, dry_run=False,
                                   actor=_actor(callback)),
-                timeout=APPLY_TIMEOUT_S)
+                notice=(f"⏳ чистка идёт дольше {APPLY_TIMEOUT_S} с и НЕ "
+                        "отменена — удаление продолжается, итог придёт сюда "
+                        "же.\nБаза в облаке меняется ОДНИМ файлом по CAS, "
+                        "поэтому промежуточного состояния там не бывает: она "
+                        "либо прежняя, либо уже чистая. Не жмите /prune "
+                        "повторно, пока не пришёл итог."))
             text = qi.format_prune(outcome)
-        except asyncio.TimeoutError:
-            text = f"🔴 чистка не уложилась в {APPLY_TIMEOUT_S} с."
         except Exception as exc:                        # noqa: BLE001
             logger.exception("prune упал")
             text = f"🔴 не смог вычистить: {exc}"
@@ -431,14 +461,14 @@ async def on_document(message: Message) -> None:
             + ("дневную дельту…" if decision.kind == "daily"
                else "файл истории…"))
         try:
-            summary = await asyncio.wait_for(
+            summary = await _await_with_notice(
+                message,
                 _apply_document(message, document, decision,
                                 actor=_actor(message)),
-                timeout=APPLY_TIMEOUT_S)
-        except asyncio.TimeoutError:
-            summary = (f"🔴 операция не уложилась в {APPLY_TIMEOUT_S} с. "
-                       "База могла остаться нетронутой — проверьте /status "
-                       "и пришлите файл ещё раз, повтор безвреден.")
+                notice=(f"⏳ файл применяется дольше {APPLY_TIMEOUT_S} с и НЕ "
+                        "отменён — работа продолжается, сводка придёт сюда же. "
+                        "Повтор сейчас только встанет в очередь за этой же "
+                        "операцией."))
         except Exception as exc:                        # noqa: BLE001
             logger.exception("применение %s упало", document.file_name)
             summary = f"🔴 не смог применить {document.file_name}: {exc}"

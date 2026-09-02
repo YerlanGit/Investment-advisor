@@ -917,6 +917,115 @@ class BotWiringTest(unittest.TestCase):
 
 
 
+class LongOperationNoticeTest(unittest.TestCase):
+    """🔴 `§−115`. Живой случай: оператор нажал «выполнить чистку» и получил
+    МОЛЧАНИЕ на шесть минут при таймауте 300 с.
+
+    Механика: `asyncio.to_thread` не отменяется. `wait_for` снимал ожидание,
+    печатал «не уложилась» как ИТОГ — а поток продолжал удалять и мог
+    опубликовать базу уже после этого сообщения. Хуже того, выход из
+    `async with _LOCK` отпускал замок поверх ЖИВОЙ записи: следующая команда
+    шла параллельно. Данные спасал CAS, картина у оператора — нет.
+
+    Теперь таймаут это ПРЕДУПРЕЖДЕНИЕ, а не результат: ожидание продолжается,
+    значит замок держится, а настоящий итог приходит следом.
+    """
+
+    def _fake_message(self, sent):
+        class _Msg:
+            async def answer(self, text, **_kw):
+                sent.append(text)
+        return _Msg()
+
+    def test_a_slow_operation_gets_a_notice_and_then_the_real_result(self) -> None:
+        import asyncio                                   # noqa: PLC0415
+        import ingest_bot                                # noqa: PLC0415
+
+        sent: list[str] = []
+
+        async def work():
+            await asyncio.sleep(0.15)
+            return "ИТОГ"
+
+        async def scenario():
+            with mock.patch.object(ingest_bot, "APPLY_TIMEOUT_S", 0.02):
+                return await ingest_bot._await_with_notice(
+                    self._fake_message(sent), work(), notice="ЖДИТЕ")
+
+        result = asyncio.run(scenario())
+        self.assertEqual(result, "ИТОГ")                 # итог НЕ потерян
+        self.assertEqual(len(sent), 1)                   # ровно одно уведомление
+        self.assertIn("ЖДИТЕ", sent[0])
+
+    def test_a_fast_operation_says_nothing_extra(self) -> None:
+        """Обратная мутация: уведомление на каждой операции читать перестанут."""
+        import asyncio                                   # noqa: PLC0415
+        import ingest_bot                                # noqa: PLC0415
+
+        sent: list[str] = []
+
+        async def work():
+            return "ИТОГ"
+
+        async def scenario():
+            with mock.patch.object(ingest_bot, "APPLY_TIMEOUT_S", 5):
+                return await ingest_bot._await_with_notice(
+                    self._fake_message(sent), work(), notice="ЖДИТЕ")
+
+        self.assertEqual(asyncio.run(scenario()), "ИТОГ")
+        self.assertEqual(sent, [])
+
+    def test_an_error_after_the_notice_still_reaches_the_caller(self) -> None:
+        """Отказ, случившийся ПОСЛЕ предупреждения, обязан дойти как отказ."""
+        import asyncio                                   # noqa: PLC0415
+        import ingest_bot                                # noqa: PLC0415
+
+        sent: list[str] = []
+
+        async def work():
+            await asyncio.sleep(0.15)
+            raise RuntimeError("облако отказало")
+
+        async def scenario():
+            with mock.patch.object(ingest_bot, "APPLY_TIMEOUT_S", 0.02):
+                await ingest_bot._await_with_notice(
+                    self._fake_message(sent), work(), notice="ЖДИТЕ")
+
+        with self.assertRaises(RuntimeError):
+            asyncio.run(scenario())
+        self.assertEqual(len(sent), 1)
+
+    def test_the_lock_is_held_until_the_work_really_finishes(self) -> None:
+        """🔴 Главное свойство: замок нельзя отпускать поверх живой записи."""
+        import asyncio                                   # noqa: PLC0415
+        import ingest_bot                                # noqa: PLC0415
+
+        order: list[str] = []
+        sent: list[str] = []
+
+        async def work():
+            await asyncio.sleep(0.15)
+            order.append("работа закончилась")
+            return "ИТОГ"
+
+        async def holder():
+            async with ingest_bot._LOCK:
+                await ingest_bot._await_with_notice(
+                    self._fake_message(sent), work(), notice="ЖДИТЕ")
+
+        async def rival():
+            await asyncio.sleep(0.05)                    # уже после таймаута
+            async with ingest_bot._LOCK:
+                order.append("вторая команда вошла")
+
+        async def scenario():
+            with mock.patch.object(ingest_bot, "APPLY_TIMEOUT_S", 0.02):
+                await asyncio.gather(holder(), rival())
+
+        asyncio.run(scenario())
+        self.assertEqual(order, ["работа закончилась", "вторая команда вошла"])
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # IB-5/IB-6 — диагностика
 # ═════════════════════════════════════════════════════════════════════════════
