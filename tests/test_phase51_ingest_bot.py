@@ -1437,6 +1437,24 @@ class DeployStepTest(unittest.TestCase):
         self.assertEqual(self.doc["substitutions"]["_INGEST_SA"], "",
                          "SA заводится осознанно, а не достаётся по умолчанию")
 
+    def test_loader_has_room_for_the_base_in_tmpfs(self) -> None:
+        """🔴 `§−116`. На Cloud Run `/tmp` — это ОПЕРАТИВНАЯ память.
+
+        Цикл загрузчика держит там копию базы (сейчас ~55 МБ и растёт), а
+        выгрузка обратно буферизует её ещё раз; `/prune` вдобавок пишет
+        `VACUUM`-копию. Вместе с numpy/pandas это ~300 МБ на дельте и больше
+        на чистке. При 512Mi запас исчезает МОЛЧА: контейнер убивают, ответ в
+        чат не уходит, и симптом неотличим от зависания.
+
+        Пин нужен, потому что `gcloud run deploy` задаёт память КАЖДЫЙ раз:
+        поднятая руками в консоли, она вернулась бы к значению из файла
+        следующим деплоем — та же грабля, что стирала env главного бота.
+        """
+        step = next(s for s in self.doc["steps"] if s["id"] == "deploy-ingest-bot")
+        body = "\n".join(step["args"])
+        self.assertIn("--memory=1Gi", body)
+        self.assertNotIn("--memory=512Mi", body)
+
     def test_loader_token_secret_is_a_substitution_named_by_the_owner(self) -> None:
         """Имя секрета — подстановка `_INGEST_BOT_TOKEN_SECRET` (`§−100`).
 
