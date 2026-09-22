@@ -39,11 +39,12 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import sqlite3
 import tempfile
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Iterable, Optional, Sequence
 
@@ -161,6 +162,11 @@ class StoreStatus:
     markets: tuple[MarketState, ...] = ()
     c1: Optional[C1Coverage] = None
     missing_dates: tuple[int, ...] = ()
+    #: Будние дни ПОСЛЕ последнего дня рынка и по сегодня — то есть срезы,
+    #: которых оператор ещё НЕ ПРИСЫЛАЛ. Отдельно от `missing_dates`, потому
+    #: что вопросы разные: там «база моложе журнала» (откат), здесь «дни, о
+    #: которых бот знать не мог» (`§−117`).
+    unsent_sessions: tuple[int, ...] = ()
     cursor_at: Optional[str] = None
     last_run: dict = field(default_factory=dict)
 
@@ -191,6 +197,7 @@ class ApplyOutcome:
     #: не говорит, и просадка 800 → 631 держалась пять дней под зелёной
     #: галочкой (`§−113`).
     file_date: Optional[int] = None
+    unsent_sessions: tuple[int, ...] = ()
     universe_total: int = 0
     missed_total: int = 0
     missed: tuple[str, ...] = ()
@@ -377,6 +384,41 @@ def _missed_for_date(conn: sqlite3.Connection, trade_date: int, *,
         f"WHERE {_MISSED_WHERE} ORDER BY i.source_symbol LIMIT ?",
         (int(trade_date), int(trade_date), int(limit))).fetchall()
     return total, tuple(str(r["sym"]) for r in rows)
+
+
+def unsent_sessions(latest: Optional[int], *,
+                    today: Optional[date] = None,
+                    limit: int = 40) -> tuple[int, ...]:
+    """Будние дни ПОСЛЕ `latest` и по `today` включительно.
+
+    🔴 Это ОЖИДАНИЕ, а не факт, и граница названа честно. Бот знает сессии
+    ТОЛЬКО те, что уже в базе, — про праздники США впереди ему взять неоткуда
+    (`market_calendar` выводит календарь из самих баров). Поэтому считаются
+    будни, а сводка прямо говорит: среди них могут быть праздники, и на
+    праздничный файл ответом будет «рынок был закрыт» — правило 9 этот случай
+    уже обрабатывает (`0 < принято < порога` против ровно нуля).
+
+    Выдумывать список праздников в коде было бы хуже молчания: он протухает
+    ровно так же тихо, как протухала база, и ошибку видно только задним числом.
+
+    `limit` бережёт сообщение Telegram: две недели простоя дают 10 дат, но
+    после отпуска их может быть шестьдесят.
+    """
+    if latest is None:
+        return ()
+    text = str(int(latest))
+    try:
+        cursor = date(int(text[:4]), int(text[4:6]), int(text[6:8]))
+    except (ValueError, IndexError):
+        return ()
+    moment = today or date.today()
+    out: list[int] = []
+    day = cursor + timedelta(days=1)
+    while day <= moment and len(out) < limit:
+        if day.weekday() < 5:                          # будни; выходные не сессии
+            out.append(int(day.strftime("%Y%m%d")))
+        day += timedelta(days=1)
+    return tuple(out)
 
 
 def _latest_by_market(conn: sqlite3.Connection) -> dict[str, int]:
@@ -672,10 +714,12 @@ def _apply(path, *, kind: str, actor: str, publisher: Optional[QuotePublisher],
 
     days_left = min((m.days_left for m in markets if m.days_left is not None),
                     default=None)
+    newest = max((m.latest for m in markets if m.latest is not None), default=None)
     return ApplyOutcome(
         ok=True, kind=kind, file_name=name, published=True, store_touched=True,
         generation=upload.generation, result=result, c1=coverage,
         missing_dates=missing, days_left=days_left,
+        unsent_sessions=unsent_sessions(newest, today=today),
         file_date=batch.file_date, universe_total=universe_total,
         missed_total=missed_total, missed=missed, warnings=tuple(warnings))
 
@@ -728,12 +772,16 @@ def status(*, publisher: Optional[QuotePublisher] = None,
         try:
             cursor = publisher.read_cursor()
             missing, _ = _rollback_warning(conn, cursor)
+            markets = _markets(conn, today=today)
+            newest = max((m.latest for m in markets if m.latest is not None),
+                         default=None)
             return StoreStatus(
                 ok=True, storage=publisher.describe(),
                 generation=snapshot.generation, size=snapshot.size,
                 instruments=_instrument_count(conn),
-                markets=_markets(conn, today=today), c1=_c1(conn),
+                markets=markets, c1=_c1(conn),
                 missing_dates=missing,
+                unsent_sessions=unsent_sessions(newest, today=today),
                 cursor_at=(cursor.at if cursor else None),
                 last_run=(dict(cursor.last_run) if cursor else {}))
         finally:
@@ -783,6 +831,77 @@ def _c1_lines(coverage: Optional[C1Coverage]) -> list[str]:
     return lines
 
 
+def _shell_context() -> dict[str, str]:
+    """Чем бот подставляет свои же имена в команды Cloud Shell.
+
+    🔴 Плейсхолдер `<ИМЯ_СЕРВИСА>` — это работа, переложенная на человека в
+    тот момент, когда он и так разбирается с поломкой. Cloud Run сообщает имя
+    сервиса сам (`K_SERVICE`), бакет и префикс бот уже знает — значит команду
+    можно отдать готовой к запуску. Чего в окружении НЕТ, остаётся
+    плейсхолдером: соврать подстановкой хуже, чем попросить дописать.
+    """
+    return {
+        "service": os.getenv("K_SERVICE", "").strip() or "<ИМЯ_СЕРВИСА>",
+        "region": os.getenv("INGEST_REGION", "").strip() or "<РЕГИОН>",
+        "bucket": os.getenv("QUOTES_BUCKET", "").strip() or "<БАКЕТ>",
+        "prefix": os.getenv("QUOTES_PREFIX", "stooq/").strip(),
+    }
+
+
+def _sessions_line(sessions: Sequence[int], *, limit: int = 8) -> str:
+    listed = " ".join(f"{d}_d.txt" for d in sessions[:limit])
+    tail = "" if len(sessions) <= limit else f" … и ещё {len(sessions) - limit}"
+    return listed + tail
+
+
+def next_steps(outcome: ApplyOutcome) -> list[str]:
+    """Блок «что делать сейчас» — ТОЛЬКО когда есть о чём сказать.
+
+    🔴 Молчание на здоровом файле обязательно. Блок, который печатается
+    всегда, перестают читать за неделю — ровно то, что случилось с ежедневным
+    напоминанием: оно приходило четырнадцать дней подряд одинаковым текстом и
+    было пропущено (`§−117`). Поэтому совет появляется по ФАКТУ проблемы и
+    несёт её числа.
+
+    Каждый шаг — список строк: первая нумеруется, остальные идут отступом.
+    Команды печатаются ГОТОВЫМИ к запуску (`_shell_context`).
+    """
+    shell = _shell_context()
+    steps: list[list[str]] = []
+
+    if outcome.unsent_sessions:
+        steps.append([
+            f"не хватает {len(outcome.unsent_sessions)} торговых дн. — пришлите "
+            f"срезы: {_sessions_line(outcome.unsent_sessions)}",
+            "среди них могут быть праздники США: на такой файл отвечу "
+            "«рынок был закрыт», и это нормально",
+        ])
+    if outcome.days_left is not None and outcome.days_left <= 0:
+        steps.append([f"🔴 ручной тир ЗАБЛОКИРОВАН уже {-outcome.days_left} дн.: "
+                      "пока дни не догнаны, отчёты не строятся"])
+    if outcome.c1 is not None and outcome.c1.checked and not outcome.c1.usable:
+        steps.append(["🔴 допуск C-1 не пройден — в профиле STRICT это BLOCK, "
+                      "а не деградация"])
+    if outcome.missed_total and outcome.file_date is not None:
+        name = f"{outcome.file_date}_d.txt"
+        raw = outcome.missed[0] if outcome.missed else "SPY.US"
+        steps.append([
+            "посмотреть В САМОМ ФАЙЛЕ, почему бумаги без бара (Cloud Shell):",
+            f"gcloud storage cp gs://{shell['bucket']}/{shell['prefix']}"
+            f"inbox/{name} .",
+            f'grep -i "^{raw.replace(".", chr(92) + ".")}," {name}',
+            "строки нет — срез не тот; дата чужая — источник отстал",
+        ])
+
+    if not steps:
+        return []
+    lines = ["  ━━ что делать сейчас ━━"]
+    for number, step in enumerate(steps, 1):
+        lines.append(f"  {number}. {step[0]}")
+        lines += [f"     {tail}" for tail in step[1:]]
+    return lines
+
+
 def format_summary(outcome: ApplyOutcome) -> str:
     """Сводка в чат.  Форма ТА ЖЕ, что печатает CLI (`OPERATOR_STOOQ §8.1`).
 
@@ -828,6 +947,7 @@ def format_summary(outcome: ApplyOutcome) -> str:
             lines.append("  ⚠️ ни один бар не лёг — день в журнал НЕ записан")
     lines += _c1_lines(outcome.c1)
     lines.append(f"  база опубликована · поколение {outcome.generation}")
+    lines += next_steps(outcome)
     if outcome.days_left is not None:
         lines.append(f"  до блокировки ручного тира: {outcome.days_left} дн.")
     lines += list(outcome.warnings)
@@ -855,6 +975,9 @@ def format_status(state: StoreStatus) -> str:
         mark = "🔴" if state.days_left <= 2 else "  "
         lines.append(f"{mark} до блокировки ручного тира: {state.days_left} дн.")
     lines += _c1_lines(state.c1)
+    if state.unsent_sessions:
+        lines.append(f"  🔴 не прислано торговых дней: "
+                     f"{len(state.unsent_sessions)} — см. /missing")
     if state.missing_dates:
         listed = " ".join(str(d) for d in state.missing_dates[:12])
         lines.append(f"  ⚠️ не хватает дней: {len(state.missing_dates)} — {listed}")
@@ -1180,11 +1303,25 @@ def build_reminder(state: StoreStatus) -> Optional[str]:
                 f"применял: {listed}{tail}\n"
                 "Похоже, базу перезаливали. Перешлите эти файлы — повтор безвреден.")
     left = state.days_left
+    newest = max((m.latest for m in state.markets if m.latest is not None),
+                 default=None)
+    behind = len(state.unsent_sessions)
     if left is not None and left <= 0:
-        return ("🔴 ручной тир УЖЕ заблокирован: база не обновлялась дольше "
-                "порога. Пришлите свежий дневной срез.")
+        # 🔴 Числа ОБЯЗАНЫ расти. Прежняя редакция возвращала одну и ту же
+        # строку и на первый день блокировки, и на четырнадцатый — а
+        # сообщение, которое не меняется, перестают читать ровно так же, как
+        # то, что приходит всегда. Замер: 14 одинаковых напоминаний подряд
+        # были пропущены оператором, и база простояла три недели (`§−117`).
+        tail = (f" Не прислано торговых дней: {behind}." if behind else "")
+        return (f"🔴 ручной тир ЗАБЛОКИРОВАН уже {-left} дн. "
+                f"Последний день базы — {newest}.{tail} "
+                "Отчёты ручного тира сейчас НЕ СТРОЯТСЯ: пришлите срезы, "
+                "список — /missing.")
     if left is not None and left <= REMIND_DAYS_LEFT:
+        tail = (f" Не прислано торговых дней: {behind} (/missing)."
+                if behind else "")
         return (f"⚠️ до блокировки ручного тира {left} дн. "
+                f"Последний день базы — {newest}.{tail} "
                 "Пришлите свежий дневной срез со stooq.com/db/.")
     return None
 
@@ -1275,11 +1412,23 @@ def format_missing(state: StoreStatus) -> str:
     """
     if not state.ok:
         return (f"🔴 не могу сказать: база недоступна.\n   {state.reason}")
-    if not state.missing_dates:
-        return "✅ пропавших дней нет: всё, что я применял, в базе на месте."
-    listed = "\n".join(f"  {d}_d.txt" for d in state.missing_dates)
-    return (f"⚠️ не хватает {len(state.missing_dates)} дн. — перешлите эти "
-            f"файлы из applied/:\n{listed}\nПорядок не важен, повтор безвреден.")
+    blocks: list[str] = []
+    if state.unsent_sessions:
+        listed = "\n".join(f"  {d}_d.txt" for d in state.unsent_sessions)
+        blocks.append(
+            f"🔴 не прислано {len(state.unsent_sessions)} торговых дн. — "
+            f"скачайте и пришлите:\n{listed}\n"
+            "Среди них могут быть праздники США: на такой файл отвечу «рынок "
+            "был закрыт», и это нормально.")
+    if state.missing_dates:
+        listed = "\n".join(f"  {d}_d.txt" for d in state.missing_dates)
+        blocks.append(
+            f"⚠️ база моложе моего журнала на {len(state.missing_dates)} дн. — "
+            f"перешлите эти файлы из applied/:\n{listed}")
+    if not blocks:
+        return ("✅ ничего слать не надо: база догнана по сегодня, и всё, что я "
+                "применял, в ней на месте.")
+    return "\n\n".join(blocks) + "\nПорядок не важен, повтор безвреден."
 
 __all__ = [
     "ApplyOutcome",
