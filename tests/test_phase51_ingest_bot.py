@@ -1253,8 +1253,12 @@ class MissingAnswerTest(_IngestCase):
         self.assertNotIn("✅", text)
 
     def test_healthy_store_with_nothing_missing_says_so(self) -> None:
-        text = qi.format_missing(qi.status(publisher=self.publisher))
+        """`today` задан ЯВНО: иначе «непри́сланные дни» считаются от реальных
+        часов, и тест, зелёный в день написания, краснеет через неделю."""
+        text = qi.format_missing(
+            qi.status(publisher=self.publisher, today=date(2026, 8, 12)))
         self.assertIn("✅", text)
+        self.assertIn("догнана", text)
 
     def test_the_last_operation_is_described_by_its_own_kind(self) -> None:
         """🔴 `/status` печатал «prune (None баров)»: шаблон один на все
@@ -1283,6 +1287,110 @@ class MissingAnswerTest(_IngestCase):
         self.assertIn("20260813_d.txt", text)
 
 
+class UnsentSessionsTest(unittest.TestCase):
+    """🔴 `§−117`. Бот не знал о днях, которых ему НЕ ПРИСЫЛАЛИ.
+
+    `missing_dates` ловит только ОТКАТ — даты, которые бот применял, а в базе
+    их не стало. Дни, о которых он не слышал, туда не попадают по построению,
+    и `/missing` на трёхнедельном простое отвечал «✅ пропавших дней нет».
+    Формально верно, читается как «всё хорошо» — тот же класс, что `§−90` A-3.
+    """
+
+    def test_weekends_are_not_sessions(self) -> None:
+        # пятница 04.09 → понедельник 07.09: суббота и воскресенье выпадают
+        self.assertEqual(
+            qi.unsent_sessions(20260904, today=date(2026, 9, 7)), (20260907,))
+
+    def test_a_current_base_has_no_backlog(self) -> None:
+        self.assertEqual(qi.unsent_sessions(20260922, today=date(2026, 9, 22)), ())
+
+    def test_an_unknown_latest_is_not_a_backlog(self) -> None:
+        """Пустая база — это «не знаю», а не «не хватает всего»."""
+        self.assertEqual(qi.unsent_sessions(None, today=date(2026, 9, 22)), ())
+
+    def test_the_list_is_bounded_for_telegram(self) -> None:
+        long = qi.unsent_sessions(20250101, today=date(2026, 9, 22), limit=40)
+        self.assertEqual(len(long), 40)
+
+    def test_the_real_outage_is_counted_correctly(self) -> None:
+        """Живой замер: 20260901 → 20260922 это 14 будних дней (07.09 среди них —
+        Labor Day, и бот честно этого не знает)."""
+        days = qi.unsent_sessions(20260901, today=date(2026, 9, 22))
+        self.assertEqual(len(days), 15)
+        self.assertIn(20260907, days)      # праздник — бот не вправе его выкинуть
+        self.assertNotIn(20260905, days)   # суббота
+
+
+class BacklogIsVisibleTest(_IngestCase):
+
+    def _applied(self, day: int, today: date):
+        return qi.apply_daily(self.daily(day), actor="1",
+                              publisher=self.publisher, today=today)
+
+    def test_status_names_the_backlog(self) -> None:
+        self._applied(20260813, date(2026, 8, 13))
+        state = qi.status(publisher=self.publisher, today=date(2026, 8, 18))
+        self.assertEqual(state.unsent_sessions, (20260814, 20260817, 20260818))
+        self.assertIn("не прислано торговых дней: 3", qi.format_status(state))
+
+    def test_missing_lists_the_files_to_download(self) -> None:
+        """Команда объявлена как «какие файлы переслать» — теперь она на этот
+        вопрос и отвечает, а не только про откат."""
+        self._applied(20260813, date(2026, 8, 13))
+        text = qi.format_missing(
+            qi.status(publisher=self.publisher, today=date(2026, 8, 18)))
+        self.assertIn("20260814_d.txt", text)
+        self.assertIn("20260818_d.txt", text)
+        self.assertIn("праздники", text)          # честная оговорка
+        self.assertNotIn("20260815", text)        # суббота
+
+    def test_a_healthy_file_gets_no_advice_block(self) -> None:
+        """🔴 Молчание обязательно: блок, который есть всегда, перестают читать.
+
+        Списки факторов подменяются на те, что в фикстуре ЕСТЬ: иначе допуск
+        C-1 честно не пройден (в базе две бумаги из десяти факторов), и тест
+        проверял бы не молчание, а ту самую тревогу.
+        """
+        with mock.patch.object(qi, "_engine_universe",
+                               return_value=(("SPY.US",), ())):
+            outcome = self._applied(20260813, date(2026, 8, 13))
+        text = qi.format_summary(outcome)
+        self.assertEqual(qi.next_steps(outcome), [])
+        self.assertNotIn("что делать сейчас", text)
+
+    def test_a_backlog_turns_into_a_numbered_plan(self) -> None:
+        outcome = self._applied(20260813, date(2026, 8, 20))
+        text = qi.format_summary(outcome)
+        self.assertIn("что делать сейчас", text)
+        self.assertIn("пришлите срезы", text)
+        self.assertIn("20260814_d.txt", text)
+        self.assertIn("праздники", text)
+
+    def test_commands_are_ready_to_run_not_placeholders(self) -> None:
+        """🔴 `<ИМЯ_СЕРВИСА>` — это работа, переложенная на человека в момент
+        поломки. Cloud Run сообщает имя сам, бакет бот уже знает."""
+        outcome = qi.ApplyOutcome(
+            ok=True, kind="daily", file_name="20260902_d.txt",
+            file_date=20260902, missed_total=2, missed=("AVB.US",))
+        with mock.patch.dict(os.environ, {"QUOTES_BUCKET": "ramp-bot-state",
+                                          "QUOTES_PREFIX": "stooq/",
+                                          "K_SERVICE": "ramp-ingest-bot"}):
+            text = "\n".join(qi.next_steps(outcome))
+        self.assertIn("gs://ramp-bot-state/stooq/inbox/20260902_d.txt", text)
+        self.assertIn("AVB", text)
+        self.assertNotIn("<БАКЕТ>", text)
+
+    def test_an_unknown_environment_stays_a_placeholder(self) -> None:
+        """Соврать подстановкой хуже, чем попросить дописать."""
+        outcome = qi.ApplyOutcome(
+            ok=True, kind="daily", file_name="20260902_d.txt",
+            file_date=20260902, missed_total=1, missed=("AVB.US",))
+        with mock.patch.dict(os.environ, {"QUOTES_BUCKET": "", "K_SERVICE": ""},
+                             clear=False):
+            text = "\n".join(qi.next_steps(outcome))
+        self.assertIn("<БАКЕТ>", text)
+
+
 class ReminderTest(unittest.TestCase):
 
     def test_healthy_base_produces_SILENCE(self) -> None:
@@ -1302,10 +1410,33 @@ class ReminderTest(unittest.TestCase):
         text = qi.build_reminder(state)
         self.assertIn("1 дн.", text)
 
-    def test_already_blocked_is_reported_as_such(self) -> None:
+    def test_already_blocked_says_HOW_LONG_and_how_much_to_catch_up(self) -> None:
+        """🔴 `§−117`. Прежняя редакция возвращала ОДНУ И ТУ ЖЕ строку и на
+        первый день блокировки, и на четырнадцатый.
+
+        Замер живой: 14 одинаковых напоминаний подряд были пропущены, база
+        простояла три недели, и ручной тир всё это время отдавал BLOCK.
+        Сообщение, которое не меняется, перестают читать ровно так же, как то,
+        что приходит всегда, — правило проекта здесь нарушалось им же самим.
+        """
         state = _state(markets=(qi.MarketState("US", 20260810, 5, 50,
-                                               stale_days=10, days_left=-3),))
-        self.assertIn("УЖЕ заблокирован", qi.build_reminder(state))
+                                               stale_days=10, days_left=-3),),
+                       unsent_sessions=(20260811, 20260812, 20260813))
+        text = qi.build_reminder(state)
+        self.assertIn("ЗАБЛОКИРОВАН уже 3 дн.", text)      # растущее число
+        self.assertIn("20260810", text)                     # последний день базы
+        self.assertIn("Не прислано торговых дней: 3", text)  # объём добора
+        self.assertIn("/missing", text)                     # куда идти
+
+    def test_a_longer_outage_reads_differently(self) -> None:
+        """Обратная мутация: два разных простоя обязаны читаться по-разному."""
+        short = qi.build_reminder(_state(markets=(
+            qi.MarketState("US", 20260810, 5, 50, stale_days=8, days_left=-1),)))
+        long = qi.build_reminder(_state(markets=(
+            qi.MarketState("US", 20260810, 5, 50, stale_days=21, days_left=-14),)))
+        self.assertNotEqual(short, long)
+        self.assertIn("уже 1 дн.", short)
+        self.assertIn("уже 14 дн.", long)
 
     def test_missing_days_outrank_the_countdown(self) -> None:
         """Пропавшие дни — про потерю данных, обратный отсчёт — про свежесть."""
@@ -1436,6 +1567,21 @@ class DeployStepTest(unittest.TestCase):
         self.assertIn("ОТКАЗ", body, "пустой SA обязан останавливать деплой")
         self.assertEqual(self.doc["substitutions"]["_INGEST_SA"], "",
                          "SA заводится осознанно, а не достаётся по умолчанию")
+
+    def test_loader_knows_its_own_service_and_region(self) -> None:
+        """🔴 `§−117`. Бот печатает команды Cloud Shell ГОТОВЫМИ к запуску.
+
+        Имя сервиса Cloud Run сообщает сам (`K_SERVICE`), бакет и префикс бот
+        уже знает, а регион взять неоткуда — поэтому он передаётся явно. Без
+        него команда чинится плейсхолдером, и работа перекладывается на
+        человека ровно в тот момент, когда он разбирается с поломкой.
+        """
+        step = next(s for s in self.doc["steps"] if s["id"] == "deploy-ingest-bot")
+        body = "\n".join(step["args"])
+        self.assertIn("INGEST_REGION=${_REGION}", body)
+        for expected in ("QUOTES_BUCKET=", "QUOTES_PREFIX=stooq/",
+                         "INGEST_ADMIN_IDS="):
+            self.assertIn(expected, body, "набор env заменяется ЦЕЛИКОМ")
 
     def test_loader_has_room_for_the_base_in_tmpfs(self) -> None:
         """🔴 `§−116`. На Cloud Run `/tmp` — это ОПЕРАТИВНАЯ память.

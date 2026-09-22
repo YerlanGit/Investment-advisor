@@ -329,7 +329,7 @@ steps:
           --no-cpu-throttling \
           --no-allow-unauthenticated \
           --set-secrets=OMBRI_INGEST_BOT_TOKEN=${_INGEST_BOT_TOKEN_SECRET}:latest,INGEST_TASK_TOKEN=INGEST_TASK_TOKEN:latest \
-          --set-env-vars=QUOTES_BACKEND=gcs,QUOTES_BUCKET=${_QUOTES_BUCKET},QUOTES_PREFIX=stooq/,INGEST_ADMIN_IDS=${_INGEST_ADMIN_IDS} \
+          --set-env-vars=QUOTES_BACKEND=gcs,QUOTES_BUCKET=${_QUOTES_BUCKET},QUOTES_PREFIX=stooq/,INGEST_ADMIN_IDS=${_INGEST_ADMIN_IDS},INGEST_REGION=${_REGION} \
           --quiet \
           || echo "WARN: деплой ingest-бота не прошёл. Главный бот не затронут."
         exit 0
