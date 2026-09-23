@@ -1297,9 +1297,30 @@ class UnsentSessionsTest(unittest.TestCase):
     """
 
     def test_weekends_are_not_sessions(self) -> None:
-        # пятница 04.09 → понедельник 07.09: суббота и воскресенье выпадают
+        # пятница 04.09 → вторник 08.09: суббота и воскресенье выпадают,
+        # вторник — СЕГОДНЯ, его файла ещё нет
         self.assertEqual(
-            qi.unsent_sessions(20260904, today=date(2026, 9, 7)), (20260907,))
+            qi.unsent_sessions(20260904, today=date(2026, 9, 8)), (20260907,))
+
+    def test_today_is_never_expected(self) -> None:
+        """🔴 `§−118`. Файл дня D появляется после закрытия США, а часы
+        контейнера — UTC: утром по Алматы сессия D ещё не началась.
+
+        Прежняя редакция (`day <= today`) КАЖДОЕ утро просила файл, которого нет
+        в природе, — и блок «что делать» висел бы на здоровой базе вечно.
+        """
+        self.assertEqual(qi.unsent_sessions(20260922, today=date(2026, 9, 23)), ())
+        self.assertNotIn(20260923,
+                         qi.unsent_sessions(20260918, today=date(2026, 9, 23)))
+
+    def test_a_sent_day_is_not_requested_again(self) -> None:
+        """🔴 `§−118`. Праздничный срез кладёт ноль баров, последний день базы
+        не двигается — и прежняя редакция тут же просила ТОТ ЖЕ файл снова.
+        На каждом праздничном понедельнике это была бы петля без выхода."""
+        self.assertEqual(
+            qi.unsent_sessions(20260904, today=date(2026, 9, 9),
+                               sent={20260907}),
+            (20260908,))
 
     def test_a_current_base_has_no_backlog(self) -> None:
         self.assertEqual(qi.unsent_sessions(20260922, today=date(2026, 9, 22)), ())
@@ -1313,12 +1334,15 @@ class UnsentSessionsTest(unittest.TestCase):
         self.assertEqual(len(long), 40)
 
     def test_the_real_outage_is_counted_correctly(self) -> None:
-        """Живой замер: 20260901 → 20260922 это 14 будних дней (07.09 среди них —
-        Labor Day, и бот честно этого не знает)."""
-        days = qi.unsent_sessions(20260901, today=date(2026, 9, 22))
+        """Живой замер: база на 20260901, сегодня 23.09 — ждём 15 будних дней
+        с 02.09 по 22.09. 07.09 среди них (Labor Day — бот этого знать не может,
+        пока файл не пришлют), а 23.09 нет: сессия сегодняшняя."""
+        days = qi.unsent_sessions(20260901, today=date(2026, 9, 23))
         self.assertEqual(len(days), 15)
-        self.assertIn(20260907, days)      # праздник — бот не вправе его выкинуть
+        self.assertEqual((days[0], days[-1]), (20260902, 20260922))
+        self.assertIn(20260907, days)
         self.assertNotIn(20260905, days)   # суббота
+        self.assertNotIn(20260923, days)   # сегодня
 
 
 class BacklogIsVisibleTest(_IngestCase):
@@ -1330,8 +1354,8 @@ class BacklogIsVisibleTest(_IngestCase):
     def test_status_names_the_backlog(self) -> None:
         self._applied(20260813, date(2026, 8, 13))
         state = qi.status(publisher=self.publisher, today=date(2026, 8, 18))
-        self.assertEqual(state.unsent_sessions, (20260814, 20260817, 20260818))
-        self.assertIn("не прислано торговых дней: 3", qi.format_status(state))
+        self.assertEqual(state.unsent_sessions, (20260814, 20260817))  # 18.08 — сегодня
+        self.assertIn("не прислано торговых дней: 2", qi.format_status(state))
 
     def test_missing_lists_the_files_to_download(self) -> None:
         """Команда объявлена как «какие файлы переслать» — теперь она на этот
@@ -1340,7 +1364,8 @@ class BacklogIsVisibleTest(_IngestCase):
         text = qi.format_missing(
             qi.status(publisher=self.publisher, today=date(2026, 8, 18)))
         self.assertIn("20260814_d.txt", text)
-        self.assertIn("20260818_d.txt", text)
+        self.assertIn("20260817_d.txt", text)
+        self.assertNotIn("20260818", text)        # сегодня — файла ещё нет
         self.assertIn("праздники", text)          # честная оговорка
         self.assertNotIn("20260815", text)        # суббота
 
@@ -1371,7 +1396,8 @@ class BacklogIsVisibleTest(_IngestCase):
         поломки. Cloud Run сообщает имя сам, бакет бот уже знает."""
         outcome = qi.ApplyOutcome(
             ok=True, kind="daily", file_name="20260902_d.txt",
-            file_date=20260902, missed_total=2, missed=("AVB.US",))
+            file_date=20260902, missed_total=2, missed=("AVB.US",),
+            missed_acute=2)
         with mock.patch.dict(os.environ, {"QUOTES_BUCKET": "ramp-bot-state",
                                           "QUOTES_PREFIX": "stooq/",
                                           "K_SERVICE": "ramp-ingest-bot"}):
@@ -1384,11 +1410,119 @@ class BacklogIsVisibleTest(_IngestCase):
         """Соврать подстановкой хуже, чем попросить дописать."""
         outcome = qi.ApplyOutcome(
             ok=True, kind="daily", file_name="20260902_d.txt",
-            file_date=20260902, missed_total=1, missed=("AVB.US",))
+            file_date=20260902, missed_total=1, missed=("AVB.US",),
+            missed_acute=1)
         with mock.patch.dict(os.environ, {"QUOTES_BUCKET": "", "K_SERVICE": ""},
                              clear=False):
             text = "\n".join(qi.next_steps(outcome))
         self.assertIn("<БАКЕТ>", text)
+
+
+class PreflightRehearsalTest(_IngestCase):
+    """🔴 `§−118`. Аудит перед добором 15 файлов, прогнанный как РЕПЕТИЦИЯ.
+
+    Каждый тест здесь — дефект, который репетиция поймала, а чтение кода
+    пропустило: он проявлялся только на последовательности реальных файлов.
+    """
+
+    def test_a_holiday_file_says_the_market_was_closed(self) -> None:
+        """Бот ОБЕЩАЛ «на праздничный файл отвечу „рынок был закрыт“», а
+        печатал «ни один бар не лёг» — обещание, которое код не держал."""
+        outcome = qi.apply_daily(self.daily(20260813, ["BTC.V"]), actor="1",
+                                 publisher=self.publisher,
+                                 today=date(2026, 8, 14))
+        text = qi.format_summary(outcome)
+        self.assertEqual(outcome.closed_markets, ("US",))
+        self.assertIn("не торговал", text)
+        self.assertNotIn("ни один бар не лёг", text)
+
+    def test_a_holiday_is_not_requested_again(self) -> None:
+        """🔴 Главное: иначе на каждом праздничном понедельнике петля без
+        выхода — бот просит файл, который только что получил."""
+        outcome = qi.apply_daily(self.daily(20260813, ["BTC.V"]), actor="1",
+                                 publisher=self.publisher,
+                                 today=date(2026, 8, 14))
+        self.assertNotIn(20260813, outcome.unsent_sessions)
+        state = qi.status(publisher=self.publisher, today=date(2026, 8, 14))
+        self.assertEqual(state.unsent_sessions, ())
+        self.assertIn("✅", qi.format_missing(state))
+
+    def test_a_fresh_miss_is_an_alarm_with_a_command(self) -> None:
+        """Вчера бумага была, сегодня её нет — новость, и причина в файле."""
+        outcome = qi.apply_daily(self.daily(20260813, ["SPY.US"]), actor="1",
+                                 publisher=self.publisher,
+                                 today=date(2026, 8, 14))
+        self.assertEqual(outcome.missed_acute, 1)
+        text = qi.format_summary(outcome)
+        self.assertIn("🔴 без бара", text)
+        self.assertIn("grep -i", text)
+
+    def test_a_long_dead_paper_is_named_calmly_without_a_chore(self) -> None:
+        """Бумага не пришла и в прошлую сессию — не новость этого файла.
+
+        Про неё говорится ВСЕГДА, но спокойно и без задания: иначе три умерших
+        у источника тикера (`AVB`, `EA`, `EQR`) висели бы в блоке советов
+        каждый день, и блок перестали бы читать. Порог доли поднят, чтобы в
+        базе из двух бумаг одна пропавшая не считалась аварией.
+        """
+        qi.apply_daily(self.daily(20260813, ["SPY.US"]), actor="1",
+                       publisher=self.publisher, today=date(2026, 8, 14))
+        with mock.patch.object(qi, "MISSED_ALARM_SHARE", 0.9):
+            outcome = qi.apply_daily(self.daily(20260814, ["SPY.US"]),
+                                     actor="1", publisher=self.publisher,
+                                     today=date(2026, 8, 15))
+            text = qi.format_summary(outcome)       # порог читается ПРИ печати
+        self.assertEqual((outcome.missed_total, outcome.missed_acute), (1, 0))
+        self.assertIn("🟡 давно не приходят", text)
+        self.assertIn("AAPL.US", text)                 # назван — не спрятан
+        self.assertNotIn("grep -i", text)              # но без задания
+
+    def test_a_mass_old_miss_is_still_an_alarm(self) -> None:
+        """Обратная мутация: пятая часть базы, пропавшая давно, — авария в
+        ЛЮБОЙ день простоя (`§−113`: 172 из 803), а не фон."""
+        qi.apply_daily(self.daily(20260813, ["SPY.US"]), actor="1",
+                       publisher=self.publisher, today=date(2026, 8, 14))
+        outcome = qi.apply_daily(self.daily(20260814, ["SPY.US"]), actor="1",
+                                 publisher=self.publisher,
+                                 today=date(2026, 8, 15))
+        self.assertEqual(outcome.missed_acute, 0)
+        self.assertIn("grep -i", qi.format_summary(outcome))   # 1 из 2 = 50 %
+
+    def test_a_blocked_tier_never_prints_a_negative_countdown(self) -> None:
+        """«До блокировки −14 дн.» — бессмыслица ровно тогда, когда сообщение
+        должно быть самым ясным."""
+        self.assertEqual(qi.days_left_line(-14),
+                         "🔴 ручной тир ЗАБЛОКИРОВАН уже 14 дн. — отчёты не "
+                         "строятся, пока база не догнана")
+        self.assertIn("ЗАБЛОКИРОВАН уже 1 дн.", qi.days_left_line(0))
+        self.assertEqual(qi.days_left_line(None), None)
+        self.assertIn("до блокировки ручного тира: 5 дн.", qi.days_left_line(5))
+        state = _state(markets=(qi.MarketState("US", 20260901, 803, 1,
+                                               stale_days=21, days_left=-14),))
+        self.assertNotIn("-14", qi.format_status(state))
+        self.assertIn("ЗАБЛОКИРОВАН уже 14 дн.", qi.format_status(state))
+
+    def test_status_keeps_red_for_outages_not_for_background(self) -> None:
+        """Три мёртвые бумаги из 803 — фон; пятая часть базы — авария.
+        Вечное 🔴 на здоровой базе учит не смотреть на 🔴 вовсе."""
+        calm = qi.format_status(_state(markets=(
+            qi.MarketState("US", 20260922, 803, 1, stale_days=1, days_left=6,
+                           fresh=800),)))
+        self.assertIn("🟡 без бара за 20260922: 3 из 803", calm)
+        self.assertNotIn("🔴 без бара", calm)
+        loud = qi.format_status(_state(markets=(
+            qi.MarketState("US", 20260828, 803, 1, stale_days=1, days_left=6,
+                           fresh=631),)))
+        self.assertIn("🔴 без бара за 20260828: 172 из 803", loud)
+
+    def test_status_names_the_running_revision(self) -> None:
+        """Шаг деплоя загрузчика fail-soft: зелёная сборка не значит, что новая
+        ревизия поднялась. Имя ревизии в `/status` отвечает на «доехало?»."""
+        with mock.patch.dict(os.environ, {"K_REVISION": "ramp-ingest-bot-00042-abc"}):
+            self.assertIn("ревизия ............... ramp-ingest-bot-00042-abc",
+                          qi.format_status(_state()))
+        with mock.patch.dict(os.environ, {"K_REVISION": ""}):
+            self.assertNotIn("ревизия", qi.format_status(_state()))
 
 
 class ReminderTest(unittest.TestCase):
