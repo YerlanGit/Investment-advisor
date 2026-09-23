@@ -48,7 +48,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Iterable, Optional, Sequence
 
-from env_config import env_int
+from env_config import env_float, env_int
 from finance import stooq_ingest as si
 from services.quote_publisher import (Cursor, PublisherUnavailable, QuotePublisher,
                                       publisher_from_env)
@@ -201,6 +201,14 @@ class ApplyOutcome:
     universe_total: int = 0
     missed_total: int = 0
     missed: tuple[str, ...] = ()
+    #: Сколько из пропущенных — ОСТРЫЕ: в прошлую сессию бар у них БЫЛ. Прочие
+    #: не пришли и тогда — это давно умершие у источника бумаги, и просить
+    #: «посмотрите в файл» про них каждый день значит учить игнорировать блок
+    #: советов (`§−118`).
+    missed_acute: int = 0
+    #: Рынки базы, у которых в файле НОЛЬ принятых баров, — праздник или
+    #: выходной (форма правила 9). Не пусто — это не поломка, а закрытый рынок.
+    closed_markets: tuple[str, ...] = ()
     warnings: tuple[str, ...] = ()
 
 
@@ -350,6 +358,12 @@ def _fresh_count(conn: sqlite3.Connection, market: str,
     return int(row["n"]) if row else 0
 
 
+#: Доля базы, начиная с которой даже ДАВНИЕ пропуски — авария, а не фон.
+#: 3 умерших у источника бумаги из 803 (0.4 %) — нормальная убыль; пятая часть
+#: базы (172 из 803, `§−113`) — выпавший пакет, и молчать про него нельзя ни
+#: в какой день простоя.
+MISSED_ALARM_SHARE = env_float("INGEST_MISSED_ALARM_SHARE", 0.01, lo=0.0, hi=1.0)
+
 #: Условие «бумага рынка, ТОРГОВАВШЕГО в этот день, осталась без бара».
 #:
 #: 🔴 Оговорка про рынок обязательна, и она же — форма правила 9 (`0 < принято
@@ -388,6 +402,7 @@ def _missed_for_date(conn: sqlite3.Connection, trade_date: int, *,
 
 def unsent_sessions(latest: Optional[int], *,
                     today: Optional[date] = None,
+                    sent: Iterable[int] = (),
                     limit: int = 40) -> tuple[int, ...]:
     """Будние дни ПОСЛЕ `latest` и по `today` включительно.
 
@@ -403,7 +418,20 @@ def unsent_sessions(latest: Optional[int], *,
 
     `limit` бережёт сообщение Telegram: две недели простоя дают 10 дат, но
     после отпуска их может быть шестьдесят.
+
+    🔴 **Сегодняшний день НЕ ожидается** (`§−118`). Файл дня D существует
+    только после закрытия США и публикации Stooq, а часы контейнера — UTC:
+    утром по Алматы это ещё тот же день D, сессия не началась. Прежняя
+    редакция считала `day <= today` и КАЖДОЕ утро просила файл, которого нет
+    в природе, — то есть блок «что делать» висел бы на здоровой базе вечно,
+    ровно тот дефект, который `§−117` чинил.
+
+    🔴 **Присланный день не ожидается повторно** (`sent`). Праздничный файл
+    кладёт ноль баров, поэтому последний день базы не двигается — и прежняя
+    редакция тут же просила прислать ТОТ ЖЕ файл снова. На каждом праздничном
+    понедельнике это была бы петля без выхода.
     """
+    done = {int(d) for d in sent}
     if latest is None:
         return ()
     text = str(int(latest))
@@ -414,11 +442,34 @@ def unsent_sessions(latest: Optional[int], *,
     moment = today or date.today()
     out: list[int] = []
     day = cursor + timedelta(days=1)
-    while day <= moment and len(out) < limit:
-        if day.weekday() < 5:                          # будни; выходные не сессии
-            out.append(int(day.strftime("%Y%m%d")))
+    while day < moment and len(out) < limit:
+        stamp = int(day.strftime("%Y%m%d"))
+        if day.weekday() < 5 and stamp not in done:    # будни, ещё не присланные
+            out.append(stamp)
         day += timedelta(days=1)
     return tuple(out)
+
+
+def _sent_dates(conn: sqlite3.Connection) -> frozenset[int]:
+    """Даты дневных срезов, которые уже ПРИМЕНЯЛИСЬ — с барами или без.
+
+    Источник — журнал `ingest_runs`, а не бары: праздничный срез кладёт ноль
+    баров, но он БЫЛ прислан, и просить его снова — значит отправить
+    оператора по кругу. Журнал пишут оба писателя одним ядром (`apply_batch`),
+    поэтому ответ одинаков для бота и CLI. Отвергнутый файл (`fatal`) в
+    журнал не попадает — и правильно: он не прислан, а сломан.
+    """
+    try:
+        rows = conn.execute(
+            "SELECT file_name FROM ingest_runs WHERE kind = 'apply'").fetchall()
+    except sqlite3.Error:
+        return frozenset()
+    out = set()
+    for row in rows:
+        stamp = si.file_date_of(str(row["file_name"] or ""))
+        if stamp is not None:
+            out.add(int(stamp))
+    return frozenset(out)
 
 
 def _latest_by_market(conn: sqlite3.Connection) -> dict[str, int]:
@@ -434,6 +485,34 @@ def _latest_by_market(conn: sqlite3.Connection) -> dict[str, int]:
         "GROUP BY i.market").fetchall()
     return {str(r["market"]): int(r["latest"])
             for r in rows if r["latest"] is not None}
+
+
+def _acute_missed(conn: sqlite3.Connection, trade_date: int) -> int:
+    """Сколько бумаг без бара за `trade_date` имели бар в ПРОШЛУЮ сессию рынка.
+
+    Острый пропуск — новость: вчера бумага была, сегодня её нет, и причину
+    надо искать в файле. Хронический — бумага не пришла и вчера: скорее всего
+    она умерла у источника (`AVB`, `EA`, `EQR` с 24.08), и совет «посмотрите в
+    файл» про неё ничего нового не скажет.
+
+    Прошлая сессия берётся ПО РЫНКУ: у крипты сессии 7/7, и общая «вчерашняя
+    дата» сделала бы все американские бумаги хроническими по воскресеньям.
+    """
+    prev_rows = conn.execute(
+        "SELECT i.market AS market, MAX(b.trade_date) AS prev "
+        "FROM daily_bars b JOIN instruments i ON i.id = b.instrument_id "
+        "WHERE b.trade_date < ? GROUP BY i.market", (int(trade_date),)).fetchall()
+    total = 0
+    for row in prev_rows:
+        if row["prev"] is None:
+            continue
+        total += int(conn.execute(
+            f"SELECT COUNT(*) AS n FROM instruments i WHERE {_MISSED_WHERE} "
+            "AND i.market = ? AND EXISTS (SELECT 1 FROM daily_bars b "
+            "WHERE b.instrument_id = i.id AND b.trade_date = ?)",
+            (int(trade_date), int(trade_date), str(row["market"]),
+             int(row["prev"]))).fetchone()["n"])
+    return total
 
 
 def _dates_present(conn: sqlite3.Connection,
@@ -673,9 +752,18 @@ def _apply(path, *, kind: str, actor: str, publisher: Optional[QuotePublisher],
             coverage = _c1(conn)
             markets = _markets(conn, today=today)
             universe_total = _instrument_count(conn)
+            sent = _sent_dates(conn)
             missed_total, missed = (
                 _missed_for_date(conn, batch.file_date)
                 if batch.file_date is not None else (0, ()))
+            # Полный скан таблицы фактов — только когда есть что делить.
+            missed_acute = (_acute_missed(conn, batch.file_date)
+                            if missed_total else 0)
+            accepted = batch.accepted_by_market
+            closed = tuple(sorted(
+                m for m in _latest_by_market(conn) if not accepted.get(m)))
+            if batch.file_date is None:
+                closed = ()                            # история — не дневной срез
         finally:
             conn.close()
 
@@ -719,9 +807,10 @@ def _apply(path, *, kind: str, actor: str, publisher: Optional[QuotePublisher],
         ok=True, kind=kind, file_name=name, published=True, store_touched=True,
         generation=upload.generation, result=result, c1=coverage,
         missing_dates=missing, days_left=days_left,
-        unsent_sessions=unsent_sessions(newest, today=today),
+        unsent_sessions=unsent_sessions(newest, today=today, sent=sent),
         file_date=batch.file_date, universe_total=universe_total,
-        missed_total=missed_total, missed=missed, warnings=tuple(warnings))
+        missed_total=missed_total, missed=missed, missed_acute=missed_acute,
+        closed_markets=closed, warnings=tuple(warnings))
 
 
 def apply_daily(path, *, actor: str, publisher: Optional[QuotePublisher] = None,
@@ -781,7 +870,8 @@ def status(*, publisher: Optional[QuotePublisher] = None,
                 instruments=_instrument_count(conn),
                 markets=markets, c1=_c1(conn),
                 missing_dates=missing,
-                unsent_sessions=unsent_sessions(newest, today=today),
+                unsent_sessions=unsent_sessions(newest, today=today,
+                                                sent=_sent_dates(conn)),
                 cursor_at=(cursor.at if cursor else None),
                 last_run=(dict(cursor.last_run) if cursor else {}))
         finally:
@@ -831,6 +921,24 @@ def _c1_lines(coverage: Optional[C1Coverage]) -> list[str]:
     return lines
 
 
+def days_left_line(days_left: Optional[int]) -> Optional[str]:
+    """Строка про блокировку ручного тира — либо `None`, если сказать нечего.
+
+    🔴 `§−118`. Прежний шаблон «до блокировки: N дн.» печатал и ОТРИЦАТЕЛЬНОЕ
+    N — «до блокировки −14 дн.», то есть бессмыслицу ровно в тот момент, когда
+    блокировка уже случилась и сообщение должно быть самым ясным. Тот же класс,
+    что «prune (None баров)»: число проходит через шаблон, не рассчитанный на
+    это состояние.
+    """
+    if days_left is None:
+        return None
+    if days_left <= 0:
+        return (f"🔴 ручной тир ЗАБЛОКИРОВАН уже {max(1, -days_left)} дн. — "
+                "отчёты не строятся, пока база не догнана")
+    mark = "🔴" if days_left <= 2 else "  "
+    return f"{mark} до блокировки ручного тира: {days_left} дн."
+
+
 def _shell_context() -> dict[str, str]:
     """Чем бот подставляет свои же имена в команды Cloud Shell.
 
@@ -876,13 +984,17 @@ def next_steps(outcome: ApplyOutcome) -> list[str]:
             "среди них могут быть праздники США: на такой файл отвечу "
             "«рынок был закрыт», и это нормально",
         ])
-    if outcome.days_left is not None and outcome.days_left <= 0:
-        steps.append([f"🔴 ручной тир ЗАБЛОКИРОВАН уже {-outcome.days_left} дн.: "
-                      "пока дни не догнаны, отчёты не строятся"])
     if outcome.c1 is not None and outcome.c1.checked and not outcome.c1.usable:
         steps.append(["🔴 допуск C-1 не пройден — в профиле STRICT это BLOCK, "
                       "а не деградация"])
-    if outcome.missed_total and outcome.file_date is not None:
+    # 🔴 Совет «посмотрите в файл» — только когда он может сказать НОВОЕ:
+    # есть острые пропуски (вчера бумага была) или пропало столько, что это
+    # авария. Три давно умерших у источника бумаги иначе висели бы в блоке
+    # советов КАЖДЫЙ день — и блок перестали бы читать (`§−118`).
+    alarming = (outcome.missed_acute > 0 or (
+        outcome.universe_total and
+        outcome.missed_total >= MISSED_ALARM_SHARE * outcome.universe_total))
+    if outcome.missed_total and outcome.file_date is not None and alarming:
         name = f"{outcome.file_date}_d.txt"
         raw = outcome.missed[0] if outcome.missed else "SPY.US"
         steps.append([
@@ -937,19 +1049,41 @@ def format_summary(outcome: ApplyOutcome) -> str:
             listed = " ".join(outcome.missed)
             tail = ("" if outcome.missed_total <= len(outcome.missed)
                     else f" … и ещё {outcome.missed_total - len(outcome.missed)}")
-            lines.append(f"  🔴 без бара за {outcome.file_date}: "
-                         f"{outcome.missed_total} из {outcome.universe_total}"
-                         f" — {listed}{tail}")
-            lines.append("     Проверьте эти тикеры В САМОМ ФАЙЛЕ: строки нет / "
-                         "у неё чужая дата / сменилась форма символа — причины "
-                         "разные, лечение тоже.")
-        if result.rows_written == 0:
+            count = f"{outcome.missed_total} из {outcome.universe_total}"
+            if outcome.missed_acute:
+                lines.append(f"  🔴 без бара за {outcome.file_date}: {count}"
+                             f" — {listed}{tail}")
+                lines.append(f"     из них {outcome.missed_acute} ещё вчера были "
+                             "в базе. Проверьте их В САМОМ ФАЙЛЕ: строки нет / "
+                             "чужая дата / сменилась форма символа — причины "
+                             "разные, лечение тоже.")
+            else:
+                # Все пропущенные не пришли и в прошлую сессию: это не новость
+                # этого файла. Говорим всегда, но спокойно и без требования.
+                lines.append(f"  🟡 давно не приходят от источника: {count} — "
+                             f"{listed}{tail}")
+                lines.append("     не пришли и в прошлую сессию — скорее всего "
+                             "делистинг. Последний бар покажет /check ТИКЕР.")
+        if result.rows_written == 0 and outcome.closed_markets:
+            # 🔴 §−118: бот ОБЕЩАЛ «на праздничный файл отвечу „рынок был
+            # закрыт“», а печатал «ни один бар не лёг» — то есть обещание,
+            # которое код не держал. Ноль баров рынка базы при целом файле —
+            # это форма правила 9: закрытый рынок, а не поломка.
+            markets = ", ".join(outcome.closed_markets)
+            lines.append(f"  🟡 рынок {markets} в этот день не торговал — "
+                         "праздник или выходной, это нормально. День отмечен "
+                         "присланным и больше запрашиваться не будет.")
+            lines.append("     Если день был торговым — файл не тот: строк "
+                         f"рынка {markets} в нём нет ни одной.")
+        elif result.rows_written == 0:
             lines.append("  ⚠️ ни один бар не лёг — день в журнал НЕ записан")
     lines += _c1_lines(outcome.c1)
     lines.append(f"  база опубликована · поколение {outcome.generation}")
     lines += next_steps(outcome)
-    if outcome.days_left is not None:
-        lines.append(f"  до блокировки ручного тира: {outcome.days_left} дн.")
+    blocked = days_left_line(outcome.days_left)
+    if blocked:
+        lines.append(f"  {blocked.strip()}" if not blocked.startswith("🔴")
+                     else f"  {blocked}")
     lines += list(outcome.warnings)
     return "\n".join(lines)
 
@@ -957,8 +1091,15 @@ def format_summary(outcome: ApplyOutcome) -> str:
 def format_status(state: StoreStatus) -> str:
     if not state.ok:
         return f"🔴 база недоступна\n   {state.reason}\n   хранилище: {state.storage}"
-    lines = [f"📊 база котировок · {state.storage}",
-             f"  поколение ............. {state.generation}",
+    lines = [f"📊 база котировок · {state.storage}"]
+    # 🔴 §−118: шаг деплоя загрузчика fail-soft (`|| echo WARN; exit 0`), то
+    # есть зелёная сборка НЕ означает, что новая ревизия поднялась, — старая
+    # продолжает отвечать старым кодом. Cloud Run сообщает имя ревизии сам;
+    # напечатанное здесь, оно отвечает на «деплой доехал?» одной командой.
+    revision = os.getenv("K_REVISION", "").strip()
+    if revision:
+        lines.append(f"  ревизия ............... {revision}")
+    lines += [f"  поколение ............. {state.generation}",
              f"  размер ................ {state.size / (1024 * 1024):.1f} МБ",
              f"  инструментов .......... {state.instruments}"]
     for market in state.markets:
@@ -967,13 +1108,21 @@ def format_status(state: StoreStatus) -> str:
                      f"(возраст {age}, бумаг {market.instruments}, "
                      f"свежих {market.fresh})")
         if market.latest is not None and market.fresh < market.instruments:
-            lines.append(f"    🔴 без бара за {market.latest}: "
-                         f"{market.instruments - market.fresh} из "
-                         f"{market.instruments} — рынок «свежий» по одной "
-                         "бумаге, а обновилась часть")
-    if state.days_left is not None:
-        mark = "🔴" if state.days_left <= 2 else "  "
-        lines.append(f"{mark} до блокировки ручного тира: {state.days_left} дн.")
+            gap = market.instruments - market.fresh
+            if gap >= MISSED_ALARM_SHARE * market.instruments:
+                lines.append(f"    🔴 без бара за {market.latest}: {gap} из "
+                             f"{market.instruments} — рынок «свежий» по одной "
+                             "бумаге, а обновилась часть")
+            else:
+                # §−118: единицы бумаг без бара — фон (делистинг, пауза
+                # торгов), а не авария. Вечное 🔴 на здоровой базе учит не
+                # смотреть на 🔴 вовсе. Названо, но спокойно.
+                lines.append(f"    🟡 без бара за {market.latest}: {gap} из "
+                             f"{market.instruments} — единичные бумаги "
+                             "(делистинг или пауза торгов), /check покажет")
+    blocked = days_left_line(state.days_left)
+    if blocked:
+        lines.append(blocked)
     lines += _c1_lines(state.c1)
     if state.unsent_sessions:
         lines.append(f"  🔴 не прислано торговых дней: "
