@@ -66,7 +66,7 @@
 | `finance.security` | 1 | `test_phase29_multiuser_connection.py` |
 | `finance.simulate` | 13 | `test_phase14_refactor.py` · `test_phase18_sprint5.py` · `test_phase19_block_audit.py` · `test_phase32_report_logic_fixes.py` · `test_phase33_effect_reinvest_quality.py` · `test_phase36_report_audit_fixes.py` · `test_phase42_instrument_ssot.py` · `test_phase44_live_report_fixes.py` · `test_phase46_p2_maintainability.py` · `test_phase48_report_verdict_audit.py` · `test_phase4_reporting.py` · `test_phase50_report_layer_parity.py` · `test_phase7_logic_wiring.py` |
 | `finance.smart_money` | 1 | `test_phase19_block_audit.py` |
-| `finance.stooq_provider` | 4 | `test_manual_freedom_parity.py` · `test_phase35_price_providers.py` · `test_phase50_report_layer_parity.py` · `test_stooq_provider.py` |
+| `finance.stooq_provider` | 5 | `test_manual_freedom_parity.py` · `test_phase35_price_providers.py` · `test_phase50_report_layer_parity.py` · `test_phase51_ingest_bot.py` · `test_stooq_provider.py` |
 | `finance.stooq_store` | 2 | `test_stooq_price_store.py` · `test_stooq_provider.py` |
 | `finance.stress` | 4 | `test_phase25_math_sprint1.py` · `test_phase28_risk_methodology_audit.py` · `test_phase4_reporting.py` · `test_phase6_currency_h2.py` |
 | `finance.technicals` | 1 | `test_phase2_modules.py` |

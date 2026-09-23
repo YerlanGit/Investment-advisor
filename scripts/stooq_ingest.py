@@ -17,6 +17,10 @@
     python scripts/stooq_ingest.py verify-universe
     gcloud storage cp $STOOQ_ROOT/prices.sqlite gs://ramp-bot-state/stooq/prices.sqlite
 
+Последняя строка — публикация базы, собранной С НУЛЯ. Дневной `apply` вручную
+публикуется ИНАЧЕ: сначала свежая база из бакета, потом заливка с
+`--if-generation-match` (`OPERATOR_STOOQ.md §8.0a`, `AUDIT §−119`).
+
 🔴 Скрипт запускается НА КОМПЬЮТЕРЕ ОПЕРАТОРА, а не в облаке. `/mnt/state` в
 Cloud Run — это gcsfuse-монтирование бакета, писать в него SQLite нельзя
 (блокировки на объектном хранилище не работают), да и оператора с шеллом там

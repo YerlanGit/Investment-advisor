@@ -921,6 +921,34 @@ def _c1_lines(coverage: Optional[C1Coverage]) -> list[str]:
     return lines
 
 
+def is_blocked(days_left: Optional[int]) -> bool:
+    """Отказывает ли провайдер ручному тиру ПРЯМО СЕЙЧАС.
+
+    🔴 `§−120`. Порог обязан совпадать с тем, по которому провайдер реально
+    отказывает: `stooq_provider._stalled_markets` — `age > MAX_MARKET_STALE_DAYS`,
+    а `days_left = MAX_MARKET_STALE_DAYS − age`. Значит блокировка — это
+    `days_left < 0`. Прежние редакции (`build_reminder` с самого начала, потом
+    `days_left_line`) писали `<= 0` и объявляли тир заблокированным на день
+    раньше: при `days_left == 0` отчёты ещё строятся, а бот говорил обратное.
+    Неизвестное (`None`) — не блокировка: о нём говорит отдельная строка.
+    """
+    return days_left is not None and days_left < 0
+
+
+def backlog_mark(days_left: Optional[int]) -> str:
+    """Цвет строки «не прислано N дней» — по БЛИЗОСТИ к блокировке.
+
+    🔴 `§−120`. Отставание на один день — штатное состояние большую часть
+    суток: файл дня D появляется ночью по UTC, а присылают его днём. Вечное 🔴
+    на этом учит не смотреть на 🔴 вовсе — тот же класс, что `§−118` D6.
+    Красный — когда до блокировки осталось не больше порога напоминания или
+    она уже случилась; неизвестный запас — «внимание», а не «всё хорошо».
+    """
+    if days_left is not None and days_left <= REMIND_DAYS_LEFT:
+        return "🔴"
+    return "🟡"
+
+
 def days_left_line(days_left: Optional[int]) -> Optional[str]:
     """Строка про блокировку ручного тира — либо `None`, если сказать нечего.
 
@@ -932,9 +960,12 @@ def days_left_line(days_left: Optional[int]) -> Optional[str]:
     """
     if days_left is None:
         return None
-    if days_left <= 0:
-        return (f"🔴 ручной тир ЗАБЛОКИРОВАН уже {max(1, -days_left)} дн. — "
+    if is_blocked(days_left):
+        return (f"🔴 ручной тир ЗАБЛОКИРОВАН уже {-days_left} дн. — "
                 "отчёты не строятся, пока база не догнана")
+    if days_left == 0:
+        return ("🔴 сегодня ПОСЛЕДНИЙ день: отчёты ещё строятся, завтра ручной "
+                "тир заблокируется")
     mark = "🔴" if days_left <= 2 else "  "
     return f"{mark} до блокировки ручного тира: {days_left} дн."
 
@@ -1125,8 +1156,8 @@ def format_status(state: StoreStatus) -> str:
         lines.append(blocked)
     lines += _c1_lines(state.c1)
     if state.unsent_sessions:
-        lines.append(f"  🔴 не прислано торговых дней: "
-                     f"{len(state.unsent_sessions)} — см. /missing")
+        lines.append(f"  {backlog_mark(state.days_left)} не прислано торговых "
+                     f"дней: {len(state.unsent_sessions)} — см. /missing")
     if state.missing_dates:
         listed = " ".join(str(d) for d in state.missing_dates[:12])
         lines.append(f"  ⚠️ не хватает дней: {len(state.missing_dates)} — {listed}")
@@ -1455,7 +1486,7 @@ def build_reminder(state: StoreStatus) -> Optional[str]:
     newest = max((m.latest for m in state.markets if m.latest is not None),
                  default=None)
     behind = len(state.unsent_sessions)
-    if left is not None and left <= 0:
+    if is_blocked(left):
         # 🔴 Числа ОБЯЗАНЫ расти. Прежняя редакция возвращала одну и ту же
         # строку и на первый день блокировки, и на четырнадцатый — а
         # сообщение, которое не меняется, перестают читать ровно так же, как
@@ -1466,6 +1497,12 @@ def build_reminder(state: StoreStatus) -> Optional[str]:
                 f"Последний день базы — {newest}.{tail} "
                 "Отчёты ручного тира сейчас НЕ СТРОЯТСЯ: пришлите срезы, "
                 "список — /missing.")
+    if left == 0:
+        tail = (f" Не прислано торговых дней: {behind} (/missing)."
+                if behind else "")
+        return (f"🔴 сегодня ПОСЛЕДНИЙ день: завтра ручной тир заблокируется. "
+                f"Последний день базы — {newest}.{tail} "
+                "Пришлите свежий дневной срез со stooq.com/db/.")
     if left is not None and left <= REMIND_DAYS_LEFT:
         tail = (f" Не прислано торговых дней: {behind} (/missing)."
                 if behind else "")
@@ -1565,7 +1602,8 @@ def format_missing(state: StoreStatus) -> str:
     if state.unsent_sessions:
         listed = "\n".join(f"  {d}_d.txt" for d in state.unsent_sessions)
         blocks.append(
-            f"🔴 не прислано {len(state.unsent_sessions)} торговых дн. — "
+            f"{backlog_mark(state.days_left)} не прислано "
+            f"{len(state.unsent_sessions)} торговых дн. — "
             f"скачайте и пришлите:\n{listed}\n"
             "Среди них могут быть праздники США: на такой файл отвечу «рынок "
             "был закрыт», и это нормально.")
