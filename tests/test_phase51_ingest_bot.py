@@ -1494,7 +1494,10 @@ class PreflightRehearsalTest(_IngestCase):
         self.assertEqual(qi.days_left_line(-14),
                          "🔴 ручной тир ЗАБЛОКИРОВАН уже 14 дн. — отчёты не "
                          "строятся, пока база не догнана")
-        self.assertIn("ЗАБЛОКИРОВАН уже 1 дн.", qi.days_left_line(0))
+        # §−120: ноль дней запаса — ещё НЕ блокировка (провайдер отказывает
+        # при `age > MAX_MARKET_STALE_DAYS`, то есть с `days_left < 0`).
+        self.assertNotIn("ЗАБЛОКИРОВАН", qi.days_left_line(0))
+        self.assertIn("ЗАБЛОКИРОВАН уже 1 дн.", qi.days_left_line(-1))
         self.assertEqual(qi.days_left_line(None), None)
         self.assertIn("до блокировки ручного тира: 5 дн.", qi.days_left_line(5))
         state = _state(markets=(qi.MarketState("US", 20260901, 803, 1,
@@ -1523,6 +1526,106 @@ class PreflightRehearsalTest(_IngestCase):
                           qi.format_status(_state()))
         with mock.patch.dict(os.environ, {"K_REVISION": ""}):
             self.assertNotIn("ревизия", qi.format_status(_state()))
+
+
+class BlockThresholdMatchesTheProviderTest(unittest.TestCase):
+    """🔴 `§−120`. Бот объявлял блокировку на день раньше провайдера.
+
+    Провайдер отказывает ручному тиру при `age > MAX_MARKET_STALE_DAYS`, а бот
+    считает `days_left = MAX_MARKET_STALE_DAYS − age` и называл тир
+    заблокированным уже при `days_left <= 0`. В день `days_left == 0` отчёты
+    строились, а `/status` и напоминание говорили оператору обратное.
+    """
+
+    def test_the_threshold_is_derived_from_the_provider_gate(self) -> None:
+        """Не литерал, а тот же расчёт: возраст на пороге — ещё не отказ."""
+        from finance.stooq_provider import MAX_MARKET_STALE_DAYS
+        at_limit = MAX_MARKET_STALE_DAYS - MAX_MARKET_STALE_DAYS   # age == limit
+        past = MAX_MARKET_STALE_DAYS - (MAX_MARKET_STALE_DAYS + 1)
+        self.assertFalse(qi.is_blocked(at_limit))
+        self.assertTrue(qi.is_blocked(past))
+
+    def test_blocked_only_below_zero(self) -> None:
+        self.assertTrue(qi.is_blocked(-1))
+        self.assertTrue(qi.is_blocked(-14))
+        self.assertFalse(qi.is_blocked(0))
+        self.assertFalse(qi.is_blocked(3))
+        self.assertFalse(qi.is_blocked(None))    # неизвестное — не блокировка
+
+    def test_last_day_is_named_as_the_last_day(self) -> None:
+        line = qi.days_left_line(0)
+        self.assertTrue(line.startswith("🔴"))   # громко: завтра отказ
+        self.assertIn("ПОСЛЕДНИЙ день", line)
+        self.assertIn("ещё строятся", line)
+
+    def test_reminder_on_the_last_day_is_not_a_block_notice(self) -> None:
+        state = _state(markets=(qi.MarketState("US", 20260914, 5, 50,
+                                               stale_days=7, days_left=0),),
+                       unsent_sessions=(20260915, 20260916))
+        text = qi.build_reminder(state)
+        self.assertIn("ПОСЛЕДНИЙ день", text)
+        self.assertNotIn("ЗАБЛОКИРОВАН", text)
+        self.assertNotIn("НЕ СТРОЯТСЯ", text)
+        self.assertIn("20260914", text)
+        self.assertIn("Не прислано торговых дней: 2", text)
+
+    def test_reminder_the_day_after_is_a_block_notice(self) -> None:
+        state = _state(markets=(qi.MarketState("US", 20260914, 5, 50,
+                                               stale_days=8, days_left=-1),))
+        text = qi.build_reminder(state)
+        self.assertIn("ЗАБЛОКИРОВАН уже 1 дн.", text)
+        self.assertNotIn("ПОСЛЕДНИЙ день", text)
+
+
+class BacklogMarkIsAVerdictTest(unittest.TestCase):
+    """🔴 `§−120`. «Не прислано торговых дней: 1» при запасе 5 дн. печаталось 🔴.
+
+    Отставание на день — штатное состояние большую часть суток (файл дня D
+    появляется ночью по UTC). Вечное 🔴 учит не смотреть на 🔴 — тот же класс,
+    что `§−118` D6. Цвет — вердикт по близости к блокировке, а не оформление.
+    """
+
+    def _status(self, days_left, unsent=(20260922,)):
+        market = qi.MarketState("US", 20260921, 803, 1,
+                                stale_days=7 - days_left, days_left=days_left)
+        return qi.format_status(_state(markets=(market,),
+                                       unsent_sessions=unsent))
+
+    @staticmethod
+    def _backlog_line(text: str) -> str:
+        return next(line for line in text.splitlines() if "не прислано" in line)
+
+    def test_one_day_behind_with_slack_is_yellow(self) -> None:
+        """Живой замер: `20260921`, до блокировки 5 дн., не прислан один день."""
+        line = self._backlog_line(self._status(5))
+        self.assertIn("🟡 не прислано торговых дней: 1", line)
+        self.assertNotIn("🔴", line)
+
+    def test_close_to_the_block_is_red(self) -> None:
+        for left in (qi.REMIND_DAYS_LEFT, 1, 0, -3):
+            with self.subTest(days_left=left):
+                self.assertIn("🔴", self._backlog_line(self._status(left)))
+
+    def test_boundary_follows_the_reminder_threshold(self) -> None:
+        """Красным становится ровно тогда, когда приходит напоминание."""
+        self.assertEqual(qi.backlog_mark(qi.REMIND_DAYS_LEFT), "🔴")
+        self.assertEqual(qi.backlog_mark(qi.REMIND_DAYS_LEFT + 1), "🟡")
+
+    def test_unknown_slack_is_attention_not_all_clear(self) -> None:
+        mark = qi.backlog_mark(None)
+        self.assertEqual(mark, "🟡")
+        self.assertNotIn("✅", mark)
+
+    def test_missing_uses_the_same_verdict(self) -> None:
+        state = _state(markets=(qi.MarketState("US", 20260921, 803, 1,
+                                               stale_days=2, days_left=5),),
+                       unsent_sessions=(20260922,))
+        text = qi.format_missing(state)
+        self.assertIn("🟡 не прислано 1 торговых дн.", text)
+        late = _state(markets=(qi.MarketState("US", 20260915, 803, 1,
+                                              stale_days=6, days_left=1),),
+                      unsent_sessions=(20260916, 20260917, 20260918))
+        self.assertIn("🔴 не прислано 3 торговых дн.", qi.format_missing(late))
 
 
 class ReminderTest(unittest.TestCase):
