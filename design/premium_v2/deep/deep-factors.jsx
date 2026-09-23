@@ -120,7 +120,9 @@ const FactorVariance = ({ fv }) => {
           </div>
           <div className="flex flex-wrap gap-1.5">
             {fv.twins.map((t, i) => (
-              <span key={i} className="inline-flex items-center gap-1.5 text-[10px] font-mono rounded-full bg-white/70 border border-ink-900/8 px-2.5 py-1">
+              // §−121: чип переносит части внутри себя — длинный тикер AIX
+              // («MSFT.US ↔ FFSPC6.1028.AIX») на 320 px уводил его на 6 px за край.
+              <span key={i} className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-0.5 max-w-full text-[10px] font-mono rounded-2xl bg-white/70 border border-ink-900/8 px-2.5 py-1">
                 <span className="text-ink-800 font-semibold whitespace-nowrap">{t.pair}</span>
                 <span className="text-ink-400">corr {t.corr}</span>
                 <span className="text-ink-300">·</span>

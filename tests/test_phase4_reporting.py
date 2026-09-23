@@ -1113,9 +1113,10 @@ class SimulatorTest(unittest.TestCase):
 
     def test_simulate_uses_bl_posterior_mu_for_expected_return(self) -> None:
         """
-        bl_records supplied → expected_return uses Σ w_i · μ_i.
-            BEFORE: 0.3·0.12 + 0.7·0.05 = 0.036 + 0.035 = 0.071
-            AFTER:  0.7·0.12 + 0.3·0.05 = 0.084 + 0.015 = 0.099
+        bl_records supplied → expected_return uses Σ w_i · (rf + μ_i).
+        μ_BL — ИЗБЫТОЧНАЯ доходность (`§−121`), книга полностью вложена:
+            BEFORE: 0.04 + 0.3·0.12 + 0.7·0.05 = 0.04 + 0.071 = 0.111
+            AFTER:  0.04 + 0.7·0.12 + 0.3·0.05 = 0.04 + 0.099 = 0.139
             improved (higher better) ✓
         """
         from finance.simulate import simulate_after_plan
@@ -1131,8 +1132,8 @@ class SimulatorTest(unittest.TestCase):
             target_weights    = self._target_70_30(),
         )
         er = out["metrics"]["expected_return"]
-        self.assertAlmostEqual(er["before"], 0.071, places=4)
-        self.assertAlmostEqual(er["after"],  0.099, places=4)
+        self.assertAlmostEqual(er["before"], 0.111, places=4)
+        self.assertAlmostEqual(er["after"],  0.139, places=4)
         self.assertTrue(er["improved"])
         self.assertTrue(out["uses_bl_returns"])
 

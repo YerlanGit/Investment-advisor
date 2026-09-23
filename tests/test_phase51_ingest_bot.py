@@ -2991,14 +2991,22 @@ class IsolationTest(unittest.TestCase):
             "services/quote_ingest.py", "services/quote_publisher.py")
 
     def _imports(self, relative: str) -> set[str]:
+        """Корни И полные имена: `services.quote_ingest` даёт оба —
+        `services` и `services.quote_ingest`.
+
+        🔴 `§−121`: прежде хранился ТОЛЬКО корень, и проверка
+        `{"services.quote_ingest"} & imported` была пуста при любом коде —
+        `from services.quote_ingest import …` в `tg_bot.py` её проходил.
+        """
         import ast                                       # noqa: PLC0415
         tree = ast.parse((self._SRC / relative).read_text(encoding="utf-8"))
         names: set[str] = set()
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom) and node.module and not node.level:
-                names.add(node.module.split(".")[0])
+                names |= {node.module.split(".")[0], node.module}
             elif isinstance(node, ast.Import):
-                names |= {a.name.split(".")[0] for a in node.names}
+                for a in node.names:
+                    names |= {a.name.split(".")[0], a.name}
         return names
 
     def test_new_modules_never_import_the_main_bot(self) -> None:
@@ -3018,7 +3026,27 @@ class IsolationTest(unittest.TestCase):
                 imported = self._imports(relative)
                 self.assertNotIn("ingest_bot", imported)
                 self.assertNotIn("ingest_access", imported)
-                self.assertFalse({"services.quote_ingest"} & imported)
+                self.assertFalse({"services.quote_ingest",
+                                  "services.quote_publisher"} & imported)
+
+    def test_the_gate_sees_submodule_imports(self) -> None:
+        """Инструмент проверки сам проверен: подложенный импорт подмодуля
+        обязан быть виден — иначе гейт выше снова пуст (`§−121`)."""
+        import ast                                       # noqa: PLC0415
+        import tempfile                                  # noqa: PLC0415
+        with tempfile.TemporaryDirectory() as tmp:
+            probe = Path(tmp) / "probe.py"
+            probe.write_text("from services.quote_ingest import apply_daily\n"
+                             "import services.quote_publisher\n",
+                             encoding="utf-8")
+            saved, self._SRC = self._SRC, Path(tmp)
+            try:
+                seen = self._imports("probe.py")
+            finally:
+                self._SRC = saved
+        self.assertIn("services.quote_ingest", seen)
+        self.assertIn("services.quote_publisher", seen)
+        del ast
 
     def test_the_whole_offline_cycle_runs_without_third_party_libraries(self) -> None:
         """🔴 Проверяется РАБОТА без библиотек, а не отсутствие строк `import`.

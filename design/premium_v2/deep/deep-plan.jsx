@@ -121,7 +121,12 @@ const ActionPlan = ({ rows }) => (
                    title="Δ веса по Black-Litterman-оптимизатору (может расходиться с сигналом 4-Pillar)">
                 BL {r.dw>0?'+':'−'}{Math.abs(r.dw).toFixed(1)} пп</div>}
           </div>
-          <div className="text-right text-[12px] num text-ink-700">{r.price.toFixed(2)}</div>
+          {/* §−121: зона входа Buy — второй строкой под ценой, а не новой
+              колонкой: таблица и так листается на телефоне. */}
+          <div className="text-right leading-tight">
+            <div className="text-[12px] num text-ink-700">{r.price.toFixed(2)}</div>
+            {r.entry && <div className="text-[10px] num text-sage-600" title="Зона входа: откат к SMA50 − ATR … SMA50">вход {r.entry}</div>}
+          </div>
           <div className="text-right text-[12px] num text-sage-600">{r.target}</div>
           <div className="text-right text-[12px] num text-rust-600">{r.stop}</div>
           {/* R-6: `reason` из движка — «deferred (turnover cap)», «вне модели:

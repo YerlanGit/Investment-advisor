@@ -25,7 +25,7 @@ import numpy as np
 ATR_BUY_LO_MULT      = 1.0     # Buy zone lower bound  = SMA50 - 1·ATR
 ATR_BUY_HI_OFFSET_RSI_HOT = 0.5  # If RSI > 75 → shift buy zone -0.5 ATR
 ATR_TAKE_MULT_BUY    = 3.0     # Take-profit          = price + 3·ATR (or 1.05·SMA200)
-ATR_STOP_MULT_BUY    = 2.0     # Stop                 = price - 2·ATR (or SMA200)
+ATR_STOP_MULT_BUY    = 2.0     # Stop                 = entry - 2·ATR (or SMA200 below entry)
 ATR_SELL_HI_MULT     = 1.0     # Sell zone upper      = SMA50 + 1·ATR
 ATR_STOP_MULT_SELL   = 2.0     # Sell stop            = price - 2·ATR
 ATR_HOLD_STOP_MULT   = 2.5     # Hold stop            = price - 2.5·ATR (or SMA100)
@@ -171,7 +171,15 @@ def compute_levels(*,
                 # Less aggressive zone if trend isn't confirming.
                 buy_lo = sma50 - 0.7 * atr
                 buy_hi = sma50 - 0.2 * atr
-            out["buy_zone"] = (float(min(buy_lo, buy_hi)), float(max(buy_lo, buy_hi)))
+            buy_lo, buy_hi = min(buy_lo, buy_hi), max(buy_lo, buy_hi)
+            # `§−121` — зеркало R-4 для ПОКУПКИ. Бумага под SMA50 − ATR давала
+            # зону целиком ВЫШЕ рынка: «покупать 330–335» при цене 320 читается
+            # как «ждать роста», а лимит исполнился бы по рынку. Верхняя граница
+            # клипается к рынку, нижняя — к досягаемому откату (−1 ATR).
+            if buy_lo > price:
+                buy_lo = float(price - ATR_BUY_LO_MULT * atr)
+                buy_hi = float(price)
+            out["buy_zone"] = (float(buy_lo), float(buy_hi))
 
         # Take-profit target: 5% above SMA200 OR price + 3·ATR, whichever is
         # higher — these are the ACTIONABLE trend/volatility targets.
@@ -195,11 +203,20 @@ def compute_levels(*,
         if take is not None:
             out["take_target"] = float(take)
 
-        # Stop: -2 ATR (mandate-scaled) or SMA200 (whichever is higher → tighter).
+        # Stop: −2 ATR (mandate-scaled) or SMA200 (whichever is higher →
+        # tighter) — measured from the ENTRY, not from the market (`§−121`).
+        # The entry is the buy zone (a pullback to SMA50); the old stop was
+        # `price − 2·ATR`, which lies ABOVE the whole zone whenever
+        # price ≥ SMA50 + 1·ATR — the normal state of any uptrending name.
+        # The report printed «покупать 220.7–222.1, стоп 223.9»: an entry in
+        # the zone would be stopped out at once.  SMA200 counts only BELOW
+        # the entry (above it the same contradiction returns).  Without a
+        # zone the entry is the market price, i.e. the legacy rule.
+        entry = out["buy_zone"][0] if out["buy_zone"] is not None else price
         stops = []
         if atr is not None:
-            stops.append(price - ATR_STOP_MULT_BUY * ms * atr)
-        if sma200 is not None:
+            stops.append(entry - ATR_STOP_MULT_BUY * ms * atr)
+        if sma200 is not None and sma200 < entry:
             stops.append(sma200)
         if stops:
             out["stop_loss"] = float(max(stops))
@@ -229,11 +246,12 @@ def compute_levels(*,
             out["stop_loss"] = float(price - ATR_STOP_MULT_SELL * ms * atr)
         return out
 
-    # Hold — only protective stop.
+    # Hold — only protective stop.  `§−121`: SMA100 counts only BELOW the
+    # market (same reason as the Buy stop — above it the stop fires at once).
     stops = []
     if atr is not None:
         stops.append(price - ATR_HOLD_STOP_MULT * ms * atr)
-    if sma100 is not None:
+    if sma100 is not None and sma100 < price:
         stops.append(sma100)
     if stops:
         out["stop_loss"] = float(max(stops))

@@ -22,7 +22,7 @@ Math
         the composite gauge.
 
   CVaR / Sharpe / MDD       SAMPLE REPLAY:
-        port_daily_new = (daily log-returns matrix) @ w_new
+        port_daily_new = ln(1 + (e^{daily log-returns} − 1) @ w_new)   (§−121)
         cvar_new       = mean(port_daily_new[port_daily_new ≤ VaR_5%])
         sharpe_new     = (mean·252 − rfr) / std·√252
         mdd_new        = min((exp(cumsum(port_daily_new)) / running_max) − 1)
@@ -36,9 +36,10 @@ Math
         mandate-dependent: CONSERVATIVE 0.03 · MODERATE 0.065 · AGGRESSIVE 0.08
         — see _RISK_MANDATE_MATRIX; the old 0.10 here was stale.)
 
-  Expected return           E[r_ann] = Σ w_i · μ_i  where μ_i is the BL
-        posterior mean (annualised).  Fallback: realised annualised return
-        of each asset derived from daily_log_returns.
+  Expected return           E[r_ann] = Σ w_i · (rf + μ_i) + min(0, w_cash)·rf
+        where μ_i is the BL posterior mean — an EXCESS return (§−121: it was
+        read as a total return and rf got subtracted twice in Sharpe).
+        Fallback: realised annualised return of the book (already total).
 
   IT share                  Σ w_i for assets classified as Technology
         (case-insensitive sector lookup; fallback to ticker-prefix heuristic).
@@ -66,6 +67,7 @@ import pandas as pd
 # alias it under the historical private name so `_composite_risk_score` and
 # the module's `__all__` export keep working for every existing caller/test.
 from finance.scoring import composite_risk_score as _composite_risk_score  # noqa: E402,F401
+from finance.period_returns import aggregate_log_returns as _aggregate_log_returns  # noqa: E402
 
 
 # ── L-18 (2026-07-19): external global-ETF diversifier sleeve ────────────────
@@ -159,7 +161,9 @@ def _sample_metrics(daily_log_matrix: np.ndarray,
         return {"cvar_95": float("nan"), "sharpe": float("nan"),
                 "max_drawdown": float("nan"), "n_days": 0}
 
-    port_daily = daily_log_matrix @ weights              # length n_days
+    # Same aggregation as the engine's headline panel (`§−121`) — the
+    # before/after replay must share the cover's basis.
+    port_daily = _aggregate_log_returns(daily_log_matrix, weights)   # n_days
     n = port_daily.size
     if n < 60:
         return {"cvar_95": float("nan"), "sharpe": float("nan"),
@@ -218,13 +222,42 @@ def _expected_return_from_bl(target_w_by_ticker: dict[str, float],
     return float(er)
 
 
+def _bl_total_return(excess: Optional[float],
+                     weights_by_ticker: dict[str, float],
+                     risk_free_rate: float) -> Optional[float]:
+    """Полная ожидаемая доходность книги из ИЗБЫТОЧНОЙ доходности BL.
+
+    🔴 `§−121` — RFR mismatch. Реверс-оптимизированный prior `π = δΣw` и
+    апостериор He–Litterman — ИЗБЫТОЧНЫЕ доходности (над rf): так устроена
+    сама модель, и оптимизатор `w* = (δΣ)⁻¹μ` ими так и пользуется. Панель же
+    «Эффект» печатала `Σ w·μ_BL` как ожидаемую доходность и считала
+    Sharpe = (er − rf)/σ — вычитала rf ВТОРОЙ раз. Живой отчёт 02.08
+    («er 2.8% против rf 4.5%, премия −1.7 пп», R-20) — это премия +2.8 пп,
+    прочитанная как отрицательная: коэффициент гасился, а в отчёт уходила
+    ложная причина «ожидаемая доходность ниже безрисковой».
+
+        R_book = Σ_{бумаги} w·(rf + μ) + min(0, w_кэш)·rf
+
+    Свободный кэш — 0% (конвенция движка: остаток у брокера процента не
+    приносит), маржинальный заём — по rf, как в реализованной панели и
+    форварде обложки.
+    """
+    if excess is None:
+        return None
+    from finance.asset_taxonomy import is_cash
+    rf = float(risk_free_rate or 0.0)
+    invested = sum(float(w) for t, w in weights_by_ticker.items() if not is_cash(t))
+    cash = sum(float(w) for t, w in weights_by_ticker.items() if is_cash(t))
+    return float(excess) + rf * invested + min(0.0, cash) * rf
+
+
 def _realised_expected_return(daily_log_matrix: np.ndarray,
                                 weights:           np.ndarray,
                                 trading_days:      int = 252) -> Optional[float]:
     """Annualised realised return of the portfolio under `weights`."""
     if daily_log_matrix.size == 0 or weights.size == 0:
         return None
-    port_daily = daily_log_matrix @ weights
+    port_daily = _aggregate_log_returns(daily_log_matrix, weights)
     return float(np.exp(float(np.mean(port_daily)) * trading_days) - 1.0)
 
 
@@ -852,8 +885,14 @@ def simulate_after_plan(*,
             pass
 
     # ── Expected return: BL μ preferred, realised fallback ────────────────
-    er_before = _expected_return_from_bl(cur_w_by_ticker, bl_records)
-    er_after  = _expected_return_from_bl(target_weights, bl_records)
+    # BL отдаёт ИЗБЫТОЧНУЮ доходность — в полную её переводит `_bl_total_return`
+    # (`§−121`); реализованный фолбэк ниже уже полный.
+    er_before = _bl_total_return(
+        _expected_return_from_bl(cur_w_by_ticker, bl_records),
+        cur_w_by_ticker, risk_free_rate)
+    er_after  = _bl_total_return(
+        _expected_return_from_bl(target_weights, bl_records),
+        target_weights, risk_free_rate)
     if er_before is None and daily_log_returns is not None and not daily_log_returns.empty:
         avail = [t for t in struct_tickers if t in daily_log_returns.columns]
         if avail:

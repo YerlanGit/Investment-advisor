@@ -85,6 +85,27 @@ _KPI_TONE_COLOR = {
 }
 
 
+def _cvar_sub(p: dict) -> str:
+    """Подпись под CVaR: денежный эквивалент + VaR 95% того же дня.
+
+    🔴 `§−121`: VaR 95% считался движком (`VaR_95_Daily`), форматировался в
+    payload (`var_95_daily`, `var_dollar`) — и не показывался НИГДЕ, ни в
+    Premium, ни в Jinja. Порог и хвост — пара: CVaR без VaR не говорит, откуда
+    начинается «худшие 5%». Отдельной карточки нет намеренно: строка укладывается
+    в подпись самой узкой карточки на 320 px, а новая карточка — это новая
+    вёрстка на телефоне.
+    """
+    # Пусто — это и `–` маппера, и `—` форматтера `pdf_payload._dollar`.
+    def _has(v: str) -> bool:
+        return bool(v) and v not in (DASH, "—")
+    parts = [x for x in (_txt(p, "cvar_dollar"),) if _has(x)]
+    var = _txt(p, "var_95_daily")
+    if _has(var):
+        vd = _txt(p, "var_dollar")
+        parts.append(f"VaR 95% {var}" + (f" ({vd})" if _has(vd) else ""))
+    return " · ".join(parts) if parts else DASH
+
+
 def _kpi(p: dict, key: str, name: str, val_key: str, note_key: str,
          spark_key: str, status: str, color: str, sub: str) -> dict:
     """Одна KPI-карточка — ОДНА функция на оба тира.
@@ -288,6 +309,12 @@ def _map_deep(p: dict, meta: dict) -> dict:
     plan = [{"t": _txt(a, "ticker"), "action": _txt(a, "action").upper().split()[0] if _g(a, "action") else DASH,
              "price": _num(a, "price_num", default=_num(a, "price")),  # §−14 A-1: numeric twin first
              "target": _txt(a, "sell_target") if _g(a, "sell_target") else _txt(a, "buy_zone"),
+             # `§−121`: у Buy колонка «target» занята take-profit, и ЗОНА ВХОДА
+             # терялась — отчёт говорил, что покупать, но не где. Стоп с того же
+             # раунда меряется ОТ ЭТОЙ ЗОНЫ, поэтому без неё строка непонятна.
+             "entry": (_txt(a, "buy_zone")
+                       if _g(a, "sell_target") and _txt(a, "buy_zone") not in (DASH, "—")
+                       else ""),
              "stop": _txt(a, "stop_loss"),
              # Quantity to trade (user request «добавить столбец количество»): the
              # engine ships qty_delta (whole units, signed) and delta_w_pp (target
@@ -438,7 +465,7 @@ def _map_deep(p: dict, meta: dict) -> dict:
             {"label": "Профиль", "value": _txt(p, "risk_mandate_label"), "icon": "shield", "small": True},
         ],
         "kpis": [
-            _kpi(p, "cvar", "CVaR 95%", "cvar", "ai_cvar_note", "cvar_svg", "normal", "#5d7c5c", _txt(p, "cvar_dollar")),
+            _kpi(p, "cvar", "CVaR 95%", "cvar", "ai_cvar_note", "cvar_svg", "normal", "#5d7c5c", _cvar_sub(p)),
             _kpi(p, "sharpe", "Sharpe Ratio", "sharpe", "ai_sharpe_note", "sharpe_svg", "good", "#caa01a",
                  f"Sortino {_txt(p, 'sortino')}"),
             _kpi(p, "dd", "Max Drawdown", "max_drawdown", "ai_mdd_note", "mdd_svg", "watch", "#c47358", _txt(p, "mdd_dollar")),
@@ -550,7 +577,7 @@ def _map_base(p: dict, meta: dict) -> dict:
         # в DEEP её роль играет отдельная риск-панель.
         "kpis": [
             _kpi(p, "cvar", "CVaR 95%", "cvar", "ai_cvar_note", "cvar_svg",
-                 "normal", "#5d7c5c", _txt(p, "cvar_dollar")),
+                 "normal", "#5d7c5c", _cvar_sub(p)),
             _kpi(p, "sharpe", "Sharpe Ratio", "sharpe", "ai_sharpe_note", "sharpe_svg",
                  "good", "#caa01a", f"Sortino {_txt(p, 'sortino')}"),
             _kpi(p, "dd", "Max Drawdown", "max_drawdown", "ai_mdd_note", "mdd_svg",

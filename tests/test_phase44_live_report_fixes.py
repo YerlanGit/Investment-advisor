@@ -116,8 +116,11 @@ class SharpeNegativeExcessTest(unittest.TestCase):
         })
         rm = pd.DataFrame([[0.04, 0.01], [0.01, 0.05]],
                           index=tickers, columns=tickers)
+        # `er_value` здесь — ПОЛНАЯ ожидаемая доходность, как в живом отчёте.
+        # BL отдаёт ИЗБЫТОЧНУЮ (`§−121`), и книга AAA/BBB вложена целиком,
+        # поэтому подменяем избытком: полная = избыток + rf·1.
         with patch.object(sim, "_expected_return_from_bl",
-                          side_effect=lambda w, r: er_value):
+                          side_effect=lambda w, r: er_value - 0.045):
             return sim.simulate_after_plan(
                 perf_df=perf, risk_matrix=rm, daily_log_returns=dlr,
                 bl_records=[{"ticker": "AAA", "expected_return": er_value}],

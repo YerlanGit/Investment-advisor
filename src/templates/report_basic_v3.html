@@ -26,8 +26,15 @@
   .sheet { max-width: 100% !important; padding: 12px 13px 20px !important; }
   .cover, .kpi-grid, .risk-conc, .score-grid, .effect-grid, .cove-grid,
   .ideas-grid, .stat-grid, [class*="-grid"], [class*="-layout"] {
-    grid-template-columns: 1fr !important; gap: 12px !important;
+    grid-template-columns: minmax(0, 1fr) !important; gap: 12px !important;
   }
+  /* §−121 (замер 320–414 на реальном payload): `1fr` — это minmax(auto, 1fr),
+     и дорожка сетки не уже min-content содержимого. Подпись KPI с
+     `white-space: nowrap` задавала ей 506 px на экране 320 — все четыре
+     карточки уезжали за край. minmax(0,…) + min-width:0 отдают ширину
+     экрану, а длинные моно-строки и чипы QC переносятся, а не режутся. */
+  .kpi, .kpi > *, [class*="-grid"] > * { min-width: 0 !important; }
+  .kpi-sub, .qc-chip { white-space: normal !important; overflow-wrap: anywhere; }
   .panel, .table-wrap { overflow-x: auto !important; -webkit-overflow-scrolling: touch; }
   table { font-size: 10.5px !important; }
   thead th, tbody td { padding: 4px 5px !important; }
@@ -1290,7 +1297,7 @@
       <div class="kpi-name">CVaR&nbsp;95%</div>
       <div class="kpi-value-row">
         <span class="kpi-value">{{ data.cvar }}</span>
-        <span class="kpi-sub">(худшие 5% дней · за 1 день{% if data.cvar_dollar %} · ≈ {{ data.cvar_dollar }}{% endif %}{% if data.cvar_ci %} · разброс {{ data.cvar_ci }}{% endif %})</span>
+        <span class="kpi-sub">(худшие 5% дней · за 1 день{% if data.cvar_dollar %} · ≈ {{ data.cvar_dollar }}{% endif %}{% if data.var_95_daily and data.var_95_daily not in ('–', '—') %} · VaR 95% {{ data.var_95_daily }}{% if data.var_dollar and data.var_dollar not in ('–', '—') %} ({{ data.var_dollar }}){% endif %}{% endif %}{% if data.cvar_ci %} · разброс {{ data.cvar_ci }}{% endif %})</span>
       </div>
 {# Спарклайн метрики — срезы за последний год, каждый по скользящему
          окну 60 дней (`finance.portfolio_series.compute_kpi_trend_series`).
@@ -1851,7 +1858,7 @@
 
     {# Sprint-5 (Task 5 — Margin-Call AI trigger): explicit leverage warning,
        filled by the model only when the book is margin-funded. #}
-    {% if data.ai_leverage_warning %}
+    {% if data.ai_leverage_warning and data.leverage_metrics and data.leverage_metrics.is_leveraged %}
     <div style="margin:0 14px 10px; padding:9px 12px; border-radius:4px;
                 background:#fdecea; border-left:3px solid #c62828;
                 font-size:10.5px; color:#8a1c1c; line-height:1.45;">
@@ -2304,7 +2311,7 @@
     <div style="font-size:9px; font-weight:700; color:#555; letter-spacing:.05em; margin-bottom:6px;">КОНТРОЛЬ КАЧЕСТВА ДАННЫХ</div>
     <div style="display:flex; flex-wrap:wrap; gap:6px;">
     {% for c in data.integrity_checks %}
-      <span style="font-size:8.5px; padding:2px 7px; border-radius:10px; white-space:nowrap;
+      <span class="qc-chip" style="font-size:8.5px; padding:2px 7px; border-radius:10px; white-space:nowrap;
              background:{% if c.status == '✓' %}#e8f5e9{% elif c.status == '⚠' %}#fff8e1{% else %}#f5f5f5{% endif %};
              color:{% if c.status == '✓' %}#2e7d32{% elif c.status == '⚠' %}#e65100{% else %}#777{% endif %};">
         {{ c.status }} <b>{{ c.label }}</b>: {{ c.detail }}

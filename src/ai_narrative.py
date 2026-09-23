@@ -254,7 +254,6 @@ REPORT_TOOL: dict = {
             "plain_summary":          {"type": "string"},
             "bullets":                {"type": "array", "items": {"type": "string"}},
             "action_plan_text":       {"type": "string"},
-            "ai_action_impact":       {"type": "string"},
             # KPI-strip notes.  ai_cvar_note was MISSING here while the prompt
             # asks for it and the extractor reads it (line ~1273): a model that
             # adheres strictly to the declared schema (Sonnet/BASE) then dropped
@@ -776,6 +775,38 @@ def _reinvest_destination(results: dict) -> str:
     return " · ".join(parts)
 
 
+# `§−121` — правило §−13 («плечо и долг видны ТОЛЬКО при отрицательном кэше»)
+# для ПРОЗЫ модели. Словарь намеренно узкий и однозначный: «маржинальность»
+# (рентабельность из SEC) и «плечевой ETF» (свойство инструмента) — законные
+# слова, их трогать нельзя. Ловится только ЗАЁМ СЧЁТА.
+# «Плечо» — только СУЩЕСТВИТЕЛЬНОЕ и только при счёте/портфеле/книге:
+# «портфель с плечевыми ETF» и «ETF с кредитным плечом 2×» — про инструмент.
+_PLECHO = r"плеч(?:о|а|ом|е|у)\b"
+_ACCOUNT_LEVERAGE_RE = re.compile(
+    r"маржинальн\w*\s+(?:долг|за[её]м|кредит|сч[её]т|позици|требовани)"
+    r"|margin[\s-]*call|маржин[\s-]*колл"
+    r"|за[её]мн\w*\s+средств"
+    rf"|(?:кредитн\w+\s+)?{_PLECHO}\s+(?:портфел|сч[её]т|книг)"
+    rf"|(?:портфел\w*|сч[её]т\w*|книг\w*)\s+(?:без|с)\s+(?:кредитн\w+\s+)?{_PLECHO}",
+    re.IGNORECASE,
+)
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?…])\s+")
+
+
+def strip_account_leverage(text: str, leveraged: bool) -> str:
+    """Убрать из текста ПРЕДЛОЖЕНИЯ о заёмных средствах счёта, если книга
+    без маржи. На маржинальной книге текст не трогается.
+
+    Режется по предложению, а не по слову: вырезанное слово оставило бы
+    бессмысленную фразу, а переписать её за модель — значит выдумать.
+    """
+    if leveraged or not text or not _ACCOUNT_LEVERAGE_RE.search(text):
+        return text
+    kept = [s for s in _SENTENCE_SPLIT_RE.split(text)
+            if not _ACCOUNT_LEVERAGE_RE.search(s)]
+    return " ".join(kept).strip()
+
+
 def _leverage_for_prompt(lm: Optional[dict]) -> dict:
     """Compact, %-scaled leverage view for the LLM prompt.
 
@@ -784,8 +815,14 @@ def _leverage_for_prompt(lm: Optional[dict]) -> dict:
     (1.0 == 100% of equity); we %-scale them so the model quotes them verbatim.
     """
     lm = lm or {}
+    # `§−121`: на книге БЕЗ маржи модели не отдаётся ни одного числа плеча.
+    # Факт «плечо 1.00x / валовая 94%» провоцировал фразы вида «портфель без
+    # кредитного плеча» — упоминание плеча там, где правило §−13 требует
+    # тишины. Нет факта — нет повода; запрет в промпте стоит рядом.
+    if not bool(lm.get("is_leveraged")):
+        return {"is_leveraged": False}
     return {
-        "is_leveraged":   bool(lm.get("is_leveraged")),
+        "is_leveraged":   True,
         "gross_exposure_pct": _safe_round((lm.get("gross_exposure") or 0) * 100, 1),
         "long_weight_pct":    _safe_round((lm.get("long_weight") or 0) * 100, 1),
         "net_exposure_pct":   _safe_round((lm.get("net_exposure") or 0) * 100, 1),
@@ -1356,7 +1393,15 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
     # margin-funded book (cash leg < 0), the model is HARD-REQUIRED to fill
     # `ai_leverage_warning` and to lead a bullet with the Margin-Call risk.
     lev = summary.get("leverage") or {}
-    leverage_rule = ""
+    # `§−121` (правило §−13 для прозы): книга без маржи — о заёмных средствах
+    # счёта молчим. Плечевой ETF как ИНСТРУМЕНТ (CONL 2×) — другое понятие,
+    # его описывать можно и нужно.
+    leverage_rule = (
+        "ПЛЕЧО СЧЁТА: кэш-баланс НЕ отрицательный — маржинального долга нет. НЕ упоминай "
+        "кредитное плечо портфеля, маржинальный долг, заёмные средства, Margin Call — ни "
+        "утвердительно, ни в отрицании («без плеча» тоже нельзя). Плечевые ETF как "
+        "инструмент описывать можно.\n"
+    )
     if lev.get("is_leveraged"):
         # 🔴 R-4: масштаб языка пропорционален размеру долга, а не факту его
         # наличия.  Прежде директива включалась по бинарному `is_leveraged` и
@@ -1627,8 +1672,7 @@ def _user_prompt(summary: dict, *, tier: str, market_context: str = "",
         'покупки, которой не было, в отчёте быть не должно [Quant Engine]",\n'
         f'{picks_spec},\n'
         '  "action_plan_text": "≤800 знаков — приоритетные действия: Trim/Sell сначала, '
-        'конкретные уровни, cumulative |Δw| ≤ 25% NAV",\n'
-        '  "ai_action_impact": "≤300 знаков — количественный прогноз: CVaR/Vol/TE/Sharpe после плана"\n'
+        'конкретные уровни, cumulative |Δw| ≤ 25% NAV"\n'
         '}\n\n'
         "ПРАВИЛА:\n"
         f"- ВСЕ тексты на РУССКОМ. Без названий бренда («{branding.project_name()}», "
@@ -1814,17 +1858,11 @@ def _fallback_narrative(results: dict, tier: str,
             bullets.insert(0, ai_leverage_warning)
 
     action_plan_text = ""
-    ai_action_impact = ""
     if tier == "deep":
         action_plan_text = (
             "Приоритет — закрытие концентрационных hotspots (TRC > 20%); "
             "затем точечные покупки по Buy-зонам в активах с Total Score > +1. "
             "Все сделки в пределах 25% оборота NAV [Quant Engine]."
-        )
-        ai_action_impact = (
-            "Сокращение крупнейшего hotspot на 30% снизит Vol на ~1-2 п.п. "
-            "и улучшит CVaR на ~0.2 п.п. Добавление защитного ETF (AGG/GLD) "
-            "снизит Tracking Error к бенчмарку [Quant Engine]."
         )
 
     return {
@@ -1832,7 +1870,8 @@ def _fallback_narrative(results: dict, tier: str,
         "plain_summary":            plain_summary[:300],
         "bullets":                  bullets[:7 if tier == "deep" else 4],
         "action_plan_text":         action_plan_text,
-        "ai_action_impact":         ai_action_impact,
+        # `§−121`: поле выведено из работы — см. комментарий в успешной ветке.
+        "ai_action_impact":         "",
         "stock_picks":              stock_picks,
         "used_rag":                 False,
         "model_used":               "fallback",
@@ -2037,7 +2076,7 @@ def generate_narrative(results: dict, tier: str = "base",
                        user_mandate: dict | None = None) -> dict:
     """
     Returns {verdict, plain_summary, bullets, stock_picks,
-             action_plan_text, ai_action_impact, used_rag}.
+             action_plan_text, used_rag}  (`ai_action_impact` — всегда "").
 
     Base tier  → Claude Haiku  (1200 tokens, fast)
     Deep tier  → Claude Sonnet (6000 tokens, richer prose + RAG synthesis)
@@ -2120,7 +2159,6 @@ def generate_narrative(results: dict, tier: str = "base",
         plain_summary = str(parsed.get("plain_summary", "")).strip()
         bullets       = [str(b).strip() for b in (parsed.get("bullets") or []) if str(b).strip()]
         plan_txt      = str(parsed.get("action_plan_text", "")).strip()
-        impact_txt    = str(parsed.get("ai_action_impact", "")).strip()
         stock_picks   = parsed.get("stock_picks") or {}
 
         if not verdict or not bullets:
@@ -2130,16 +2168,17 @@ def generate_narrative(results: dict, tier: str = "base",
 
         # CoVe: strip RAG citations whose source file is not in market_context.
         _held_now     = _held_symbols(results)
+        _is_levered   = bool((results.get("leverage_metrics") or {}).get("is_leveraged"))
 
         def _clean_top(txt: str) -> str:
-            return _expand_bank_short_forms(
-                _strip_unverified_rag_citations(txt, market_context), _held_now)
+            return strip_account_leverage(_expand_bank_short_forms(
+                _strip_unverified_rag_citations(txt, market_context), _held_now),
+                _is_levered)
 
-        bullets       = [_clean_top(b) for b in bullets]
+        bullets       = [b for b in (_clean_top(b) for b in bullets) if b]
         plan_txt      = _clean_top(plan_txt)
         verdict       = _clean_top(verdict)
         plain_summary = _clean_top(plain_summary)
-        impact_txt    = _clean_top(impact_txt)
 
         # Normalise stock_picks structure.
         stock_picks = _normalise_stock_picks(stock_picks, tier, market_context)
@@ -2187,8 +2226,9 @@ def generate_narrative(results: dict, tier: str = "base",
             иначе панель провенанса опишет не тот текст, который читает
             пользователь (`§−97`).
             """
-            return _expand_bank_short_forms(
-                _strip_unverified_rag_citations(txt, market_context), _held)
+            return strip_account_leverage(_expand_bank_short_forms(
+                _strip_unverified_rag_citations(txt, market_context), _held),
+                _is_levered)
 
         def _comment(key: str, limit: int = 250) -> str:
             txt = str(parsed.get(key, "")).strip()
@@ -2229,7 +2269,7 @@ def generate_narrative(results: dict, tier: str = "base",
         # consensus the model surfaced from memory, across everything the user
         # actually reads.  Feeds the CoVe "ИИ-цитирование банков" checker.
         _cite = _count_rag_citations(
-            [verdict, plain_summary, plan_txt, impact_txt, *bullets,
+            [verdict, plain_summary, plan_txt, *bullets,
              _regime_cmt, _factor_cmt, _effect_cmt, _rc.get("summary", "")]
             + [_comment(k) for k in (
                 "ai_risk_comment", "ai_holdings_comment", "ai_4pillar_comment",
@@ -2245,7 +2285,14 @@ def generate_narrative(results: dict, tier: str = "base",
             "plain_summary":            _soft_trim(plain_summary, 230, allow_grace=False),
             "bullets":                  bullets[:7 if tier == "deep" else 4],
             "action_plan_text":         _soft_trim(plan_txt, 1000) if tier == "deep" else "",
-            "ai_action_impact":         _soft_trim(impact_txt, 400) if tier == "deep" else "",
+            # `§−121`: поле ВЫВЕДЕНО ИЗ РАБОТЫ. Промпт просил «количественный
+            # прогноз CVaR/Vol/TE/Sharpe после плана» — то есть заставлял модель
+            # СЧИТАТЬ то, что движок уже посчитал в панели «Эффект» (`§−44`
+            # R-5, `§−97` E-5), а фолбэк печатал выдуманные «−1-2 п.п.». Поле
+            # не рендерилось нигде, но оплачивалось каждым DEEP-вызовом и
+            # засчитывалось в аудит цитат «того, что читает пользователь».
+            # Ключ контракта оставлен пустым: удаление — решение владельца.
+            "ai_action_impact":         "",
             "stock_picks":              stock_picks,
             "used_rag":                 used_rag,
             "model_used":               model,
@@ -2273,9 +2320,12 @@ def generate_narrative(results: dict, tier: str = "base",
             "ai_stress_comment":        validate_stress_comment(_comment("ai_stress_comment")),
             "ai_action_comment":        _comment("ai_action_comment", 400 if tier == "deep" else 250),
             "ai_effect_comment":        _effect_cmt,
-            # Sprint-5 margin/leverage trigger output — only the AI fills this
-            # (empty when the book is unlevered; the template hides it then).
-            "ai_leverage_warning":      _comment("ai_leverage_warning", 260),
+            # Sprint-5 margin/leverage trigger output — only the AI fills this.
+            # `§−121`: «пусто на книге без маржи» держалось на послушании
+            # модели, а Jinja-баннер проверял лишь непустоту текста. Теперь
+            # поле гасит ДВИЖОК: нет отрицательного кэша — нет предупреждения.
+            "ai_leverage_warning":      (_comment("ai_leverage_warning", 260)
+                                         if _is_levered else ""),
             "regime_confirmation":      _rc,
             # RAG audit trail (2026-07-04): how the narrative sourced bank views
             # — report-backed [RAG:file] citations vs. bank consensus from model

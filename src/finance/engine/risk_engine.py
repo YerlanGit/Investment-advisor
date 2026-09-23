@@ -58,6 +58,8 @@ from finance.period_returns import (
     MIN_OVERLAP_TDAYS as _MIN_OVERLAP_TDAYS,
     compute_period_returns_table as _compute_period_returns_table,
     build_portfolio_log_returns as _build_portfolio_log_returns,
+    aggregate_log_returns as _aggregate_log_returns,
+    apply_margin_financing as _apply_margin_financing,
     compute_benchmark_stats as _compute_benchmark_stats,
 )
 # Stress engine (parametric factor shocks) — also sklearn-free.
@@ -759,8 +761,10 @@ class MAC3RiskEngine:
             return w
 
         for i, ticker in enumerate(cols):
-            v_plus  = float(np.percentile(ret_mat @ _bumped(i, +h), var_p * 100))
-            v_minus = float(np.percentile(ret_mat @ _bumped(i, -h), var_p * 100))
+            v_plus  = float(np.percentile(
+                _aggregate_log_returns(ret_mat, _bumped(i, +h)), var_p * 100))
+            v_minus = float(np.percentile(
+                _aggregate_log_returns(ret_mat, _bumped(i, -h)), var_p * 100))
             out[ticker] = (v_plus - v_minus) / (2.0 * h)
         return pd.Series(out)
 
@@ -1548,7 +1552,9 @@ class MAC3RiskEngine:
         # (H2 pre-converted the price matrix → a_data is base-currency log
         # returns).  Sum(weights) < 1 by design when cash sits in the
         # portfolio — that dilutes risk correctly without renormalisation.
-        port_returns_daily = a_data.values @ weights
+        # `§−121`: ln(1 + Σ wᵢ·Rᵢ), not Σ wᵢ·rᵢ — the log of the sum, not the
+        # sum of logs (the latter drops the diversification return).
+        port_returns_daily = _aggregate_log_returns(a_data.values, weights)
         port_series_index  = a_data.index
         # F-22 (2026-07-11): realized-metrics basis — masked composite series.
         # The intersection window `a_data` shrinks to the YOUNGEST kept listing
@@ -1569,7 +1575,9 @@ class MAC3RiskEngine:
             _comp, _comp_info = _build_portfolio_log_returns(
                 data[valid_resolved], _w_by_res)
             if _comp is not None and _total_w > 0 and len(_comp) > len(a_data):
-                port_returns_daily = _comp.values * _total_w
+                # Cash dilution in SIMPLE space (cash earns 0): the book's day
+                # is Σw · R_comp, then back to log (`§−121`).
+                port_returns_daily = np.log1p(np.expm1(_comp.values) * _total_w)
                 port_series_index  = _comp.index
                 logger.info(
                     "Realized-metrics basis: composite %d дн "
@@ -1580,6 +1588,13 @@ class MAC3RiskEngine:
             logger.warning(
                 "Composite series unavailable — realized metrics fall back "
                 "to the intersection window: %s", _exc)
+        # `§−121`: a margin loan (negative cash row in weights_dict) accrues
+        # financing at the reporting-currency rf — never free.  The threshold
+        # (−0.1%) is the same float-noise guard as `leverage_metrics`.
+        _cash_w = sum(float(w or 0.0) for t, w in weights_dict.items()
+                      if str(t).upper() in self.NON_RISK_ASSETS)
+        port_returns_daily = _apply_margin_financing(
+            port_returns_daily, _cash_w, self.current_rfr_daily)
         # H3 (Phase-3): expose the date-indexed portfolio log-return series so
         # the Telegram equity-curve SVG consumes it instead of recomputing
         # `log(prices/prices.shift) @ weights` in the bot layer.  Stored on

@@ -2021,9 +2021,13 @@ const FactorVariance = ({
     className: "font-light text-ink-500"
   }, "— одна ставка куплена дважды (systematic corr ≥ 0.90)")), /*#__PURE__*/React.createElement("div", {
     className: "flex flex-wrap gap-1.5"
-  }, fv.twins.map((t, i) => /*#__PURE__*/React.createElement("span", {
+  }, fv.twins.map((t, i) =>
+  /*#__PURE__*/
+  // §−121: чип переносит части внутри себя — длинный тикер AIX
+  // («MSFT.US ↔ FFSPC6.1028.AIX») на 320 px уводил его на 6 px за край.
+  React.createElement("span", {
     key: i,
-    className: "inline-flex items-center gap-1.5 text-[10px] font-mono rounded-full bg-white/70 border border-ink-900/8 px-2.5 py-1"
+    className: "inline-flex flex-wrap items-center gap-x-1.5 gap-y-0.5 max-w-full text-[10px] font-mono rounded-2xl bg-white/70 border border-ink-900/8 px-2.5 py-1"
   }, /*#__PURE__*/React.createElement("span", {
     className: "text-ink-800 font-semibold whitespace-nowrap"
   }, t.pair), /*#__PURE__*/React.createElement("span", {
@@ -2697,8 +2701,13 @@ const ActionPlan = ({
     className: `text-[10px] num ${dwTone}`,
     title: "Δ веса по Black-Litterman-оптимизатору (может расходиться с сигналом 4-Pillar)"
   }, "BL ", r.dw > 0 ? '+' : '−', Math.abs(r.dw).toFixed(1), " пп")), /*#__PURE__*/React.createElement("div", {
-    className: "text-right text-[12px] num text-ink-700"
-  }, r.price.toFixed(2)), /*#__PURE__*/React.createElement("div", {
+    className: "text-right leading-tight"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "text-[12px] num text-ink-700"
+  }, r.price.toFixed(2)), r.entry && /*#__PURE__*/React.createElement("div", {
+    className: "text-[10px] num text-sage-600",
+    title: "Зона входа: откат к SMA50 − ATR … SMA50"
+  }, "вход ", r.entry)), /*#__PURE__*/React.createElement("div", {
     className: "text-right text-[12px] num text-sage-600"
   }, r.target), /*#__PURE__*/React.createElement("div", {
     className: "text-right text-[12px] num text-rust-600"

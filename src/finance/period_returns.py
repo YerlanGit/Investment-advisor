@@ -47,6 +47,63 @@ def _cum_simple_from_log(window_log) -> float | None:
     return float(np.exp(arr.sum()) - 1.0)
 
 
+# Floor on a single-day portfolio simple return before the log: a book with
+# Σw > 1 (margin) or shorts can in principle lose more than 100% in one day,
+# and ln(≤0) is −inf/NaN — one such tick would poison every downstream mean.
+_MIN_DAY_SIMPLE_RETURN = -0.999999
+
+
+def aggregate_log_returns(log_matrix, weights) -> np.ndarray:
+    """
+    Daily LOG return of a constant-weight book from per-asset daily LOG returns.
+
+        r_p(t) = ln(1 + Σᵢ wᵢ·(e^{rᵢ(t)} − 1))
+
+    🔴 `§−121`. Логарифм суммы ≠ сумме логарифмов. Прежняя свёртка
+    `Σ wᵢ·rᵢ` (взвешенные ЛОГ-доходности) — это средний темп роста бумаг, а не
+    темп роста портфеля: по неравенству Йенсена она всегда ниже на
+    «доходность диверсификации» ≈ ½(Σ wᵢσᵢ² − σₚ²) в год. На демо-книге —
+    −3.9 пп годовой доходности (9.47% против 13.36%) и +1.3 пп просадки;
+    ошибка систематическая и всегда в пессимистичную сторону. Складываются
+    ПРОСТЫЕ доходности (так устроены historical-simulation VaR и композиты
+    GIPS), логарифм берётся от суммы.
+
+    Cash convention is unchanged: Σw < 1 leaves the residual at a 0% simple
+    return, so the book is diluted exactly as before.  NaN in a row → NaN out.
+    """
+    lm = np.asarray(log_matrix, dtype=float)
+    w = np.asarray(weights, dtype=float)
+    simple = np.expm1(lm) @ w
+    return np.log1p(np.maximum(simple, _MIN_DAY_SIMPLE_RETURN))
+
+
+def apply_margin_financing(port_log, cash_weight: float,
+                           rf_daily: float) -> np.ndarray:
+    """
+    Charge a margin loan (negative cash) at the risk-free rate, per day.
+
+        r_p'(t) = ln(1 + (e^{r_p(t)} − 1) + min(0, w_cash)·rf_daily)
+
+    🔴 `§−121`. Отрицательный кэш — это кредит брокера, и он НЕ бесплатен.
+    Прежде реализованная панель и форвард (`E[r_port]`) вели маржинальный
+    остаток под 0%, и плечо 1.2× получало ≈ 0.2·rf ≈ 0.9 пп годовых даром —
+    в доходности, Sharpe и ожидаемом эффекте. rf валюты отчёта — НИЖНЯЯ
+    граница: брокер берёт больше, поэтому оценка остаётся оптимистичной, но
+    уже не бесплатной. Положительный кэш не трогаем: свободный остаток у
+    брокера не приносит процента, 0% — фактическая доходность.
+    """
+    arr = np.asarray(port_log, dtype=float)
+    try:
+        cw = float(cash_weight)
+        rd = float(rf_daily)
+    except (TypeError, ValueError):
+        return arr
+    if not (np.isfinite(cw) and np.isfinite(rd)) or cw >= -1e-3:
+        return arr
+    simple = np.expm1(arr) + cw * rd
+    return np.log1p(np.maximum(simple, _MIN_DAY_SIMPLE_RETURN))
+
+
 def compute_period_returns_table(port_log: pd.Series,
                                   bm_logs: dict[str, pd.Series]) -> dict:
     """
@@ -206,15 +263,20 @@ def build_portfolio_log_returns(price_df: "pd.DataFrame | None",
     # flattened the first half of the equity curve.  Instead, each day uses
     # the weights of the names actually TRADING that day, renormalised —
     # standard composite-backfill convention, no look-ahead, no synthetic
-    # prices:  r_port(t) = Σᵢ wᵢ·rᵢ(t)·1[present] / Σᵢ wᵢ·1[present].
+    # prices:  R_port(t) = Σᵢ wᵢ·Rᵢ(t)·1[present] / Σᵢ wᵢ·1[present],
+    # r_port = ln(1 + R_port), Rᵢ = e^{rᵢ} − 1 (simple, not log — `§−121`).
     # Days covering less than MIN_DAILY_COVERAGE of the kept weight stay NaN
     # (a lone thin listing must not represent the whole book for that day).
+    # `§−121`: the renormalised average is taken over SIMPLE returns and the
+    # log is applied to the sum (see `aggregate_log_returns`) — averaging the
+    # log-returns themselves drops the diversification return.
     w_ser    = pd.Series(raw_w, dtype=float).reindex(panel.columns)
     present  = log_ret.notna()
     coverage = present.mul(w_ser, axis=1).sum(axis=1)
-    weighted = log_ret.mul(w_ser, axis=1).sum(axis=1, min_count=1)
+    weighted = np.expm1(log_ret).mul(w_ser, axis=1).sum(axis=1, min_count=1)
     covered  = coverage >= MIN_DAILY_COVERAGE * total_w   # mask BEFORE dividing
-    port_log = (weighted[covered] / coverage[covered]).dropna()
+    simple   = (weighted[covered] / coverage[covered]).dropna()
+    port_log = np.log1p(simple.clip(lower=_MIN_DAY_SIMPLE_RETURN))
     if len(port_log) < 2:
         info["covered_weight"] = round(total_w, 4)
         return None, info
@@ -274,6 +336,8 @@ __all__ = [
     "PERIOD_WINDOWS_TDAYS",
     "MIN_OVERLAP_TDAYS",
     "_cum_simple_from_log",
+    "aggregate_log_returns",
+    "apply_margin_financing",
     "compute_period_returns_table",
     "build_portfolio_log_returns",
     "compute_benchmark_stats",

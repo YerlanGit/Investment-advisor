@@ -192,6 +192,40 @@ class AuditJournalStaysNavigableTest(unittest.TestCase):
             "Ненайденный раунд — это висячая ссылка из кода (так §−76…§−89 "
             "прожили 14 раундов без секции).")
 
+    def test_round_file_names_tell_the_truth(self) -> None:
+        """`§−N` лежит в файле, чей ДИАПАЗОН в имени накрывает N, и индекс
+        называет именно этот файл.
+
+        🔴 `§−121`: правило поиска из `AUDIT.md §0` («открывай файл, чей
+        диапазон накрывает N») жило без гейта и молча сломалось —
+        `ROUNDS_91-76.md` держал §−76…§−120, 3 524 строки, а шапка обещала
+        §−76…§−112. Индекс при этом был «прав» только потому, что называл тот
+        же неверный файл: проверка существования этого не ловит.
+        """
+        import re
+        rounds_dir = _ROOT / "docs" / "audit" / "rounds"
+        if not rounds_dir.exists():
+            self.skipTest("docs/audit/rounds/ отсутствует")
+        where: dict[str, str] = {}
+        bad_range = []
+        for f in rounds_dir.glob("ROUNDS_*.md"):
+            m = re.fullmatch(r"ROUNDS_(\d+)-(\d+)\.md", f.name)
+            self.assertIsNotNone(m, f"имя без диапазона: {f.name}")
+            hi, lo = int(m.group(1)), int(m.group(2))
+            for n in re.findall(r"^## −([\d.]+)\.",
+                                f.read_text(encoding="utf-8"), re.M):
+                where[n] = f.name
+                floor = 0 if lo == 1 else lo      # §−0.5 — пред-раунд первого файла
+                if not (floor <= float(n) < hi + 1):
+                    bad_range.append((n, f.name))
+        self.assertFalse(bad_range, f"раунд вне диапазона своего файла: {bad_range[:5]}")
+        if not _ROUNDS_INDEX.exists():
+            return
+        rows = re.findall(r"\|\s*`§−([\d.]+)`\s*\|.*\|\s*(ROUNDS_[\d-]+\.md)\s*\|",
+                          _ROUNDS_INDEX.read_text(encoding="utf-8"))
+        wrong = [(n, f, where.get(n)) for n, f in rows if where.get(n) != f]
+        self.assertFalse(wrong, f"индекс называет не тот файл: {wrong[:5]}")
+
     def test_index_points_only_at_existing_rounds(self) -> None:
         """Обратная сторона: индекс не должен обещать несуществующее."""
         import re

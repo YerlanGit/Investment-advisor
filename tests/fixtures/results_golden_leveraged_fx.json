@@ -153,66 +153,66 @@
    "Benchmark_Ann_Return": 0.09866090337,
    "Benchmark_Return": 0.6242111591,
    "Excess_Return": 1.387466949,
-   "Excess_Return_Ann": -0.02126044673,
-   "Information_Ratio": -0.3007196344,
-   "Portfolio_Ann_Return": 0.07740045663,
+   "Excess_Return_Ann": -0.02018481693,
+   "Information_Ratio": -0.2853555019,
+   "Portfolio_Ann_Return": 0.07847608644,
    "Portfolio_Return": 2.011678108,
-   "Tracking_Error": 0.06498053441
+   "Tracking_Error": 0.06498232521
   },
   "MSCI EM": {
    "Beating_Benchmark": true,
    "Benchmark_Ann_Return": 0.1140132231,
    "Benchmark_Return": 0.7446510192,
    "Excess_Return": 1.267027089,
-   "Excess_Return_Ann": -0.03661276647,
-   "Information_Ratio": -0.5016536307,
-   "Portfolio_Ann_Return": 0.07740045663,
+   "Excess_Return_Ann": -0.03553713666,
+   "Information_Ratio": -0.4866749429,
+   "Portfolio_Ann_Return": 0.07847608644,
    "Portfolio_Return": 2.011678108,
-   "Tracking_Error": 0.066615398
+   "Tracking_Error": 0.06661530087
   },
   "Nasdaq 100": {
    "Beating_Benchmark": true,
    "Benchmark_Ann_Return": 0.1404675907,
    "Benchmark_Return": 0.9690149191,
    "Excess_Return": 1.042663189,
-   "Excess_Return_Ann": -0.06306713406,
-   "Information_Ratio": -0.8945793297,
-   "Portfolio_Ann_Return": 0.07740045663,
+   "Excess_Return_Ann": -0.06199150425,
+   "Information_Ratio": -0.8788712136,
+   "Portfolio_Ann_Return": 0.07847608644,
    "Portfolio_Return": 2.011678108,
-   "Tracking_Error": 0.0635909959
+   "Tracking_Error": 0.06359217494
   },
   "Russell 2000": {
    "Beating_Benchmark": true,
    "Benchmark_Ann_Return": 0.1190889938,
    "Benchmark_Return": 0.7860166568,
    "Excess_Return": 1.225661451,
-   "Excess_Return_Ann": -0.04168853721,
-   "Information_Ratio": -0.5721959072,
-   "Portfolio_Ann_Return": 0.07740045663,
+   "Excess_Return_Ann": -0.0406129074,
+   "Information_Ratio": -0.5571720329,
+   "Portfolio_Ann_Return": 0.07847608644,
    "Portfolio_Return": 2.011678108,
-   "Tracking_Error": 0.06634755753
+   "Tracking_Error": 0.06634565297
   },
   "S&P 500": {
    "Beating_Benchmark": true,
    "Benchmark_Ann_Return": 0.1289118562,
    "Benchmark_Return": 0.8683143007,
    "Excess_Return": 1.143363807,
-   "Excess_Return_Ann": -0.05151139959,
-   "Information_Ratio": -0.7140045978,
-   "Portfolio_Ann_Return": 0.07740045663,
+   "Excess_Return_Ann": -0.05043576978,
+   "Information_Ratio": -0.6987448812,
+   "Portfolio_Ann_Return": 0.07847608644,
    "Portfolio_Return": 2.011678108,
-   "Tracking_Error": 0.0654100194
+   "Tracking_Error": 0.06541041988
   },
   "Профильный бенчмарк": {
    "Beating_Benchmark": true,
    "Benchmark_Ann_Return": 0.1289118562,
    "Benchmark_Return": 0.8683143007,
    "Excess_Return": 1.143363807,
-   "Excess_Return_Ann": -0.05151139959,
-   "Information_Ratio": -0.7140045978,
-   "Portfolio_Ann_Return": 0.07740045663,
+   "Excess_Return_Ann": -0.05043576978,
+   "Information_Ratio": -0.6987448812,
+   "Portfolio_Ann_Return": 0.07847608644,
    "Portfolio_Return": 2.011678108,
-   "Tracking_Error": 0.0654100194
+   "Tracking_Error": 0.06541041988
   }
  },
  "benchmark_factor_profile": {
@@ -315,15 +315,15 @@
   "method": "vol/TRC via √(w'Σw) on structural cov · CVaR/Sharpe/MDD via sample replay on daily log-returns · composite = 0.4·vol+0.4·|CVaR|+0.2·max_TRC normalised",
   "metrics": {
    "cvar_95": {
-    "after": -0.01186587495,
-    "before": -0.01201972218,
-    "delta": 0.0001538472391,
+    "after": -0.01188904583,
+    "before": -0.0120433938,
+    "delta": 0.0001543479676,
     "delta_pp": 0.02,
     "improved": true
    },
    "expected_return": {
-    "after": 0.01453321096,
-    "before": 0.01546839908,
+    "after": 0.05953321096,
+    "before": 0.06046839908,
     "delta": -0.0009351881195,
     "delta_pp": -0.09,
     "improved": false
@@ -336,10 +336,10 @@
     "improved": null
    },
    "max_drawdown": {
-    "after": -0.1144306011,
-    "before": -0.1242909619,
-    "delta": 0.009860360773,
-    "delta_pp": 0.99,
+    "after": -0.117693906,
+    "before": -0.1273853722,
+    "delta": 0.009691466245,
+    "delta_pp": 0.97,
     "improved": true
    },
    "max_trc": {
@@ -355,10 +355,10 @@
     "improved": null
    },
    "sharpe": {
-    "after": 0.4175063171,
-    "before": 0.4175063171,
-    "delta": 0.0,
-    "improved": null
+    "after": 0.3558266407,
+    "before": 0.3638690096,
+    "delta": -0.00804236895,
+    "improved": false
    },
    "volatility_ann": {
     "after": 0.0942743508,
@@ -369,8 +369,8 @@
    }
   },
   "n_days_used": 1299,
-  "sharpe_delta_meaningful": false,
-  "sharpe_note": "Ожидаемая доходность ниже безрисковой ставки (премия -3.0 пп), поэтому Sharpe перестаёт упорядочивать портфели: при отрицательном избытке снижение волатильности механически ухудшает коэффициент. Дельта не показана — смотрите на волатильность, CVaR и просадку.",
+  "sharpe_delta_meaningful": true,
+  "sharpe_note": "",
   "uses_bl_returns": true,
   "verdict": {
    "headline": "Снижение риска без значимых компромиссов",
@@ -735,7 +735,7 @@
     0.05918236406,
     26.40455456,
     23.04264999,
-    0.005535476454,
+    0.005235729497,
     0.1684503838,
     11.13316308,
     0.0,
@@ -772,7 +772,7 @@
     0.05898906053,
     53.69034075,
     51.91654223,
-    -0.004580951186,
+    -0.004892969026,
     0.1542148268,
     318.2911451,
     0.0,
@@ -809,7 +809,7 @@
     0.05777191575,
     29.10548046,
     25.04080778,
-    0.001328757768,
+    0.001673962669,
     0.1698054644,
     31.51325478,
     0.0,
@@ -917,38 +917,38 @@
    "periods": [
     {
      "bm_pct": 0.00504201966,
-     "excess_pp": -0.009620168217,
+     "excess_pp": -0.009551080293,
      "n_days": 21,
      "period": "1m",
-     "port_pct": -0.004578148557
+     "port_pct": -0.004509060633
     },
     {
      "bm_pct": 0.09248178773,
-     "excess_pp": 0.005556182039,
+     "excess_pp": 0.005833912016,
      "n_days": 63,
      "period": "3m",
-     "port_pct": 0.09803796977
+     "port_pct": 0.09831569975
     },
     {
      "bm_pct": 0.1172580792,
-     "excess_pp": -0.02545698907,
+     "excess_pp": -0.02489842641,
      "n_days": 126,
      "period": "6m",
-     "port_pct": 0.09180109017
+     "port_pct": 0.09235965283
     },
     {
      "bm_pct": 0.2855190686,
-     "excess_pp": 0.05132585691,
+     "excess_pp": 0.05261280376,
      "n_days": 252,
      "period": "12m",
-     "port_pct": 0.3368449255
+     "port_pct": 0.3381318724
     },
     {
      "bm_pct": 0.2874895265,
-     "excess_pp": 0.0514359741,
+     "excess_pp": 0.05274787714,
      "n_days": 256,
      "period": "YTD",
-     "port_pct": 0.3389255006
+     "port_pct": 0.3402374037
     }
    ],
    "window_end": "2027-12-24",
@@ -959,38 +959,38 @@
    "periods": [
     {
      "bm_pct": -0.02832669224,
-     "excess_pp": 0.02374854368,
+     "excess_pp": 0.0238176316,
      "n_days": 21,
      "period": "1m",
-     "port_pct": -0.004578148557
+     "port_pct": -0.004509060633
     },
     {
      "bm_pct": 0.04719672883,
-     "excess_pp": 0.05084124094,
+     "excess_pp": 0.05111897091,
      "n_days": 63,
      "period": "3m",
-     "port_pct": 0.09803796977
+     "port_pct": 0.09831569975
     },
     {
      "bm_pct": 0.02742251491,
-     "excess_pp": 0.06437857526,
+     "excess_pp": 0.06493713792,
      "n_days": 126,
      "period": "6m",
-     "port_pct": 0.09180109017
+     "port_pct": 0.09235965283
     },
     {
      "bm_pct": 0.2413768242,
-     "excess_pp": 0.09546810133,
+     "excess_pp": 0.09675504818,
      "n_days": 252,
      "period": "12m",
-     "port_pct": 0.3368449255
+     "port_pct": 0.3381318724
     },
     {
      "bm_pct": 0.2494923925,
-     "excess_pp": 0.08943310811,
+     "excess_pp": 0.09074501116,
      "n_days": 256,
      "period": "YTD",
-     "port_pct": 0.3389255006
+     "port_pct": 0.3402374037
     }
    ],
    "window_end": "2027-12-24",
@@ -1001,38 +1001,38 @@
    "periods": [
     {
      "bm_pct": -0.01717754616,
-     "excess_pp": 0.0125993976,
+     "excess_pp": 0.01266848553,
      "n_days": 21,
      "period": "1m",
-     "port_pct": -0.004578148557
+     "port_pct": -0.004509060633
     },
     {
      "bm_pct": 0.1362945028,
-     "excess_pp": -0.03825653302,
+     "excess_pp": -0.03797880304,
      "n_days": 63,
      "period": "3m",
-     "port_pct": 0.09803796977
+     "port_pct": 0.09831569975
     },
     {
      "bm_pct": 0.1483949299,
-     "excess_pp": -0.05659383975,
+     "excess_pp": -0.05603527709,
      "n_days": 126,
      "period": "6m",
-     "port_pct": 0.09180109017
+     "port_pct": 0.09235965283
     },
     {
      "bm_pct": 0.292319406,
-     "excess_pp": 0.04452551951,
+     "excess_pp": 0.04581246636,
      "n_days": 252,
      "period": "12m",
-     "port_pct": 0.3368449255
+     "port_pct": 0.3381318724
     },
     {
      "bm_pct": 0.2867062519,
-     "excess_pp": 0.05221924872,
+     "excess_pp": 0.05353115177,
      "n_days": 256,
      "period": "YTD",
-     "port_pct": 0.3389255006
+     "port_pct": 0.3402374037
     }
    ],
    "window_end": "2027-12-24",
@@ -1043,38 +1043,38 @@
    "periods": [
     {
      "bm_pct": -0.01213862049,
-     "excess_pp": 0.007560471928,
+     "excess_pp": 0.007629559853,
      "n_days": 21,
      "period": "1m",
-     "port_pct": -0.004578148557
+     "port_pct": -0.004509060633
     },
     {
      "bm_pct": 0.1021554174,
-     "excess_pp": -0.004117447587,
+     "excess_pp": -0.003839717609,
      "n_days": 63,
      "period": "3m",
-     "port_pct": 0.09803796977
+     "port_pct": 0.09831569975
     },
     {
      "bm_pct": 0.1397742634,
-     "excess_pp": -0.04797317322,
+     "excess_pp": -0.04741461056,
      "n_days": 126,
      "period": "6m",
-     "port_pct": 0.09180109017
+     "port_pct": 0.09235965283
     },
     {
      "bm_pct": 0.3143698819,
-     "excess_pp": 0.02247504367,
+     "excess_pp": 0.02376199052,
      "n_days": 252,
      "period": "12m",
-     "port_pct": 0.3368449255
+     "port_pct": 0.3381318724
     },
     {
      "bm_pct": 0.3126075199,
-     "excess_pp": 0.02631798073,
+     "excess_pp": 0.02762988378,
      "n_days": 256,
      "period": "YTD",
-     "port_pct": 0.3389255006
+     "port_pct": 0.3402374037
     }
    ],
    "window_end": "2027-12-24",
@@ -1085,38 +1085,38 @@
    "periods": [
     {
      "bm_pct": -0.009520295299,
-     "excess_pp": 0.004942146741,
+     "excess_pp": 0.005011234666,
      "n_days": 21,
      "period": "1m",
-     "port_pct": -0.004578148557
+     "port_pct": -0.004509060633
     },
     {
      "bm_pct": 0.05879893947,
-     "excess_pp": 0.0392390303,
+     "excess_pp": 0.03951676028,
      "n_days": 63,
      "period": "3m",
-     "port_pct": 0.09803796977
+     "port_pct": 0.09831569975
     },
     {
      "bm_pct": 0.01689517749,
-     "excess_pp": 0.07490591268,
+     "excess_pp": 0.07546447534,
      "n_days": 126,
      "period": "6m",
-     "port_pct": 0.09180109017
+     "port_pct": 0.09235965283
     },
     {
      "bm_pct": 0.3303916076,
-     "excess_pp": 0.00645331797,
+     "excess_pp": 0.007740264819,
      "n_days": 252,
      "period": "12m",
-     "port_pct": 0.3368449255
+     "port_pct": 0.3381318724
     },
     {
      "bm_pct": 0.3163445346,
-     "excess_pp": 0.02258096603,
+     "excess_pp": 0.02389286907,
      "n_days": 256,
      "period": "YTD",
-     "port_pct": 0.3389255006
+     "port_pct": 0.3402374037
     }
    ],
    "window_end": "2027-12-24",
@@ -1127,38 +1127,38 @@
    "periods": [
     {
      "bm_pct": -0.009520295299,
-     "excess_pp": 0.004942146741,
+     "excess_pp": 0.005011234666,
      "n_days": 21,
      "period": "1m",
-     "port_pct": -0.004578148557
+     "port_pct": -0.004509060633
     },
     {
      "bm_pct": 0.05879893947,
-     "excess_pp": 0.0392390303,
+     "excess_pp": 0.03951676028,
      "n_days": 63,
      "period": "3m",
-     "port_pct": 0.09803796977
+     "port_pct": 0.09831569975
     },
     {
      "bm_pct": 0.01689517749,
-     "excess_pp": 0.07490591268,
+     "excess_pp": 0.07546447534,
      "n_days": 126,
      "period": "6m",
-     "port_pct": 0.09180109017
+     "port_pct": 0.09235965283
     },
     {
      "bm_pct": 0.3303916076,
-     "excess_pp": 0.00645331797,
+     "excess_pp": 0.007740264819,
      "n_days": 252,
      "period": "12m",
-     "port_pct": 0.3368449255
+     "port_pct": 0.3381318724
     },
     {
      "bm_pct": 0.3163445346,
-     "excess_pp": 0.02258096603,
+     "excess_pp": 0.02389286907,
      "n_days": 256,
      "period": "YTD",
-     "port_pct": 0.3389255006
+     "port_pct": 0.3402374037
     }
    ],
    "window_end": "2027-12-24",
@@ -1173,36 +1173,36 @@
   ],
   "length": 1299,
   "summary": {
-   "max": 0.022248,
-   "mean": 0.000323056,
-   "min": -0.0179657,
+   "max": 0.0222074,
+   "mean": 0.000304301,
+   "min": -0.0179815,
    "n_floats": 1299,
-   "order_checksum": 400.592,
-   "std": 0.00588108,
-   "sum": 0.41965
+   "order_checksum": 384.719,
+   "std": 0.00588136,
+   "sum": 0.395287
   },
-  "values_sha256": "069f6a1b6abf85475b4f5107673f9fba712aa0f5c74f084986490e4bb90ce845"
+  "values_sha256": "168e91bcb9f2a731427689d483c453ba1ad787d0cbe67b3582f58a72091cd344"
  },
  "portfolio_metrics": {
-  "Annualised_Return": 0.08481573329,
+  "Annualised_Return": 0.0797005802,
   "CVaR_95_Bootstrap": {
-   "hi95": -0.01108726067,
-   "lo95": -0.01295282089,
-   "point": -0.01197228284
+   "hi95": -0.01107944659,
+   "lo95": -0.01292338694,
+   "point": -0.01199956532
   },
-  "CVaR_95_Daily": -0.01201972218,
+  "CVaR_95_Daily": -0.0120433938,
   "Composite_Risk_Score": 38,
-  "Expected_Return_Annual": 0.1766997358,
+  "Expected_Return_Annual": 0.1711290763,
   "Expected_Return_Cash_Weight": 0.0,
   "Expected_Return_Invested_Weight": 1.0,
-  "Expected_Sharpe": 1.380998593,
-  "Max_Drawdown": -0.1242909619,
+  "Expected_Sharpe": 1.322584863,
+  "Max_Drawdown": -0.1273853722,
   "Max_Euler_Risk_Pct": 51.91654223,
-  "Positive_Days_Pct": 53.11778291,
-  "Sharpe_Ratio": 0.4175063171,
-  "Sortino_Ratio": 0.611142774,
+  "Positive_Days_Pct": 52.57890685,
+  "Sharpe_Ratio": 0.3638690096,
+  "Sortino_Ratio": 0.53115321,
   "Total_Volatility_Ann": 0.09536558289,
-  "VaR_95_Daily": -0.009590889223,
+  "VaR_95_Daily": -0.009611901847,
   "beta_reliability": "ok",
   "beta_shrinkage_applied": false,
   "beta_standard_errors": {
@@ -1245,7 +1245,7 @@
   },
   "composite_aggravators": {
    "leverage_ratio": 1.1238,
-   "max_drawdown": -0.1242909619,
+   "max_drawdown": -0.1273853722,
    "sector_top_pct": 47.78
   },
   "expected_return_clamped_n": 0,
@@ -1811,7 +1811,7 @@
    "note": "broad equity -10% + momentum factor much harder hit; calibrated against SPX -16% / NDX -22% Q2 2022",
    "port_dollar": -2215.38,
    "port_pct": -0.0305,
-   "recovery_months": 12.0,
+   "recovery_months": 12.7,
    "residualized": true,
    "shocks": {
     "Market": -0.1,
@@ -1884,7 +1884,7 @@
    "note": "HY OAS +200 bps → IEF -2% from rate spike; quality bid; EM credit hit hardest (2008/2020/2023 analogues)",
    "port_dollar": -578.08,
    "port_pct": -0.008,
-   "recovery_months": 8.4,
+   "recovery_months": 8.9,
    "residualized": true,
    "shocks": {
     "EM_Bond": -0.08,
@@ -1958,7 +1958,7 @@
    "note": "single hawkish surprise; IEF -0.5%, equity wobble -2%",
    "port_dollar": -122.66,
    "port_pct": -0.0017,
-   "recovery_months": 7.5,
+   "recovery_months": 7.9,
    "residualized": true,
    "shocks": {
     "Market": -0.02,
@@ -2032,7 +2032,7 @@
    "note": "broad sell-off + EM hit hardest + gold/oil bid; calibrated against 2022-02-24 and 2014-Q1 analogues",
    "port_dollar": -1405.04,
    "port_pct": -0.0193,
-   "recovery_months": 10.2,
+   "recovery_months": 10.8,
    "residualized": true,
    "shocks": {
     "Commodities": 0.05,
@@ -2179,7 +2179,7 @@
    "note": "PROXY (no direct USD factor): strong USD typically -5% EM, -3% EM credit, -4% commodities. Would benefit from UUP.US.",
    "port_dollar": -900.89,
    "port_pct": -0.0124,
-   "recovery_months": 9.1,
+   "recovery_months": 9.7,
    "residualized": false,
    "shocks": {
     "Commodities": -0.04,

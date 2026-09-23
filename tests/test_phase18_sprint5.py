@@ -281,14 +281,17 @@ class MandateAwareLevelsTest(unittest.TestCase):
 
     def _levels(self, scale):
         from finance.action_plan import compute_levels
+        # SMA200 = 80 — ниже входа при любом мандате. При 90 структурный якорь
+        # связывал оба стопа (одинаковые 90), а прежний «строго тише» держался
+        # на стопе 94, стоявшем РОВНО на нижней границе входа 94 (`§−121`).
         return compute_levels(action="Buy", price=100.0, atr_abs=4.0,
-                              sma50=98.0, sma100=95.0, sma200=90.0,
+                              sma50=98.0, sma100=95.0, sma200=80.0,
                               high_52w=None, rsi=50.0, mandate_scale=scale)
 
     def test_moderate_reproduces_legacy_levels(self):
         from finance.action_plan import compute_levels
         legacy = compute_levels(action="Buy", price=100.0, atr_abs=4.0,
-                                sma50=98.0, sma100=95.0, sma200=90.0,
+                                sma50=98.0, sma100=95.0, sma200=80.0,
                                 high_52w=None, rsi=50.0)
         self.assertEqual(self._levels(1.0), legacy)
 
