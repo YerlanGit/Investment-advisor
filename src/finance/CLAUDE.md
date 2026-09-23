@@ -43,11 +43,20 @@
   при коллизии прокси — иначе C-8/C-10 блокируют здоровую книгу. `AUDIT §−49`.
   **Окно чекера обязано равняться `engine._last_regression_nobs`**: строгое пересечение
   колонок схлопывается одной молодой бумагой (F-15/F-21). `AUDIT §−51`.
+- **Доходность книги — ТОЛЬКО `period_returns.aggregate_log_returns`** = ln(1 + Σw·R).
+  `a_data @ w` по лог-доходностям — средний рост бумаг, а не книги (Йенсен: минус
+  доходность диверсификации, демо −3.9 пп годовых). Маржа (кэш < 0) — по rf через
+  `apply_margin_financing`; свободный кэш — 0%. `AUDIT §−121`, `MATH_ENGINE.md §3.2`.
+- **BL-μ — ИЗБЫТОЧНАЯ доходность** (над rf). Показывать её как ожидаемую доходность
+  или считать с ней Sharpe можно только после `simulate._bl_total_return` — иначе rf
+  вычитается дважды (`AUDIT §−121`, `MATH_ENGINE.md §13`).
+- **Уровни Action Plan меряются от ВХОДА**: стоп Buy = max(вход − 2·s·ATR, SMA200 ниже
+  входа); SMA-якоря — только ниже рынка. `MATH_ENGINE.md §14a`.
 - Ортогонализация (BLOCK 3.5) и её β̂ должны сбрасываться в начале `analyze_all`
   (F-1) — иначе стресс residualize-ится на устаревших бетах.
 
 ## Обязательный цикл
 1. Правь `src/finance/*` и `tests/test_phase*.py` вместе.
 2. `PYTHONPATH=src python -m pytest tests/ -q` — префикс ОБЯЗАТЕЛЕН, без него
-   `import finance…` не находится (baseline: 1955 passed, 2 xfailed).
+   `import finance…` не находится (baseline: 2055 passed, 12 skipped, 2 xfailed).
 3. Крупное изменение → строка Было/Стало в `docs/audit/AUDIT.md`.

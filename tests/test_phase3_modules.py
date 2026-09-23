@@ -151,24 +151,26 @@ class ActionPlanLevelsTest(unittest.TestCase):
             sma50=205.0, sma100=210.0, sma200=190.0,
             high_52w=220.0, rsi=55.0, macd_below_zero=False,
         )
-        # Buy zone within [SMA50 - 1·ATR, SMA50] = [201, 205]
+        # [SMA50 − 1·ATR, SMA50] = [201, 205] лежит целиком ВЫШЕ цены 200 —
+        # `§−121` (зеркало R-4) клипает зону к рынку: [price − ATR, price].
         lo, hi = out["buy_zone"]
-        self.assertAlmostEqual(lo, 201.0, places=6)
-        self.assertAlmostEqual(hi, 205.0, places=6)
+        self.assertAlmostEqual(lo, 196.0, places=6)
+        self.assertAlmostEqual(hi, 200.0, places=6)
         # Take target ≥ price + 3·ATR = 212
         self.assertGreaterEqual(out["take_target"], 212.0)
-        # Stop ≥ max(price - 2·ATR=192, SMA200=190) = 192
-        self.assertAlmostEqual(out["stop_loss"], 192.0, places=6)
+        # Стоп меряется от ВХОДА (`§−121`): max(196 − 2·ATR = 188, SMA200 = 190).
+        self.assertAlmostEqual(out["stop_loss"], 190.0, places=6)
 
     def test_hot_rsi_shifts_buy_zone_lower(self) -> None:
         from finance.action_plan import compute_levels
+        # price 210 > SMA50: зона ниже рынка, клип `§−121` не вмешивается.
         cool = compute_levels(
-            action="Buy", price=200.0, atr_abs=4.0,
+            action="Buy", price=210.0, atr_abs=4.0,
             sma50=205.0, sma100=210.0, sma200=190.0,
             high_52w=220.0, rsi=50.0, macd_below_zero=False,
         )
         hot = compute_levels(
-            action="Buy", price=200.0, atr_abs=4.0,
+            action="Buy", price=210.0, atr_abs=4.0,
             sma50=205.0, sma100=210.0, sma200=190.0,
             high_52w=220.0, rsi=80.0, macd_below_zero=False,
         )

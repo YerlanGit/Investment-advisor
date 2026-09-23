@@ -84,7 +84,13 @@ def _launch(pw):
     return pw.chromium.launch(executable_path=exe) if exe else pw.chromium.launch()
 
 
-def measure(html_path: str, widths=WIDTHS) -> dict:
+#: Сколько узлов ждать до замера. Premium монтирует React, и замер пустого
+#: корня дал бы «ноль переполнений» ни за что. Сценарный тир — серверный
+#: Jinja на ~160 узлов: с порогом 200 его было НЕЛЬЗЯ измерить (`§−121`).
+REACT_MIN_NODES = 200
+
+
+def measure(html_path: str, widths=WIDTHS, min_nodes: int = REACT_MIN_NODES) -> dict:
     """{ширина: {offenders, nodes}} — по одному проходу на ширину."""
     from playwright.sync_api import sync_playwright
 
@@ -98,7 +104,7 @@ def measure(html_path: str, widths=WIDTHS) -> dict:
                 # Ждём, пока React смонтирует дерево: измерять пустой корень —
                 # это получить «ноль переполнений» ни за что.
                 page.wait_for_function(
-                    "() => document.querySelectorAll('body *').length > 200",
+                    f"() => document.querySelectorAll('body *').length > {int(min_nodes)}",
                     timeout=15000)
                 out[w] = page.evaluate(_PROBE)
                 page.close()
@@ -146,7 +152,8 @@ _CLIP_PROBE = """
 """
 
 
-def measure_clipped(html_path: str, widths=WIDTHS) -> dict:
+def measure_clipped(html_path: str, widths=WIDTHS,
+                    min_nodes: int = REACT_MIN_NODES) -> dict:
     """{ширина: [{need, got, cls, text}]} — текстовые листья, у которых
     содержимое срезано и НЕДОСТУПНО прокруткой."""
     from playwright.sync_api import sync_playwright
@@ -159,7 +166,7 @@ def measure_clipped(html_path: str, widths=WIDTHS) -> dict:
                 page = browser.new_page(viewport={"width": w, "height": 900})
                 page.goto("file://" + str(Path(html_path).resolve()))
                 page.wait_for_function(
-                    "() => document.querySelectorAll('body *').length > 200",
+                    f"() => document.querySelectorAll('body *').length > {int(min_nodes)}",
                     timeout=15000)
                 out[w] = page.evaluate(_CLIP_PROBE)
                 page.close()

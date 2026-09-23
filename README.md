@@ -6,7 +6,8 @@ HTML report — multi-factor risk decomposition, tail risk, stress tests, and an
 AI-written narrative — in Russian.
 
 > Pipeline: **Engine (`src/finance/*`) → Adapter (`src/pdf_payload.py`) →
-> Jinja2 templates (`src/templates/report_*_v3.html`)**, with
+> Premium V2 React (`src/premium_payload.py` + `src/premium_assets/`, default) /
+> Jinja2 v3 fallback (`src/templates/report_*_v3.html`)**, with
 > `src/ai_narrative.py` (Claude) for the prose layer.
 
 ---
@@ -22,11 +23,16 @@ AI-written narrative — in Russian.
      dropped, never mixed into one covariance matrix.
    - **Factor model + Euler decomposition** — Ledoit-Wolf/EWMA covariance,
      marginal & component contribution to risk (TRC).
-   - **Geometric annualisation**, currency-matched **Sharpe / Sortino**, and a
-     dynamic risk-free rate (FRED).
-   - **Bootstrap CVaR** (deterministic, reproducible seed), **stress tests**
-     with a smooth convexity cap, **Black-Litterman** views, and a 4-pillar
-     composite score.
+   - **Geometric annualisation** of the book's own log return
+     `ln(1 + Σ wᵢ·Rᵢ)` (the log of the weighted SIMPLE sum — not a weighted sum
+     of logs, which drops the diversification return), currency-matched
+     **Sharpe / Sortino**, and a per-currency risk-free rate (static default
+     USD 4.5% / KZT 14%, override via `US_RFR_ANNUAL` / `KZ_RFR_ANNUAL`; the QC
+     panel prints which one was used). Margin debt accrues at that rate.
+   - **Historical VaR / bootstrap CVaR** (deterministic, reproducible seed),
+     **stress tests** with a smooth convexity cap, **Black-Litterman** views
+     (posterior returns are EXCESS returns over rf), and a 4-pillar composite
+     score.
 3. **Adds context** — RAG over bank-analytic PDFs (ChromaDB) and macro/regime
    signals.
 4. **Renders a report** — `pdf_payload.build_payload()` maps engine output to
@@ -41,11 +47,26 @@ AI-written narrative — in Russian.
    free of charge; the chosen benchmark propagates end-to-end, including the
    DEEP factor-decomposition column (`benchmark_factor_profile`).
 
+## Two services, one image
+
+| Service | Entry point | Writes | Isolation |
+|---|---|---|---|
+| **Report bot** | `src/entrypoint.py` (image `CMD`) | tokenomics, key vault, report HTML | own token, own Cloud Run service |
+| **Data bot** (quote loader) | `src/ingest_entrypoint.py` (`--command` override) | `stooq/prices.sqlite` via compare-and-swap | own token (a shared token is refused at start) |
+
+Both run from the same image but in separate containers, event loops and
+state files; the report bot reads a local read-only copy of the quote base.
+The code boundary (shared core / report bot / data bot, lazy imports included)
+is an executable manifest — `tests/test_service_boundaries.py`; the physical
+split plan is `docs/ARCHITECTURE_FOR_AGENTS.md §8`.
+
 ## Repository layout
 
 ```text
 src/
 ├── entrypoint.py            # Cloud Run entry: health server + bot polling + ChromaDB sync
+├── ingest_entrypoint.py     # SECOND service: quote-loader bot (health + scheduled check)
+├── ingest_bot.py            # loader bot: Stooq daily/history files → prices.sqlite (CAS)
 ├── tg_bot.py                # aiogram 3.x bot: FSM onboarding, analysis flow, billing
 ├── db_tokenomics.py         # async SQLite token ledger (atomic, WAL)
 ├── pdf_payload.py           # ADAPTER: engine results -> template schema
@@ -53,19 +74,20 @@ src/
 ├── pdf_charts.py            # inline SVG charts (equity curve, sector donut, sparklines)
 ├── ai_narrative.py          # Claude narrative (prompt-injection-fenced)
 ├── profile_manager.py       # risk-mandate profiles & benchmarks
-├── history.py               # Tradernet price-history cache
 ├── finance/                 # THE RISK ENGINE
 │   ├── investment_logic.py  #   MAC3 engine + UniversalPortfolioManager facade
 │   ├── currency.py          #   Base-currency FX transformation
 │   ├── scoring.py / scoring_orchestrator.py   # 4-pillar scoring
 │   ├── black_litterman.py / simulate.py / stress.py / regime.py
 │   ├── period_returns.py / technicals.py / action_plan.py
+│   ├── manual_portfolio.py / stooq_*.py       # manual book + Stooq quote base
 │   ├── broker_api.py / security.py            # broker + Fernet vault
 │   └── ...
-├── freedom_portfolio/       # Tradernet client + history frame
+├── freedom_portfolio/       # Tradernet client + price history (history.py)
 ├── agent/                   # advisor bot, RAG engine, gatekeeper
-├── services/                # GCS report storage, FRED macro feed, FX feed
-└── templates/               # report_basic_v3.html · report_deep_v3.html
+├── services/                # GCS report storage, FRED macro feed, FX feed, quote publisher/ingest
+├── premium_assets/          # built Premium V2 bundles (from design/premium_v2 via build.sh)
+└── templates/               # report_{basic,deep,scenario}_v3.html (Jinja fallback + scenario tier)
 cloud_function/              # RAG-ingest Cloud Function (bank PDFs -> ChromaDB)
 tests/                       # test_phase*.py — hermetic engine suite (deploy gate)
 ```
@@ -80,6 +102,10 @@ PYTHONPATH=src python -m unittest discover -s tests -p "test_phase*.py"
 # or
 PYTHONPATH=src python -m pytest tests/ -q
 ```
+
+Mobile/DOM gates (`test_phase55`, `test_phase62`) need Playwright + Chromium and
+skip themselves otherwise. Exact expected counts for both verification runs
+(full checkout and the deploy-image mirror) live in `CLAUDE.md`.
 
 ## Deployment
 

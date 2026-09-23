@@ -899,10 +899,12 @@ class UniversalPortfolioManager:
         # ── BLOCK 5: portfolio-level FORWARD expected annual return ──────────
         # Aggregate the per-asset CAPM expectations into a single portfolio
         # number the UI can show against risk:
-        #     E[r_port] = Σ_i w_i · E[r_i]   +   w_cash · r_f
-        # The risky weights generally sum to <1 (cash/bonds sit outside the
-        # factor model); the un-invested residual earns the risk-free rate, so
-        # cash drag is priced in rather than silently dropped.  This is distinct
+        #     E[r_port] = Σ_i w_i · E[r_i]   +   min(0, w_cash) · r_f
+        # Cash rows sit in df with E[r] = 0: free broker cash earns nothing,
+        # so its drag is priced in.  A MARGIN loan (w_cash < 0) is charged at
+        # r_f — a lower bound on the broker's rate, never zero (`§−121`; the
+        # old `max(0, 1 − w_risky)` residual made leverage free).  Names with
+        # no finite E[r] still sit in the residual at r_f.  This is distinct
         # from `Annualised_Return` (the REALISED trailing CAGR) — it is the
         # forward expectation implied by today's factor betas + factor premia.
         # The result is fed back into the SAME port_metrics dict the structural
@@ -936,7 +938,10 @@ class UniversalPortfolioManager:
                     _er_weighted += _w * float(_er)
                 _rfr = float(port_metrics.get("risk_free_rate_annual") or 0.0)
                 _cash_w = max(0.0, 1.0 - _w_risky)
-                _port_exp = _er_weighted + _cash_w * _rfr
+                _margin_w = min(0.0, sum(
+                    float(w or 0.0) for t, w in weights_dict.items()
+                    if str(t).upper() in self.engine.NON_RISK_ASSETS))
+                _port_exp = _er_weighted + _cash_w * _rfr + _margin_w * _rfr
                 _vol = float(port_metrics.get("Total_Volatility_Ann") or 0.0)
                 port_metrics["Expected_Return_Annual"] = _port_exp
                 # Forward (ex-ante) Sharpe — expected excess return per unit of

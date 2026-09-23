@@ -85,18 +85,22 @@ class CompositeRealizedBasisTest(unittest.TestCase):
 
     def test_full_panel_equals_legacy_path(self) -> None:
         """No staggering → composite adds no history → the series must be the
-        EXACT legacy `a_data @ weights` (bit-for-bit, no numeric churn)."""
+        intersection path itself (no numeric churn from the composite).
+
+        `§−121`: the intersection path is ln(1 + Σ wᵢ·Rᵢ) — the log of the
+        weighted SIMPLE sum — not the former Σ wᵢ·rᵢ over log-returns."""
         engine, df = _staggered_engine_data(young_days=500)   # both full
         w = {"ELDER.US": 0.6, "YOUNG.US": 0.4}
         _, _, metrics = engine.calculate_structural_risk(
             df, ["ELDER.US", "YOUNG.US"], w)
         series = engine._last_port_log_returns
-        rets = np.log(df / df.shift(1)).dropna()
-        expected = (rets["ELDER.US"] * 0.6 + rets["YOUNG.US"] * 0.4).values
+        simple = (df / df.shift(1) - 1.0).dropna()
+        expected = np.log1p(simple["ELDER.US"] * 0.6
+                            + simple["YOUNG.US"] * 0.4).values
         self.assertEqual(len(series), len(expected))
-        # atol 1e-15: the manual Σw·r reference differs from the engine's
-        # matmul only by float op-ordering ulps — semantics identical.
-        np.testing.assert_allclose(series.values, expected, rtol=0, atol=1e-15)
+        # atol 1e-14: the manual reference differs from the engine's matmul
+        # only by float op-ordering ulps — semantics identical.
+        np.testing.assert_allclose(series.values, expected, rtol=0, atol=1e-14)
         self.assertEqual(metrics["realized_window_days"], len(expected))
 
     def test_cash_dilution_preserved_on_composite(self) -> None:
@@ -107,19 +111,20 @@ class CompositeRealizedBasisTest(unittest.TestCase):
             df, ["ELDER.US", "YOUNG.US"],
             {"ELDER.US": 0.3, "YOUNG.US": 0.2})       # 50% cash
         series = engine._last_port_log_returns
-        rets = np.log(df / df.shift(1))
-        # Probe a late date where BOTH names trade: composite == Σ w·r.
+        simple = df / df.shift(1) - 1.0
+        # Probe a late date where BOTH names trade: composite ==
+        # ln(1 + Σ w·R) with cash at a 0% simple return (`§−121`).
         probe = df.index[-5]
-        want = float(rets.loc[probe, "ELDER.US"] * 0.3
-                     + rets.loc[probe, "YOUNG.US"] * 0.2)
+        want = float(np.log1p(simple.loc[probe, "ELDER.US"] * 0.3
+                              + simple.loc[probe, "YOUNG.US"] * 0.2))
         self.assertAlmostEqual(float(series.loc[probe]), want, places=12)
         # Probe an early date (young absent): composite convention — the
         # INVESTED sleeve (Σw = 0.5 of NAV) is renormalised across the names
-        # trading that day, so it sits fully in the elder → 0.5 · r_elder.
+        # trading that day, so it sits fully in the elder → ln(1 + 0.5·R_elder).
         # (Same convention as the period-returns table / equity curve; the
         # missing name is NOT treated as extra cash.)
         early = df.index[10]
-        want_early = float(rets.loc[early, "ELDER.US"] * 0.5)
+        want_early = float(np.log1p(simple.loc[early, "ELDER.US"] * 0.5))
         self.assertAlmostEqual(float(series.loc[early]), want_early, places=12)
 
 

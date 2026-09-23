@@ -201,7 +201,10 @@ def compute_kpi_trend_series(results: dict) -> Optional[dict]:
             daily_lr = np.log(prices[keep] / prices[keep].shift(1)).dropna()
             if len(daily_lr) < 60:
                 return None
-            port_lr = (daily_lr * w).sum(axis=1)
+            # `§−121`: log of the weighted SIMPLE sum, as in the engine.
+            from finance.period_returns import aggregate_log_returns
+            port_lr = pd.Series(aggregate_log_returns(daily_lr.values, w),
+                                index=daily_lr.index)
 
         if len(port_lr) > 252:
             port_lr = port_lr.iloc[-252:]
