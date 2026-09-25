@@ -395,6 +395,25 @@ async def release_report_lock(telegram_id: int, owner: str) -> bool:
     return removed
 
 
+async def release_report_locks_for_owner(owner: str) -> int:
+    """Снять ВСЕ аренды одного держателя (`§−122`: graceful shutdown инстанса).
+
+    Только свои строки: при max-instances>1 чужие аренды остаются на месте.
+    Возвращает число снятых строк.
+    """
+    async with _get_conn_tx() as db:
+        await _begin_immediate(db)
+        try:
+            cursor = await db.execute(
+                "DELETE FROM report_locks WHERE owner = ?", (owner,))
+            removed = int(cursor.rowcount or 0)
+        except Exception:
+            await db.execute("ROLLBACK")
+            raise
+        await db.execute("COMMIT")
+    return removed
+
+
 async def purge_expired_report_locks() -> int:
     """Удалить просроченные аренды. Возвращает число снятых строк."""
     async with _get_conn_tx() as db:

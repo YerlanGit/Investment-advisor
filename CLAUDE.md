@@ -15,11 +15,11 @@ GCP Cloud Run (long-polling) · Cloud Function (RAG-ингест) · ChromaDB ·
 ## Верификация (обязательна перед каждым пушем)
 
 ```bash
-PYTHONPATH=src python -m pytest tests/ -q          # → 2055 passed, 2 xfailed (+12 skipped без playwright)
+PYTHONPATH=src python -m pytest tests/ -q          # → 2066 passed, 2 xfailed (+12 skipped без playwright)
 ```
 
 - Префикс `PYTHONPATH=src` **ОБЯЗАТЕЛЕН** (`conftest.py`/`pyproject.toml` нет).
-- **Прогонов ДВА.** Второй — зеркало деплой-образа без `design/`: `cp -r src tests SYSTEM_PROMPT.md requirements*.txt <tmp>/ && cd <tmp>`, тот же прогон → 1933 passed, 134 skipped, 2 xfailed.
+- **Прогонов ДВА.** Второй — зеркало деплой-образа без `design/`: `cp -r src tests SYSTEM_PROMPT.md requirements*.txt <tmp>/ && cd <tmp>`, тот же прогон → 1943 passed, 135 skipped, 2 xfailed.
   Зелёный CI ≠ деплой пройдёт: CI видит полный чекаут, Cloud Build — образ; разница — ровно тесты, читающие `design/`, `docs/`, `CLAUDE.md`, `scripts/`, `cloud_function/`.
 - Правил `design/*.jsx` → **обязательно** `bash design/premium_v2/build.sh`.
 - Смоук-рендер тиров: `html_renderer.render_report_html(None, <user_id>, ...)`.
@@ -38,12 +38,9 @@ PYTHONPATH=src python -m pytest tests/ -q          # → 2055 passed, 2 xfailed 
 - Новый тикер — ТОЛЬКО в `finance/asset_taxonomy.py` (SSOT ФАКТОВ); решения у
   потребителей РАЗНЫЕ (`TLT`: мандат «Bonds», `Asset_Type` «ETF» — оба верны).
   `NoSecondCopyTest` падает на литерале тикера в потребителе.
-- Старт контейнера роняют ДВЕ вещи. Разбор env на уровне модуля — ТОЛЬКО через
-  `env_config.env_int`/`env_float`: голый `int(os.getenv(...))` роняет ИМПОРТ (AST-сканер).
-  И ТЯЖЁЛЫЙ импорт на ФОНОВОМ ПОТОКЕ — оба бота: демон RAG рвал numpy у главного
-  потока (`§−98`), у загрузчика то же делают потоки `to_thread` (`§−99`). Новый
-  ленивый импорт обязан попасть в реестр предзагрузки своего бота
-  (`entrypoint._BOOT_INGEST_HEAVY_IMPORTS` / `ingest_bot._WORKER_HEAVY_IMPORTS`).
+- Старт контейнера роняют ДВЕ вещи. Разбор env на уровне модуля — ТОЛЬКО через `env_config.env_int`/`env_float`: голый `int(os.getenv(...))` роняет ИМПОРТ (AST-сканер).
+  И ТЯЖЁЛЫЙ импорт на ФОНОВОМ ПОТОКЕ — оба бота (демон RAG рвал numpy у главного потока `§−98`, потоки `to_thread` загрузчика `§−99`):
+  новый ленивый импорт обязан попасть в реестр предзагрузки своего бота (`entrypoint._BOOT_INGEST_HEAVY_IMPORTS` / `ingest_bot._WORKER_HEAVY_IMPORTS`).
 - У двух ботов РАЗНЫЕ токены: один на двоих — 409 у обоих и упавший ГЛАВНЫЙ бот (`§−99`). Оба на имени OMBRI, прежнее имя принимается с предупреждением.
 - Имя СЕКРЕТА — подстановка (`_BOT_TOKEN_SECRET` / `_INGEST_BOT_TOKEN_SECRET`), и её дефолт обязан указывать на СУЩЕСТВУЮЩИЙ секрет: привязка к несуществующему роняет ВЕСЬ деплой (`§−101`).
 - `_BOT_TOKEN_SECRET` и `_BOT_USERNAME` переключаются ТОЛЬКО ПАРОЙ: хэндл вшит в статический отчёт, и кнопка «Применить идею» поведёт не к тому боту (`§−101`).
@@ -67,12 +64,9 @@ PYTHONPATH=src python -m pytest tests/ -q          # → 2055 passed, 2 xfailed 
   (`test_engine_orchestrator.py`), новая логика = новая СТАДИЯ, а не блок в оркестраторе.
 - Эталон СЛЕП к порядку ключей словаря (`normalize` сортирует). Порядок, несущий смысл, пинится отдельно —
   как `test_engine_benchmark_order.py`: первый ключ профильного бенчмарка доезжает до подписи карточки (`§−64`).
-- ПРИСТРОЙКИ, которые прод (`entrypoint`, `tg_bot`) НЕ импортирует, иначе его
-  деплой начнёт от них зависеть: `ingest_bot`/`ingest_access`/`services/quote_*`
-  — бот-загрузчик, дефолт хранилища офлайн (`QUOTES_BACKEND=local`), дельта не
-  заводит бумаг (`test_phase51_ingest_bot.IsolationTest`); `freedom-etl/` — свой
-  образ и зависимости, `src/` в него не копируется. Дублирование хелперов env
-  там осознанно — тот же случай, что `cloud_function/rag_engine.py`.
+- ПРИСТРОЙКИ, которые прод (`entrypoint`, `tg_bot`) НЕ импортирует, иначе его деплой начнёт от них зависеть:
+  `ingest_bot`/`ingest_access`/`services/quote_*` — бот-загрузчик, дефолт хранилища офлайн (`QUOTES_BACKEND=local`), дельта не заводит бумаг (`test_phase51_ingest_bot.IsolationTest`);
+  `freedom-etl/` — свой образ и зависимости, `src/` в него не копируется. Дублирование хелперов env там осознанно — как `cloud_function/rag_engine.py`.
 - ДВА РАЗНЫХ ПРОЕКТА, не смешивать: `roadmap/manual_portfolio/` (ручной ввод, источник
   Stooq) и `roadmap/freedom_warehouse/` (Freedom API → своя БД). Основания разные
   (I-12/I-14): `manual` не вправе читать витрину с `origin='tradernet'`, как и сам Tradernet.
@@ -119,6 +113,9 @@ PYTHONPATH=src python -m pytest tests/ -q          # → 2055 passed, 2 xfailed 
 - **Стоп Action Plan меряется от ВХОДА**: стоп лонга ниже зоны и рынка, зона покупки не выше рынка, монотонность по мандату (`§−121`, гейт на 3000 геометрий).
 - **Плечо/долг — только при кэше < 0, в ПРОЗЕ тоже** (правило §−13): факта нет в промпте, `ai_leverage_warning` гасит движок, `strip_account_leverage` режет предложения о займе счёта (`§−121`).
 - **Каждый модуль `src/` — в корзине манифеста** `tests/test_service_boundaries.py` (ядро · бот отчётов · бот данных · инструменты); стрелок между ботами нет, ленивых тоже (`§−121`).
+- **Всё, что ждёт сеть или считает, — в executor: loop у бота ОДИН на всех.** LLM/RAG/рендер/загрузка в GCS шли в loop'е, один DEEP замораживал бота для всех (`§−122`, гейт пишет ПОТОК стадии).
+- **Слот — по пользователю, `MAX_CONCURRENT_REPORTS` — на всех**; лишние ждут и видят место в очереди; гейт отпускается в `finally`. Стадии одного отчёта берут ОДИН `price_source` (`§−122`).
+- **Аренда слота, пережившая процесс, — блок пользователя на TTL**: по SIGTERM инстанс снимает СВОИ аренды (`release_report_locks_for_owner`), чужие — нет (`§−122`).
 - **У высвобожденного веса ВСЕГДА есть адресат**: гейт реинвеста по ОСТАТКУ, не по факту «есть ли покупка»; Σ `delta_pp` панели = 0, иначе адресат достаётся ИИ (`§−102`).
 - Мобильная вёрстка — ПО ЗАМЕРУ (320/360/390/414), мимо свёрнутых аккордеонов, метрик ДВЕ: `measure` (уход ЗА экран; `scrollWidth` обнулён страничным `overflow-x:hidden`, `§−97` E-6) и `measure_clipped` (срез ВНУТРИ колонки: 1 px из 141, `§−102`). Лечит РАСКЛАДКА, не кегль.
 - Мобильный замер — на РЕАЛЬНОМ payload во ВСЕХ рендерах (Premium, Jinja-фолбэк, сценарий): мок без длинных тикеров, а фолбэк был сломан на всех ширинах (`test_phase62`, `§−121`).
