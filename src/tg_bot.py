@@ -73,6 +73,7 @@ from db_tokenomics import (
     MANUAL_DRAFT_MAX_BYTES,
     ManualDraftTooLarge,
     release_report_lock,
+    release_report_locks_for_owner,
     save_benchmark_ticker,
     save_connection_mode,
     save_manual_draft,
@@ -444,9 +445,17 @@ def _fetch_portfolio_sync(api_key: str, secret_key: str = "", login: str = ""):
 
 
 def _analyze_existing_portfolio_sync(df, bench_ticker: str | None = None,
-                                     risk_mandate: str | None = None) -> dict:
-    """Blocking: только MAC3 анализ уже загруженного DataFrame."""
-    return UniversalPortfolioManager().analyze_all(
+                                     risk_mandate: str | None = None,
+                                     price_source: str = "freedom") -> dict:
+    """Blocking: только MAC3 анализ уже загруженного DataFrame.
+
+    🔴 `§−122`: `price_source` ОБЯЗАН совпадать со Stage 1. Прежде здесь
+    строился `UniversalPortfolioManager()` с дефолтом `freedom`, и Stage 2
+    ходила за ценами в Tradernet даже для `manual`/`demo` (I-12) — второй
+    сетевой поход за теми же рядами. Тест I-12 этого не видел: он падал на
+    первом конструкторе и до этой строки не доходил.
+    """
+    return UniversalPortfolioManager(price_source=price_source).analyze_all(
         df, profile_benchmark=bench_ticker, risk_mandate=risk_mandate)
 
 
@@ -2395,15 +2404,20 @@ async def _send_report(
     """
     report_type = TIER_LABEL[tier]
 
-    # Render Jinja → HTML string and write to /tmp.  Both ops are sync
-    # and fast (<50 ms total); no need for executor offload.
+    # Render + write happen in the executor (`§−122`): Premium-инъекция быстрая,
+    # но Jinja-фолбэк и запись 300+ КБ — нет, а loop у бота один на всех.
     # M-1: a template/render failure must degrade gracefully — show the user a
     # soft message with a support error-id (NOT a stack trace), log the full
     # traceback under that id, and signal the caller so the token is refunded.
+    loop = asyncio.get_running_loop()
+
+    def _render_and_write() -> str:
+        html = render_report_html(payload, user_id=user_id,
+                                  report_type=report_type, tier=tier)
+        return write_report_html(html, user_id=user_id, tier=tier)
+
     try:
-        html       = render_report_html(payload, user_id=user_id,
-                                         report_type=report_type, tier=tier)
-        local_path = write_report_html(html, user_id=user_id, tier=tier)
+        local_path = await loop.run_in_executor(None, _render_and_write)
     except Exception as exc:
         error_id = uuid.uuid4().hex[:12]
         logger.exception("Report generation failed [%s] user=%s tier=%s",
@@ -2417,8 +2431,10 @@ async def _send_report(
         )
         raise RuntimeError("report_generation_failed") from exc
 
-    # Push to GCS (or fall back to file:// in local-dev mode).
-    url = upload_report(local_path, user_id=user_id, tier=tier)
+    # Push to GCS (or fall back to file:// in local-dev mode).  Сеть (PUT +
+    # подпись URL) — в executor: секунды заморозки loop'а на КАЖДЫЙ отчёт (`§−122`).
+    url = await loop.run_in_executor(
+        None, lambda: upload_report(local_path, user_id=user_id, tier=tier))
 
     # A file:// URL means the GCS upload/signing failed (in production the
     # bucket is always configured).  Telegram rejects file:// links inside a
@@ -2871,7 +2887,11 @@ async def _run_analysis_background(
         except Exception as exc:
             logger.warning("Не удалось отправить уведомление о неспискании для %s: %s", user_id, exc)
 
+    _gate_held = False
     try:
+        # `§−122`: общий потолок одновременных расчётов — ДО первой тяжёлой стадии.
+        await _enter_report_gate(bot, chat_id)
+        _gate_held = True
         # ── Step 1: load market history ──────────────────────────────────
         await step("⏳", "*Шаг 1/4:* Интеграция рыночных данных и FX-трансформация цен…")
 
@@ -2971,6 +2991,7 @@ async def _run_analysis_background(
         try:
             results = await loop.run_in_executor(
                 None, _analyze_existing_portfolio_sync, df, bench_tick, _mandate_name,
+                source,
             )
         except Exception as exc:
             # F-6: support-id instead of raw exception text (info disclosure).
@@ -3032,12 +3053,19 @@ async def _run_analysis_background(
         profile       = await get_profile(user_id)
         profile_name  = (profile or {}).get("profile_name", "Moderate")
 
-        payload = _build_pdf_payload(
-            results, tier,
-            user_bench_ticker=bench_tick,
-            prev_snapshot=prev_snapshot,
-            user_risk_profile=profile_name,
-            user_profile=profile,
+        # `§−122`: RAG (ChromaDB + ONNX) и вызов Anthropic (30–120 с для DEEP)
+        # живут внутри `_build_pdf_payload` — в executor, как и сценарная
+        # ветка. Прямой вызов держал event loop: пока модель писала нарратив
+        # одному пользователю, бот не читал апдейты Telegram ни для кого.
+        payload = await loop.run_in_executor(
+            None,
+            lambda: _build_pdf_payload(
+                results, tier,
+                user_bench_ticker=bench_tick,
+                prev_snapshot=prev_snapshot,
+                user_risk_profile=profile_name,
+                user_profile=profile,
+            ),
         )
         # CHECKPOINT 3 — render + upload.  `_send_report` raises
         # RuntimeError("report_delivery_failed") if the GCS upload fails, so
@@ -3197,6 +3225,8 @@ async def _run_analysis_background(
         # Always release the single-flight slot, regardless of success /
         # failure / cancellation.  Without this a single hung task locks
         # the user out forever (they would only see "анализ уже идёт").
+        if _gate_held:
+            _leave_report_gate()
         await _release_user_slot(user_id)
 
 
@@ -3604,6 +3634,68 @@ _INSTANCE_ID: str = f"{os.getpid()}-{uuid.uuid4().hex[:8]}"
 #: пользователю честную ошибку.
 _IN_FLIGHT_USERS: set[int] = set()
 
+# ── Global gate: сколько отчётов считается ОДНОВРЕМЕННО (`§−122`) ────────────
+# Слот выше — ПО ПОЛЬЗОВАТЕЛЮ; без общего потолка десять пользователей дали бы
+# десять параллельных конвейеров на одном CPU: каждый в 10 раз медленнее, а
+# пул executor'а (≈5 потоков) целиком занят ожиданием ответов Anthropic.
+# Лишние ждут в очереди и видят, сколько перед ними. Дефолт 2: на 1 vCPU
+# третий параллельный расчёт уже не ускоряет, а только растягивает всех.
+MAX_CONCURRENT_REPORTS: int = env_int("MAX_CONCURRENT_REPORTS", 2, lo=1, hi=16)
+_REPORT_GATE = asyncio.Semaphore(MAX_CONCURRENT_REPORTS)
+_REPORTS_RUNNING: int = 0
+_REPORTS_WAITING: int = 0
+#: Через сколько секунд ожидания в очереди писать WARNING (и повторять). Гейт,
+#: который никто не отпустил, — ТИХИЙ отказ: пользователи «в очереди», а
+#: отчётов нет. Периодическое предупреждение делает его видимым в логах и
+#: алерте (`READINESS_10_USERS §5`).
+_QUEUE_WARN_S: float = 600.0
+
+
+async def _enter_report_gate(bot, chat_id: int) -> None:
+    """Дождаться места в конвейере; пока ждём — сказать пользователю, сколько
+    расчётов перед ним. Молчание здесь читается как зависание."""
+    global _REPORTS_RUNNING, _REPORTS_WAITING
+    if _REPORT_GATE.locked():
+        _REPORTS_WAITING += 1
+        ahead = _REPORTS_WAITING - 1
+        try:
+            await bot.send_message(
+                chat_id,
+                "⏳ *Сейчас считаются отчёты других пользователей.* Ваш в очереди"
+                + (f" — перед вами ещё {ahead}" if ahead else "")
+                + ". Он начнётся автоматически, ничего нажимать не нужно.",
+                parse_mode=ParseMode.MARKDOWN,
+            )
+        except Exception as exc:                   # noqa: BLE001
+            logger.warning("Не удалось сообщить об очереди %s: %s", chat_id, exc)
+        acquire = asyncio.ensure_future(_REPORT_GATE.acquire())
+        waited = 0.0
+        try:
+            while True:
+                done, _ = await asyncio.wait({acquire}, timeout=_QUEUE_WARN_S)
+                if done:
+                    acquire.result()
+                    break
+                waited += _QUEUE_WARN_S
+                logger.warning(
+                    "Очередь отчётов стоит: chat=%s ждёт %.0f с, в работе %d, "
+                    "ждут %d — если так долго, гейт не отпущен.",
+                    chat_id, waited, _REPORTS_RUNNING, _REPORTS_WAITING)
+        except BaseException:
+            acquire.cancel()
+            raise
+        finally:
+            _REPORTS_WAITING -= 1
+    else:
+        await _REPORT_GATE.acquire()
+    _REPORTS_RUNNING += 1
+
+
+def _leave_report_gate() -> None:
+    global _REPORTS_RUNNING
+    _REPORTS_RUNNING -= 1
+    _REPORT_GATE.release()
+
 
 async def _try_acquire_user_slot(user_id: int, tier: str | None = None) -> bool:
     """Взять слот на построение отчёта. False — у пользователя уже идёт расчёт."""
@@ -3929,6 +4021,18 @@ async def main() -> None:
             logger.info("Сессия Telegram закрыта (graceful, getUpdates освобождён).")
         except Exception:
             pass
+        # 3) `§−122`: аренды слотов ЭТОГО инстанса. Расчёт, застигнутый
+        #    редеплоем, всё равно погибнет с процессом, а его аренда жила бы в
+        #    SQLite ещё до 30 минут — пользователь видел бы «анализ уже идёт»
+        #    и не мог повторить. Снимаем только свои (owner = _INSTANCE_ID):
+        #    чужие держатели при max-instances>1 не задеваются.
+        try:
+            n = await asyncio.wait_for(
+                release_report_locks_for_owner(_INSTANCE_ID), timeout=3.0)
+            if n:
+                logger.info("Сняты аренды отчётов этого инстанса: %d.", n)
+        except Exception as exc:                   # noqa: BLE001
+            logger.warning("Аренды отчётов при остановке не сняты: %s", exc)
 
     logger.info("%s Bot запущен.", branding.bot_name())
     watcher = asyncio.create_task(_watch_shutdown())
