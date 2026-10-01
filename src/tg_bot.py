@@ -61,11 +61,13 @@ from db_tokenomics import (
     credit_tokens,
     deduct_tokens,
     delete_manual_draft,
+    delete_manual_portfolio,
     InsufficientFundsError,
     get_balance,
     get_benchmark_ticker,
     get_connection_mode_explicit,
     get_manual_draft,
+    get_manual_portfolio,
     get_profile,
     get_last_report_snapshot,
     init_db,
@@ -77,6 +79,7 @@ from db_tokenomics import (
     save_benchmark_ticker,
     save_connection_mode,
     save_manual_draft,
+    save_manual_portfolio,
     save_profile,
     save_report_snapshot,
 )
@@ -89,6 +92,27 @@ from finance.broker_api import (
 from finance.data_checks import DataQualityBlocked
 from finance.investment_logic import UniversalPortfolioManager
 from finance.security import SecureVault, MasterKeyRotatedError
+# Гибрид (I-15): брокер + ручной ввод. Пакет — L1, импорт вниз.
+from portfolio_aggregation import (
+    AGGREGATED_SOURCE,
+    AggregatedNotPermitted,
+    AggregationRefused,
+    FreedomSource,
+    KEY_ORIGIN_ADMIN_SERVICE,
+    KEY_ORIGIN_VAULT,
+    ManualSource,
+    PortfolioAggregator,
+    aggregated_manager,
+    load_with_budget,
+    apply_edit as _mp_apply_edit,
+    broker_fetch_budget_s,
+    canonical_text as _mp_canonical_text,
+    entries_of as _mp_entries_of,
+    hybrid_flag_on,
+    manual_max_positions,
+    remove_at as _mp_remove_at,
+    version_tag as _mp_version_tag,
+)
 from agent.gatekeeper import run_gatekeeper
 # SSOT имён эмитентов (§−95) — модуль на импорте тянет только stdlib.
 from agent.rag_engine import BANK_ORDER, bank_alias_regex, bank_tail_regex
@@ -213,6 +237,7 @@ class ManualPortfolio(StatesGroup):
 
     Input   = State()   # ждём текст (файл — Фаза 7)
     Confirm = State()   # показан экран подтверждения
+    Edit    = State()   # гибрид PR-1: точечные правки сохранённого портфеля (+/−)
 
 
 class MandateEdit(StatesGroup):
@@ -333,6 +358,16 @@ def manual_portfolio_enabled() -> bool:
     """
     return str(os.getenv(MANUAL_PORTFOLIO_ENV, "off")).strip().lower() in (
         "1", "true", "yes", "on")
+
+
+def hybrid_portfolio_enabled() -> bool:
+    """Флаг меню источников и агрегированного отчёта (`HYBRID_PORTFOLIO_ENABLED`).
+
+    Дефолт — ВЫКЛЮЧЕН (I-9). Требует включённого ручного ввода: агрегированный
+    отчёт без ручного портфеля бессмыслен, а ручной портфель без флага ручного
+    ввода недоступен. Читается функцией — по той же причине, что и соседний флаг.
+    """
+    return manual_portfolio_enabled() and hybrid_flag_on()
 
 
 # ── Pure helpers ──────────────────────────────────────────────────────────────
@@ -1275,8 +1310,18 @@ async def send_question(
         )
 
 
-async def _show_analysis_menu(message: Message, slug: str) -> None:
+async def _show_analysis_menu(message: Message, slug: str,
+                              user_id: int | None = None) -> None:
     """Send the final analysis choice, with a deep-link context if slug is set."""
+    # Гибрид D-9: меню двухшаговое (источник → тир). Только при включённом
+    # флаге (I-9): без него меню ровно прежнее. Чат с ботом личный, поэтому
+    # id чата — это id пользователя, когда вызывающий его не передал.
+    if hybrid_portfolio_enabled():
+        uid = user_id if user_id is not None else getattr(
+            getattr(message, "chat", None), "id", None)
+        if uid is not None:
+            await _show_source_menu(message, int(uid))
+            return
     if slug:
         await message.answer(
             f"👋 Кстати, вы пришли из нашего канала _{_source_label(slug)}_.\n\n"
@@ -1394,6 +1439,15 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
                 )
                 return
             balance = await get_balance(user_id)
+            if hybrid_portfolio_enabled():
+                # D-9: сначала источник, потом тир (I-9: только под флагом).
+                await message.answer(
+                    f"📊 *{branding.project_name()} — Risk & Asset Management Platform*\n\n"
+                    f"Ваш баланс: *{balance} токен(а)*",
+                    parse_mode=ParseMode.MARKDOWN,
+                )
+                await _show_source_menu(message, user_id)
+                return
             await message.answer(
                 f"📊 *{branding.project_name()} — Risk & Asset Management Platform*\n\n"
                 f"Ваш баланс: *{balance} токен(а)*\n\n"
@@ -2375,13 +2429,344 @@ async def cb_manual_action(callback: CallbackQuery, state: FSMContext) -> None:
 
     if action == "confirm":
         slug = str(data.get("slug") or "")
+        # Гибрид PR-1 (D-3): текст черновика ПЕРЕНОСИТСЯ в постоянный ручной
+        # портфель. Черновик остаётся до доставленного отчёта, как и раньше.
+        manual_text = str(data.get("manual_text") or "")
+        if not manual_text.strip():
+            manual_text = str((await get_manual_draft(user_id) or {}).get("text") or "")
+        saved_line = await _persist_manual_portfolio(user_id, manual_text)
         await state.clear()
         await callback.message.answer(
             "✅ *Портфель принят.*\n\n"
-            "Он сохранён — можно выбирать тип анализа.",
+            "Он сохранён — можно выбирать тип анализа."
+            + (f"\n\n{saved_line}" if saved_line else ""),
             parse_mode=ParseMode.MARKDOWN,
         )
         await _show_analysis_menu(callback.message, slug)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ГИБРИД PR-1 · ПОСТОЯННЫЙ РУЧНОЙ ПОРТФЕЛЬ: экран, Add / Remove / Trim
+# ══════════════════════════════════════════════════════════════════════════════
+# Логика правок — чистые функции `portfolio_aggregation.edits`; здесь только
+# вид и доставка. Каждая правка — read-modify-write под `user_slot` (S-6):
+# без слота два одновременных «+AAPL» прочли бы одну версию и одна правка
+# молча потерялась бы.
+
+_MP_EDIT_HELP = (
+    "✏️ *Правка ручного портфеля*\n\n"
+    "Пришлите одну или несколько строк:\n"
+    "`+AAPL 10 150` — добавить (есть — докупить, цена станет средневзвешенной)\n"
+    "`-AAPL 5` — уменьшить количество (цена покупки не меняется)\n"
+    "`-AAPL` — удалить позицию целиком\n"
+    "`+USD 500` / `-USD 500` — кэш; маржа — только явной строкой "
+    "`+CASH:USD -1000`\n\n"
+    "Ошибка в любой строке — не меняется ничего."
+)
+
+#: callback_data правки — недоверенный ввод (S-5): allowlist и формат.
+_MP_ACTIONS = frozenset({"show", "add", "rmlist", "del", "delyes", "keep", "back"})
+_MP_RM_RE = re.compile(r"^mp:rm:(\d{1,3}):([0-9a-f]{8})$")
+
+
+def _mp_engine():
+    """Движок ТОЛЬКО ради распознавания тикеров (`canonical_ticker`)."""
+    return UniversalPortfolioManager(price_source="manual").engine
+
+
+def _mp_canonical_sync(text: str) -> tuple[str, int, int]:
+    return _mp_canonical_text(text, _mp_engine())
+
+
+def _mp_entries_sync(text: str):
+    return _mp_entries_of(text, _mp_engine())
+
+
+def _mp_apply_sync(text: str, op_line: str):
+    return _mp_apply_edit(text, op_line, _mp_engine())
+
+
+def _mp_remove_sync(text: str, index: int, tag: str):
+    return _mp_remove_at(text, index, tag, _mp_engine())
+
+
+async def _persist_manual_portfolio(user_id: int, text: str) -> str:
+    """Перенести подтверждённый ввод в постоянный портфель. → строка для чата.
+
+    Хранилище — удобство, а не условие расчёта: сбой (нет мастер-ключа, БД)
+    не имеет права отнять у пользователя только что принятый портфель, поэтому
+    ошибки только логируются — без содержимого портфеля (S-3).
+    """
+    if not str(text or "").strip():
+        return ""
+    loop = asyncio.get_running_loop()
+    try:
+        canon, n_ok, _n_bad = await loop.run_in_executor(None, _mp_canonical_sync, text)
+        if n_ok == 0:
+            return ""
+        limit = manual_max_positions()
+        if n_ok > limit:
+            logger.info("MANUAL STORE: не сохранён user=%s: %d поз. > %d",
+                        user_id, n_ok, limit)
+            return (f"ℹ️ Для постоянного хранения портфель длинноват: {n_ok} "
+                    f"позиций при пределе {limit} — этот расчёт пройдёт, а "
+                    "сохранённым останется прежний портфель.")
+        await save_manual_portfolio(user_id, canon)
+        logger.info("MANUAL STORE: сохранён user=%s поз.=%d", user_id, n_ok)
+        return "💾 Сохранён как ваш ручной портфель — правки: /portfolio"
+    except Exception as exc:                           # noqa: BLE001
+        logger.warning("MANUAL STORE: не сохранён user=%s: %s", user_id,
+                       type(exc).__name__)
+        return ""
+
+
+async def _load_manual_portfolio_text(user_id: int) -> tuple[str, bool]:
+    """→ (текст, недоступен_ли_шифротекст). Пустой текст — портфеля нет."""
+    try:
+        stored = await get_manual_portfolio(user_id)
+    except MasterKeyRotatedError:
+        logger.warning("MANUAL STORE: шифротекст не читается user=%s", user_id)
+        return "", True
+    return str((stored or {}).get("text") or ""), False
+
+
+def kb_mp_screen(has_positions: bool) -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton(text="➕ Добавить", callback_data="mp:add")]]
+    if has_positions:
+        rows[0].append(InlineKeyboardButton(text="➖ Убрать / уменьшить",
+                                            callback_data="mp:rmlist"))
+        rows.append([InlineKeyboardButton(text="🗑 Удалить портфель",
+                                          callback_data="mp:del")])
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="mp:back")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def kb_mp_remove(entries, tag: str) -> InlineKeyboardMarkup:
+    """Кнопка на позицию: индекс + хэш ВЕРСИИ (S-5) — старая кнопка не удалит
+    другую позицию после правки."""
+    rows = [[InlineKeyboardButton(text=f"✖️ {_fit(_md_safe(e.label), 24)}",
+                                  callback_data=f"mp:rm:{i}:{tag}")]
+            for i, e in enumerate(entries[:_MANUAL_PREVIEW_ROWS])]
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="mp:show")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def kb_mp_forget() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="🗑 Да, удалить", callback_data="mp:delyes"),
+        InlineKeyboardButton(text="❌ Отмена", callback_data="mp:keep"),
+    ]])
+
+
+def _format_mp_screen(entries, changes: list[str] | None = None) -> str:
+    """Экран «Мой ручной портфель». Только вид — числа уже в тексте портфеля."""
+    lines = [f"✏️ *Мой ручной портфель* · позиций: {len(entries)}", ""]
+    if changes:
+        lines.append("*Что изменилось:*")
+        lines += [f"  • {_md_safe(c)}" for c in changes]
+        lines.append("")
+    if not entries:
+        lines.append("Портфель пуст — добавьте позиции кнопкой «➕ Добавить».")
+    else:
+        body = [f"{'Тикер':<14}{'Кол-во':>14}{'Цена':>14} Вал."]
+        for e in entries[:_MANUAL_PREVIEW_ROWS]:
+            price = "" if e.is_cash else _fmt_amount(e.price)
+            body.append(f"{_fit(_md_safe(e.label), 14):<14}"
+                        f"{_fmt_amount(e.quantity):>14}{price:>14} {_md_safe(e.currency)}")
+        rest = len(entries) - _MANUAL_PREVIEW_ROWS
+        if rest > 0:
+            body.append(f"… и ещё {rest}")
+        lines.append("```\n" + "\n".join(body) + "\n```")
+        lines.append("Правка текстом: `+AAPL 10 150` · `-AAPL 5` · `-AAPL`")
+    return _clip_to_telegram_limit("\n".join(lines))
+
+
+async def _show_manual_portfolio(message: Message, user_id: int,
+                                 changes: list[str] | None = None) -> None:
+    text, unreadable = await _load_manual_portfolio_text(user_id)
+    if unreadable:
+        await message.answer(
+            "🔐 *Сохранённый портфель недоступен* — ключ шифрования был обновлён.\n\n"
+            "Введите портфель заново: /forget\\_portfolio удалит старую запись.",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=kb_mp_screen(False),
+        )
+        return
+    loop = asyncio.get_running_loop()
+    entries = await loop.run_in_executor(None, _mp_entries_sync, text) if text else []
+    await message.answer(_format_mp_screen(entries, changes),
+                         parse_mode=ParseMode.MARKDOWN,
+                         reply_markup=kb_mp_screen(bool(entries)))
+
+
+async def _manual_flag_refusal(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    await message.answer("ℹ️ Ручной ввод портфеля пока недоступен.",
+                         reply_markup=kb_connect_choice())
+
+
+async def cmd_portfolio(message: Message, state: FSMContext) -> None:
+    """/portfolio — экран сохранённого ручного портфеля."""
+    if not manual_portfolio_enabled():
+        await _manual_flag_refusal(message, state)
+        return
+    await _show_manual_portfolio(message, message.from_user.id)
+
+
+async def cmd_forget_portfolio(message: Message, state: FSMContext) -> None:
+    """/forget_portfolio — удалить ручной портфель И черновик (после подтверждения).
+
+    Работает и при выключенном флаге ручного ввода: право удалить свои данные
+    не зависит от того, включена ли фича (S-9).
+    """
+    await state.clear()
+    await message.answer(
+        "🗑 *Удалить ручной портфель?*\n\n"
+        "Будут удалены сохранённый портфель и незавершённый черновик ввода. "
+        "Отменить удаление нельзя.",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=kb_mp_forget(),
+    )
+
+
+async def _forget_manual_portfolio(user_id: int) -> None:
+    await delete_manual_portfolio(user_id)
+    await delete_manual_draft(user_id)
+    logger.info("MANUAL STORE: удалён по запросу user=%s", user_id)
+
+
+@portfolio_router.callback_query(F.data.startswith("mp:"))
+async def cb_manual_portfolio(callback: CallbackQuery, state: FSMContext) -> None:
+    """Кнопки экрана ручного портфеля. callback_data — недоверенный ввод (S-5)."""
+    await callback.answer()
+    data = str(callback.data or "")
+    user_id = callback.from_user.id
+    rm = _MP_RM_RE.match(data)
+    action = "rm" if rm else data.split(":", 1)[1] if ":" in data else ""
+    if action != "rm" and action not in _MP_ACTIONS:
+        logger.warning("MANUAL STORE: подделанный callback user=%s", user_id)
+        return
+
+    if action == "delyes":
+        # Удаление данных — без гейта флага (см. `cmd_forget_portfolio`).
+        try:
+            async with user_slot(user_id):
+                await _forget_manual_portfolio(user_id)
+        except SlotBusy:
+            await callback.message.answer(
+                "⏳ Секунду — идёт другая обработка. Нажмите ещё раз.")
+            return
+        await state.clear()
+        await callback.message.answer(
+            "🗑 Ручной портфель и черновик удалены.")
+        return
+    if action == "keep":
+        await callback.message.answer("Хорошо, ничего не удаляю.")
+        return
+
+    # S-4: старая кнопка живёт в чате вечно — флаг проверяется на КАЖДОМ нажатии.
+    if not manual_portfolio_enabled():
+        await _manual_flag_refusal(callback.message, state)
+        return
+
+    if action == "show":
+        await _show_manual_portfolio(callback.message, user_id)
+        return
+    if action == "back":
+        await state.clear()
+        await _show_analysis_menu(callback.message, "", user_id=user_id)
+        return
+    if action == "add":
+        await state.set_state(ManualPortfolio.Edit)
+        await callback.message.answer(_MP_EDIT_HELP, parse_mode=ParseMode.MARKDOWN)
+        return
+    if action == "del":
+        await callback.message.answer(
+            "🗑 *Удалить ручной портфель?*\n\nОтменить удаление нельзя.",
+            parse_mode=ParseMode.MARKDOWN, reply_markup=kb_mp_forget())
+        return
+
+    text, unreadable = await _load_manual_portfolio_text(user_id)
+    if action == "rmlist":
+        loop = asyncio.get_running_loop()
+        entries = await loop.run_in_executor(None, _mp_entries_sync, text) if text else []
+        if not entries:
+            await _show_manual_portfolio(callback.message, user_id)
+            return
+        await state.set_state(ManualPortfolio.Edit)
+        await callback.message.answer(
+            "➖ *Что убрать?* Кнопка удаляет позицию целиком; чтобы уменьшить, "
+            "пришлите `-ТИКЕР КОЛИЧЕСТВО`.",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=kb_mp_remove(entries, _mp_version_tag(text)))
+        return
+
+    # action == "rm": индекс + версия, правка под слотом.
+    index, tag = int(rm.group(1)), rm.group(2)
+    try:
+        async with user_slot(user_id):
+            text, unreadable = await _load_manual_portfolio_text(user_id)
+            loop = asyncio.get_running_loop()
+            res = await loop.run_in_executor(None, _mp_remove_sync, text, index, tag)
+            if res.ok:
+                await save_manual_portfolio(user_id, res.new_text)
+    except SlotBusy:
+        await callback.message.answer(
+            "⏳ Секунду — идёт другая обработка. Нажмите ещё раз.")
+        return
+    if not res.ok:
+        await callback.message.answer(f"⚠️ {_md_safe(res.error)}")
+        return
+    await _show_manual_portfolio(callback.message, user_id, changes=res.applied)
+
+
+@portfolio_router.message(StateFilter(ManualPortfolio.Edit), F.text,
+                          ~F.text.startswith("/"))
+async def msg_manual_edit(message: Message, state: FSMContext) -> None:
+    """Текстовые правки `+…`/`-…` сохранённого портфеля (D-4)."""
+    user_id = message.from_user.id
+    if not manual_portfolio_enabled():
+        await _manual_flag_refusal(message, state)
+        return
+    ops = message.text or ""
+    if len(ops.encode("utf-8")) > MANUAL_DRAFT_MAX_BYTES:
+        await message.answer("⚠️ Слишком длинная команда правки.")
+        return
+    try:
+        async with user_slot(user_id):
+            text, unreadable = await _load_manual_portfolio_text(user_id)
+            if unreadable:
+                await message.answer(
+                    "🔐 Сохранённый портфель недоступен — ключ шифрования был "
+                    "обновлён. Удалите его (/forget\\_portfolio) и введите заново.",
+                    parse_mode=ParseMode.MARKDOWN)
+                return
+            loop = asyncio.get_running_loop()
+            res = await loop.run_in_executor(None, _mp_apply_sync, text, ops)
+            if res.ok:
+                await save_manual_portfolio(user_id, res.new_text)
+    except SlotBusy:
+        await message.answer(
+            "⏳ *Секунду — у вас уже идёт обработка.*\n\n"
+            "Пришлите правку ещё раз, когда предыдущий запрос завершится.",
+            parse_mode=ParseMode.MARKDOWN)
+        return
+    except Exception as exc:                           # noqa: BLE001
+        error_id = uuid.uuid4().hex[:12]
+        logger.error("MANUAL STORE: правка упала [%s] user=%s: %s",
+                     error_id, user_id, type(exc).__name__)
+        await message.answer(
+            "😔 Не удалось применить правку.\n\n"
+            f"Код ошибки для поддержки: `{error_id}`",
+            parse_mode=ParseMode.MARKDOWN)
+        return
+    if not res.ok:
+        await message.answer(
+            f"⚠️ Правка не применена: {_md_safe(res.error)}\n\n"
+            "Портфель не изменился — исправьте строку и пришлите снова.")
+        return
+    logger.info("MANUAL STORE: правка user=%s операций=%d", user_id, len(res.applied))
+    await _show_manual_portfolio(message, user_id, changes=res.applied)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2493,6 +2878,439 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
     """
     await callback.answer()
     _, tier, context_slug = callback.data.split(":", 2)
+    await _confirm_flow(callback, state, tier)
+
+
+#: Причины, с которыми бот предлагает ручной отчёт вместо брокерского (PR-2).
+#: Ключ уезжает в callback_data (`fb:manual:<tier>:<код>`) — поэтому allowlist:
+#: callback_data — недоверенный ввод (S-5). Значение — текст для CoVe и превью.
+FALLBACK_REASON_TEXT: dict[str, str] = {
+    "waf_block":   "блокировка запросов по IP на стороне брокера",
+    "api_error":   "сбой API брокера",
+    "parse_error": "ответ брокера не разобран",
+    "timeout":     "брокер не ответил вовремя",
+    "auth":        "ключи брокера отклонены",
+    "error":       "сбой загрузки портфеля",
+    "history":     "не загрузилась история цен",
+}
+_FB_RE = re.compile(r"^fb:manual:([a-z]{1,12}):([a-z_]{1,16})$")
+
+
+async def _manual_fallback_offer(user_id: int, tier: str,
+                                 reason: str) -> tuple[str, InlineKeyboardMarkup | None]:
+    """Хвост сообщения об отказе брокера: что можно сделать ВМЕСТО (PR-2 §3).
+
+    Три ветки: ручной портфель есть → кнопка ручного отчёта; нет → честное
+    «пуст» и кнопка ввода; флаг ручного ввода выключен → ничего (I-9: текст и
+    клавиатура ровно прежние).
+    """
+    if not manual_portfolio_enabled():
+        return "", None
+    reason = reason if reason in FALLBACK_REASON_TEXT else "error"
+    try:
+        text, _unreadable = await _load_manual_portfolio_text(user_id)
+    except Exception as exc:                           # noqa: BLE001
+        logger.warning("FALLBACK: ручной портфель не прочитан user=%s: %s",
+                       user_id, type(exc).__name__)
+        text = ""
+    if text.strip():
+        return ("\n\n📈 Можно построить отчёт по вашим *ручным активам* — "
+                "котировки возьмём из независимого публичного источника, тариф "
+                "тот же, токен спишется только после готового отчёта.",
+                InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(
+                    text="📈 Сгенерировать отчёт по ручным активам",
+                    callback_data=f"fb:manual:{tier}:{reason}")]]))
+    return ("\n\nРучной портфель пуст, отчёт сейчас невозможен. Попробуйте "
+            "позже или добавьте активы вручную.",
+            InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(
+                text="➕ Добавить активы вручную", callback_data="mp:add")]]))
+
+
+class BrokerBudgetExceeded(RuntimeError):
+    """Брокер не ответил за `BROKER_FETCH_BUDGET_S` (D-8)."""
+
+
+async def _answer_fallback_offer(message: Message, user_id: int, tier: str,
+                                 reason: str) -> None:
+    """То же предложение отдельным сообщением — под уже отправленным отказом."""
+    text, kb = await _manual_fallback_offer(user_id, tier, reason or "api_error")
+    if kb is not None:
+        await message.answer(text.strip(), parse_mode=ParseMode.MARKDOWN,
+                             reply_markup=kb)
+
+
+async def cb_fallback_manual(callback: CallbackQuery, state: FSMContext) -> None:
+    """`fb:manual:<tier>:<причина>` — ручной отчёт, когда брокер недоступен.
+
+    Проходит ВЕСЬ путь подтверждения заново (слот, флаг, наличие портфеля,
+    баланс), а не прыгает в фоновую задачу: кнопка живёт в чате вечно, и к
+    моменту нажатия любое из этих условий могло измениться (S-4).
+    """
+    await callback.answer()
+    m = _FB_RE.match(str(callback.data or ""))
+    if not m or m.group(1) not in TIER_COST or m.group(2) not in FALLBACK_REASON_TEXT:
+        logger.warning("FALLBACK: подделанный callback user=%s", callback.from_user.id)
+        return
+    if not manual_portfolio_enabled():
+        await callback.message.answer("ℹ️ Ручной ввод портфеля пока недоступен.",
+                                      reply_markup=kb_connect_choice())
+        return
+    await _confirm_flow(callback, state, m.group(1), source_override="manual",
+                        fallback_reason=m.group(2))
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ГИБРИД PR-3 · АГРЕГИРОВАННЫЙ ОТЧЁТ (брокер + ручной ввод) и меню источников
+# ══════════════════════════════════════════════════════════════════════════════
+# Сборка состава — `portfolio_aggregation` (L1); здесь только ключи, тексты и
+# кнопки. Математика отчёта та же: склейку дублей делает движок.
+
+#: Источники, которые можно выбрать КНОПКОЙ (callback_data — недоверенный ввод).
+REPORT_SOURCES = ("freedom", "manual", AGGREGATED_SOURCE, "demo")
+_REPORT_SOURCE_LABEL = {
+    "freedom": "📊 Отчёт: Freedom Broker",
+    "manual": "✏️ Отчёт: Ручной портфель",
+    AGGREGATED_SOURCE: "🌐 Отчёт: Агрегированный портфель",
+    "demo": "📋 Демо",
+}
+_SRC_RE = re.compile(r"^src:([a-z]{1,12})$")
+_RPT_RE = re.compile(r"^(rpt|rptgo):([a-z]{1,12}):([a-z]{1,12})$")
+_AGG_RE = re.compile(r"^agg:sum:([a-z]{1,12}):([0-9a-f]{8})$")
+
+
+def _overlap_tag(overlaps: list[str]) -> str:
+    """Хэш набора пересечений: подтверждение относится к ЭТОМУ набору."""
+    import hashlib
+
+    return hashlib.sha256(",".join(sorted(overlaps)).encode("utf-8")).hexdigest()[:8]
+
+
+class _BrokerViaBot:
+    """Транспорт `FreedomSource` через `_fetch_portfolio_sync` — тот же вызов,
+    что у брокерского отчёта (и та же точка подмены в тестах)."""
+
+    def __init__(self, api_key: str, secret_key: str, login: str) -> None:
+        self._args = (api_key, secret_key, login)
+
+    def fetch_portfolio(self):
+        return _fetch_portfolio_sync(*self._args)
+
+
+class _ManualViaBot:
+    """`ManualSource`, чей движок строится уже на потоке executor'а."""
+
+    name = "manual"
+
+    def __init__(self, text: str) -> None:
+        self._text = text
+
+    def load(self):
+        return ManualSource(self._text, _mp_engine()).load()
+
+
+async def _aggregated_refuse(callback: CallbackQuery, state: FSMContext, user_id: int,
+                             text: str, kb: InlineKeyboardMarkup | None = None) -> None:
+    await _release_user_slot(user_id)
+    await callback.message.answer(text + "\n\n✅ Токен *не списан*.",
+                                  parse_mode=ParseMode.MARKDOWN, reply_markup=kb)
+    await state.clear()
+
+
+def _kb_manual_report(tier: str, reason: str | None = None) -> InlineKeyboardMarkup:
+    data = f"fb:manual:{tier}:{reason}" if reason else f"rptgo:manual:{tier}"
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📈 Сгенерировать отчёт по ручным активам",
+                              callback_data=data)],
+        [InlineKeyboardButton(text="✏️ Мой ручной портфель", callback_data="mp:show")],
+    ])
+
+
+async def _aggregated_step1(callback: CallbackQuery, state: FSMContext, tier: str,
+                            user_id: int, *, api_key: str, secret_key: str, login: str,
+                            key_origin: str | None, overlap_tag: str | None):
+    """Брокер ∥ ручной портфель → гейт I-15 → слияние → экран D-5.
+
+    → `(df, composition, freedom_result)` либо `None`, если отказ уже показан
+    (и слот уже снят). Исключений наружу не бросает.
+    """
+    manual_text, unreadable = await _load_manual_portfolio_text(user_id)
+    if unreadable or not manual_text.strip():
+        await _aggregated_refuse(
+            callback, state, user_id,
+            "📝 *Ручной портфель пуст* — агрегированному отчёту нечего добавить "
+            "к счёту брокера.",
+            InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(
+                text="➕ Добавить активы вручную", callback_data="mp:add")]]))
+        return None
+    if key_origin is None:                              # pragma: no cover — ветка ключей
+        await _aggregated_refuse(callback, state, user_id,
+                                 "⚠️ *Брокер не подключён.*")
+        return None
+
+    budget = broker_fetch_budget_s()
+    freedom_src = FreedomSource(api_key, secret_key, login, key_origin=key_origin,
+                                connector_factory=_BrokerViaBot)
+    freedom, manual = await asyncio.gather(
+        load_with_budget(freedom_src, budget),
+        load_with_budget(_ManualViaBot(manual_text), budget))
+    logger.info("HYBRID: user=%s freedom_ok=%s reason=%s [%s] manual_ok=%s поз.=%d+%d",
+                user_id, freedom.ok, freedom.failure_reason or "-",
+                freedom.error_id or "-", manual.ok, freedom.positions, manual.positions)
+
+    if not freedom.ok:
+        reason = freedom.failure_reason or "error"
+        if reason == "empty":
+            await _aggregated_refuse(
+                callback, state, user_id,
+                "📭 *На счёте Freedom нет позиций* — агрегированный отчёт совпал бы "
+                "с ручным.", _kb_manual_report(tier))
+            return None
+        if reason == "auth":
+            await _aggregated_refuse(
+                callback, state, user_id,
+                "⚠️ *Агрегированный отчёт сейчас невозможен.*\n\n"
+                "Брокер отклонил ключи — похоже, они неверны или отозваны; "
+                "проверьте их в /start → 🔗 Freedom Broker API.",
+                _kb_manual_report(tier, "auth"))
+            return None
+        # D-7: брокер недоступен — причина по `_broker_outage_advice`, а не одна
+        # фраза на все случаи (`§−94`).
+        if reason == "timeout":
+            why = (f"⚠️ Серверы Freedom Broker сейчас недоступны — брокер не "
+                   f"ответил за {budget} с. Обычно это проходит за 5–15 минут.")
+        else:
+            why = _broker_outage_advice(
+                reason if reason in ("waf_block", "parse_error") else "api_error",
+                freedom.error_id or uuid.uuid4().hex[:12])
+        fb_reason = reason if reason in FALLBACK_REASON_TEXT else "error"
+        await _aggregated_refuse(
+            callback, state, user_id,
+            "🌐 *Агрегированный отчёт сейчас невозможен* — Freedom Broker "
+            "недоступен, а без живого счёта брокерские котировки показывать "
+            "нельзя.\n\n" + why,
+            _kb_manual_report(tier, fb_reason))
+        return None
+
+    if not manual.ok:
+        if manual.failure_reason == "too_many":
+            text = (f"📝 В ручном портфеле больше {manual.detail.get('limit')} "
+                    "позиций — сократите его в /portfolio.")
+        else:
+            text = "📝 *Ручной портфель не разобрался* — откройте его в /portfolio."
+        await _aggregated_refuse(callback, state, user_id, text,
+                                 InlineKeyboardMarkup(inline_keyboard=[[
+                                     InlineKeyboardButton(text="✏️ Мой ручной портфель",
+                                                          callback_data="mp:show")]]))
+        return None
+
+    try:
+        merged = PortfolioAggregator().merge(freedom, manual)
+    except AggregatedNotPermitted as exc:
+        logger.error("HYBRID: I-15 отказ user=%s: %s", user_id, exc.reason)
+        await _aggregated_refuse(
+            callback, state, user_id,
+            "🌐 *Агрегированный отчёт сейчас невозможен* — живой портфель брокера "
+            "не подтверждён.", _kb_manual_report(tier, "error"))
+        return None
+    except AggregationRefused as exc:
+        if exc.reason == "currency_conflict":
+            text = ("💱 *Одна бумага — в разных валютах.* На счёте Freedom и в "
+                    "ручном портфеле указаны разные валюты для: "
+                    f"{_md_safe(', '.join(exc.tickers))}. Сложить такие лоты "
+                    "нельзя — исправьте валюту в ручном портфеле.")
+        elif exc.reason == "too_many":
+            text = (f"📚 Вместе получается больше {exc.limit} позиций — это предел "
+                    "агрегированного отчёта. Сократите ручной портфель.")
+        else:
+            text = "📝 *Ручной портфель пуст* — добавьте активы в /portfolio."
+        await _aggregated_refuse(callback, state, user_id, text,
+                                 InlineKeyboardMarkup(inline_keyboard=[[
+                                     InlineKeyboardButton(text="✏️ Исправить ручной портфель",
+                                                          callback_data="mp:show")]]))
+        return None
+
+    if merged.overlaps and overlap_tag != _overlap_tag(merged.overlaps):
+        # D-5: пересечения показываются ДО расчёта, решение — за пользователем.
+        await _release_user_slot(user_id)
+        await callback.message.answer(
+            "🔁 *Эти бумаги есть и на счёте Freedom, и в ручном портфеле:* "
+            f"{_md_safe(', '.join(merged.overlaps))}.\n\n"
+            "Ручной портфель не должен повторять брокерский — иначе позиция "
+            "учтётся дважды.\n\n✅ Токен *не списан*.",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(
+                    text="✅ Это разные счета — суммировать",
+                    callback_data=f"agg:sum:{tier}:{_overlap_tag(merged.overlaps)}")],
+                [InlineKeyboardButton(text="✏️ Исправить ручной портфель",
+                                      callback_data="mp:show")],
+                [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel")],
+            ]),
+        )
+        await state.clear()
+        return None
+    return merged.frame, merged.composition(), freedom
+
+
+async def _report_source_availability(user_id: int) -> dict[str, str | None]:
+    """Источник → `None` (доступен) либо причина, почему нет (D-9)."""
+    loop = asyncio.get_running_loop()
+    try:
+        has_keys = _is_admin(user_id) or await loop.run_in_executor(
+            None, _has_vault_keys_sync, user_id)
+    except Exception as exc:                           # noqa: BLE001
+        logger.warning("HYBRID: vault недоступен user=%s: %s", user_id,
+                       type(exc).__name__)
+        has_keys = False
+    manual_text, _unreadable = await _load_manual_portfolio_text(user_id)
+    has_manual = bool(manual_text.strip())
+    return {
+        "freedom": None if has_keys else "подключите брокера: /start → 🔗 Freedom Broker API",
+        "manual": None if manual_portfolio_enabled() else "ручной ввод выключен",
+        AGGREGATED_SOURCE: (None if has_keys and has_manual else
+                            "подключите брокера" if not has_keys else
+                            "заполните ручной портфель (/portfolio)"),
+        "demo": None,
+    }
+
+
+async def _show_source_menu(message: Message, user_id: int) -> None:
+    """Шаг 1 из 2 (D-9): источник. Показаны только доступные, остальные — с причиной."""
+    avail = await _report_source_availability(user_id)
+    rows = [[InlineKeyboardButton(text=_REPORT_SOURCE_LABEL[src],
+                                  callback_data=f"src:{src}")]
+            for src in REPORT_SOURCES if avail[src] is None]
+    rows.append([InlineKeyboardButton(text="✏️ Мой ручной портфель",
+                                      callback_data="mp:show")])
+    closed = [f"  • {_REPORT_SOURCE_LABEL[src]} — {avail[src]}"
+              for src in REPORT_SOURCES if avail[src] is not None]
+    await message.answer(
+        "🧭 *Шаг 1 из 2 — источник портфеля*\n\n"
+        "📊 *Freedom Broker* — живой счёт брокера.\n"
+        "✏️ *Ручной портфель* — ваш ввод; котировки из независимого источника.\n"
+        "🌐 *Агрегированный* — счёт Freedom + ручной ввод; котировки Tradernet "
+        "для всех позиций.\n"
+        "📋 *Демо* — шаблонный портфель, бесплатно."
+        + ("\n\n*Сейчас недоступно:*\n" + "\n".join(closed) if closed else ""),
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+    )
+
+
+def kb_report_tiers(source: str) -> InlineKeyboardMarkup:
+    """Шаг 2 из 2: тир. Тарифы — те же `TIER_COST` (D-10, I-4)."""
+    def _cost(tier: str) -> str:
+        c = _effective_cost(tier, source)
+        return "бесплатно" if c == 0 else f"{c} токен" + ("а" if c in (2, 3, 4) else "")
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"📊 Базовый ({_cost('base')})",
+                              callback_data=f"rpt:{source}:base"),
+         InlineKeyboardButton(text=f"🔬 Глубокий ({_cost('deep')})",
+                              callback_data=f"rpt:{source}:deep")],
+        [InlineKeyboardButton(text=f"🎯 Сценарный анализ ({_cost('scenario')})",
+                              callback_data=f"rpt:{source}:scenario")],
+    ])
+
+
+async def _hybrid_menu_refusal(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    await message.answer("ℹ️ Выбор источника отчёта сейчас недоступен — "
+                         "откройте меню заново: /start")
+
+
+async def cb_report_source(callback: CallbackQuery, state: FSMContext) -> None:
+    """`src:<источник>` → шаг 2 (тир). Флаг и доступность — заново (S-4)."""
+    await callback.answer()
+    m = _SRC_RE.match(str(callback.data or ""))
+    user_id = callback.from_user.id
+    if not m or m.group(1) not in REPORT_SOURCES:
+        logger.warning("HYBRID: подделанный callback user=%s", user_id)
+        return
+    if not hybrid_portfolio_enabled():
+        await _hybrid_menu_refusal(callback.message, state)
+        return
+    source = m.group(1)
+    why = (await _report_source_availability(user_id))[source]
+    if source == "manual" and why is None:
+        text, _unreadable = await _load_manual_portfolio_text(user_id)
+        if not text.strip():
+            await _manual_ask_for_input(callback.message, state)   # пустой → ввод
+            return
+    if why is not None:
+        await callback.message.answer(f"ℹ️ Источник недоступен: {why}.")
+        return
+    await callback.message.answer(
+        f"🧭 *Шаг 2 из 2 — тип анализа* · {_REPORT_SOURCE_LABEL[source]}\n\n"
+        "📊 *Базовый* — риск-профиль, CVaR/Sharpe, состав, идеи.\n"
+        "🎯 *Сценарный* — вклад позиций в риск, 3 макро-режима, бэктест.\n"
+        "🔬 *Глубокий* — + факторное разложение, 4-Pillar, стресс-сценарии.",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=kb_report_tiers(source),
+    )
+
+
+async def cb_report_tier(callback: CallbackQuery, state: FSMContext) -> None:
+    """`rpt:<источник>:<тир>` — экран цены; `rptgo:…` — запуск полного пути."""
+    await callback.answer()
+    m = _RPT_RE.match(str(callback.data or ""))
+    user_id = callback.from_user.id
+    if (not m or m.group(2) not in REPORT_SOURCES or m.group(3) not in TIER_COST):
+        logger.warning("HYBRID: подделанный callback user=%s", user_id)
+        return
+    kind, source, tier = m.groups()
+    if not hybrid_portfolio_enabled():
+        await _hybrid_menu_refusal(callback.message, state)
+        return
+    if kind == "rpt":
+        cost = _effective_cost(tier, source)
+        balance = await get_balance(user_id)
+        await callback.message.answer(
+            f"⚠️ *Внимание:* {_REPORT_SOURCE_LABEL[source]} · {TIER_LABEL[tier]}\n\n"
+            + (f"С вашего баланса будет списано *{cost} токен(а)* — только после "
+               "готового отчёта.\n" if cost else "Отчёт *бесплатный*.\n")
+            + f"Текущий баланс: *{balance} токен(а)*.\n\nОдобрить?",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="✅ Одобрить",
+                                     callback_data=f"rptgo:{source}:{tier}"),
+                InlineKeyboardButton(text="❌ Отмена", callback_data="cancel"),
+            ]]),
+        )
+        return
+    await _confirm_flow(callback, state, tier, source_override=source)
+
+
+async def cb_aggregated_overlap(callback: CallbackQuery, state: FSMContext) -> None:
+    """`agg:sum:<тир>:<хэш набора>` — «это разные счета, суммировать» (D-5).
+
+    Брокер запрашивается ЗАНОВО: I-15 требует живого фетча в том же запросе,
+    а состав счёта мог измениться, пока экран висел в чате.
+    """
+    await callback.answer()
+    m = _AGG_RE.match(str(callback.data or ""))
+    if not m or m.group(1) not in TIER_COST:
+        logger.warning("HYBRID: подделанный callback user=%s", callback.from_user.id)
+        return
+    if not hybrid_portfolio_enabled():
+        await _hybrid_menu_refusal(callback.message, state)
+        return
+    await _confirm_flow(callback, state, m.group(1), source_override=AGGREGATED_SOURCE,
+                        overlap_tag=m.group(2))
+
+
+async def _confirm_flow(callback: CallbackQuery, state: FSMContext, tier: str, *,
+                        source_override: str | None = None,
+                        fallback_reason: str | None = None,
+                        overlap_tag: str | None = None) -> None:
+    """Тело подтверждения отчёта: источник → баланс → загрузка → превью → фон.
+
+    `source_override` — источник, выбранный КНОПКОЙ (`fb:`), а не режимом по
+    умолчанию из профиля: `connection_mode` при этом не меняется.
+    `fallback_reason` — отчёт строится вместо брокерского (PR-2): причина
+    доезжает до превью и до CoVe.
+    `overlap_tag` — пользователь подтвердил ИМЕННО этот набор пересечений
+    брокер × ручной ввод (экран D-5); другой набор покажет экран заново.
+    """
     user_id = callback.from_user.id
     cost    = TIER_COST[tier]
 
@@ -2517,7 +3335,10 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
     # the vault file on gcsfuse — an I/O error escaping here would leak the
     # single-flight slot and lock the user out until restart.
     try:
-        source, stored_mode = await _resolve_portfolio_source(user_id)
+        if source_override is not None:
+            source, stored_mode = source_override, None
+        else:
+            source, stored_mode = await _resolve_portfolio_source(user_id)
     except Exception as exc:                       # noqa: BLE001
         error_id = uuid.uuid4().hex[:12]
         logger.exception("Source resolution failed for %s [%s]: %s",
@@ -2572,6 +3393,17 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
         )
         await state.clear()
         return
+    if source == AGGREGATED_SOURCE and not hybrid_portfolio_enabled():
+        # S-4: кнопка агрегированного отчёта переживает выключение флага.
+        logger.info("HYBRID: расчёт запрошен при выключенном флаге user=%s", user_id)
+        await _release_user_slot(user_id)
+        await callback.message.edit_text(
+            "🛠 *Агрегированный отчёт временно недоступен.*\n\n"
+            "✅ Токен *не списан*.",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        await state.clear()
+        return
     cost = _effective_cost(tier, source)
 
     # H1 (Phase-3): NO upfront deduction.  Read-only balance pre-check —
@@ -2601,6 +3433,8 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
         # брокера вовсе, а строка утверждала бы обратное. Тот же I-12 на слое
         # текста, что и подпись CoVe (F-6).
         what = ("Собираю ваш портфель" if source == "manual"
+                else "Загружаю счёт Freedom Broker и ваш ручной портфель"
+                if source == AGGREGATED_SOURCE
                 else "Подключаюсь к Freedom Broker и загружаю портфель")
         await callback.message.edit_text(
             f"⏳ {what}…\n\n"
@@ -2614,7 +3448,11 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
     profile    = await get_profile(user_id)
     bench_tick = _resolve_bench_ticker(profile)
 
-    if source == "freedom":
+    # I-15: агрегированный отчёт ходит к брокеру ТЕМИ ЖЕ ключами, что и
+    # freedom (vault пользователя или сервисные — только администратору), и
+    # запоминает их происхождение: это часть доказательства статуса клиента.
+    key_origin = None
+    if source in ("freedom", AGGREGATED_SOURCE):
         try:
             keys = await loop.run_in_executor(None, _get_keys_sync, user_id)
         except MasterKeyRotatedError as exc:
@@ -2638,6 +3476,7 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
                 api_key    = os.getenv("FREEDOM_API_KEY",    "demo")
                 secret_key = os.getenv("FREEDOM_API_SECRET", "")
                 login      = os.getenv("FREEDOM_LOGIN",      "")
+                key_origin = KEY_ORIGIN_ADMIN_SERVICE
                 logger.warning(
                     "KEY SOURCE: env/service  user=%s (admin) — vault пуст, "
                     "используются сервисные ключи.", user_id,
@@ -2663,6 +3502,7 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
             login      = (login      or "").strip()
             api_key    = (api_key    or "").strip()
             secret_key = (secret_key or "").strip()
+            key_origin = KEY_ORIGIN_VAULT
             logger.info(
                 "KEY SOURCE: vault  user=%s  api_key_present=%s  secret_present=%s",
                 user_id, bool(api_key), bool(secret_key),
@@ -2689,7 +3529,12 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
         if source == "manual":
             # Черновик старше FSM-состояния: он переживает рестарт контейнера,
             # а состояние — нет (`PHASE_05 §5`).
-            manual_text = str((await state.get_data()).get("manual_text") or "")
+            manual_text = ("" if source_override == "manual" else
+                           str((await state.get_data()).get("manual_text") or ""))
+            if source_override == "manual":
+                # Кнопочный ручной отчёт (fallback) — это «мой ручной портфель»:
+                # сохранённый портфель первым, черновик — запасным.
+                manual_text, _unreadable = await _load_manual_portfolio_text(user_id)
             if not manual_text.strip():
                 # `get_manual_draft` отдаёт СЛОВАРЬ (`text`/`created_at`/
                 # `updated_at`), а не строку: `str()` от него дал бы
@@ -2698,14 +3543,37 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
                 draft = await get_manual_draft(user_id)
                 manual_text = str((draft or {}).get("text") or "")
             if not manual_text.strip():
+                # Гибрид PR-1: черновик удаляется после доставленного отчёта, а
+                # постоянный ручной портфель — нет. Он и есть «мой портфель».
+                manual_text, _unreadable = await _load_manual_portfolio_text(user_id)
+            if not manual_text.strip():
                 raise ManualInputUnusable("черновик не найден")
             df = await loop.run_in_executor(
                 None, _manual_frame_sync, manual_text
             )
+        elif source == AGGREGATED_SOURCE:
+            loaded = await _aggregated_step1(
+                callback, state, tier, user_id,
+                api_key=api_key, secret_key=secret_key, login=login,
+                key_origin=key_origin, overlap_tag=overlap_tag)
+            if loaded is None:
+                return                          # отказ уже показан, слот снят
+            df, agg_composition, freedom_proof = loaded
         else:
-            df = await loop.run_in_executor(
-                None, _fetch_portfolio_sync, api_key, secret_key, login
-            )
+            # D-8: общий бюджет ожидания брокера. Поток executor'а по таймауту
+            # не отменяется (вызов без побочных эффектов) — его поздний
+            # результат просто отбрасывается, а слот освобождается ниже ровно
+            # один раз.
+            try:
+                df = await asyncio.wait_for(
+                    loop.run_in_executor(
+                        None, _fetch_portfolio_sync, api_key, secret_key, login),
+                    timeout=broker_fetch_budget_s(),
+                )
+            except asyncio.TimeoutError as exc:
+                # Свой тип, а не голый TimeoutError: в 3.11 им же является
+                # `socket.timeout`, и чужой таймаут назвался бы «брокер молчит».
+                raise BrokerBudgetExceeded() from exc
     except ManualInputUnusable as exc:
         logger.info("MANUAL: расчёт невозможен user=%s: %s", user_id, exc)
         await _release_user_slot(user_id)
@@ -2725,12 +3593,16 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
     except BrokerAuthError as exc:
         logger.error("Freedom Broker auth failed for %s: %s", user_id, exc)
         await _release_user_slot(user_id)          # H1: free slot — bg task never spawned
+        # PR-2: текст — «ключи неверны», а не «серверы недоступны»; ручной
+        # отчёт предлагается так же, как при сбое.
+        _offer_text, _offer_kb = await _manual_fallback_offer(user_id, tier, "auth")
         await callback.message.answer(
             "⚠️ *Не удалось подключиться к брокеру.*\n\n"
             "Похоже, API-ключи неверны или отозваны — проверьте их в "
             "/start → 🔗 Freedom Broker API.\n\n"
-            "✅ Токен *не списан* — платите только за готовый отчёт.",
+            "✅ Токен *не списан* — платите только за готовый отчёт." + _offer_text,
             parse_mode=ParseMode.MARKDOWN,
+            reply_markup=_offer_kb,
         )
         await state.clear()
         return
@@ -2743,6 +3615,24 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
         )
         await state.clear()
         return
+    except BrokerBudgetExceeded:
+        # D-8: брокер молчит дольше бюджета. «Серверы недоступны» здесь честно —
+        # в отличие от `waf_block`/`parse_error` (`_broker_outage_advice`).
+        _budget = broker_fetch_budget_s()
+        logger.error("PORTFOLIO SOURCE: broker timeout user=%s budget=%ss",
+                     user_id, _budget)
+        await _release_user_slot(user_id)
+        _offer_text, _offer_kb = await _manual_fallback_offer(user_id, tier, "timeout")
+        await callback.message.answer(
+            "⚠️ *Серверы Freedom Broker сейчас недоступны* — брокер не ответил "
+            f"за {_budget} с. Обычно это проходит за 5–15 минут; попробуйте "
+            "чуть позже.\n\n"
+            "✅ Токен *не списан*." + _offer_text,
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=_offer_kb,
+        )
+        await state.clear()
+        return
     except Exception as exc:
         # F-6: never echo str(exc) to the user — arbitrary exception text can
         # carry upstream response bodies (client.py wraps resp.text into
@@ -2751,11 +3641,14 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
         logger.exception("Не удалось загрузить портфель для %s [%s]: %s",
                          user_id, error_id, exc)
         await _release_user_slot(user_id)
+        _offer_text, _offer_kb = (await _manual_fallback_offer(user_id, tier, "error")
+                                  if source == "freedom" else ("", None))
         await callback.message.answer(
             "ℹ️ *Не удалось загрузить портфель прямо сейчас.*\n\n"
             f"Код ошибки для поддержки: `{error_id}`\n\n"
-            "✅ Токен *не списан*. Попробуйте ещё раз через пару минут.",
+            "✅ Токен *не списан*. Попробуйте ещё раз через пару минут." + _offer_text,
             parse_mode=ParseMode.MARKDOWN,
+            reply_markup=_offer_kb,
         )
         await state.clear()
         return
@@ -2785,6 +3678,7 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
             "\n\n✅ Токен *не списан*.",
             parse_mode=ParseMode.MARKDOWN,
         )
+        await _answer_fallback_offer(callback.message, user_id, tier, _reason)
         await state.clear()
         return
 
@@ -2794,6 +3688,22 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
     if source == "demo":
         source_line = ("📋 *Источник: ДЕМО-портфель (шаблон) — отчёт "
                        "бесплатный.*\n\n")
+    elif source == AGGREGATED_SOURCE:
+        # Названы ОБА источника состава и ОДИН источник цен (I-13, §I.6).
+        _comp = agg_composition
+        source_line = (
+            f"🌐 *Состав: Freedom Broker ({_comp['freedom_positions']} поз.) + "
+            f"ручной ввод ({_comp['manual_positions']} поз.); котировки — "
+            "Tradernet для всех позиций.*\n"
+            + (f"Суммированы бумаги из обоих источников: "
+               f"{_md_safe(', '.join(_comp['overlaps']))}.\n" if _comp["overlaps"] else "")
+            + "\n")
+    elif source == "manual" and fallback_reason:
+        # PR-2: отчёт строится ВМЕСТО брокерского — это названо прямо, иначе
+        # разница с прошлым брокерским отчётом читалась бы как движение рынка.
+        source_line = ("📝 *Отчёт по ручным активам; брокер был недоступен "
+                       f"({FALLBACK_REASON_TEXT.get(fallback_reason, 'сбой')}).* "
+                       "Котировки — независимый публичный источник.\n\n")
     elif source == "manual":
         # Названо прямо: состав — от пользователя, цены — НЕ от брокера.
         # Умолчание здесь читалось бы как «всё как обычно, через Freedom».
@@ -2824,8 +3734,33 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
         df        = df,
         bench_tick= bench_tick,
         source    = source,
+        broker_fallback = (FALLBACK_REASON_TEXT.get(fallback_reason)
+                           if fallback_reason else None),
+        **({"aggregated_composition": agg_composition,
+            "freedom_proof": freedom_proof}
+           if source == AGGREGATED_SOURCE else {}),
     ))
     await state.clear()
+
+
+async def _send_history_fallback_offer(bot, chat_id: int, user_id: int,
+                                       tier: str, source: str) -> None:
+    """Шаг 1 брокерского отчёта упал — предложить ручной отчёт ОТДЕЛЬНОЙ кнопкой.
+
+    Только для `freedom`: у ручного отчёта брокера нет, а у агрегированного
+    своя ветка отказа (D-7). Сбой здесь не имеет права уронить обработку
+    ошибки, ради которой он вызван.
+    """
+    if source != "freedom":
+        return
+    try:
+        text, kb = await _manual_fallback_offer(user_id, tier, "history")
+        if kb is not None:
+            await bot.send_message(chat_id, text.strip(),
+                                   parse_mode=ParseMode.MARKDOWN, reply_markup=kb)
+    except Exception as exc:                           # noqa: BLE001
+        logger.warning("FALLBACK: предложение не отправлено user=%s: %s",
+                       user_id, type(exc).__name__)
 
 
 async def _run_analysis_background(
@@ -2838,6 +3773,9 @@ async def _run_analysis_background(
     df,
     bench_tick: str | None,
     source: str = "freedom",
+    broker_fallback: str | None = None,
+    aggregated_composition: dict | None = None,
+    freedom_proof=None,
 ) -> None:
     """
     Фоновая задача с поэтапными уведомлениями в Telegram.
@@ -2904,7 +3842,13 @@ async def _run_analysis_background(
         # I-12 (данные Tradernet не-клиентам Freedom) без единого признака.
         # `provider_for_source` — fail-closed: неизвестный ему источник честно
         # отказывает ДО сетевых вызовов, и это правильный конец такой ветки.
-        manager = UniversalPortfolioManager(price_source=source)
+        #
+        # I-15: менеджер с `aggregated` (а с ним и клиент Tradernet для ручных
+        # тикеров) создаётся ТОЛЬКО за гейтом живого фетча по ключам vault.
+        if source == AGGREGATED_SOURCE:
+            manager = aggregated_manager(freedom_proof, UniversalPortfolioManager)
+        else:
+            manager = UniversalPortfolioManager(price_source=source)
 
         # Wrap the heavy parts to detect WHERE we fail.
         def _stage_market_data():
@@ -2931,6 +3875,7 @@ async def _run_analysis_background(
                 parse_mode=ParseMode.MARKDOWN,
             )
             await refund("market_data_error")
+            await _send_history_fallback_offer(bot, chat_id, user_id, tier, source)
             raise
 
         # Unpack the facade summary — no engine internals touched in the bot.
@@ -2962,6 +3907,7 @@ async def _run_analysis_background(
                 parse_mode=ParseMode.MARKDOWN,
             )
             await refund("no_market_data")
+            await _send_history_fallback_offer(bot, chat_id, user_id, tier, source)
             raise RuntimeError("market_data_subscription_required")
 
         # Sprint-5 UX: the verbose per-ticker load diagnostics (proxy map,
@@ -3007,6 +3953,16 @@ async def _run_analysis_background(
             raise
 
         await step("✅", "Факторная модель и декомпозиция рисков рассчитаны.")
+
+        # PR-2: отчёт построен ВМЕСТО брокерского — CoVe обязан это назвать
+        # (`data_lineage._manual_source_status`). Ключ ставит слой доставки:
+        # движок о брокере ничего не знает и знать не должен.
+        if broker_fallback:
+            results["broker_fallback_reason"] = broker_fallback
+        # PR-3 §I.6: состав агрегированного отчёта (N + M позиций, пересечения)
+        # — для строки CoVe `_aggregated_source_status`.
+        if source == AGGREGATED_SOURCE and aggregated_composition:
+            results["aggregated_composition"] = dict(aggregated_composition)
 
         # Note: an intermediate "MAC3 Risk Summary" dump used to surface
         # raw vol / Sharpe / Sortino / CVaR / VaR / positive-days here.
@@ -3154,6 +4110,17 @@ async def _run_analysis_background(
             except Exception as cta_exc:
                 logger.warning("Scenario CTA/cache failed for %s: %s", user_id, cta_exc)
 
+    except AggregatedNotPermitted as exc:
+        # I-15 на второй линии: без доказательства живого фетча расчёт не
+        # начинается вовсе — до первого сетевого вызова.
+        logger.error("HYBRID: I-15 отказ в фоне user=%s: %s", user_id, exc.reason)
+        await bot.send_message(
+            chat_id,
+            "🌐 *Агрегированный отчёт невозможен* — живой портфель брокера не "
+            "подтверждён в этом запросе. Запустите отчёт заново из меню /start.",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        await refund("aggregated_not_permitted")
     except RealPortfolioRequired as exc:
         await bot.send_message(
             chat_id,
@@ -3508,7 +4475,12 @@ async def cmd_help(message: Message) -> None:
         "классы активов, риск-профиль.\n"
         "  Изменения бесплатны и действуют со следующего отчёта.\n\n"
         "*Портфель:*\n"
-        "  /start → 🔗 Freedom Broker API (read-only ключи) или 📋 Демо-режим.\n\n"
+        "  /start → 🔗 Freedom Broker API (read-only ключи) или 📋 Демо-режим.\n"
+        # I-9: строки ручного портфеля — только при включённом ручном вводе.
+        + ("  /portfolio — мой ручной портфель (правки `+AAPL 10 150` / `-AAPL`).\n"
+           "  /forget\\_portfolio — удалить ручной портфель и черновик.\n"
+           if manual_portfolio_enabled() else "")
+        + "\n"
         "*Поддержка:* /support",
         parse_mode=ParseMode.MARKDOWN,
     )
@@ -3897,10 +4869,19 @@ def build_dispatcher() -> Dispatcher:
     # Admin-only token grant for testing (ADMIN_USER_IDS env gate).
     dp.message.register(cmd_grant,    F.text.startswith("/grant"))
     dp.message.register(cmd_mandate,  F.text == "/mandate")
+    # Гибрид PR-1: сохранённый ручной портфель (экран + удаление по запросу).
+    dp.message.register(cmd_portfolio,        F.text == "/portfolio")
+    dp.message.register(cmd_forget_portfolio, F.text == "/forget_portfolio")
 
     # Analysis flow callbacks
     dp.callback_query.register(cb_analysis_choice, F.data.startswith("analysis:"))
     dp.callback_query.register(cb_confirm,          F.data.startswith("confirm:"))
+    # Гибрид PR-2: ручной отчёт вместо брокерского (кнопка из сообщения об отказе).
+    dp.callback_query.register(cb_fallback_manual,  F.data.startswith("fb:"))
+    # Гибрид PR-3: меню источников (D-9) и подтверждение пересечений (D-5).
+    dp.callback_query.register(cb_report_source,      F.data.startswith("src:"))
+    dp.callback_query.register(cb_report_tier,        F.data.startswith("rpt"))
+    dp.callback_query.register(cb_aggregated_overlap, F.data.startswith("agg:"))
     dp.callback_query.register(cb_scenario_cached,  F.data == "scenario:cached")
     dp.callback_query.register(cb_cancel,           F.data == "cancel")
     # /mandate menu (B1 2026-07-17) — free mandate edits, no billing here.
@@ -3981,7 +4962,12 @@ async def main() -> None:
             BotCommand(command="topup",   description="Пополнить токены"),
             BotCommand(command="help",    description="Помощь"),
             BotCommand(command="support", description="Поддержка"),
-        ])
+        ] + ([
+            # Гибрид PR-1 — только при включённом ручном вводе (I-9).
+            BotCommand(command="portfolio", description="Мой ручной портфель"),
+            BotCommand(command="forget_portfolio",
+                       description="Удалить ручной портфель"),
+        ] if manual_portfolio_enabled() else []))
     except Exception as exc:                           # noqa: BLE001
         logger.warning("set_my_commands failed: %s", exc)
 

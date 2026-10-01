@@ -242,6 +242,63 @@ MANUAL_TICKERS = ["AAPL.US", "KSPI.KZ", "TLT.US", "SPY.US", "QQQ.US",
 MANUAL_RATES = {"KZT": 1.0 / 450.0}
 
 
+#: Портфель СЦЕНАРИЯ «aggregated» — гибрид: живой счёт Freedom + ручной ввод
+#: (I-15, `portfolio_aggregation`). Под защитой весь путь «брокерский фрейм +
+#: текст → `PortfolioAggregator.merge` → analyze_all», а не только движок:
+#:
+#: | Приём | Что проверяет |
+#: |---|---|
+#: | `AAPL` и на счёте, и в ручном вводе | склейка ДВУХ ИСТОЧНИКОВ движком (A-1), цена брокера сохраняется |
+#: | `USD` кэш в обоих источниках + `CASH:KZT` | кэш суммируется по коду валюты (D-6) + конверсия −37 |
+#: | `TLT` только в ручном вводе | `Broker_Current_Price = None` → цена из матрицы (D-2, ветка 2) |
+#: | `_ramp_source = aggregated` | `portfolio_source` в результате |
+AGGREGATED_BROKER_ROWS = [
+    {"Ticker": "AAPL", "Quantity": 80, "Purchase_Price": 145.0,
+     "Broker_Current_Price": 190.0, "Asset_Type": "Акция",
+     "Raw_Ticker": "AAPL.US", "Currency": "USD"},
+    {"Ticker": "MSFT", "Quantity": 40, "Purchase_Price": 310.0,
+     "Broker_Current_Price": 415.0, "Asset_Type": "Акция",
+     "Raw_Ticker": "MSFT.US", "Currency": "USD"},
+    {"Ticker": "USD", "Quantity": 2000, "Purchase_Price": 1.0,
+     "Broker_Current_Price": 1.0, "Asset_Type": "Кэш",
+     "Raw_Ticker": "USD", "Currency": "USD"},
+]
+
+AGGREGATED_MANUAL_TEXT = """
+AAPL 20 160.0
+TLT 120 95.0
+CASH:KZT 1 000 000
+CASH:USD 1500
+"""
+
+AGGREGATED_TICKERS = ["AAPL.US", "MSFT.US", "TLT.US", "SPY.US", "QQQ.US",
+                      "AGG.US", "EEM.US"]
+
+AGGREGATED_RATES = {"KZT": 1.0 / 450.0}
+
+
+def build_aggregated_frame(engine) -> "tuple[pd.DataFrame, dict]":
+    """Смешанный фрейм сценария «aggregated» — через НАСТОЯЩИЙ агрегатор.
+
+    Брокер подменён только на уровне транспорта (`connector_factory`), поэтому
+    `FreedomSource.load` → `ManualSource.load` → `merge` исполняются целиком.
+    """
+    from portfolio_aggregation import FreedomSource, ManualSource, PortfolioAggregator
+
+    class _Connector:
+        def __init__(self, *_a) -> None:
+            pass
+
+        def fetch_portfolio(self) -> pd.DataFrame:
+            return pd.DataFrame(AGGREGATED_BROKER_ROWS)
+
+    freedom = FreedomSource("fixture-key", "fixture-secret",
+                            connector_factory=_Connector).load()
+    manual = ManualSource(AGGREGATED_MANUAL_TEXT, engine).load()
+    merged = PortfolioAggregator().merge(freedom, manual)
+    return merged.frame, merged.composition()
+
+
 SCENARIOS: dict[str, dict] = {
     "base": {
         "rows": PORTFOLIO_ROWS,
@@ -257,6 +314,15 @@ SCENARIOS: dict[str, dict] = {
         "fx_rates": MANUAL_RATES,
         "fixture": "results_golden_manual.json",
         "doc": "книга РУЧНОГО ВВОДА: текст → парсер → фрейм → analyze_all",
+    },
+    "aggregated": {
+        "aggregated": True,
+        "rows": None,
+        "price_source": "aggregated",
+        "tickers": AGGREGATED_TICKERS,
+        "fx_rates": AGGREGATED_RATES,
+        "fixture": "results_golden_aggregated.json",
+        "doc": "ГИБРИД: счёт Freedom + ручной ввод → merge → analyze_all (I-15)",
     },
     "leveraged_fx": {
         "rows": LEVERAGED_FX_ROWS,
@@ -372,7 +438,10 @@ def run_analyze_all(scenario: str = "base") -> dict:
     saved = {k: os.environ.get(k) for k in ENV_PINS}
     os.environ.update(ENV_PINS)
     try:
-        upm = UniversalPortfolioManager()
+        # Источник цен — только если сценарий его объявил: прежние сценарии
+        # строят менеджер РОВНО как до гибрида (их эталоны не тронуты).
+        upm = (UniversalPortfolioManager(price_source=cfg["price_source"])
+               if cfg.get("price_source") else UniversalPortfolioManager())
         frame = _price_frame(upm.engine, cfg["tickers"])
         hist = _FakeHistory(frame)
         upm.engine.get_market_data = (                       # type: ignore[assignment]
@@ -387,7 +456,9 @@ def run_analyze_all(scenario: str = "base") -> dict:
             upm.engine.fx_rate_to_base = (            # type: ignore[assignment]
                 lambda ccy, _r=_rates: _r.get(str(ccy).upper()))
 
-        if cfg.get("text") is not None:
+        if cfg.get("aggregated"):
+            portfolio, _composition = build_aggregated_frame(upm.engine)
+        elif cfg.get("text") is not None:
             # Ручной сценарий: фрейм строит ПАРСЕР, иначе он выпал бы из-под
             # защиты снимка (ЧК-04.6).
             from finance.manual_portfolio import parse_portfolio_text

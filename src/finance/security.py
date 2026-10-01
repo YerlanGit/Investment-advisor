@@ -32,7 +32,7 @@ class MasterKeyRotatedError(Exception):
         self.user_message = message
 
 
-def _load_cipher() -> MultiFernet:
+def load_cipher() -> MultiFernet:
     """Build a MultiFernet from FINTECH_MASTER_KEY (H-7: seamless rotation).
 
     The env var may hold ONE key or several separated by commas/whitespace.
@@ -49,6 +49,27 @@ def _load_cipher() -> MultiFernet:
         )
     keys = [k for k in re.split(r"[,\s]+", raw.strip()) if k]
     return MultiFernet([Fernet(k.encode()) for k in keys])
+
+
+#: Имя стало ПУБЛИЧНЫМ (2026-10-01): тем же мастер-ключом шифруется сохранённый
+#: ручной портфель (`db_tokenomics.save_manual_portfolio`), а приватное имя между
+#: модулями не ходит (`tests/test_layering.py`). Алиас — ради существующих вызовов.
+_load_cipher = load_cipher
+
+
+def encrypt_text(text: str) -> bytes:
+    """Зашифровать строку текущим первичным ключом (MultiFernet, H-7)."""
+    return load_cipher().encrypt(str(text).encode("utf-8"))
+
+
+def decrypt_text(token: bytes) -> str:
+    """Расшифровать любым активным ключом; иначе `MasterKeyRotatedError`."""
+    try:
+        return load_cipher().decrypt(bytes(token)).decode("utf-8")
+    except InvalidToken as exc:
+        raise MasterKeyRotatedError(
+            "Сохранённый ручной портфель недоступен: ключ шифрования был "
+            "обновлён. Введите портфель заново.") from exc
 
 
 class SecureVault:

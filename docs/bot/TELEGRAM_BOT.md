@@ -1,5 +1,5 @@
 # TELEGRAM_BOT.md — полный флоу телеграм-бота: от `/start` до отчёта
-<!-- nav | area:bot | code:src/tg_bot.py,src/entrypoint.py,src/agent/gatekeeper.py,src/finance/demo_portfolio.py | read-before:онбординг, тиры, токеномика, колбэки, FSM, /mandate -->
+<!-- nav | area:bot | code:src/tg_bot.py,src/entrypoint.py,src/agent/gatekeeper.py,src/finance/demo_portfolio.py,src/portfolio_aggregation/ | read-before:онбординг, тиры, токеномика, колбэки, FSM, /mandate -->
 
 > Назначение: единая карта поведения бота (`src/tg_bot.py`, `src/entrypoint.py`) —
 > что происходит на каждом шаге, какие состояния FSM, какие колбэки, где списываются
@@ -251,6 +251,7 @@ text-fallback не затронуты. Закрыто тестами
 | `MandateEdit` | `Profile` | ручной выбор риск-профиля из `/mandate` (B1 2026-07-17) |
 | `PortfolioConnection` | `Login`, `ApiKey`, `SecretKey` | ввод ключей Freedom Broker (шифруются) |
 | `AnalysisFlow` | `awaiting_approval` | подтверждение списания перед анализом |
+| `ManualPortfolio` | `Input`, `Confirm`, `Edit` | ручной ввод (Фаза 5) и точечные правки сохранённого портфеля `+…`/`-…` (гибрид PR-1, `§−123`) |
 
 **Text-fallback (регистрируется ПОСЛЕДНИМ):** любой посторонний free-text вне
 активного FSM-состояния (`StateFilter(None)`, не `/команда`) мягко возвращается к
@@ -270,6 +271,14 @@ text-fallback не затронуты. Закрыто тестами
 | `confirm:<tier>:<slug>` | `cb_confirm` | запуск анализа |
 | `scenario:cached` | `cb_scenario_cached` | сценарный отчёт из кэша |
 | `cancel` | `cb_cancel` | отмена (без списания) |
+| `manual:*` | `cb_manual_action` | ручной ввод: черновик, подтверждение (переносит текст в постоянный портфель), правка, отмена |
+| `mp:{show,add,rmlist,del,delyes,keep,back}`, `mp:rm:<idx>:<хэш версии>` | `cb_manual_portfolio` | экран «Мой ручной портфель»; кнопка удаления несёт хэш версии (старая кнопка не удалит другую позицию); `delyes` работает и без флага (право удалить свои данные) |
+| `fb:manual:<tier>:<причина>` | `cb_fallback_manual` | ручной отчёт ВМЕСТО брокерского, когда Freedom недоступен; проходит весь путь `_confirm_flow` заново |
+| `src:<источник>` → `rpt:<источник>:<tier>` → `rptgo:<источник>:<tier>` | `cb_report_source` / `cb_report_tier` | меню D-9 (источник → тир → цена → запуск); только при `HYBRID_PORTFOLIO_ENABLED` |
+| `agg:sum:<tier>:<хэш набора>` | `cb_aggregated_overlap` | «это разные счета — суммировать» для пересечений Freedom × ручной (D-5); брокер запрашивается заново |
+
+Все `callback_data` — недоверенный ввод: источник, тир, причина и индекс проверяются
+по allowlist/регэкспу, флаг — на КАЖДОМ нажатии (кнопки живут в чате вечно).
 
 **Deep-link start-параметры** (`/start <param>`, обрабатываются в `cmd_start`):
 
@@ -277,6 +286,32 @@ text-fallback не затронуты. Закрыто тестами
 |---|---|
 | `scn_<n>` | «Применить идею» из отчёта → подтверждение сценарного тира (§2.3) |
 | прочий `<slug>` | контекст промо-канала (`_source_label`) |
+
+---
+
+## 9a. Гибридный портфель: агрегированный отчёт и fallback (`§−123`)
+
+Код — пакет `src/portfolio_aggregation/` (источники, гейт, агрегатор, правки); бот только
+достаёт ключи/текст и рисует экраны. Флаги — функциями: `MANUAL_PORTFOLIO_ENABLED`
+(ручной ввод, `/portfolio`, fallback-кнопки) и `HYBRID_PORTFOLIO_ENABLED` (меню
+источников и агрегированный отчёт; требует первого). Оба по умолчанию **выключены**;
+выключены — бот ведёт себя ровно как до гибрида (I-9).
+
+| Сценарий | Что видит пользователь |
+|---|---|
+| `/portfolio` | таблица (≤ 20 строк) + `➕ Добавить` / `➖ Убрать / уменьшить` / `🗑 Удалить портфель` / `⬅️ Назад`; правки текстом в `ManualPortfolio.Edit`, всё-или-ничего, под `user_slot` |
+| `/forget_portfolio` | подтверждение → удаляются `manual_portfolio` и `manual_portfolio_draft` |
+| брокер отдал fallback-мок / таймаут 60 с / ключи отклонены / прочее исключение | прежний отказ по причине (`_broker_outage_advice`) + `📈 Сгенерировать отчёт по ручным активам` (`fb:manual:…`) либо «Ручной портфель пуст…» + `➕ Добавить активы вручную` |
+| Шаг 1 брокерского отчёта упал | после сообщения об ошибке — отдельная кнопка ручного отчёта |
+| 🌐 агрегированный | брокер ∥ ручной (бюджет 60 с) → гейт I-15 → слияние; пересечения → экран D-5; брокер недоступен → «агрегированный сейчас невозможен» + ручной отчёт (D-7); пустой счёт → ручной отчёт |
+
+**I-15.** Источник `aggregated` получает Tradernet для ВСЕХ колонок только после живого
+фетча по ключам vault в этом же запросе (админ — сервисные ключи). Без доказательства
+`UniversalPortfolioManager(price_source="aggregated")` не создаётся — ни в
+`_confirm_flow`, ни в `_run_analysis_background` (`aggregated_manager`).
+
+**Тарифы те же** (`TIER_COST`, D-10): ручной fallback и агрегированный отчёт стоят как
+брокерский; списание — только после доставки. `connection_mode` кнопками не меняется.
 
 ---
 
@@ -316,6 +351,9 @@ text-fallback не затронуты. Закрыто тестами
 ## 11. Где что менять
 
 - **Кнопки/копирайт меню** → `kb_analysis_choice`, `_show_analysis_menu`, `cmd_start`.
+- **Меню источников / агрегированный отчёт / fallback** → `_show_source_menu`,
+  `_report_source_availability`, `_aggregated_step1`, `_manual_fallback_offer`;
+  сборка состава — `src/portfolio_aggregation/` (НЕ в боте).
 - **Тарифы (в токенах)** → `TIER_COST` / `TIER_LABEL` (`tg_bot.py`).
 - **Цена токена в ₸** → `TOKEN_PRICE_KZT` / `TOKEN_PACK_PRICE_KZT` (`tg_bot.py`) —
   копирайт /balance, /topup, /help читает эти константы (2026-07-17: 2 500 ₸).

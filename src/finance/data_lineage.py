@@ -807,6 +807,13 @@ def _manual_source_status(results: dict) -> Optional[dict]:
     rows = results.get("fx_converted_rows") or []
     note = ("количество и цена покупки введены пользователем и брокером "
             "не подтверждены; рыночные цены — от провайдера")
+    # PR-2 (гибрид): отчёт построен ВМЕСТО брокерского, потому что Freedom
+    # не ответил. Читатель обязан это знать — иначе он сравнит его с прошлым
+    # брокерским отчётом и примет разницу состава за движение рынка.
+    _fallback = str(results.get("broker_fallback_reason") or "").strip()
+    if _fallback:
+        note = (f"отчёт построен по ручным активам; Freedom Broker был "
+                f"недоступен ({_fallback}); ") + note
     if rows:
         note += (f"; позиций переведено в валюту отчёта: {len(rows)} "
                  f"({', '.join(sorted({str(r.get('currency')) for r in rows}))})")
@@ -814,6 +821,40 @@ def _manual_source_status(results: dict) -> Optional[dict]:
         name   = "Состав портфеля",
         source = "Ручной ввод пользователя",
         method = "Текстовый ввод → разбор → контракт движка",
+        status = "degrade",
+        note   = note,
+    )
+
+
+def _aggregated_source_status(results: dict) -> Optional[dict]:
+    """Агрегированный отчёт: состав = брокер + ручной ввод (I-15, `§I.6`).
+
+    Строка условная, как и `_manual_source_status`: `None` для всех прочих
+    источников. Статус `degrade` по той же причине — часть позиций брокером
+    не подтверждена. Отдельно названо, что цены ручных позиций — Tradernet:
+    тот же портфель в чисто ручном отчёте посчитан по другому провайдеру, и
+    числа могут разойтись (осознанное следствие D-1).
+    """
+    if str(results.get("portfolio_source") or "").lower() != "aggregated":
+        return None
+    comp = results.get("aggregated_composition") or {}
+    n_broker = comp.get("freedom_positions")
+    n_manual = comp.get("manual_positions")
+    if n_broker is not None and n_manual is not None:
+        source = (f"Freedom Broker ({int(n_broker)} поз.) + ручной ввод "
+                  f"({int(n_manual)} поз.)")
+    else:
+        source = "Freedom Broker + ручной ввод"
+    note = ("цены — Tradernet для всех позиций; количество и цена покупки "
+            "ручных позиций брокером не подтверждены")
+    overlaps = [str(t) for t in (comp.get("overlaps") or [])]
+    if overlaps:
+        note += ("; пользователь подтвердил, что бумаги есть в обоих источниках "
+                 "и суммируются: " + ", ".join(overlaps))
+    return _row(
+        name   = "Состав портфеля",
+        source = source,
+        method = "Живой портфель брокера ⊕ ручной ввод → контракт движка",
         status = "degrade",
         note   = note,
     )
@@ -859,6 +900,9 @@ def build_lineage(results: dict,
     _manual_row = _manual_source_status(results)
     if _manual_row is not None:
         rows.append(_manual_row)
+    _aggregated_row = _aggregated_source_status(results)
+    if _aggregated_row is not None:
+        rows.append(_aggregated_row)
 
     _proxy_row = _proxy_status(results)
     if _proxy_row is not None:
