@@ -538,3 +538,83 @@ class LayerTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ── аудит §−123: найденные при перепроверке дефекты ──────────────────────────
+
+class AuditFindingsTest(unittest.TestCase):
+    """Каждый тест — дефект, найденный двойной проверкой гибрида."""
+
+    def test_unpriced_manual_position_is_named(self) -> None:
+        """Ручная бумага без ряда у провайдера и без цены брокера выпадала из
+        отчёта МОЛЧА: ни в таблице, ни в `dropped_rows`, ни у чекеров."""
+        sys.path.insert(0, str(_SRC.parent / "tests"))
+        import golden_support as gs
+        from portfolio_aggregation import unpriced_positions
+
+        text = "AAPL 20 160.0\nTLT 120 95.0\nZZZQ 10 100 USD\nCASH:USD 1500\n"
+        with patch.object(gs, "AGGREGATED_MANUAL_TEXT", text):
+            results = gs.run_analyze_all("aggregated")
+            from finance.investment_logic import UniversalPortfolioManager
+            frame, _comp = gs.build_aggregated_frame(UniversalPortfolioManager().engine)
+        perf = set(results["performance_table"]["Ticker"])
+        self.assertNotIn("ZZZQ", perf, "движок не изменён: бумага без цены не оценивается")
+        self.assertEqual(unpriced_positions(frame, results), ["ZZZQ"])
+
+    def test_unpriced_has_no_false_positives(self) -> None:
+        """Прокси, молодой листинг, отброшенная строка, дубли — не «выпавшие»."""
+        sys.path.insert(0, str(_SRC.parent / "tests"))
+        import golden_support as gs
+        from portfolio_aggregation import unpriced_positions
+
+        results = gs.run_analyze_all("base")
+        self.assertEqual(unpriced_positions(pd.DataFrame(gs.PORTFOLIO_ROWS), results), [])
+
+    def test_unpriced_note_in_cove(self) -> None:
+        from finance.data_lineage import _aggregated_source_status, _manual_source_status
+
+        for fn, src in ((_aggregated_source_status, "aggregated"),
+                        (_manual_source_status, "manual")):
+            row = fn({"portfolio_source": src, "unpriced_positions": ["ZZZQ"]})
+            self.assertIn("не вошли в расчёт (нет рыночной цены): ZZZQ", row["note"])
+
+    def test_one_counting_rule_for_the_limit(self) -> None:
+        """50 бумаг + кэш: правки пропускают — значит и источник обязан."""
+        from portfolio_aggregation import count_positions
+
+        engine = _engine()
+        text = "\n".join(f"T{i:03d} 1 10 USD" for i in range(50))
+        text += "\nCASH:USD 100\nCASH:KZT 1000"
+        with patch.dict(os.environ, {"MANUAL_MAX_POSITIONS": ""}):
+            res = ManualSource(text, engine).load()
+        self.assertTrue(res.ok, res.failure_reason)
+        self.assertEqual(count_positions(entries_of(text, engine)), 50)
+        self.assertIsNotNone(apply_edit(text, "+NEWT 1 10 USD", engine).error)
+        self.assertTrue(apply_edit(text, "+CASH:EUR 5", engine).ok, "кэш лимит не трогает")
+
+    def test_numbers_roundtrip_losslessly(self) -> None:
+        """`:.10f` срезал знаки: 0.123456789012 → 0.123456789, 1e-11 → 0."""
+        from portfolio_aggregation.edits import fmt_amount
+
+        engine = _engine()
+        for qty in (0.123456789012, 1e-11, 155.45454545454547, 2500000.0):
+            text = f"BTC-USD {fmt_amount(qty)} 30000 USD"
+            entries = entries_of(text, engine)
+            self.assertEqual(len(entries), 1, text)
+            self.assertEqual(entries[0].quantity, qty)
+        vwap = apply_edit("AAPL.US 3 100 USD", "+AAPL 7 101", engine)
+        aapl = entries_of(vwap.new_text, engine)[0]
+        self.assertEqual(aapl.price, (3 * 100 + 7 * 101) / 10)
+
+    def test_dash_variants_are_minus(self) -> None:
+        engine = _engine()
+        for dash in ("–", "—", "−"):
+            res = apply_edit("AAPL.US 3 100 USD", f"{dash}AAPL", engine)
+            self.assertTrue(res.ok, dash)
+            self.assertEqual(res.new_text, "")
+
+    def test_taxonomy_uses_canonical_not_user_input(self) -> None:
+        rows = [dict(BROKER_ROWS[0], Asset_Class="EQUITY", Asset_Class_Label="Акции")]
+        res = PortfolioAggregator().merge(_live_freedom(rows), _manual("TLT 5 90"))
+        tlt = res.frame[res.frame["Ticker"] == "TLT"].iloc[0]
+        self.assertEqual(tlt["Asset_Class"], "FIXED_INCOME")

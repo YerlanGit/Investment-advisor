@@ -814,6 +814,7 @@ def _manual_source_status(results: dict) -> Optional[dict]:
     if _fallback:
         note = (f"отчёт построен по ручным активам; Freedom Broker был "
                 f"недоступен ({_fallback}); ") + note
+    note += _unpriced_note(results)
     if rows:
         note += (f"; позиций переведено в валюту отчёта: {len(rows)} "
                  f"({', '.join(sorted({str(r.get('currency')) for r in rows}))})")
@@ -824,6 +825,18 @@ def _manual_source_status(results: dict) -> Optional[dict]:
         status = "degrade",
         note   = note,
     )
+
+
+def _unpriced_note(results: dict) -> str:
+    """Хвост строки состава: бумаги, выпавшие из расчёта без цены (`§−123`).
+
+    Ключ кладёт слой доставки (`unpriced_positions`), движок его не знает.
+    Пусто — пустая строка, текст строки CoVe прежний.
+    """
+    lost = [str(t) for t in (results.get("unpriced_positions") or [])]
+    if not lost:
+        return ""
+    return "; не вошли в расчёт (нет рыночной цены): " + ", ".join(lost)
 
 
 def _aggregated_source_status(results: dict) -> Optional[dict]:
@@ -851,6 +864,7 @@ def _aggregated_source_status(results: dict) -> Optional[dict]:
     if overlaps:
         note += ("; пользователь подтвердил, что бумаги есть в обоих источниках "
                  "и суммируются: " + ", ".join(overlaps))
+    note += _unpriced_note(results)
     return _row(
         name   = "Состав портфеля",
         source = source,

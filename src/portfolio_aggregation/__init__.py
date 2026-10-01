@@ -24,14 +24,15 @@ D-1…D-12, инвариант I-15 в `docs/roadmap/manual_portfolio/PHASE_00_C
 `tg_bot`, vault и БД — ключи и текст передаёт L4.
 """
 
-from .aggregator import AggregateResult, AggregationRefused, PortfolioAggregator
+from .aggregator import (AggregateResult, AggregationRefused, PortfolioAggregator,
+                         unpriced_positions)
 from .edits import (EditResult, apply_edit, canonical_text, entries_of,
                     remove_at, version_tag)
 from .flags import (HYBRID_PORTFOLIO_ENV, aggregated_max_positions,
                     broker_fetch_budget_s, hybrid_flag_on, manual_max_positions)
 from .gate import (AGGREGATED_SOURCE, AggregatedNotPermitted, aggregated_manager,
                    live_broker_proof_failure, require_live_broker_fetch)
-from .sources import (FAILURE_REASONS, KEY_ORIGIN_ADMIN_SERVICE, KEY_ORIGIN_VAULT,
+from .sources import (FAILURE_REASONS, count_positions, KEY_ORIGIN_ADMIN_SERVICE, KEY_ORIGIN_VAULT,
                       FreedomSource, ManualSource, PortfolioSource, SourceResult,
                       load_with_budget)
 
@@ -55,6 +56,7 @@ __all__ = [
     "apply_edit",
     "broker_fetch_budget_s",
     "canonical_text",
+    "count_positions",
     "entries_of",
     "hybrid_flag_on",
     "live_broker_proof_failure",
@@ -62,5 +64,6 @@ __all__ = [
     "manual_max_positions",
     "remove_at",
     "require_live_broker_fetch",
+    "unpriced_positions",
     "version_tag",
 ]

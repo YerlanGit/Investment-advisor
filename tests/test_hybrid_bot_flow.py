@@ -398,3 +398,137 @@ class SourceMenuTest(HybridTestBase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ── аудит §−123 ──────────────────────────────────────────────────────────────
+
+class AuditBotFindingsTest(HybridTestBase):
+
+    def _stage_patches(self, seen: list, results: dict):
+        def _prefetch(_self, candidates):
+            return SimpleNamespace(
+                data=pd.DataFrame({"AAPL": [1.0, 1.1]}), risky_tickers=["AAPL"],
+                history_result=SimpleNamespace(failed={}, retried=[]),
+                loaded_count=1, internal_tickers=set(), resolved_portfolio=["AAPL"],
+                portfolio_loaded=1, portfolio_total=1, proxy_map={})
+
+        snapshots: list = []
+
+        async def _get_snap(*_a, **_k):
+            snapshots.append("read")
+            return {"risk_score": 50}
+
+        async def _save_snap(**_k):
+            snapshots.append("write")
+
+        def _payload(res, tier, **kw):
+            seen.append({"results": dict(res), "prev": kw.get("prev_snapshot")})
+            return {"risk_pct": 10}
+
+        self.snapshots = snapshots
+        return [
+            patch.object(_StubManager, "prefetch_market_data", _prefetch, create=True),
+            patch.object(self.tg, "_analyze_existing_portfolio_sync",
+                         lambda *_a, **_k: dict(results)),
+            patch.object(self.tg, "run_gatekeeper",
+                         lambda *_a, **_k: {"critical": [], "warnings": []}),
+            patch.object(self.tg, "_build_pdf_payload", _payload),
+            patch.object(self.tg, "render_report_html", lambda *_a, **_k: "<html/>"),
+            patch.object(self.tg, "write_report_html", lambda *_a, **_k: "/tmp/x.html"),
+            patch.object(self.tg, "upload_report",
+                         lambda *_a, **_k: "https://example.invalid/r.html"),
+            patch.object(self.tg, "get_last_report_snapshot", _get_snap),
+            patch.object(self.tg, "save_report_snapshot", _save_snap),
+        ]
+
+    async def _bg(self, **kw):
+        bot = _BotRecorder()
+        seen: list = []
+        results = kw.pop("results", {"performance_table": pd.DataFrame({"Ticker": ["AAPL"]})})
+        patches = self._stage_patches(seen, results)
+        for p in patches:
+            p.start()
+        try:
+            await self.real_background(bot=bot, chat_id=self.USER_ID, user_id=self.USER_ID,
+                                       tier="base", cost=0, bench_tick=None, **kw)
+        finally:
+            for p in patches:
+                p.stop()
+        return bot, seen
+
+    async def test_unpriced_position_is_announced(self) -> None:
+        df = pd.DataFrame({"Ticker": ["AAPL", "ZZZQ", "USD"], "Quantity": [1, 1, 1],
+                           "Asset_Type": ["Акция", "Акция", "Кэш"]})
+        bot, seen = await self._bg(df=df, source="manual")
+        self.assertTrue(any("Не вошли в расчёт" in t and "ZZZQ" in t for t, _ in bot.sent))
+        self.assertEqual(seen[0]["results"]["unpriced_positions"], ["ZZZQ"])
+
+    async def test_month_over_month_skipped_for_other_portfolios(self) -> None:
+        """Дельта «против прошлого месяца» не сравнивает разные составы книги."""
+        from portfolio_aggregation import FreedomSource
+
+        proof = FreedomSource("k", connector_factory=lambda *_a: SimpleNamespace(
+            fetch_portfolio=lambda: pd.DataFrame(BROKER_ROWS))).load()
+        df = pd.DataFrame(BROKER_ROWS)
+        _bot, seen = await self._bg(df=df, source="aggregated", freedom_proof=proof,
+                                    aggregated_composition={"freedom_positions": 2,
+                                                            "manual_positions": 0,
+                                                            "overlaps": []})
+        self.assertIsNone(seen[0]["prev"])
+        self.assertEqual(self.snapshots, [])
+        _bot, seen = await self._bg(df=df, source="manual",
+                                    broker_fallback="брокер не ответил вовремя")
+        self.assertIsNone(seen[0]["prev"])
+        self.assertEqual(self.snapshots, [])
+        _bot, seen = await self._bg(df=df, source="freedom")
+        self.assertEqual(seen[0]["prev"], {"risk_score": 50}, "брокерская история прежняя")
+        self.assertEqual(self.snapshots, ["read", "write"])
+
+    async def test_fallback_report_keeps_unfinished_draft(self) -> None:
+        """Отчёт по СОХРАНЁННОМУ портфелю не стирает незаконченный черновик."""
+        await self.db.save_manual_portfolio(self.USER_ID, MANUAL_NO_OVERLAP)
+        await self.db.save_manual_draft(self.USER_ID, "MSFT 1 400")
+        cb = _FakeCallback("fb:manual:base:timeout", user_id=self.USER_ID)
+        await self.tg.cb_fallback_manual(cb, self.state)
+        await asyncio.sleep(0)
+        self.assertEqual(len(self.started), 1, cb.message.all_text)
+        self.assertIs(self.started[0].get("delete_draft"), False)
+        _bot, _seen = await self._bg(df=pd.DataFrame(BROKER_ROWS), source="manual",
+                                     delete_draft=False)
+        self.assertIsNotNone(await self.db.get_manual_draft(self.USER_ID))
+
+    async def test_storage_failure_is_never_silent(self) -> None:
+        """Сбой хранилища на экране/кнопках — код поддержки, а не тишина."""
+        async def _boom(_uid):
+            raise RuntimeError("db down")
+
+        with patch.object(self.tg, "get_manual_portfolio", _boom):
+            msg = _FakeMessage("/portfolio", user_id=self.USER_ID)
+            await self.tg.cmd_portfolio(msg, self.state)
+            self.assertIn("Код ошибки для поддержки", msg.all_text)
+            cb = _FakeCallback("mp:rmlist", user_id=self.USER_ID)
+            await self.tg.cb_manual_portfolio(cb, self.state)
+            self.assertIn("Код ошибки для поддержки", cb.message.all_text)
+            menu = _FakeMessage("", user_id=self.USER_ID)
+            await self.tg._show_analysis_menu(menu, "", user_id=self.USER_ID)
+            self.assertIn("src:demo", _buttons(menu), "меню источников не пропало")
+
+    async def test_screen_shows_exact_quantities(self) -> None:
+        """0.005 BTC печаталось как «0.01» — экран врал о сохранённом."""
+        await self.db.save_manual_portfolio(self.USER_ID, "BTC-USD 0.005 65000.5 USD")
+        msg = _FakeMessage("/portfolio", user_id=self.USER_ID)
+        await self.tg.cmd_portfolio(msg, self.state)
+        self.assertIn("0.005", msg.all_text)
+        self.assertIn("65 000.5", msg.all_text)
+
+
+class OverLimitPromiseTest(HybridTestBase):
+    """Аудит `§−123`: сообщение о непринятом длинном вводе не обещает ложного."""
+
+    async def test_hybrid_with_saved_portfolio_says_old_one_is_used(self) -> None:
+        await self.db.save_manual_portfolio(self.USER_ID, "AAPL.US 1 100 USD")
+        await self._send_text("\n".join(f"T{i:03d} 1 10 USD" for i in range(51)))
+        cb = await self._tap("confirm")
+        self.assertIn("не сохранён", cb.message.all_text)
+        self.assertIn("прежнему", cb.message.all_text)
+        self.assertEqual(await self._stored(), "AAPL.US 1 100 USD")
