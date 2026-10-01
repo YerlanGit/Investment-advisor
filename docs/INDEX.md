@@ -342,6 +342,7 @@ grep -rl "area:math" docs/               # → все доки одной под
 | `design/premium_v2/*.jsx` (вид отчёта) | `report/PREMIUM_DESIGN.md` — после правки ОБЯЗАТЕЛЬНО `design/premium_v2/build.sh` |
 | `src/ai_narrative.py` · `SYSTEM_PROMPT.md` (ИИ-тексты) | `report/REPORT_SECTIONS.md §5` + `llm/LLM_STRATEGY_MULTILINGUAL.md` |
 | `src/tg_bot.py` · `entrypoint.py` (флоу бота) | `bot/TELEGRAM_BOT.md` |
+| `src/portfolio_aggregation/**` (гибрид: брокер + ручной ввод, fallback, правки ручного портфеля) | **`roadmap/manual_portfolio/PHASE_00_CONTRACT.md` I-15** + `bot/TELEGRAM_BOT.md §9a` + `audit/rounds` `§−123` — математики в пакете нет, склейка дублей остаётся в движке |
 | `src/db_tokenomics.py` · цены токенов | `business/ECONOMICS.md` |
 | `src/agent/rag_engine.py` · `cloud_function/` · `scripts/ingest_bank_report.py` | `rag/RAG_INGESTION.md` (+ `rag/RAG_TROUBLESHOOTING.md` при пустой базе) |
 | `src/finance/scenario_engine.py` · `scenario_report.py` | `roadmap/ROADMAP_SCENARIO_TIER.md` |
