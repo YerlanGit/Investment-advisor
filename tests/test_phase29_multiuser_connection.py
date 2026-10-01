@@ -289,7 +289,8 @@ class UndeterminedSourceRecoveryTest(unittest.TestCase):
         marker = "⚠️ *Источник портфеля не выбран.*"   # the message literal
         self.assertIn(marker, self.src)
         block = self.src.split(marker, 1)[1][:600]
-        self.assertIn("kb_connect_choice()", block,
+        # §−124: клавиатура получает пользователя (флаги раскатки пофамильные).
+        self.assertIn("kb_connect_choice(", block,
                       "the undetermined-source message must attach the "
                       "connection keyboard (one-tap recovery)")
 
@@ -298,7 +299,7 @@ class UndeterminedSourceRecoveryTest(unittest.TestCase):
             "\nasync def ", 1)[0]
         self.assertIn("_resolve_portfolio_source", start_body)
         self.assertIn('"undetermined"', start_body)
-        self.assertIn("kb_connect_choice()", start_body,
+        self.assertIn("kb_connect_choice(", start_body,
                       "/start for a returning user must offer the source "
                       "choice when the source is undetermined")
 

@@ -15,11 +15,11 @@ GCP Cloud Run (long-polling) · Cloud Function (RAG-ингест) · ChromaDB ·
 ## Верификация (обязательна перед каждым пушем)
 
 ```bash
-PYTHONPATH=src python -m pytest tests/ -q          # → 2189 passed, 2 xfailed (+12 skipped без playwright)
+PYTHONPATH=src python -m pytest tests/ -q          # → 2225 passed, 2 xfailed (+12 skipped без playwright)
 ```
 
 - Префикс `PYTHONPATH=src` **ОБЯЗАТЕЛЕН** (`conftest.py`/`pyproject.toml` нет).
-- **Прогонов ДВА.** Второй — зеркало деплой-образа без `design/`: `cp -r src tests SYSTEM_PROMPT.md requirements*.txt <tmp>/ && cd <tmp>`, тот же прогон → 2066 passed, 135 skipped, 2 xfailed.
+- **Прогонов ДВА.** Второй — зеркало деплой-образа без `design/`: `cp -r src tests SYSTEM_PROMPT.md requirements*.txt <tmp>/ && cd <tmp>`, тот же прогон → 2101 passed, 136 skipped, 2 xfailed.
   Зелёный CI ≠ деплой пройдёт: CI видит полный чекаут, Cloud Build — образ; разница — ровно тесты, читающие `design/`, `docs/`, `CLAUDE.md`, `scripts/`, `cloud_function/`.
 - Правил `design/*.jsx` → **обязательно** `bash design/premium_v2/build.sh`.
 - Смоук-рендер тиров: `html_renderer.render_report_html(None, <user_id>, ...)`.
@@ -118,6 +118,7 @@ PYTHONPATH=src python -m pytest tests/ -q          # → 2189 passed, 2 xfailed 
 - **Аренда слота, пережившая процесс, — блок пользователя на TTL**: по SIGTERM инстанс снимает СВОИ аренды (`release_report_locks_for_owner`), чужие — нет (`§−122`).
 - **`aggregated` (брокер + ручной) — только за гейтом I-15**: Tradernet для ручных тикеров — лишь после ЖИВОГО фетча по ключам vault в том же запросе (`portfolio_aggregation.gate`).
   Мок брокера → `ok=False` ДО `pd.concat` (он теряет `attrs`); склейку дублей делает движок, НЕ агрегатор (`§−123`).
+- **Флаг фичи для прода — на строке `--set-env-vars` в `cloudbuild.yaml`** (она заменяет ВЕСЬ набор: флаг из консоли стирается деплоем); раскатка `off`→`admins`→`on`. Портфель отчёта — ЯВНО в callback_data: режим по умолчанию перелечивается в `freedom` при ключах (`§−124`).
 - **У высвобожденного веса ВСЕГДА есть адресат**: гейт реинвеста по ОСТАТКУ, не по факту «есть ли покупка»; Σ `delta_pp` панели = 0, иначе адресат достаётся ИИ (`§−102`).
 - Мобильная вёрстка — ПО ЗАМЕРУ (320/360/390/414), мимо свёрнутых аккордеонов, метрик ДВЕ: `measure` (уход ЗА экран; `scrollWidth` обнулён страничным `overflow-x:hidden`, `§−97` E-6) и `measure_clipped` (срез ВНУТРИ колонки: 1 px из 141, `§−102`). Лечит РАСКЛАДКА, не кегль.
 - Мобильный замер — на РЕАЛЬНОМ payload во ВСЕХ рендерах (Premium, Jinja-фолбэк, сценарий): мок без длинных тикеров, а фолбэк был сломан на всех ширинах (`test_phase62`, `§−121`).

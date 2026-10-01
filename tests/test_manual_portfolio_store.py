@@ -154,14 +154,17 @@ class EditFlowTest(StoreTestBase):
             self.USER_ID, "AAPL.US 10 150 USD\nCASH:USD 3000")
 
     async def test_screen_lists_positions_and_buttons(self) -> None:
-        msg = _FakeMessage("/portfolio", user_id=self.USER_ID)
-        await self.tg.cmd_portfolio(msg, self.state)
-        text, kwargs = msg.sent[-1]
+        cb = _FakeCallback("mp:show", user_id=self.USER_ID)
+        await self.tg.cb_manual_portfolio(cb, self.state)
+        text, kwargs = (cb.message.sent + cb.message.edited)[-1]
         self.assertIn("AAPL", text)
         self.assertIn("CASH:USD", text)
         datas = [b.callback_data for row in kwargs["reply_markup"].inline_keyboard
                  for b in row]
-        self.assertEqual(datas, ["mp:add", "mp:rmlist", "mp:del", "mp:back"])
+        # §−124: отчёт по ручному портфелю — прямо с его экрана (портфель явно
+        # в callback_data); «назад» ведёт в «Мой портфель».
+        self.assertEqual(datas, ["mp:add", "mp:rmlist", "src:manual",
+                                 "mp:del", "mp:back"])
 
     async def test_add_vwap_and_change_line(self) -> None:
         await self._mp("mp:add")
@@ -245,7 +248,7 @@ class RemoveButtonsTest(StoreTestBase):
 
     async def test_rmlist_buttons_carry_version(self) -> None:
         cb = await self._mp("mp:rmlist")
-        _t, kwargs = cb.message.sent[-1]
+        _t, kwargs = (cb.message.sent + cb.message.edited)[-1]   # экран правится на месте
         datas = [b.callback_data for row in kwargs["reply_markup"].inline_keyboard
                  for b in row]
         tag = self._tag(self.text)

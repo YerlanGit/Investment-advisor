@@ -50,6 +50,14 @@ def _broker(*_a) -> pd.DataFrame:
     return pd.DataFrame(BROKER_ROWS)
 
 
+async def make_profile(db, user_id: int) -> None:
+    """Пройденная анкета: без мандата меню отправляет на /start (§−124)."""
+    await db.save_profile(
+        telegram_id=user_id, score=10, profile_name="Умеренный",
+        target_volatility=0.10, target_te=0.04, selected_assets=["US_EQUITY"],
+        limits_dict={"US_EQUITY": [30, 60]}, benchmark_ticker="SPY.US")
+
+
 class HybridTestBase(FallbackTestBase):
 
     async def asyncSetUp(self) -> None:
@@ -296,11 +304,13 @@ class AggregatedRefusalsTest(HybridTestBase):
         self.assertFalse(self.started)
 
     async def test_empty_manual_portfolio(self) -> None:
+        """§−124: отказ — ДО похода к брокеру и с кнопкой туда, где его устранить."""
         await self.db.delete_manual_portfolio(self.USER_ID)
         cb = await self._go("rptgo:aggregated:base",
                             fetch=lambda *_a: self.fail("брокер не спрашивается"))
-        self.assertIn("Ручной портфель пуст", cb.message.all_text)
-        self.assertIn("mp:add", _buttons(cb.message))
+        self.assertIn("заполните ручной портфель", cb.message.all_text)
+        self.assertIn("mp:show", _buttons(cb.message))
+        self.assertFalse(self.started)
 
     async def test_logs_carry_no_keys_or_positions(self) -> None:
         """S-3: в логах — user_id, причина, error_id, счётчики."""
@@ -323,8 +333,9 @@ class SourceMenuTest(HybridTestBase):
     async def test_all_sources_when_available(self) -> None:
         await self.db.save_manual_portfolio(self.USER_ID, MANUAL_NO_OVERLAP)
         msg = await self._menu()
+        # §−124: под списком — строка навигации (портфель · меню).
         self.assertEqual(_buttons(msg), ["src:freedom", "src:manual", "src:aggregated",
-                                         "src:demo", "mp:show"])
+                                         "src:demo", "home:portfolio", "home:menu"])
 
     async def test_unavailable_sources_are_explained(self) -> None:
         with patch.object(self.tg, "_has_vault_keys_sync", lambda _uid: False), \
@@ -333,14 +344,16 @@ class SourceMenuTest(HybridTestBase):
         datas = _buttons(msg)
         self.assertNotIn("src:freedom", datas)
         self.assertNotIn("src:aggregated", datas)
-        self.assertIn("подключите брокера", msg.all_text)
+        self.assertIn("Недоступно", msg.all_text)
+        self.assertIn("нужен подключённый Freedom", msg.all_text)
 
     async def test_step2_tiers_carry_source(self) -> None:
         await self.db.save_manual_portfolio(self.USER_ID, MANUAL_NO_OVERLAP)
         cb = await self._go("src:aggregated")
         datas = _buttons(cb.message)
-        self.assertEqual(datas, ["rpt:aggregated:base", "rpt:aggregated:deep",
-                                 "rpt:aggregated:scenario"])
+        # §−124: тиры по одному в строке (парой они обрезались на телефоне) + навигация.
+        self.assertEqual(datas, ["rpt:aggregated:base", "rpt:aggregated:scenario",
+                                 "rpt:aggregated:deep", "home:report", "home:menu"])
         self.assertTrue(all(len(d.encode()) <= 64 for d in datas))
         cb2 = await self._go("rpt:aggregated:deep")
         self.assertIn("rptgo:aggregated:deep", _buttons(cb2.message))
@@ -383,8 +396,8 @@ class SourceMenuTest(HybridTestBase):
         """I-9: без флага гибрида — прежнее меню тиров."""
         os.environ["HYBRID_PORTFOLIO_ENABLED"] = "off"
         msg = await self._menu()
-        self.assertEqual(_buttons(msg), ["analysis:base", "analysis:deep",
-                                         "analysis:scenario"])
+        self.assertEqual(_buttons(msg), ["analysis:base", "analysis:scenario",
+                                         "analysis:deep", "home:portfolio", "home:menu"])
 
     async def test_handlers_registered(self) -> None:
         # `build_dispatcher()` здесь не вызывается: роутеры модульные и
@@ -502,10 +515,16 @@ class AuditBotFindingsTest(HybridTestBase):
         async def _boom(_uid):
             raise RuntimeError("db down")
 
+        await make_profile(self.db, self.USER_ID)
         with patch.object(self.tg, "get_manual_portfolio", _boom):
+            # §−124: /portfolio — экран «Мой портфель»; сбой хранилища там
+            # назван «недоступен», а не «пуст» (это разные факты).
             msg = _FakeMessage("/portfolio", user_id=self.USER_ID)
             await self.tg.cmd_portfolio(msg, self.state)
-            self.assertIn("Код ошибки для поддержки", msg.all_text)
+            self.assertIn("Ручной портфель — недоступен", msg.all_text)
+            cb = _FakeCallback("mp:show", user_id=self.USER_ID)
+            await self.tg.cb_manual_portfolio(cb, self.state)
+            self.assertIn("Код ошибки для поддержки", cb.message.all_text)
             cb = _FakeCallback("mp:rmlist", user_id=self.USER_ID)
             await self.tg.cb_manual_portfolio(cb, self.state)
             self.assertIn("Код ошибки для поддержки", cb.message.all_text)
@@ -516,10 +535,10 @@ class AuditBotFindingsTest(HybridTestBase):
     async def test_screen_shows_exact_quantities(self) -> None:
         """0.005 BTC печаталось как «0.01» — экран врал о сохранённом."""
         await self.db.save_manual_portfolio(self.USER_ID, "BTC-USD 0.005 65000.5 USD")
-        msg = _FakeMessage("/portfolio", user_id=self.USER_ID)
-        await self.tg.cmd_portfolio(msg, self.state)
-        self.assertIn("0.005", msg.all_text)
-        self.assertIn("65 000.5", msg.all_text)
+        cb = _FakeCallback("mp:show", user_id=self.USER_ID)
+        await self.tg.cb_manual_portfolio(cb, self.state)
+        self.assertIn("0.005", cb.message.all_text)
+        self.assertIn("65 000.5", cb.message.all_text)
 
 
 class OverLimitPromiseTest(HybridTestBase):

@@ -25,7 +25,7 @@
 > импорт), то есть когда карта действительно врёт.
 
 
-**Замер:** 95 тест-файлов · 62 модулей `src/` имеют хотя бы один адресный тест-импорт.
+**Замер:** 96 тест-файлов · 62 модулей `src/` имеют хотя бы один адресный тест-импорт.
 
 ## Модуль → тесты
 
@@ -81,7 +81,7 @@
 | `ingest_entrypoint` | 1 | `test_phase51_ingest_bot.py` |
 | `pdf_charts` | 2 | `test_phase4_reporting.py` · `test_phase5_rag_quality.py` |
 | `pdf_payload` | 30 | `test_factor_decomposition.py` · `test_phase10_pillar_chip.py` · `test_phase14_refactor.py` · `test_phase16_sprint2.py` · `test_phase18_sprint5.py` · `test_phase19_block_audit.py` · `test_phase25_math_sprint1.py` · `test_phase28_risk_methodology_audit.py` · `test_phase31_benchmark_factor_propagation.py` · `test_phase33_effect_reinvest_quality.py` · `test_phase36_illiquid_proxy.py` · `test_phase36_report_audit_fixes.py` · `test_phase37_position_contract.py` · `test_phase39_report_consistency.py` · `test_phase40_labels_and_boundary.py` · `test_phase41_fx_base_currency.py` · `test_phase44_live_report_fixes.py` · `test_phase47_cove_and_fx_honesty.py` · `test_phase49_contract_reaches_eyes.py` · `test_phase4_reporting.py` · `test_phase50_report_layer_parity.py` · `test_phase52_bank_identity_ssot.py` · `test_phase54_rag_chunking_and_provenance.py` · `test_phase56_payload_schema.py` · `test_phase5_rag_quality.py` · `test_phase61_report_layer_audit.py` · `test_phase62_mobile_real_payloads.py` · `test_phase7_logic_wiring.py` · `test_phase8_report_fixes.py` · `test_phase9_fpillar_stress.py` |
-| `portfolio_aggregation` | 4 | `test_broker_fallback.py` · `test_hybrid_bot_flow.py` · `test_manual_portfolio_store.py` · `test_portfolio_aggregation.py` |
+| `portfolio_aggregation` | 5 | `test_bot_navigation.py` · `test_broker_fallback.py` · `test_hybrid_bot_flow.py` · `test_manual_portfolio_store.py` · `test_portfolio_aggregation.py` |
 | `portfolio_aggregation.edits` | 1 | `test_portfolio_aggregation.py` |
 | `premium_payload` | 19 | `test_factor_decomposition.py` · `test_phase19_block_audit.py` · `test_phase21_recos.py` · `test_phase26_report_fixes.py` · `test_phase31_benchmark_factor_propagation.py` · `test_phase33_effect_reinvest_quality.py` · `test_phase36_illiquid_proxy.py` · `test_phase37_base_holdings_ai.py` · `test_phase39_report_consistency.py` · `test_phase40_labels_and_boundary.py` · `test_phase44_live_report_fixes.py` · `test_phase47_cove_and_fx_honesty.py` · `test_phase48_report_verdict_audit.py` · `test_phase49_contract_reaches_eyes.py` · `test_phase50_report_layer_parity.py` · `test_phase52_bank_identity_ssot.py` · `test_phase53_kpi_card_parity.py` · `test_phase57_mockup_literal_guard.py` · `test_phase61_report_layer_audit.py` |
 | `premium_renderer` | 2 | `test_phase49_contract_reaches_eyes.py` · `test_phase55_mobile_and_dom_gates.py` |
@@ -92,7 +92,7 @@
 | `services.macro_data` | 3 | `test_phase21_recos.py` · `test_phase4_reporting.py` · `test_phase50_report_layer_parity.py` |
 | `services.quote_publisher` | 1 | `test_phase51_ingest_bot.py` |
 | `services.report_storage` | 2 | `test_phase14_refactor.py` · `test_phase46_p2_maintainability.py` |
-| `tg_bot` | 16 | `test_manual_fsm_flow.py` · `test_phase12_beta_safety.py` · `test_phase16_sprint2.py` · `test_phase17_admin_grant.py` · `test_phase1_fixes.py` · `test_phase23_rag_inventory.py` · `test_phase24_scenario_report.py` · `test_phase26_report_fixes.py` · `test_phase29_multiuser_connection.py` · `test_phase31_benchmark_factor_propagation.py` · `test_phase43_report_lock.py` · `test_phase51_broker_outage_diagnosis.py` · `test_phase52_bank_identity_ssot.py` · `test_phase59_brand_rename.py` · `test_phase5_rag_quality.py` · `test_phase63_multiuser_readiness.py` |
+| `tg_bot` | 17 | `test_bot_navigation.py` · `test_manual_fsm_flow.py` · `test_phase12_beta_safety.py` · `test_phase16_sprint2.py` · `test_phase17_admin_grant.py` · `test_phase1_fixes.py` · `test_phase23_rag_inventory.py` · `test_phase24_scenario_report.py` · `test_phase26_report_fixes.py` · `test_phase29_multiuser_connection.py` · `test_phase31_benchmark_factor_propagation.py` · `test_phase43_report_lock.py` · `test_phase51_broker_outage_diagnosis.py` · `test_phase52_bank_identity_ssot.py` · `test_phase59_brand_rename.py` · `test_phase5_rag_quality.py` · `test_phase63_multiuser_readiness.py` |
 
 ## Модули без прямого тест-импорта
 
