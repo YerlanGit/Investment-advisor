@@ -95,6 +95,7 @@ from finance.security import SecureVault, MasterKeyRotatedError
 # Гибрид (I-15): брокер + ручной ввод. Пакет — L1, импорт вниз.
 from portfolio_aggregation import (
     apply_edit as _mp_apply_edit,
+    broker_fetch_budget_s,
     canonical_text as _mp_canonical_text,
     entries_of as _mp_entries_of,
     hybrid_flag_on,
@@ -2849,6 +2850,93 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
     """
     await callback.answer()
     _, tier, context_slug = callback.data.split(":", 2)
+    await _confirm_flow(callback, state, tier)
+
+
+#: Причины, с которыми бот предлагает ручной отчёт вместо брокерского (PR-2).
+#: Ключ уезжает в callback_data (`fb:manual:<tier>:<код>`) — поэтому allowlist:
+#: callback_data — недоверенный ввод (S-5). Значение — текст для CoVe и превью.
+FALLBACK_REASON_TEXT: dict[str, str] = {
+    "waf_block":   "блокировка запросов по IP на стороне брокера",
+    "api_error":   "сбой API брокера",
+    "parse_error": "ответ брокера не разобран",
+    "timeout":     "брокер не ответил вовремя",
+    "auth":        "ключи брокера отклонены",
+    "error":       "сбой загрузки портфеля",
+    "history":     "не загрузилась история цен",
+}
+_FB_RE = re.compile(r"^fb:manual:([a-z]{1,12}):([a-z_]{1,16})$")
+
+
+async def _manual_fallback_offer(user_id: int, tier: str,
+                                 reason: str) -> tuple[str, InlineKeyboardMarkup | None]:
+    """Хвост сообщения об отказе брокера: что можно сделать ВМЕСТО (PR-2 §3).
+
+    Три ветки: ручной портфель есть → кнопка ручного отчёта; нет → честное
+    «пуст» и кнопка ввода; флаг ручного ввода выключен → ничего (I-9: текст и
+    клавиатура ровно прежние).
+    """
+    if not manual_portfolio_enabled():
+        return "", None
+    reason = reason if reason in FALLBACK_REASON_TEXT else "error"
+    try:
+        text, _unreadable = await _load_manual_portfolio_text(user_id)
+    except Exception as exc:                           # noqa: BLE001
+        logger.warning("FALLBACK: ручной портфель не прочитан user=%s: %s",
+                       user_id, type(exc).__name__)
+        text = ""
+    if text.strip():
+        return ("\n\n📈 Можно построить отчёт по вашим *ручным активам* — "
+                "котировки возьмём из независимого публичного источника, тариф "
+                "тот же, токен спишется только после готового отчёта.",
+                InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(
+                    text="📈 Сгенерировать отчёт по ручным активам",
+                    callback_data=f"fb:manual:{tier}:{reason}")]]))
+    return ("\n\nРучной портфель пуст, отчёт сейчас невозможен. Попробуйте "
+            "позже или добавьте активы вручную.",
+            InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(
+                text="➕ Добавить активы вручную", callback_data="mp:add")]]))
+
+
+async def _answer_fallback_offer(message: Message, user_id: int, tier: str,
+                                 reason: str) -> None:
+    """То же предложение отдельным сообщением — под уже отправленным отказом."""
+    text, kb = await _manual_fallback_offer(user_id, tier, reason or "api_error")
+    if kb is not None:
+        await message.answer(text.strip(), parse_mode=ParseMode.MARKDOWN,
+                             reply_markup=kb)
+
+
+async def cb_fallback_manual(callback: CallbackQuery, state: FSMContext) -> None:
+    """`fb:manual:<tier>:<причина>` — ручной отчёт, когда брокер недоступен.
+
+    Проходит ВЕСЬ путь подтверждения заново (слот, флаг, наличие портфеля,
+    баланс), а не прыгает в фоновую задачу: кнопка живёт в чате вечно, и к
+    моменту нажатия любое из этих условий могло измениться (S-4).
+    """
+    await callback.answer()
+    m = _FB_RE.match(str(callback.data or ""))
+    if not m or m.group(1) not in TIER_COST or m.group(2) not in FALLBACK_REASON_TEXT:
+        logger.warning("FALLBACK: подделанный callback user=%s", callback.from_user.id)
+        return
+    if not manual_portfolio_enabled():
+        await callback.message.answer("ℹ️ Ручной ввод портфеля пока недоступен.",
+                                      reply_markup=kb_connect_choice())
+        return
+    await _confirm_flow(callback, state, m.group(1), source_override="manual",
+                        fallback_reason=m.group(2))
+
+
+async def _confirm_flow(callback: CallbackQuery, state: FSMContext, tier: str, *,
+                        source_override: str | None = None,
+                        fallback_reason: str | None = None) -> None:
+    """Тело подтверждения отчёта: источник → баланс → загрузка → превью → фон.
+
+    `source_override` — источник, выбранный КНОПКОЙ (`fb:`), а не режимом по
+    умолчанию из профиля: `connection_mode` при этом не меняется.
+    `fallback_reason` — отчёт строится вместо брокерского (PR-2): причина
+    доезжает до превью и до CoVe.
+    """
     user_id = callback.from_user.id
     cost    = TIER_COST[tier]
 
@@ -2873,7 +2961,10 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
     # the vault file on gcsfuse — an I/O error escaping here would leak the
     # single-flight slot and lock the user out until restart.
     try:
-        source, stored_mode = await _resolve_portfolio_source(user_id)
+        if source_override is not None:
+            source, stored_mode = source_override, None
+        else:
+            source, stored_mode = await _resolve_portfolio_source(user_id)
     except Exception as exc:                       # noqa: BLE001
         error_id = uuid.uuid4().hex[:12]
         logger.exception("Source resolution failed for %s [%s]: %s",
@@ -3045,7 +3136,12 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
         if source == "manual":
             # Черновик старше FSM-состояния: он переживает рестарт контейнера,
             # а состояние — нет (`PHASE_05 §5`).
-            manual_text = str((await state.get_data()).get("manual_text") or "")
+            manual_text = ("" if source_override == "manual" else
+                           str((await state.get_data()).get("manual_text") or ""))
+            if source_override == "manual":
+                # Кнопочный ручной отчёт (fallback) — это «мой ручной портфель»:
+                # сохранённый портфель первым, черновик — запасным.
+                manual_text, _unreadable = await _load_manual_portfolio_text(user_id)
             if not manual_text.strip():
                 # `get_manual_draft` отдаёт СЛОВАРЬ (`text`/`created_at`/
                 # `updated_at`), а не строку: `str()` от него дал бы
@@ -3063,8 +3159,14 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
                 None, _manual_frame_sync, manual_text
             )
         else:
-            df = await loop.run_in_executor(
-                None, _fetch_portfolio_sync, api_key, secret_key, login
+            # D-8: общий бюджет ожидания брокера. Поток executor'а по таймауту
+            # не отменяется (вызов без побочных эффектов) — его поздний
+            # результат просто отбрасывается, а слот освобождается ниже ровно
+            # один раз.
+            df = await asyncio.wait_for(
+                loop.run_in_executor(
+                    None, _fetch_portfolio_sync, api_key, secret_key, login),
+                timeout=broker_fetch_budget_s(),
             )
     except ManualInputUnusable as exc:
         logger.info("MANUAL: расчёт невозможен user=%s: %s", user_id, exc)
@@ -3085,12 +3187,16 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
     except BrokerAuthError as exc:
         logger.error("Freedom Broker auth failed for %s: %s", user_id, exc)
         await _release_user_slot(user_id)          # H1: free slot — bg task never spawned
+        # PR-2: текст — «ключи неверны», а не «серверы недоступны»; ручной
+        # отчёт предлагается так же, как при сбое.
+        _offer_text, _offer_kb = await _manual_fallback_offer(user_id, tier, "auth")
         await callback.message.answer(
             "⚠️ *Не удалось подключиться к брокеру.*\n\n"
             "Похоже, API-ключи неверны или отозваны — проверьте их в "
             "/start → 🔗 Freedom Broker API.\n\n"
-            "✅ Токен *не списан* — платите только за готовый отчёт.",
+            "✅ Токен *не списан* — платите только за готовый отчёт." + _offer_text,
             parse_mode=ParseMode.MARKDOWN,
+            reply_markup=_offer_kb,
         )
         await state.clear()
         return
@@ -3103,6 +3209,24 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
         )
         await state.clear()
         return
+    except asyncio.TimeoutError:
+        # D-8: брокер молчит дольше бюджета. «Серверы недоступны» здесь честно —
+        # в отличие от `waf_block`/`parse_error` (`_broker_outage_advice`).
+        _budget = broker_fetch_budget_s()
+        logger.error("PORTFOLIO SOURCE: broker timeout user=%s budget=%ss",
+                     user_id, _budget)
+        await _release_user_slot(user_id)
+        _offer_text, _offer_kb = await _manual_fallback_offer(user_id, tier, "timeout")
+        await callback.message.answer(
+            "⚠️ *Серверы Freedom Broker сейчас недоступны* — брокер не ответил "
+            f"за {_budget} с. Обычно это проходит за 5–15 минут; попробуйте "
+            "чуть позже.\n\n"
+            "✅ Токен *не списан*." + _offer_text,
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=_offer_kb,
+        )
+        await state.clear()
+        return
     except Exception as exc:
         # F-6: never echo str(exc) to the user — arbitrary exception text can
         # carry upstream response bodies (client.py wraps resp.text into
@@ -3111,11 +3235,14 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
         logger.exception("Не удалось загрузить портфель для %s [%s]: %s",
                          user_id, error_id, exc)
         await _release_user_slot(user_id)
+        _offer_text, _offer_kb = (await _manual_fallback_offer(user_id, tier, "error")
+                                  if source == "freedom" else ("", None))
         await callback.message.answer(
             "ℹ️ *Не удалось загрузить портфель прямо сейчас.*\n\n"
             f"Код ошибки для поддержки: `{error_id}`\n\n"
-            "✅ Токен *не списан*. Попробуйте ещё раз через пару минут.",
+            "✅ Токен *не списан*. Попробуйте ещё раз через пару минут." + _offer_text,
             parse_mode=ParseMode.MARKDOWN,
+            reply_markup=_offer_kb,
         )
         await state.clear()
         return
@@ -3145,6 +3272,7 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
             "\n\n✅ Токен *не списан*.",
             parse_mode=ParseMode.MARKDOWN,
         )
+        await _answer_fallback_offer(callback.message, user_id, tier, _reason)
         await state.clear()
         return
 
@@ -3154,6 +3282,12 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
     if source == "demo":
         source_line = ("📋 *Источник: ДЕМО-портфель (шаблон) — отчёт "
                        "бесплатный.*\n\n")
+    elif source == "manual" and fallback_reason:
+        # PR-2: отчёт строится ВМЕСТО брокерского — это названо прямо, иначе
+        # разница с прошлым брокерским отчётом читалась бы как движение рынка.
+        source_line = ("📝 *Отчёт по ручным активам; брокер был недоступен "
+                       f"({FALLBACK_REASON_TEXT.get(fallback_reason, 'сбой')}).* "
+                       "Котировки — независимый публичный источник.\n\n")
     elif source == "manual":
         # Названо прямо: состав — от пользователя, цены — НЕ от брокера.
         # Умолчание здесь читалось бы как «всё как обычно, через Freedom».
@@ -3184,8 +3318,30 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
         df        = df,
         bench_tick= bench_tick,
         source    = source,
+        broker_fallback = (FALLBACK_REASON_TEXT.get(fallback_reason)
+                           if fallback_reason else None),
     ))
     await state.clear()
+
+
+async def _send_history_fallback_offer(bot, chat_id: int, user_id: int,
+                                       tier: str, source: str) -> None:
+    """Шаг 1 брокерского отчёта упал — предложить ручной отчёт ОТДЕЛЬНОЙ кнопкой.
+
+    Только для `freedom`: у ручного отчёта брокера нет, а у агрегированного
+    своя ветка отказа (D-7). Сбой здесь не имеет права уронить обработку
+    ошибки, ради которой он вызван.
+    """
+    if source != "freedom":
+        return
+    try:
+        text, kb = await _manual_fallback_offer(user_id, tier, "history")
+        if kb is not None:
+            await bot.send_message(chat_id, text.strip(),
+                                   parse_mode=ParseMode.MARKDOWN, reply_markup=kb)
+    except Exception as exc:                           # noqa: BLE001
+        logger.warning("FALLBACK: предложение не отправлено user=%s: %s",
+                       user_id, type(exc).__name__)
 
 
 async def _run_analysis_background(
@@ -3198,6 +3354,7 @@ async def _run_analysis_background(
     df,
     bench_tick: str | None,
     source: str = "freedom",
+    broker_fallback: str | None = None,
 ) -> None:
     """
     Фоновая задача с поэтапными уведомлениями в Telegram.
@@ -3291,6 +3448,7 @@ async def _run_analysis_background(
                 parse_mode=ParseMode.MARKDOWN,
             )
             await refund("market_data_error")
+            await _send_history_fallback_offer(bot, chat_id, user_id, tier, source)
             raise
 
         # Unpack the facade summary — no engine internals touched in the bot.
@@ -3322,6 +3480,7 @@ async def _run_analysis_background(
                 parse_mode=ParseMode.MARKDOWN,
             )
             await refund("no_market_data")
+            await _send_history_fallback_offer(bot, chat_id, user_id, tier, source)
             raise RuntimeError("market_data_subscription_required")
 
         # Sprint-5 UX: the verbose per-ticker load diagnostics (proxy map,
@@ -3367,6 +3526,12 @@ async def _run_analysis_background(
             raise
 
         await step("✅", "Факторная модель и декомпозиция рисков рассчитаны.")
+
+        # PR-2: отчёт построен ВМЕСТО брокерского — CoVe обязан это назвать
+        # (`data_lineage._manual_source_status`). Ключ ставит слой доставки:
+        # движок о брокере ничего не знает и знать не должен.
+        if broker_fallback:
+            results["broker_fallback_reason"] = broker_fallback
 
         # Note: an intermediate "MAC3 Risk Summary" dump used to surface
         # raw vol / Sharpe / Sortino / CVaR / VaR / positive-days here.
@@ -4269,6 +4434,8 @@ def build_dispatcher() -> Dispatcher:
     # Analysis flow callbacks
     dp.callback_query.register(cb_analysis_choice, F.data.startswith("analysis:"))
     dp.callback_query.register(cb_confirm,          F.data.startswith("confirm:"))
+    # Гибрид PR-2: ручной отчёт вместо брокерского (кнопка из сообщения об отказе).
+    dp.callback_query.register(cb_fallback_manual,  F.data.startswith("fb:"))
     dp.callback_query.register(cb_scenario_cached,  F.data == "scenario:cached")
     dp.callback_query.register(cb_cancel,           F.data == "cancel")
     # /mandate menu (B1 2026-07-17) — free mandate edits, no billing here.
