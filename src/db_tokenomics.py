@@ -306,6 +306,21 @@ async def init_db() -> None:
             )
         """)
 
+        # Гибрид PR-1 (D-3): ПОСТОЯННЫЙ ручной портфель — отдельно от черновика.
+        # Черновик — про незавершённый ввод и удаляется после отчёта; этот —
+        # то, что пользователь держит и правит точечно (+/−), и он нужен
+        # fallback-отчёту, когда брокер недоступен. Хранится КАНОНИЧЕСКИЙ ТЕКСТ
+        # позиций, зашифрованный тем же мастер-ключом, что и ключи брокера:
+        # состав портфеля — персональные финансовые данные (S-9).
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS manual_portfolio (
+                telegram_id INTEGER PRIMARY KEY,
+                payload_enc BLOB    NOT NULL,
+                created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
         await db.commit()
 
     # Просроченные аренды прошлых инстансов — убрать на старте, чтобы таблица
@@ -784,6 +799,84 @@ async def delete_manual_draft(telegram_id: int) -> bool:
             "DELETE FROM manual_portfolio_draft WHERE telegram_id = ?",
             (telegram_id,),
         )
+        await db.commit()
+        return cursor.rowcount > 0
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Гибрид PR-1 · Постоянный ручной портфель (зашифрован at rest)
+# ═════════════════════════════════════════════════════════════════════════════
+# Шифрование — `finance.security` (MultiFernet, `FINTECH_MASTER_KEY`). Импорт
+# ЛЕНИВЫЙ: модуль на импорте читает `.env`, а этот файл грузится и там, где
+# ручной портфель не нужен вовсе.
+
+
+async def save_manual_portfolio(telegram_id: int, payload_text: str) -> bool:
+    """Сохранить канонический текст ручного портфеля (UPSERT, шифрованно).
+
+    Лимит размера — тот же `MANUAL_DRAFT_MAX_BYTES`, проверяется ДО записи.
+    `created_at` при перезаписи сохраняется, как у черновика.
+    """
+    from finance.security import encrypt_text
+
+    text = str(payload_text or "")
+    size = len(text.encode("utf-8"))
+    if size > MANUAL_DRAFT_MAX_BYTES:
+        raise ManualDraftTooLarge(
+            f"ручной портфель {size} байт при пределе {MANUAL_DRAFT_MAX_BYTES}")
+    token = encrypt_text(text)
+    async with _get_conn() as db:
+        cursor = await db.execute(
+            """
+            INSERT INTO manual_portfolio
+                   (telegram_id, payload_enc, created_at, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ON CONFLICT(telegram_id) DO UPDATE SET
+                payload_enc = excluded.payload_enc,
+                updated_at  = CURRENT_TIMESTAMP
+            """,
+            (telegram_id, token),
+        )
+        await db.commit()
+        return cursor.rowcount != 0
+
+
+async def get_manual_portfolio(telegram_id: int) -> dict | None:
+    """Ручной портфель или `None`. Ключи: `text`, `created_at`, `updated_at`.
+
+    Raises `finance.security.MasterKeyRotatedError`, если мастер-ключ сменился
+    и шифротекст не читается: вызывающий показывает «введите заново», а не
+    трейсбек.
+    """
+    from finance.security import decrypt_text
+
+    async with _get_conn() as db:
+        cursor = await db.execute(
+            "SELECT payload_enc, created_at, updated_at "
+            "FROM manual_portfolio WHERE telegram_id = ?",
+            (telegram_id,),
+        )
+        row = await cursor.fetchone()
+    if row is None or row[0] is None:
+        return None
+    return {"text": decrypt_text(row[0]), "created_at": row[1], "updated_at": row[2]}
+
+
+async def has_manual_portfolio(telegram_id: int) -> bool:
+    """Есть ли сохранённый портфель — БЕЗ расшифровки (как `SecureVault.has_user`)."""
+    async with _get_conn() as db:
+        cursor = await db.execute(
+            "SELECT 1 FROM manual_portfolio WHERE telegram_id = ? LIMIT 1",
+            (telegram_id,),
+        )
+        return (await cursor.fetchone()) is not None
+
+
+async def delete_manual_portfolio(telegram_id: int) -> bool:
+    """Удалить постоянный ручной портфель. True — строка действительно была."""
+    async with _get_conn() as db:
+        cursor = await db.execute(
+            "DELETE FROM manual_portfolio WHERE telegram_id = ?", (telegram_id,))
         await db.commit()
         return cursor.rowcount > 0
 

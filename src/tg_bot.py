@@ -61,11 +61,13 @@ from db_tokenomics import (
     credit_tokens,
     deduct_tokens,
     delete_manual_draft,
+    delete_manual_portfolio,
     InsufficientFundsError,
     get_balance,
     get_benchmark_ticker,
     get_connection_mode_explicit,
     get_manual_draft,
+    get_manual_portfolio,
     get_profile,
     get_last_report_snapshot,
     init_db,
@@ -77,6 +79,7 @@ from db_tokenomics import (
     save_benchmark_ticker,
     save_connection_mode,
     save_manual_draft,
+    save_manual_portfolio,
     save_profile,
     save_report_snapshot,
 )
@@ -90,7 +93,15 @@ from finance.data_checks import DataQualityBlocked
 from finance.investment_logic import UniversalPortfolioManager
 from finance.security import SecureVault, MasterKeyRotatedError
 # Гибрид (I-15): брокер + ручной ввод. Пакет — L1, импорт вниз.
-from portfolio_aggregation import hybrid_flag_on
+from portfolio_aggregation import (
+    apply_edit as _mp_apply_edit,
+    canonical_text as _mp_canonical_text,
+    entries_of as _mp_entries_of,
+    hybrid_flag_on,
+    manual_max_positions,
+    remove_at as _mp_remove_at,
+    version_tag as _mp_version_tag,
+)
 from agent.gatekeeper import run_gatekeeper
 # SSOT имён эмитентов (§−95) — модуль на импорте тянет только stdlib.
 from agent.rag_engine import BANK_ORDER, bank_alias_regex, bank_tail_regex
@@ -215,6 +226,7 @@ class ManualPortfolio(StatesGroup):
 
     Input   = State()   # ждём текст (файл — Фаза 7)
     Confirm = State()   # показан экран подтверждения
+    Edit    = State()   # гибрид PR-1: точечные правки сохранённого портфеля (+/−)
 
 
 class MandateEdit(StatesGroup):
@@ -1287,7 +1299,8 @@ async def send_question(
         )
 
 
-async def _show_analysis_menu(message: Message, slug: str) -> None:
+async def _show_analysis_menu(message: Message, slug: str,
+                              user_id: int | None = None) -> None:
     """Send the final analysis choice, with a deep-link context if slug is set."""
     if slug:
         await message.answer(
@@ -2387,13 +2400,344 @@ async def cb_manual_action(callback: CallbackQuery, state: FSMContext) -> None:
 
     if action == "confirm":
         slug = str(data.get("slug") or "")
+        # Гибрид PR-1 (D-3): текст черновика ПЕРЕНОСИТСЯ в постоянный ручной
+        # портфель. Черновик остаётся до доставленного отчёта, как и раньше.
+        manual_text = str(data.get("manual_text") or "")
+        if not manual_text.strip():
+            manual_text = str((await get_manual_draft(user_id) or {}).get("text") or "")
+        saved_line = await _persist_manual_portfolio(user_id, manual_text)
         await state.clear()
         await callback.message.answer(
             "✅ *Портфель принят.*\n\n"
-            "Он сохранён — можно выбирать тип анализа.",
+            "Он сохранён — можно выбирать тип анализа."
+            + (f"\n\n{saved_line}" if saved_line else ""),
             parse_mode=ParseMode.MARKDOWN,
         )
         await _show_analysis_menu(callback.message, slug)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ГИБРИД PR-1 · ПОСТОЯННЫЙ РУЧНОЙ ПОРТФЕЛЬ: экран, Add / Remove / Trim
+# ══════════════════════════════════════════════════════════════════════════════
+# Логика правок — чистые функции `portfolio_aggregation.edits`; здесь только
+# вид и доставка. Каждая правка — read-modify-write под `user_slot` (S-6):
+# без слота два одновременных «+AAPL» прочли бы одну версию и одна правка
+# молча потерялась бы.
+
+_MP_EDIT_HELP = (
+    "✏️ *Правка ручного портфеля*\n\n"
+    "Пришлите одну или несколько строк:\n"
+    "`+AAPL 10 150` — добавить (есть — докупить, цена станет средневзвешенной)\n"
+    "`-AAPL 5` — уменьшить количество (цена покупки не меняется)\n"
+    "`-AAPL` — удалить позицию целиком\n"
+    "`+USD 500` / `-USD 500` — кэш; маржа — только явной строкой "
+    "`+CASH:USD -1000`\n\n"
+    "Ошибка в любой строке — не меняется ничего."
+)
+
+#: callback_data правки — недоверенный ввод (S-5): allowlist и формат.
+_MP_ACTIONS = frozenset({"show", "add", "rmlist", "del", "delyes", "keep", "back"})
+_MP_RM_RE = re.compile(r"^mp:rm:(\d{1,3}):([0-9a-f]{8})$")
+
+
+def _mp_engine():
+    """Движок ТОЛЬКО ради распознавания тикеров (`canonical_ticker`)."""
+    return UniversalPortfolioManager(price_source="manual").engine
+
+
+def _mp_canonical_sync(text: str) -> tuple[str, int, int]:
+    return _mp_canonical_text(text, _mp_engine())
+
+
+def _mp_entries_sync(text: str):
+    return _mp_entries_of(text, _mp_engine())
+
+
+def _mp_apply_sync(text: str, op_line: str):
+    return _mp_apply_edit(text, op_line, _mp_engine())
+
+
+def _mp_remove_sync(text: str, index: int, tag: str):
+    return _mp_remove_at(text, index, tag, _mp_engine())
+
+
+async def _persist_manual_portfolio(user_id: int, text: str) -> str:
+    """Перенести подтверждённый ввод в постоянный портфель. → строка для чата.
+
+    Хранилище — удобство, а не условие расчёта: сбой (нет мастер-ключа, БД)
+    не имеет права отнять у пользователя только что принятый портфель, поэтому
+    ошибки только логируются — без содержимого портфеля (S-3).
+    """
+    if not str(text or "").strip():
+        return ""
+    loop = asyncio.get_running_loop()
+    try:
+        canon, n_ok, _n_bad = await loop.run_in_executor(None, _mp_canonical_sync, text)
+        if n_ok == 0:
+            return ""
+        limit = manual_max_positions()
+        if n_ok > limit:
+            logger.info("MANUAL STORE: не сохранён user=%s: %d поз. > %d",
+                        user_id, n_ok, limit)
+            return (f"ℹ️ Для постоянного хранения портфель длинноват: {n_ok} "
+                    f"позиций при пределе {limit} — этот расчёт пройдёт, а "
+                    "сохранённым останется прежний портфель.")
+        await save_manual_portfolio(user_id, canon)
+        logger.info("MANUAL STORE: сохранён user=%s поз.=%d", user_id, n_ok)
+        return "💾 Сохранён как ваш ручной портфель — правки: /portfolio"
+    except Exception as exc:                           # noqa: BLE001
+        logger.warning("MANUAL STORE: не сохранён user=%s: %s", user_id,
+                       type(exc).__name__)
+        return ""
+
+
+async def _load_manual_portfolio_text(user_id: int) -> tuple[str, bool]:
+    """→ (текст, недоступен_ли_шифротекст). Пустой текст — портфеля нет."""
+    try:
+        stored = await get_manual_portfolio(user_id)
+    except MasterKeyRotatedError:
+        logger.warning("MANUAL STORE: шифротекст не читается user=%s", user_id)
+        return "", True
+    return str((stored or {}).get("text") or ""), False
+
+
+def kb_mp_screen(has_positions: bool) -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton(text="➕ Добавить", callback_data="mp:add")]]
+    if has_positions:
+        rows[0].append(InlineKeyboardButton(text="➖ Убрать / уменьшить",
+                                            callback_data="mp:rmlist"))
+        rows.append([InlineKeyboardButton(text="🗑 Удалить портфель",
+                                          callback_data="mp:del")])
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="mp:back")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def kb_mp_remove(entries, tag: str) -> InlineKeyboardMarkup:
+    """Кнопка на позицию: индекс + хэш ВЕРСИИ (S-5) — старая кнопка не удалит
+    другую позицию после правки."""
+    rows = [[InlineKeyboardButton(text=f"✖️ {_fit(_md_safe(e.label), 24)}",
+                                  callback_data=f"mp:rm:{i}:{tag}")]
+            for i, e in enumerate(entries[:_MANUAL_PREVIEW_ROWS])]
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="mp:show")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def kb_mp_forget() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="🗑 Да, удалить", callback_data="mp:delyes"),
+        InlineKeyboardButton(text="❌ Отмена", callback_data="mp:keep"),
+    ]])
+
+
+def _format_mp_screen(entries, changes: list[str] | None = None) -> str:
+    """Экран «Мой ручной портфель». Только вид — числа уже в тексте портфеля."""
+    lines = [f"✏️ *Мой ручной портфель* · позиций: {len(entries)}", ""]
+    if changes:
+        lines.append("*Что изменилось:*")
+        lines += [f"  • {_md_safe(c)}" for c in changes]
+        lines.append("")
+    if not entries:
+        lines.append("Портфель пуст — добавьте позиции кнопкой «➕ Добавить».")
+    else:
+        body = [f"{'Тикер':<14}{'Кол-во':>14}{'Цена':>14} Вал."]
+        for e in entries[:_MANUAL_PREVIEW_ROWS]:
+            price = "" if e.is_cash else _fmt_amount(e.price)
+            body.append(f"{_fit(_md_safe(e.label), 14):<14}"
+                        f"{_fmt_amount(e.quantity):>14}{price:>14} {_md_safe(e.currency)}")
+        rest = len(entries) - _MANUAL_PREVIEW_ROWS
+        if rest > 0:
+            body.append(f"… и ещё {rest}")
+        lines.append("```\n" + "\n".join(body) + "\n```")
+        lines.append("Правка текстом: `+AAPL 10 150` · `-AAPL 5` · `-AAPL`")
+    return _clip_to_telegram_limit("\n".join(lines))
+
+
+async def _show_manual_portfolio(message: Message, user_id: int,
+                                 changes: list[str] | None = None) -> None:
+    text, unreadable = await _load_manual_portfolio_text(user_id)
+    if unreadable:
+        await message.answer(
+            "🔐 *Сохранённый портфель недоступен* — ключ шифрования был обновлён.\n\n"
+            "Введите портфель заново: /forget\\_portfolio удалит старую запись.",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=kb_mp_screen(False),
+        )
+        return
+    loop = asyncio.get_running_loop()
+    entries = await loop.run_in_executor(None, _mp_entries_sync, text) if text else []
+    await message.answer(_format_mp_screen(entries, changes),
+                         parse_mode=ParseMode.MARKDOWN,
+                         reply_markup=kb_mp_screen(bool(entries)))
+
+
+async def _manual_flag_refusal(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    await message.answer("ℹ️ Ручной ввод портфеля пока недоступен.",
+                         reply_markup=kb_connect_choice())
+
+
+async def cmd_portfolio(message: Message, state: FSMContext) -> None:
+    """/portfolio — экран сохранённого ручного портфеля."""
+    if not manual_portfolio_enabled():
+        await _manual_flag_refusal(message, state)
+        return
+    await _show_manual_portfolio(message, message.from_user.id)
+
+
+async def cmd_forget_portfolio(message: Message, state: FSMContext) -> None:
+    """/forget_portfolio — удалить ручной портфель И черновик (после подтверждения).
+
+    Работает и при выключенном флаге ручного ввода: право удалить свои данные
+    не зависит от того, включена ли фича (S-9).
+    """
+    await state.clear()
+    await message.answer(
+        "🗑 *Удалить ручной портфель?*\n\n"
+        "Будут удалены сохранённый портфель и незавершённый черновик ввода. "
+        "Отменить удаление нельзя.",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=kb_mp_forget(),
+    )
+
+
+async def _forget_manual_portfolio(user_id: int) -> None:
+    await delete_manual_portfolio(user_id)
+    await delete_manual_draft(user_id)
+    logger.info("MANUAL STORE: удалён по запросу user=%s", user_id)
+
+
+@portfolio_router.callback_query(F.data.startswith("mp:"))
+async def cb_manual_portfolio(callback: CallbackQuery, state: FSMContext) -> None:
+    """Кнопки экрана ручного портфеля. callback_data — недоверенный ввод (S-5)."""
+    await callback.answer()
+    data = str(callback.data or "")
+    user_id = callback.from_user.id
+    rm = _MP_RM_RE.match(data)
+    action = "rm" if rm else data.split(":", 1)[1] if ":" in data else ""
+    if action != "rm" and action not in _MP_ACTIONS:
+        logger.warning("MANUAL STORE: подделанный callback user=%s", user_id)
+        return
+
+    if action == "delyes":
+        # Удаление данных — без гейта флага (см. `cmd_forget_portfolio`).
+        try:
+            async with user_slot(user_id):
+                await _forget_manual_portfolio(user_id)
+        except SlotBusy:
+            await callback.message.answer(
+                "⏳ Секунду — идёт другая обработка. Нажмите ещё раз.")
+            return
+        await state.clear()
+        await callback.message.answer(
+            "🗑 Ручной портфель и черновик удалены.")
+        return
+    if action == "keep":
+        await callback.message.answer("Хорошо, ничего не удаляю.")
+        return
+
+    # S-4: старая кнопка живёт в чате вечно — флаг проверяется на КАЖДОМ нажатии.
+    if not manual_portfolio_enabled():
+        await _manual_flag_refusal(callback.message, state)
+        return
+
+    if action == "show":
+        await _show_manual_portfolio(callback.message, user_id)
+        return
+    if action == "back":
+        await state.clear()
+        await _show_analysis_menu(callback.message, "", user_id=user_id)
+        return
+    if action == "add":
+        await state.set_state(ManualPortfolio.Edit)
+        await callback.message.answer(_MP_EDIT_HELP, parse_mode=ParseMode.MARKDOWN)
+        return
+    if action == "del":
+        await callback.message.answer(
+            "🗑 *Удалить ручной портфель?*\n\nОтменить удаление нельзя.",
+            parse_mode=ParseMode.MARKDOWN, reply_markup=kb_mp_forget())
+        return
+
+    text, unreadable = await _load_manual_portfolio_text(user_id)
+    if action == "rmlist":
+        loop = asyncio.get_running_loop()
+        entries = await loop.run_in_executor(None, _mp_entries_sync, text) if text else []
+        if not entries:
+            await _show_manual_portfolio(callback.message, user_id)
+            return
+        await state.set_state(ManualPortfolio.Edit)
+        await callback.message.answer(
+            "➖ *Что убрать?* Кнопка удаляет позицию целиком; чтобы уменьшить, "
+            "пришлите `-ТИКЕР КОЛИЧЕСТВО`.",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=kb_mp_remove(entries, _mp_version_tag(text)))
+        return
+
+    # action == "rm": индекс + версия, правка под слотом.
+    index, tag = int(rm.group(1)), rm.group(2)
+    try:
+        async with user_slot(user_id):
+            text, unreadable = await _load_manual_portfolio_text(user_id)
+            loop = asyncio.get_running_loop()
+            res = await loop.run_in_executor(None, _mp_remove_sync, text, index, tag)
+            if res.ok:
+                await save_manual_portfolio(user_id, res.new_text)
+    except SlotBusy:
+        await callback.message.answer(
+            "⏳ Секунду — идёт другая обработка. Нажмите ещё раз.")
+        return
+    if not res.ok:
+        await callback.message.answer(f"⚠️ {_md_safe(res.error)}")
+        return
+    await _show_manual_portfolio(callback.message, user_id, changes=res.applied)
+
+
+@portfolio_router.message(StateFilter(ManualPortfolio.Edit), F.text,
+                          ~F.text.startswith("/"))
+async def msg_manual_edit(message: Message, state: FSMContext) -> None:
+    """Текстовые правки `+…`/`-…` сохранённого портфеля (D-4)."""
+    user_id = message.from_user.id
+    if not manual_portfolio_enabled():
+        await _manual_flag_refusal(message, state)
+        return
+    ops = message.text or ""
+    if len(ops.encode("utf-8")) > MANUAL_DRAFT_MAX_BYTES:
+        await message.answer("⚠️ Слишком длинная команда правки.")
+        return
+    try:
+        async with user_slot(user_id):
+            text, unreadable = await _load_manual_portfolio_text(user_id)
+            if unreadable:
+                await message.answer(
+                    "🔐 Сохранённый портфель недоступен — ключ шифрования был "
+                    "обновлён. Удалите его (/forget\\_portfolio) и введите заново.",
+                    parse_mode=ParseMode.MARKDOWN)
+                return
+            loop = asyncio.get_running_loop()
+            res = await loop.run_in_executor(None, _mp_apply_sync, text, ops)
+            if res.ok:
+                await save_manual_portfolio(user_id, res.new_text)
+    except SlotBusy:
+        await message.answer(
+            "⏳ *Секунду — у вас уже идёт обработка.*\n\n"
+            "Пришлите правку ещё раз, когда предыдущий запрос завершится.",
+            parse_mode=ParseMode.MARKDOWN)
+        return
+    except Exception as exc:                           # noqa: BLE001
+        error_id = uuid.uuid4().hex[:12]
+        logger.error("MANUAL STORE: правка упала [%s] user=%s: %s",
+                     error_id, user_id, type(exc).__name__)
+        await message.answer(
+            "😔 Не удалось применить правку.\n\n"
+            f"Код ошибки для поддержки: `{error_id}`",
+            parse_mode=ParseMode.MARKDOWN)
+        return
+    if not res.ok:
+        await message.answer(
+            f"⚠️ Правка не применена: {_md_safe(res.error)}\n\n"
+            "Портфель не изменился — исправьте строку и пришлите снова.")
+        return
+    logger.info("MANUAL STORE: правка user=%s операций=%d", user_id, len(res.applied))
+    await _show_manual_portfolio(message, user_id, changes=res.applied)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2709,6 +3053,10 @@ async def cb_confirm(callback: CallbackQuery, state: FSMContext) -> None:
                 # разберёт, — и отказ выглядел бы как «пользователь ввёл чушь».
                 draft = await get_manual_draft(user_id)
                 manual_text = str((draft or {}).get("text") or "")
+            if not manual_text.strip():
+                # Гибрид PR-1: черновик удаляется после доставленного отчёта, а
+                # постоянный ручной портфель — нет. Он и есть «мой портфель».
+                manual_text, _unreadable = await _load_manual_portfolio_text(user_id)
             if not manual_text.strip():
                 raise ManualInputUnusable("черновик не найден")
             df = await loop.run_in_executor(
@@ -3520,7 +3868,12 @@ async def cmd_help(message: Message) -> None:
         "классы активов, риск-профиль.\n"
         "  Изменения бесплатны и действуют со следующего отчёта.\n\n"
         "*Портфель:*\n"
-        "  /start → 🔗 Freedom Broker API (read-only ключи) или 📋 Демо-режим.\n\n"
+        "  /start → 🔗 Freedom Broker API (read-only ключи) или 📋 Демо-режим.\n"
+        # I-9: строки ручного портфеля — только при включённом ручном вводе.
+        + ("  /portfolio — мой ручной портфель (правки `+AAPL 10 150` / `-AAPL`).\n"
+           "  /forget\\_portfolio — удалить ручной портфель и черновик.\n"
+           if manual_portfolio_enabled() else "")
+        + "\n"
         "*Поддержка:* /support",
         parse_mode=ParseMode.MARKDOWN,
     )
@@ -3909,6 +4262,9 @@ def build_dispatcher() -> Dispatcher:
     # Admin-only token grant for testing (ADMIN_USER_IDS env gate).
     dp.message.register(cmd_grant,    F.text.startswith("/grant"))
     dp.message.register(cmd_mandate,  F.text == "/mandate")
+    # Гибрид PR-1: сохранённый ручной портфель (экран + удаление по запросу).
+    dp.message.register(cmd_portfolio,        F.text == "/portfolio")
+    dp.message.register(cmd_forget_portfolio, F.text == "/forget_portfolio")
 
     # Analysis flow callbacks
     dp.callback_query.register(cb_analysis_choice, F.data.startswith("analysis:"))
@@ -3993,7 +4349,12 @@ async def main() -> None:
             BotCommand(command="topup",   description="Пополнить токены"),
             BotCommand(command="help",    description="Помощь"),
             BotCommand(command="support", description="Поддержка"),
-        ])
+        ] + ([
+            # Гибрид PR-1 — только при включённом ручном вводе (I-9).
+            BotCommand(command="portfolio", description="Мой ручной портфель"),
+            BotCommand(command="forget_portfolio",
+                       description="Удалить ручной портфель"),
+        ] if manual_portfolio_enabled() else []))
     except Exception as exc:                           # noqa: BLE001
         logger.warning("set_my_commands failed: %s", exc)
 
