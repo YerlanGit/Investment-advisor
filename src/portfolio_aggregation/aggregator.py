@@ -31,7 +31,7 @@ from typing import Optional
 
 import pandas as pd
 
-from finance.asset_taxonomy import display_label, from_freedom_metadata
+from finance.asset_taxonomy import AssetClass, display_label, from_freedom_metadata
 from finance.manual_portfolio import CONTRACT_COLUMNS
 
 from .flags import aggregated_max_positions
@@ -118,10 +118,16 @@ def _fill_taxonomy(out: pd.DataFrame) -> pd.DataFrame:
         missing = [c for c in present if pd.isna(row.get(c)) or row.get(c) in ("", None)]
         if not missing:
             continue
+        # Сначала канонический `Ticker`: у ручной строки `Raw_Ticker` — это
+        # ВВОД пользователя («каспи»), а не символ (аудит `§−123`). Сырой ввод —
+        # лишь запасной вариант, если по канону класс не определился.
+        ccy = _clean_ccy(row.get("Currency")) or None
+        aclass = from_freedom_metadata(ticker=str(row.get("Ticker") or ""),
+                                       t_field=None, k_field=None, currency=ccy)
         raw = row.get("Raw_Ticker")
-        ticker = str(raw if isinstance(raw, str) and raw else row.get("Ticker"))
-        aclass = from_freedom_metadata(ticker=ticker, t_field=None, k_field=None,
-                                       currency=_clean_ccy(row.get("Currency")) or None)
+        if aclass is AssetClass.UNKNOWN and isinstance(raw, str) and raw:
+            aclass = from_freedom_metadata(ticker=raw, t_field=None, k_field=None,
+                                           currency=ccy)
         if "Asset_Class" in missing:
             out.at[i, "Asset_Class"] = aclass.value
         if "Asset_Class_Label" in missing:
@@ -181,4 +187,37 @@ class PortfolioAggregator:
                                manual_positions=int(len(hand)))
 
 
-__all__ = ["AggregateResult", "AggregationRefused", "PortfolioAggregator"]
+
+
+def unpriced_positions(input_frame: pd.DataFrame, results: dict) -> list[str]:
+    """Бумаги входа, которых НЕТ в оценённом портфеле и которые не названы
+    в `dropped_rows` — то есть выпавшие молча (аудит `§−123`).
+
+    Движок оценивает бумагу матрицей цен, ценой брокера или (для прокси) ценой
+    покупки; у ручной строки цены брокера нет, и бумага без истории у
+    провайдера уходит в `dropna(subset=['Current_Price'])` без единого следа в
+    `results`. Математику это не меняет и менять не должно (отчёт честно
+    считается по оценённым позициям), но пользователь ОБЯЗАН узнать, какие
+    позиции в расчёт не вошли. Это сравнение множеств, не вычисление.
+    """
+    if input_frame is None or input_frame.empty or "Ticker" not in input_frame.columns:
+        return []
+    wanted: list[str] = []
+    for _, row in input_frame.iterrows():
+        if _is_cash(row):
+            continue
+        t = str(row.get("Ticker") or "").strip().upper()
+        if t and t not in wanted:
+            wanted.append(t)
+    perf = results.get("performance_table") if isinstance(results, dict) else None
+    priced: set[str] = set()
+    if perf is not None and hasattr(perf, "columns"):
+        col = perf["Ticker"] if "Ticker" in perf.columns else perf.index.to_series()
+        priced = {str(t).strip().upper() for t in col}
+    dropped = {str(d.get("ticker") or "").strip().upper()
+               for d in (results.get("dropped_rows") or []) if isinstance(d, dict)}
+    return [t for t in wanted if t not in priced and t not in dropped]
+
+
+__all__ = ["AggregateResult", "AggregationRefused", "PortfolioAggregator",
+           "unpriced_positions"]

@@ -56,6 +56,23 @@ KEY_ORIGIN_ADMIN_SERVICE = "admin_service"
 KEY_ORIGINS = (KEY_ORIGIN_VAULT, KEY_ORIGIN_ADMIN_SERVICE)
 
 
+def count_positions(items) -> int:
+    """Сколько РАЗНЫХ бумаг (кэш не считается) — ОДНО правило для правок,
+    хранилища и источника (S-7).
+
+    Аудит `§−123`: правки считали разные бумаги, а хранилище и `ManualSource`
+    — строки вместе с кэшем. Портфель «50 бумаг + 2 строки кэша» правки
+    пропускали, а агрегированный отчёт затем отвергал как «слишком длинный».
+    Принимает и `ParsedPosition` (`.ticker`), и `edits.Entry` (`.key`).
+    """
+    keys = set()
+    for item in items or []:
+        if getattr(item, "is_cash", False):
+            continue
+        keys.add(str(getattr(item, "key", None) or getattr(item, "ticker", "")))
+    return len(keys)
+
+
 def empty_frame() -> pd.DataFrame:
     """Пустой контрактный фрейм — то, что получает потребитель при отказе."""
     return pd.DataFrame(columns=CONTRACT_COLUMNS)
@@ -191,7 +208,7 @@ class ManualSource:
         if not report.valid:
             return _failed(self.name, "empty", parsed=0, errors=len(report.failed))
         limit = self._max if self._max is not None else manual_max_positions()
-        if len(report.valid) > limit:
+        if count_positions(report.valid) > limit:
             return _failed(self.name, "too_many", parsed=len(report.valid),
                            errors=len(report.failed), limit=limit)
         return SourceResult(name=self.name, frame=report.to_dataframe(), ok=True,
@@ -226,6 +243,7 @@ __all__ = [
     "ManualSource",
     "PortfolioSource",
     "SourceResult",
+    "count_positions",
     "empty_frame",
     "load_with_budget",
 ]

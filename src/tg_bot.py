@@ -103,6 +103,8 @@ from portfolio_aggregation import (
     ManualSource,
     PortfolioAggregator,
     aggregated_manager,
+    count_positions,
+    unpriced_positions,
     load_with_budget,
     apply_edit as _mp_apply_edit,
     broker_fetch_budget_s,
@@ -2475,7 +2477,12 @@ def _mp_engine():
 
 
 def _mp_canonical_sync(text: str) -> tuple[str, int, int]:
-    return _mp_canonical_text(text, _mp_engine())
+    """→ (канонический текст, РАЗНЫХ бумаг, отвергнуто строк).
+
+    Счёт — `count_positions`, то же правило, что у правок и `ManualSource`."""
+    engine = _mp_engine()
+    canon, _lines, rejected = _mp_canonical_text(text, engine)
+    return canon, count_positions(_mp_entries_of(canon, engine)), rejected
 
 
 def _mp_entries_sync(text: str):
@@ -2502,12 +2509,22 @@ async def _persist_manual_portfolio(user_id: int, text: str) -> str:
     loop = asyncio.get_running_loop()
     try:
         canon, n_ok, _n_bad = await loop.run_in_executor(None, _mp_canonical_sync, text)
-        if n_ok == 0:
+        if not canon.strip():
             return ""
         limit = manual_max_positions()
         if n_ok > limit:
             logger.info("MANUAL STORE: не сохранён user=%s: %d поз. > %d",
                         user_id, n_ok, limit)
+            # Аудит `§−123`: обещание обязано совпадать с тем, что посчитается.
+            # Меню источников строит ручной отчёт по СОХРАНЁННОМУ портфелю
+            # первым, поэтому при включённом гибриде и уже сохранённом портфеле
+            # этот ввод в расчёт НЕ пойдёт — так и говорим.
+            prev_text, _unreadable = await _load_manual_portfolio_text(user_id)
+            if hybrid_portfolio_enabled() and prev_text.strip():
+                return (f"ℹ️ В этом вводе {n_ok} бумаг при пределе {limit} — он "
+                        "*не сохранён*, и отчёты из меню строятся по прежнему "
+                        "сохранённому портфелю (/portfolio). Сократите ввод, "
+                        "чтобы считать по нему.")
             return (f"ℹ️ Для постоянного хранения портфель длинноват: {n_ok} "
                     f"позиций при пределе {limit} — этот расчёт пройдёт, а "
                     "сохранённым останется прежний портфель.")
@@ -2558,6 +2575,17 @@ def kb_mp_forget() -> InlineKeyboardMarkup:
     ]])
 
 
+def _fmt_exact(value: float) -> str:
+    """Количество/цена на экране портфеля — БЕЗ округления до двух знаков.
+
+    Аудит `§−123`: `_fmt_amount` печатал 0.005 BTC как «0.01», то есть экран,
+    ради проверки которого он существует, показывал не то, что сохранено.
+    До 8 знаков после точки, хвостовые нули срезаны, разряды — пробелом.
+    """
+    s = f"{value:,.8f}".replace(",", " ")
+    return s.rstrip("0").rstrip(".") if "." in s else s
+
+
 def _format_mp_screen(entries, changes: list[str] | None = None) -> str:
     """Экран «Мой ручной портфель». Только вид — числа уже в тексте портфеля."""
     lines = [f"✏️ *Мой ручной портфель* · позиций: {len(entries)}", ""]
@@ -2570,9 +2598,10 @@ def _format_mp_screen(entries, changes: list[str] | None = None) -> str:
     else:
         body = [f"{'Тикер':<14}{'Кол-во':>14}{'Цена':>14} Вал."]
         for e in entries[:_MANUAL_PREVIEW_ROWS]:
-            price = "" if e.is_cash else _fmt_amount(e.price)
+            price = "" if e.is_cash else _fit(_fmt_exact(e.price), 14)
             body.append(f"{_fit(_md_safe(e.label), 14):<14}"
-                        f"{_fmt_amount(e.quantity):>14}{price:>14} {_md_safe(e.currency)}")
+                        f"{_fit(_fmt_exact(e.quantity), 14):>14}{price:>14} "
+                        f"{_md_safe(e.currency)}")
         rest = len(entries) - _MANUAL_PREVIEW_ROWS
         if rest > 0:
             body.append(f"… и ещё {rest}")
@@ -2605,12 +2634,25 @@ async def _manual_flag_refusal(message: Message, state: FSMContext) -> None:
                          reply_markup=kb_connect_choice())
 
 
+async def _mp_error(message: Message, user_id: int, exc: Exception) -> None:
+    """Молчание — худший ответ бота (`§−104`): сбой БД/шифра → код поддержки."""
+    error_id = uuid.uuid4().hex[:12]
+    logger.error("MANUAL STORE: сбой [%s] user=%s: %s", error_id, user_id,
+                 type(exc).__name__)
+    await message.answer("😔 Ручной портфель сейчас недоступен.\n\n"
+                         f"Код ошибки для поддержки: `{error_id}`",
+                         parse_mode=ParseMode.MARKDOWN)
+
+
 async def cmd_portfolio(message: Message, state: FSMContext) -> None:
     """/portfolio — экран сохранённого ручного портфеля."""
     if not manual_portfolio_enabled():
         await _manual_flag_refusal(message, state)
         return
-    await _show_manual_portfolio(message, message.from_user.id)
+    try:
+        await _show_manual_portfolio(message, message.from_user.id)
+    except Exception as exc:                           # noqa: BLE001
+        await _mp_error(message, message.from_user.id, exc)
 
 
 async def cmd_forget_portfolio(message: Message, state: FSMContext) -> None:
@@ -2639,6 +2681,13 @@ async def _forget_manual_portfolio(user_id: int) -> None:
 async def cb_manual_portfolio(callback: CallbackQuery, state: FSMContext) -> None:
     """Кнопки экрана ручного портфеля. callback_data — недоверенный ввод (S-5)."""
     await callback.answer()
+    try:
+        await _cb_manual_portfolio(callback, state)
+    except Exception as exc:                           # noqa: BLE001
+        await _mp_error(callback.message, callback.from_user.id, exc)
+
+
+async def _cb_manual_portfolio(callback: CallbackQuery, state: FSMContext) -> None:
     data = str(callback.data or "")
     user_id = callback.from_user.id
     rm = _MP_RM_RE.match(data)
@@ -3162,7 +3211,13 @@ async def _report_source_availability(user_id: int) -> dict[str, str | None]:
         logger.warning("HYBRID: vault недоступен user=%s: %s", user_id,
                        type(exc).__name__)
         has_keys = False
-    manual_text, _unreadable = await _load_manual_portfolio_text(user_id)
+    try:
+        manual_text, _unreadable = await _load_manual_portfolio_text(user_id)
+    except Exception as exc:                           # noqa: BLE001
+        # Меню не имеет права пропасть из-за сбоя хранилища (`§−104`).
+        logger.warning("HYBRID: ручной портфель не прочитан user=%s: %s",
+                       user_id, type(exc).__name__)
+        manual_text = ""
     has_manual = bool(manual_text.strip())
     return {
         "freedom": None if has_keys else "подключите брокера: /start → 🔗 Freedom Broker API",
@@ -3448,6 +3503,7 @@ async def _confirm_flow(callback: CallbackQuery, state: FSMContext, tier: str, *
     profile    = await get_profile(user_id)
     bench_tick = _resolve_bench_ticker(profile)
 
+    manual_from_store = False      # ручной отчёт построен по СОХРАНЁННОМУ портфелю
     # I-15: агрегированный отчёт ходит к брокеру ТЕМИ ЖЕ ключами, что и
     # freedom (vault пользователя или сервисные — только администратору), и
     # запоминает их происхождение: это часть доказательства статуса клиента.
@@ -3535,6 +3591,7 @@ async def _confirm_flow(callback: CallbackQuery, state: FSMContext, tier: str, *
                 # Кнопочный ручной отчёт (fallback) — это «мой ручной портфель»:
                 # сохранённый портфель первым, черновик — запасным.
                 manual_text, _unreadable = await _load_manual_portfolio_text(user_id)
+                manual_from_store = bool(manual_text.strip())
             if not manual_text.strip():
                 # `get_manual_draft` отдаёт СЛОВАРЬ (`text`/`created_at`/
                 # `updated_at`), а не строку: `str()` от него дал бы
@@ -3546,6 +3603,7 @@ async def _confirm_flow(callback: CallbackQuery, state: FSMContext, tier: str, *
                 # Гибрид PR-1: черновик удаляется после доставленного отчёта, а
                 # постоянный ручной портфель — нет. Он и есть «мой портфель».
                 manual_text, _unreadable = await _load_manual_portfolio_text(user_id)
+                manual_from_store = bool(manual_text.strip())
             if not manual_text.strip():
                 raise ManualInputUnusable("черновик не найден")
             df = await loop.run_in_executor(
@@ -3736,11 +3794,19 @@ async def _confirm_flow(callback: CallbackQuery, state: FSMContext, tier: str, *
         source    = source,
         broker_fallback = (FALLBACK_REASON_TEXT.get(fallback_reason)
                            if fallback_reason else None),
+        # Аудит `§−123`: отчёт по СОХРАНЁННОМУ портфелю не трогает черновик —
+        # иначе доставка fallback-отчёта стирала незаконченный ввод.
+        **({"delete_draft": False}
+           if source == "manual" and manual_from_store else {}),
         **({"aggregated_composition": agg_composition,
             "freedom_proof": freedom_proof}
            if source == AGGREGATED_SOURCE else {}),
     ))
     await state.clear()
+
+
+class _SkipSnapshot(Exception):
+    """Снимок для сравнения месяц-к-месяцу не пишется (другой состав книги)."""
 
 
 async def _send_history_fallback_offer(bot, chat_id: int, user_id: int,
@@ -3776,6 +3842,7 @@ async def _run_analysis_background(
     broker_fallback: str | None = None,
     aggregated_composition: dict | None = None,
     freedom_proof=None,
+    delete_draft: bool = True,
 ) -> None:
     """
     Фоновая задача с поэтапными уведомлениями в Telegram.
@@ -3959,6 +4026,22 @@ async def _run_analysis_background(
         # движок о брокере ничего не знает и знать не должен.
         if broker_fallback:
             results["broker_fallback_reason"] = broker_fallback
+        # Аудит `§−123`: бумага без цены (нет ряда у провайдера, нет цены
+        # брокера — так бывает у РУЧНОЙ строки) выпадает в движке молча. Числа
+        # не трогаем — называем выпавшее пользователю и в CoVe.
+        if source in ("manual", AGGREGATED_SOURCE):
+            _lost = unpriced_positions(df, results)
+            if _lost:
+                results["unpriced_positions"] = _lost
+                logger.warning("UNPRICED user=%s: %d поз. вне расчёта",
+                               user_id, len(_lost))
+                await bot.send_message(
+                    chat_id,
+                    "⚠️ *Не вошли в расчёт — нет рыночной цены:* "
+                    f"{_md_safe(', '.join(_lost))}.\n\n"
+                    "Отчёт посчитан по остальным позициям; доли и риск — без них.",
+                    parse_mode=ParseMode.MARKDOWN,
+                )
         # PR-3 §I.6: состав агрегированного отчёта (N + M позиций, пересечения)
         # — для строки CoVe `_aggregated_source_status`.
         if source == AGGREGATED_SOURCE and aggregated_composition:
@@ -4002,8 +4085,14 @@ async def _run_analysis_background(
         # ── Step 4: report assembly ───────────────────────────────────────
         await step("⏳", "*Шаг 4/4:* Сборка интерактивного интерфейса и валидация данных…")
 
-        # Fetch previous snapshot for month-over-month delta
-        prev_snapshot = await get_last_report_snapshot(user_id, tier)
+        # Fetch previous snapshot for month-over-month delta.
+        # Аудит `§−123`: снимки ключуются (пользователь, тир), а не источником.
+        # Агрегированный и fallback-отчёт — ДРУГОЙ состав книги, и дельта
+        # «риск-индекс против прошлого месяца» сравнивала бы разные портфели.
+        # Такие отчёты историю не читают и не пишут — брокерская остаётся чистой.
+        keep_history = not (source == AGGREGATED_SOURCE or broker_fallback)
+        prev_snapshot = (await get_last_report_snapshot(user_id, tier)
+                         if keep_history else None)
 
         # Resolve user's risk profile name for AI stock-pick context
         profile       = await get_profile(user_id)
@@ -4047,7 +4136,7 @@ async def _run_analysis_background(
         # только здесь (§5).  Удалить его раньше — на подтверждении или на
         # старте расчёта — значило бы: отчёт упал по нашей вине, а двадцать
         # позиций пользователь набирает заново.
-        if source == "manual":
+        if source == "manual" and delete_draft:
             try:
                 await delete_manual_draft(user_id)
             except Exception as draft_exc:             # noqa: BLE001
@@ -4057,6 +4146,8 @@ async def _run_analysis_background(
         # Persist this report's key metrics for future MoM comparison
         metrics = results.get("portfolio_metrics") or {}
         try:
+            if not keep_history:
+                raise _SkipSnapshot()
             await save_report_snapshot(
                 telegram_id = user_id,
                 tier        = tier,
@@ -4066,6 +4157,8 @@ async def _run_analysis_background(
                 volatility  = metrics.get("Total_Volatility_Ann"),
                 total_value = results.get("total_value"),
             )
+        except _SkipSnapshot:
+            pass
         except Exception as snap_exc:
             logger.warning("Failed to save report snapshot: %s", snap_exc)
 

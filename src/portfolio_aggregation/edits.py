@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from decimal import Decimal
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -26,6 +27,7 @@ from finance.broker_api import strip_exchange_suffix
 from finance.manual_portfolio import parse_portfolio_text
 
 from .flags import manual_max_positions
+from .sources import count_positions
 
 #: Число без экспоненты: парсер принимает только `^-?\d+(\.\d+)?$`.
 _AMOUNT_OK = re.compile(r"^-?\d+(\.\d+)?$")
@@ -61,8 +63,16 @@ class EditResult:
 
 
 def fmt_amount(value: float) -> str:
-    """Число в форме, которую парсер прочтёт обратно без потерь (без `e`)."""
-    s = f"{float(value):.10f}".rstrip("0").rstrip(".")
+    """Число в форме, которую парсер прочтёт обратно БЕЗ ПОТЕРЬ (без `e`).
+
+    Кратчайшее представление float (`repr`), развёрнутое в фиксированную
+    запись через `Decimal`. Аудит `§−123`: прежний `:.10f` срезал знаки после
+    десятого — 0.123456789012 BTC сохранялось как 0.123456789, а 1e-11 — как 0
+    (и строка потом отвергалась парсером как «нулевое количество»).
+    """
+    s = format(Decimal(repr(float(value))), "f")
+    if "." in s:
+        s = s.rstrip("0").rstrip(".")
     return "0" if s in ("", "-0") else s
 
 
@@ -113,10 +123,6 @@ def version_tag(text: str) -> str:
     return hashlib.sha256(str(text or "").encode("utf-8")).hexdigest()[:8]
 
 
-def _distinct_keys(entries: list[Entry]) -> int:
-    return len({e.key for e in entries if not e.is_cash})
-
-
 def _collapse(entries: list[Entry], key: str) -> tuple[list[Entry], Optional[Entry], int]:
     """Слить все лоты `key` в один (VWAP), вернуть (без них, слитый, индекс)."""
     lots = [e for e in entries if e.key == key]
@@ -156,7 +162,7 @@ def _apply_plus(entries: list[Entry], body: str, engine, max_positions: int
     rest, cur, at = _collapse(entries, new.key)
 
     if cur is None:
-        if not new.is_cash and _distinct_keys(entries) + 1 > max_positions:
+        if not new.is_cash and count_positions(entries) + 1 > max_positions:
             raise ValueError(f"в ручном портфеле уже {max_positions} позиций — это предел")
         return entries + [new], (f"{new.label}: добавлено {fmt_amount(new.quantity)}"
                                  + ("" if new.is_cash else
@@ -244,7 +250,7 @@ def apply_edit(text: str, op_line: str, engine, *,
             sign, body = line[0], line[1:].strip()
             if sign == "+":
                 entries, note = _apply_plus(entries, body, engine, limit)
-            elif sign in ("-", "−"):
+            elif sign in ("-", "−", "–", "—"):      # минус, en/em dash автозамены
                 entries, note = _apply_minus(entries, body, engine)
             else:
                 raise ValueError(
