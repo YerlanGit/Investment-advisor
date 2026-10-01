@@ -43,6 +43,11 @@ REPORT_BOT = frozenset({
     "agent.gatekeeper", "agent.rag_engine",
     "finance.data_lineage", "finance.scenario_report", "finance.scenario_engine",
     "finance.portfolio_series", "finance.manual_portfolio", "finance.security",
+    # Гибрид (I-15): пакет собирает состав из брокера и ручного ввода, а ручной
+    # ввод (`finance.manual_portfolio`) живёт в боте отчётов — значит и пакет.
+    "portfolio_aggregation", "portfolio_aggregation.aggregator",
+    "portfolio_aggregation.edits", "portfolio_aggregation.flags",
+    "portfolio_aggregation.gate", "portfolio_aggregation.sources",
 })
 
 TOOLING = frozenset({

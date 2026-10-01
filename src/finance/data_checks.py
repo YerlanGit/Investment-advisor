@@ -82,6 +82,11 @@ def profile_for_source(source) -> CheckProfile:
         return CheckProfile.STRICT
     if src == "demo":
         return CheckProfile.DEMO
+    if src == "aggregated":
+        # I-15 / D-12: цены агрегированного отчёта — те же, что у freedom
+        # (Tradernet), значит и профиль тот же. Явной веткой: полагаться на
+        # дефолт нельзя — его смысл «не объявил», а этот источник объявил.
+        return CheckProfile.LEGACY
     return CheckProfile.LEGACY
 
 

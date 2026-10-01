@@ -178,7 +178,12 @@ _MANUAL_FORBIDDEN = frozenset({"tradernet"})
 # сетевых вызовов и до списания токена.  Расширять его — сознательное решение
 # («этому источнику Tradernet-данные показывать законно?»), а не побочный
 # эффект опечатки в `connection_mode`.
-_KNOWN_SOURCES = frozenset({"freedom", "demo", "manual"})
+#:
+#: `aggregated` (2026-10-01, I-15): брокерский счёт + ручной ввод в ОДНОМ отчёте.
+#: Tradernet законен для него, потому что бот строит такой отчёт только после
+#: ЖИВОГО фетча портфеля по ключам пользователя в этом же запросе
+#: (`portfolio_aggregation.gate`) — это доказательство статуса клиента для I-12.
+_KNOWN_SOURCES = frozenset({"freedom", "demo", "manual", "aggregated"})
 
 def _make_stooq() -> PriceProvider:
     """Импорт ЛЕНИВЫЙ — иначе цикл.
@@ -270,6 +275,14 @@ def provider_for_source(source: str, *, client=None) -> PriceProvider:
                 f"Доступны: {', '.join(sorted(_REGISTRY))}."
             )
         return factory()
+
+    if src == "aggregated":
+        # D-1: агрегированный отчёт ЦЕЛИКОМ на Tradernet — для всех колонок
+        # матрицы, включая ручные тикеры (I-13: один отчёт — один источник).
+        # Явная ветка, а не падение в хвост: решение «этому источнику брокерский
+        # фид законен» должно быть видно, а не следовать из порядка `if`.
+        # Доказательство права (I-15) проверяет гейт ДО создания менеджера.
+        return TradernetProvider(client)
 
     # freedom / всё остальное — живой брокерский фид
     return TradernetProvider(client)

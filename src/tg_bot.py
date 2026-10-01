@@ -89,6 +89,8 @@ from finance.broker_api import (
 from finance.data_checks import DataQualityBlocked
 from finance.investment_logic import UniversalPortfolioManager
 from finance.security import SecureVault, MasterKeyRotatedError
+# Гибрид (I-15): брокер + ручной ввод. Пакет — L1, импорт вниз.
+from portfolio_aggregation import hybrid_flag_on
 from agent.gatekeeper import run_gatekeeper
 # SSOT имён эмитентов (§−95) — модуль на импорте тянет только stdlib.
 from agent.rag_engine import BANK_ORDER, bank_alias_regex, bank_tail_regex
@@ -333,6 +335,16 @@ def manual_portfolio_enabled() -> bool:
     """
     return str(os.getenv(MANUAL_PORTFOLIO_ENV, "off")).strip().lower() in (
         "1", "true", "yes", "on")
+
+
+def hybrid_portfolio_enabled() -> bool:
+    """Флаг меню источников и агрегированного отчёта (`HYBRID_PORTFOLIO_ENABLED`).
+
+    Дефолт — ВЫКЛЮЧЕН (I-9). Требует включённого ручного ввода: агрегированный
+    отчёт без ручного портфеля бессмыслен, а ручной портфель без флага ручного
+    ввода недоступен. Читается функцией — по той же причине, что и соседний флаг.
+    """
+    return manual_portfolio_enabled() and hybrid_flag_on()
 
 
 # ── Pure helpers ──────────────────────────────────────────────────────────────

@@ -174,7 +174,11 @@ class ProviderAllowlistFailsClosedTest(unittest.TestCase):
 
     def test_allowlist_is_explicit(self):
         from finance.price_providers import _KNOWN_SOURCES
-        self.assertEqual(set(_KNOWN_SOURCES), {"freedom", "demo", "manual"})
+        # `aggregated` добавлен осознанно (D-12, I-15 — 2026-10-01): брокерский
+        # счёт + ручной ввод, Tradernet законен только после живого фетча по
+        # ключам пользователя (`portfolio_aggregation.gate`).
+        self.assertEqual(set(_KNOWN_SOURCES),
+                         {"freedom", "demo", "manual", "aggregated"})
 
 
 if __name__ == "__main__":
