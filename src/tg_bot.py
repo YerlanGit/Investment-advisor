@@ -2926,6 +2926,10 @@ async def _manual_fallback_offer(user_id: int, tier: str,
                 text="➕ Добавить активы вручную", callback_data="mp:add")]]))
 
 
+class BrokerBudgetExceeded(RuntimeError):
+    """Брокер не ответил за `BROKER_FETCH_BUDGET_S` (D-8)."""
+
+
 async def _answer_fallback_offer(message: Message, user_id: int, tier: str,
                                  reason: str) -> None:
     """То же предложение отдельным сообщением — под уже отправленным отказом."""
@@ -3560,11 +3564,16 @@ async def _confirm_flow(callback: CallbackQuery, state: FSMContext, tier: str, *
             # не отменяется (вызов без побочных эффектов) — его поздний
             # результат просто отбрасывается, а слот освобождается ниже ровно
             # один раз.
-            df = await asyncio.wait_for(
-                loop.run_in_executor(
-                    None, _fetch_portfolio_sync, api_key, secret_key, login),
-                timeout=broker_fetch_budget_s(),
-            )
+            try:
+                df = await asyncio.wait_for(
+                    loop.run_in_executor(
+                        None, _fetch_portfolio_sync, api_key, secret_key, login),
+                    timeout=broker_fetch_budget_s(),
+                )
+            except asyncio.TimeoutError as exc:
+                # Свой тип, а не голый TimeoutError: в 3.11 им же является
+                # `socket.timeout`, и чужой таймаут назвался бы «брокер молчит».
+                raise BrokerBudgetExceeded() from exc
     except ManualInputUnusable as exc:
         logger.info("MANUAL: расчёт невозможен user=%s: %s", user_id, exc)
         await _release_user_slot(user_id)
@@ -3606,7 +3615,7 @@ async def _confirm_flow(callback: CallbackQuery, state: FSMContext, tier: str, *
         )
         await state.clear()
         return
-    except asyncio.TimeoutError:
+    except BrokerBudgetExceeded:
         # D-8: брокер молчит дольше бюджета. «Серверы недоступны» здесь честно —
         # в отличие от `waf_block`/`parse_error` (`_broker_outage_advice`).
         _budget = broker_fetch_budget_s()
