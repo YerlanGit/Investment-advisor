@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import sqlite3
 import sys
 import unittest
@@ -313,8 +314,11 @@ class FlagAndForgetTest(StoreTestBase):
         self.assertTrue(await self._slot_is_free())
 
     async def test_commands_registered(self) -> None:
-        dp = self.tg.build_dispatcher()
-        names = {h.callback.__name__ for h in dp.message.handlers}
+        # `build_dispatcher()` здесь не вызывается: роутеры модульные и
+        # прикрепляются к диспетчеру один раз на процесс.
+        import inspect
+        names = set(re.findall(r"register\((\w+)", inspect.getsource(
+            self.tg.build_dispatcher)))
         self.assertIn("cmd_portfolio", names)
         self.assertIn("cmd_forget_portfolio", names)
 

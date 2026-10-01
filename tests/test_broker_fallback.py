@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import sys
 import time
 import unittest
@@ -75,6 +76,8 @@ class FallbackTestBase(StoreTestBase):
         await self.db.init_user(self.USER_ID)
         await self.db.credit_tokens(self.USER_ID, 10, reason="test")
         self.started: list[dict] = []
+        # Настоящая фоновая задача — для тестов, которые гоняют именно её.
+        self.real_background = self.tg._run_analysis_background
 
         async def _fake_background(**kwargs):
             self.started.append(kwargs)
@@ -262,8 +265,11 @@ class FallbackButtonTest(FallbackTestBase):
             await self.tg._release_user_slot(self.USER_ID)
 
     async def test_registered_in_dispatcher(self) -> None:
-        dp = self.tg.build_dispatcher()
-        names = {h.callback.__name__ for h in dp.callback_query.handlers}
+        # `build_dispatcher()` здесь не вызывается: роутеры модульные и
+        # прикрепляются к диспетчеру один раз на процесс.
+        import inspect
+        names = set(re.findall(r"register\((\w+)", inspect.getsource(
+            self.tg.build_dispatcher)))
         self.assertIn("cb_fallback_manual", names)
 
 

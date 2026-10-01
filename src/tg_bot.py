@@ -94,6 +94,16 @@ from finance.investment_logic import UniversalPortfolioManager
 from finance.security import SecureVault, MasterKeyRotatedError
 # Гибрид (I-15): брокер + ручной ввод. Пакет — L1, импорт вниз.
 from portfolio_aggregation import (
+    AGGREGATED_SOURCE,
+    AggregatedNotPermitted,
+    AggregationRefused,
+    FreedomSource,
+    KEY_ORIGIN_ADMIN_SERVICE,
+    KEY_ORIGIN_VAULT,
+    ManualSource,
+    PortfolioAggregator,
+    aggregated_manager,
+    load_with_budget,
     apply_edit as _mp_apply_edit,
     broker_fetch_budget_s,
     canonical_text as _mp_canonical_text,
@@ -1303,6 +1313,15 @@ async def send_question(
 async def _show_analysis_menu(message: Message, slug: str,
                               user_id: int | None = None) -> None:
     """Send the final analysis choice, with a deep-link context if slug is set."""
+    # Гибрид D-9: меню двухшаговое (источник → тир). Только при включённом
+    # флаге (I-9): без него меню ровно прежнее. Чат с ботом личный, поэтому
+    # id чата — это id пользователя, когда вызывающий его не передал.
+    if hybrid_portfolio_enabled():
+        uid = user_id if user_id is not None else getattr(
+            getattr(message, "chat", None), "id", None)
+        if uid is not None:
+            await _show_source_menu(message, int(uid))
+            return
     if slug:
         await message.answer(
             f"👋 Кстати, вы пришли из нашего канала _{_source_label(slug)}_.\n\n"
@@ -1420,6 +1439,15 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
                 )
                 return
             balance = await get_balance(user_id)
+            if hybrid_portfolio_enabled():
+                # D-9: сначала источник, потом тир (I-9: только под флагом).
+                await message.answer(
+                    f"📊 *{branding.project_name()} — Risk & Asset Management Platform*\n\n"
+                    f"Ваш баланс: *{balance} токен(а)*",
+                    parse_mode=ParseMode.MARKDOWN,
+                )
+                await _show_source_menu(message, user_id)
+                return
             await message.answer(
                 f"📊 *{branding.project_name()} — Risk & Asset Management Platform*\n\n"
                 f"Ваш баланс: *{balance} токен(а)*\n\n"
@@ -2927,15 +2955,357 @@ async def cb_fallback_manual(callback: CallbackQuery, state: FSMContext) -> None
                         fallback_reason=m.group(2))
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# ГИБРИД PR-3 · АГРЕГИРОВАННЫЙ ОТЧЁТ (брокер + ручной ввод) и меню источников
+# ══════════════════════════════════════════════════════════════════════════════
+# Сборка состава — `portfolio_aggregation` (L1); здесь только ключи, тексты и
+# кнопки. Математика отчёта та же: склейку дублей делает движок.
+
+#: Источники, которые можно выбрать КНОПКОЙ (callback_data — недоверенный ввод).
+REPORT_SOURCES = ("freedom", "manual", AGGREGATED_SOURCE, "demo")
+_REPORT_SOURCE_LABEL = {
+    "freedom": "📊 Отчёт: Freedom Broker",
+    "manual": "✏️ Отчёт: Ручной портфель",
+    AGGREGATED_SOURCE: "🌐 Отчёт: Агрегированный портфель",
+    "demo": "📋 Демо",
+}
+_SRC_RE = re.compile(r"^src:([a-z]{1,12})$")
+_RPT_RE = re.compile(r"^(rpt|rptgo):([a-z]{1,12}):([a-z]{1,12})$")
+_AGG_RE = re.compile(r"^agg:sum:([a-z]{1,12}):([0-9a-f]{8})$")
+
+
+def _overlap_tag(overlaps: list[str]) -> str:
+    """Хэш набора пересечений: подтверждение относится к ЭТОМУ набору."""
+    import hashlib
+
+    return hashlib.sha256(",".join(sorted(overlaps)).encode("utf-8")).hexdigest()[:8]
+
+
+class _BrokerViaBot:
+    """Транспорт `FreedomSource` через `_fetch_portfolio_sync` — тот же вызов,
+    что у брокерского отчёта (и та же точка подмены в тестах)."""
+
+    def __init__(self, api_key: str, secret_key: str, login: str) -> None:
+        self._args = (api_key, secret_key, login)
+
+    def fetch_portfolio(self):
+        return _fetch_portfolio_sync(*self._args)
+
+
+class _ManualViaBot:
+    """`ManualSource`, чей движок строится уже на потоке executor'а."""
+
+    name = "manual"
+
+    def __init__(self, text: str) -> None:
+        self._text = text
+
+    def load(self):
+        return ManualSource(self._text, _mp_engine()).load()
+
+
+async def _aggregated_refuse(callback: CallbackQuery, state: FSMContext, user_id: int,
+                             text: str, kb: InlineKeyboardMarkup | None = None) -> None:
+    await _release_user_slot(user_id)
+    await callback.message.answer(text + "\n\n✅ Токен *не списан*.",
+                                  parse_mode=ParseMode.MARKDOWN, reply_markup=kb)
+    await state.clear()
+
+
+def _kb_manual_report(tier: str, reason: str | None = None) -> InlineKeyboardMarkup:
+    data = f"fb:manual:{tier}:{reason}" if reason else f"rptgo:manual:{tier}"
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📈 Сгенерировать отчёт по ручным активам",
+                              callback_data=data)],
+        [InlineKeyboardButton(text="✏️ Мой ручной портфель", callback_data="mp:show")],
+    ])
+
+
+async def _aggregated_step1(callback: CallbackQuery, state: FSMContext, tier: str,
+                            user_id: int, *, api_key: str, secret_key: str, login: str,
+                            key_origin: str | None, overlap_tag: str | None):
+    """Брокер ∥ ручной портфель → гейт I-15 → слияние → экран D-5.
+
+    → `(df, composition, freedom_result)` либо `None`, если отказ уже показан
+    (и слот уже снят). Исключений наружу не бросает.
+    """
+    manual_text, unreadable = await _load_manual_portfolio_text(user_id)
+    if unreadable or not manual_text.strip():
+        await _aggregated_refuse(
+            callback, state, user_id,
+            "📝 *Ручной портфель пуст* — агрегированному отчёту нечего добавить "
+            "к счёту брокера.",
+            InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(
+                text="➕ Добавить активы вручную", callback_data="mp:add")]]))
+        return None
+    if key_origin is None:                              # pragma: no cover — ветка ключей
+        await _aggregated_refuse(callback, state, user_id,
+                                 "⚠️ *Брокер не подключён.*")
+        return None
+
+    budget = broker_fetch_budget_s()
+    freedom_src = FreedomSource(api_key, secret_key, login, key_origin=key_origin,
+                                connector_factory=_BrokerViaBot)
+    freedom, manual = await asyncio.gather(
+        load_with_budget(freedom_src, budget),
+        load_with_budget(_ManualViaBot(manual_text), budget))
+    logger.info("HYBRID: user=%s freedom_ok=%s reason=%s [%s] manual_ok=%s поз.=%d+%d",
+                user_id, freedom.ok, freedom.failure_reason or "-",
+                freedom.error_id or "-", manual.ok, freedom.positions, manual.positions)
+
+    if not freedom.ok:
+        reason = freedom.failure_reason or "error"
+        if reason == "empty":
+            await _aggregated_refuse(
+                callback, state, user_id,
+                "📭 *На счёте Freedom нет позиций* — агрегированный отчёт совпал бы "
+                "с ручным.", _kb_manual_report(tier))
+            return None
+        if reason == "auth":
+            await _aggregated_refuse(
+                callback, state, user_id,
+                "⚠️ *Агрегированный отчёт сейчас невозможен.*\n\n"
+                "Брокер отклонил ключи — похоже, они неверны или отозваны; "
+                "проверьте их в /start → 🔗 Freedom Broker API.",
+                _kb_manual_report(tier, "auth"))
+            return None
+        # D-7: брокер недоступен — причина по `_broker_outage_advice`, а не одна
+        # фраза на все случаи (`§−94`).
+        if reason == "timeout":
+            why = (f"⚠️ Серверы Freedom Broker сейчас недоступны — брокер не "
+                   f"ответил за {budget} с. Обычно это проходит за 5–15 минут.")
+        else:
+            why = _broker_outage_advice(
+                reason if reason in ("waf_block", "parse_error") else "api_error",
+                freedom.error_id or uuid.uuid4().hex[:12])
+        fb_reason = reason if reason in FALLBACK_REASON_TEXT else "error"
+        await _aggregated_refuse(
+            callback, state, user_id,
+            "🌐 *Агрегированный отчёт сейчас невозможен* — Freedom Broker "
+            "недоступен, а без живого счёта брокерские котировки показывать "
+            "нельзя.\n\n" + why,
+            _kb_manual_report(tier, fb_reason))
+        return None
+
+    if not manual.ok:
+        if manual.failure_reason == "too_many":
+            text = (f"📝 В ручном портфеле больше {manual.detail.get('limit')} "
+                    "позиций — сократите его в /portfolio.")
+        else:
+            text = "📝 *Ручной портфель не разобрался* — откройте его в /portfolio."
+        await _aggregated_refuse(callback, state, user_id, text,
+                                 InlineKeyboardMarkup(inline_keyboard=[[
+                                     InlineKeyboardButton(text="✏️ Мой ручной портфель",
+                                                          callback_data="mp:show")]]))
+        return None
+
+    try:
+        merged = PortfolioAggregator().merge(freedom, manual)
+    except AggregatedNotPermitted as exc:
+        logger.error("HYBRID: I-15 отказ user=%s: %s", user_id, exc.reason)
+        await _aggregated_refuse(
+            callback, state, user_id,
+            "🌐 *Агрегированный отчёт сейчас невозможен* — живой портфель брокера "
+            "не подтверждён.", _kb_manual_report(tier, "error"))
+        return None
+    except AggregationRefused as exc:
+        if exc.reason == "currency_conflict":
+            text = ("💱 *Одна бумага — в разных валютах.* На счёте Freedom и в "
+                    "ручном портфеле указаны разные валюты для: "
+                    f"{_md_safe(', '.join(exc.tickers))}. Сложить такие лоты "
+                    "нельзя — исправьте валюту в ручном портфеле.")
+        elif exc.reason == "too_many":
+            text = (f"📚 Вместе получается больше {exc.limit} позиций — это предел "
+                    "агрегированного отчёта. Сократите ручной портфель.")
+        else:
+            text = "📝 *Ручной портфель пуст* — добавьте активы в /portfolio."
+        await _aggregated_refuse(callback, state, user_id, text,
+                                 InlineKeyboardMarkup(inline_keyboard=[[
+                                     InlineKeyboardButton(text="✏️ Исправить ручной портфель",
+                                                          callback_data="mp:show")]]))
+        return None
+
+    if merged.overlaps and overlap_tag != _overlap_tag(merged.overlaps):
+        # D-5: пересечения показываются ДО расчёта, решение — за пользователем.
+        await _release_user_slot(user_id)
+        await callback.message.answer(
+            "🔁 *Эти бумаги есть и на счёте Freedom, и в ручном портфеле:* "
+            f"{_md_safe(', '.join(merged.overlaps))}.\n\n"
+            "Ручной портфель не должен повторять брокерский — иначе позиция "
+            "учтётся дважды.\n\n✅ Токен *не списан*.",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(
+                    text="✅ Это разные счета — суммировать",
+                    callback_data=f"agg:sum:{tier}:{_overlap_tag(merged.overlaps)}")],
+                [InlineKeyboardButton(text="✏️ Исправить ручной портфель",
+                                      callback_data="mp:show")],
+                [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel")],
+            ]),
+        )
+        await state.clear()
+        return None
+    return merged.frame, merged.composition(), freedom
+
+
+async def _report_source_availability(user_id: int) -> dict[str, str | None]:
+    """Источник → `None` (доступен) либо причина, почему нет (D-9)."""
+    loop = asyncio.get_running_loop()
+    try:
+        has_keys = _is_admin(user_id) or await loop.run_in_executor(
+            None, _has_vault_keys_sync, user_id)
+    except Exception as exc:                           # noqa: BLE001
+        logger.warning("HYBRID: vault недоступен user=%s: %s", user_id,
+                       type(exc).__name__)
+        has_keys = False
+    manual_text, _unreadable = await _load_manual_portfolio_text(user_id)
+    has_manual = bool(manual_text.strip())
+    return {
+        "freedom": None if has_keys else "подключите брокера: /start → 🔗 Freedom Broker API",
+        "manual": None if manual_portfolio_enabled() else "ручной ввод выключен",
+        AGGREGATED_SOURCE: (None if has_keys and has_manual else
+                            "подключите брокера" if not has_keys else
+                            "заполните ручной портфель (/portfolio)"),
+        "demo": None,
+    }
+
+
+async def _show_source_menu(message: Message, user_id: int) -> None:
+    """Шаг 1 из 2 (D-9): источник. Показаны только доступные, остальные — с причиной."""
+    avail = await _report_source_availability(user_id)
+    rows = [[InlineKeyboardButton(text=_REPORT_SOURCE_LABEL[src],
+                                  callback_data=f"src:{src}")]
+            for src in REPORT_SOURCES if avail[src] is None]
+    rows.append([InlineKeyboardButton(text="✏️ Мой ручной портфель",
+                                      callback_data="mp:show")])
+    closed = [f"  • {_REPORT_SOURCE_LABEL[src]} — {avail[src]}"
+              for src in REPORT_SOURCES if avail[src] is not None]
+    await message.answer(
+        "🧭 *Шаг 1 из 2 — источник портфеля*\n\n"
+        "📊 *Freedom Broker* — живой счёт брокера.\n"
+        "✏️ *Ручной портфель* — ваш ввод; котировки из независимого источника.\n"
+        "🌐 *Агрегированный* — счёт Freedom + ручной ввод; котировки Tradernet "
+        "для всех позиций.\n"
+        "📋 *Демо* — шаблонный портфель, бесплатно."
+        + ("\n\n*Сейчас недоступно:*\n" + "\n".join(closed) if closed else ""),
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+    )
+
+
+def kb_report_tiers(source: str) -> InlineKeyboardMarkup:
+    """Шаг 2 из 2: тир. Тарифы — те же `TIER_COST` (D-10, I-4)."""
+    def _cost(tier: str) -> str:
+        c = _effective_cost(tier, source)
+        return "бесплатно" if c == 0 else f"{c} токен" + ("а" if c in (2, 3, 4) else "")
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"📊 Базовый ({_cost('base')})",
+                              callback_data=f"rpt:{source}:base"),
+         InlineKeyboardButton(text=f"🔬 Глубокий ({_cost('deep')})",
+                              callback_data=f"rpt:{source}:deep")],
+        [InlineKeyboardButton(text=f"🎯 Сценарный анализ ({_cost('scenario')})",
+                              callback_data=f"rpt:{source}:scenario")],
+    ])
+
+
+async def _hybrid_menu_refusal(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    await message.answer("ℹ️ Выбор источника отчёта сейчас недоступен — "
+                         "откройте меню заново: /start")
+
+
+async def cb_report_source(callback: CallbackQuery, state: FSMContext) -> None:
+    """`src:<источник>` → шаг 2 (тир). Флаг и доступность — заново (S-4)."""
+    await callback.answer()
+    m = _SRC_RE.match(str(callback.data or ""))
+    user_id = callback.from_user.id
+    if not m or m.group(1) not in REPORT_SOURCES:
+        logger.warning("HYBRID: подделанный callback user=%s", user_id)
+        return
+    if not hybrid_portfolio_enabled():
+        await _hybrid_menu_refusal(callback.message, state)
+        return
+    source = m.group(1)
+    why = (await _report_source_availability(user_id))[source]
+    if source == "manual" and why is None:
+        text, _unreadable = await _load_manual_portfolio_text(user_id)
+        if not text.strip():
+            await _manual_ask_for_input(callback.message, state)   # пустой → ввод
+            return
+    if why is not None:
+        await callback.message.answer(f"ℹ️ Источник недоступен: {why}.")
+        return
+    await callback.message.answer(
+        f"🧭 *Шаг 2 из 2 — тип анализа* · {_REPORT_SOURCE_LABEL[source]}\n\n"
+        "📊 *Базовый* — риск-профиль, CVaR/Sharpe, состав, идеи.\n"
+        "🎯 *Сценарный* — вклад позиций в риск, 3 макро-режима, бэктест.\n"
+        "🔬 *Глубокий* — + факторное разложение, 4-Pillar, стресс-сценарии.",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=kb_report_tiers(source),
+    )
+
+
+async def cb_report_tier(callback: CallbackQuery, state: FSMContext) -> None:
+    """`rpt:<источник>:<тир>` — экран цены; `rptgo:…` — запуск полного пути."""
+    await callback.answer()
+    m = _RPT_RE.match(str(callback.data or ""))
+    user_id = callback.from_user.id
+    if (not m or m.group(2) not in REPORT_SOURCES or m.group(3) not in TIER_COST):
+        logger.warning("HYBRID: подделанный callback user=%s", user_id)
+        return
+    kind, source, tier = m.groups()
+    if not hybrid_portfolio_enabled():
+        await _hybrid_menu_refusal(callback.message, state)
+        return
+    if kind == "rpt":
+        cost = _effective_cost(tier, source)
+        balance = await get_balance(user_id)
+        await callback.message.answer(
+            f"⚠️ *Внимание:* {_REPORT_SOURCE_LABEL[source]} · {TIER_LABEL[tier]}\n\n"
+            + (f"С вашего баланса будет списано *{cost} токен(а)* — только после "
+               "готового отчёта.\n" if cost else "Отчёт *бесплатный*.\n")
+            + f"Текущий баланс: *{balance} токен(а)*.\n\nОдобрить?",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="✅ Одобрить",
+                                     callback_data=f"rptgo:{source}:{tier}"),
+                InlineKeyboardButton(text="❌ Отмена", callback_data="cancel"),
+            ]]),
+        )
+        return
+    await _confirm_flow(callback, state, tier, source_override=source)
+
+
+async def cb_aggregated_overlap(callback: CallbackQuery, state: FSMContext) -> None:
+    """`agg:sum:<тир>:<хэш набора>` — «это разные счета, суммировать» (D-5).
+
+    Брокер запрашивается ЗАНОВО: I-15 требует живого фетча в том же запросе,
+    а состав счёта мог измениться, пока экран висел в чате.
+    """
+    await callback.answer()
+    m = _AGG_RE.match(str(callback.data or ""))
+    if not m or m.group(1) not in TIER_COST:
+        logger.warning("HYBRID: подделанный callback user=%s", callback.from_user.id)
+        return
+    if not hybrid_portfolio_enabled():
+        await _hybrid_menu_refusal(callback.message, state)
+        return
+    await _confirm_flow(callback, state, m.group(1), source_override=AGGREGATED_SOURCE,
+                        overlap_tag=m.group(2))
+
+
 async def _confirm_flow(callback: CallbackQuery, state: FSMContext, tier: str, *,
                         source_override: str | None = None,
-                        fallback_reason: str | None = None) -> None:
+                        fallback_reason: str | None = None,
+                        overlap_tag: str | None = None) -> None:
     """Тело подтверждения отчёта: источник → баланс → загрузка → превью → фон.
 
     `source_override` — источник, выбранный КНОПКОЙ (`fb:`), а не режимом по
     умолчанию из профиля: `connection_mode` при этом не меняется.
     `fallback_reason` — отчёт строится вместо брокерского (PR-2): причина
     доезжает до превью и до CoVe.
+    `overlap_tag` — пользователь подтвердил ИМЕННО этот набор пересечений
+    брокер × ручной ввод (экран D-5); другой набор покажет экран заново.
     """
     user_id = callback.from_user.id
     cost    = TIER_COST[tier]
@@ -3019,6 +3389,17 @@ async def _confirm_flow(callback: CallbackQuery, state: FSMContext, tier: str, *
         )
         await state.clear()
         return
+    if source == AGGREGATED_SOURCE and not hybrid_portfolio_enabled():
+        # S-4: кнопка агрегированного отчёта переживает выключение флага.
+        logger.info("HYBRID: расчёт запрошен при выключенном флаге user=%s", user_id)
+        await _release_user_slot(user_id)
+        await callback.message.edit_text(
+            "🛠 *Агрегированный отчёт временно недоступен.*\n\n"
+            "✅ Токен *не списан*.",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        await state.clear()
+        return
     cost = _effective_cost(tier, source)
 
     # H1 (Phase-3): NO upfront deduction.  Read-only balance pre-check —
@@ -3048,6 +3429,8 @@ async def _confirm_flow(callback: CallbackQuery, state: FSMContext, tier: str, *
         # брокера вовсе, а строка утверждала бы обратное. Тот же I-12 на слое
         # текста, что и подпись CoVe (F-6).
         what = ("Собираю ваш портфель" if source == "manual"
+                else "Загружаю счёт Freedom Broker и ваш ручной портфель"
+                if source == AGGREGATED_SOURCE
                 else "Подключаюсь к Freedom Broker и загружаю портфель")
         await callback.message.edit_text(
             f"⏳ {what}…\n\n"
@@ -3061,7 +3444,11 @@ async def _confirm_flow(callback: CallbackQuery, state: FSMContext, tier: str, *
     profile    = await get_profile(user_id)
     bench_tick = _resolve_bench_ticker(profile)
 
-    if source == "freedom":
+    # I-15: агрегированный отчёт ходит к брокеру ТЕМИ ЖЕ ключами, что и
+    # freedom (vault пользователя или сервисные — только администратору), и
+    # запоминает их происхождение: это часть доказательства статуса клиента.
+    key_origin = None
+    if source in ("freedom", AGGREGATED_SOURCE):
         try:
             keys = await loop.run_in_executor(None, _get_keys_sync, user_id)
         except MasterKeyRotatedError as exc:
@@ -3085,6 +3472,7 @@ async def _confirm_flow(callback: CallbackQuery, state: FSMContext, tier: str, *
                 api_key    = os.getenv("FREEDOM_API_KEY",    "demo")
                 secret_key = os.getenv("FREEDOM_API_SECRET", "")
                 login      = os.getenv("FREEDOM_LOGIN",      "")
+                key_origin = KEY_ORIGIN_ADMIN_SERVICE
                 logger.warning(
                     "KEY SOURCE: env/service  user=%s (admin) — vault пуст, "
                     "используются сервисные ключи.", user_id,
@@ -3110,6 +3498,7 @@ async def _confirm_flow(callback: CallbackQuery, state: FSMContext, tier: str, *
             login      = (login      or "").strip()
             api_key    = (api_key    or "").strip()
             secret_key = (secret_key or "").strip()
+            key_origin = KEY_ORIGIN_VAULT
             logger.info(
                 "KEY SOURCE: vault  user=%s  api_key_present=%s  secret_present=%s",
                 user_id, bool(api_key), bool(secret_key),
@@ -3158,6 +3547,14 @@ async def _confirm_flow(callback: CallbackQuery, state: FSMContext, tier: str, *
             df = await loop.run_in_executor(
                 None, _manual_frame_sync, manual_text
             )
+        elif source == AGGREGATED_SOURCE:
+            loaded = await _aggregated_step1(
+                callback, state, tier, user_id,
+                api_key=api_key, secret_key=secret_key, login=login,
+                key_origin=key_origin, overlap_tag=overlap_tag)
+            if loaded is None:
+                return                          # отказ уже показан, слот снят
+            df, agg_composition, freedom_proof = loaded
         else:
             # D-8: общий бюджет ожидания брокера. Поток executor'а по таймауту
             # не отменяется (вызов без побочных эффектов) — его поздний
@@ -3282,6 +3679,16 @@ async def _confirm_flow(callback: CallbackQuery, state: FSMContext, tier: str, *
     if source == "demo":
         source_line = ("📋 *Источник: ДЕМО-портфель (шаблон) — отчёт "
                        "бесплатный.*\n\n")
+    elif source == AGGREGATED_SOURCE:
+        # Названы ОБА источника состава и ОДИН источник цен (I-13, §I.6).
+        _comp = agg_composition
+        source_line = (
+            f"🌐 *Состав: Freedom Broker ({_comp['freedom_positions']} поз.) + "
+            f"ручной ввод ({_comp['manual_positions']} поз.); котировки — "
+            "Tradernet для всех позиций.*\n"
+            + (f"Суммированы бумаги из обоих источников: "
+               f"{_md_safe(', '.join(_comp['overlaps']))}.\n" if _comp["overlaps"] else "")
+            + "\n")
     elif source == "manual" and fallback_reason:
         # PR-2: отчёт строится ВМЕСТО брокерского — это названо прямо, иначе
         # разница с прошлым брокерским отчётом читалась бы как движение рынка.
@@ -3320,6 +3727,9 @@ async def _confirm_flow(callback: CallbackQuery, state: FSMContext, tier: str, *
         source    = source,
         broker_fallback = (FALLBACK_REASON_TEXT.get(fallback_reason)
                            if fallback_reason else None),
+        **({"aggregated_composition": agg_composition,
+            "freedom_proof": freedom_proof}
+           if source == AGGREGATED_SOURCE else {}),
     ))
     await state.clear()
 
@@ -3355,6 +3765,8 @@ async def _run_analysis_background(
     bench_tick: str | None,
     source: str = "freedom",
     broker_fallback: str | None = None,
+    aggregated_composition: dict | None = None,
+    freedom_proof=None,
 ) -> None:
     """
     Фоновая задача с поэтапными уведомлениями в Telegram.
@@ -3421,7 +3833,13 @@ async def _run_analysis_background(
         # I-12 (данные Tradernet не-клиентам Freedom) без единого признака.
         # `provider_for_source` — fail-closed: неизвестный ему источник честно
         # отказывает ДО сетевых вызовов, и это правильный конец такой ветки.
-        manager = UniversalPortfolioManager(price_source=source)
+        #
+        # I-15: менеджер с `aggregated` (а с ним и клиент Tradernet для ручных
+        # тикеров) создаётся ТОЛЬКО за гейтом живого фетча по ключам vault.
+        if source == AGGREGATED_SOURCE:
+            manager = aggregated_manager(freedom_proof, UniversalPortfolioManager)
+        else:
+            manager = UniversalPortfolioManager(price_source=source)
 
         # Wrap the heavy parts to detect WHERE we fail.
         def _stage_market_data():
@@ -3532,6 +3950,10 @@ async def _run_analysis_background(
         # движок о брокере ничего не знает и знать не должен.
         if broker_fallback:
             results["broker_fallback_reason"] = broker_fallback
+        # PR-3 §I.6: состав агрегированного отчёта (N + M позиций, пересечения)
+        # — для строки CoVe `_aggregated_source_status`.
+        if source == AGGREGATED_SOURCE and aggregated_composition:
+            results["aggregated_composition"] = dict(aggregated_composition)
 
         # Note: an intermediate "MAC3 Risk Summary" dump used to surface
         # raw vol / Sharpe / Sortino / CVaR / VaR / positive-days here.
@@ -3679,6 +4101,17 @@ async def _run_analysis_background(
             except Exception as cta_exc:
                 logger.warning("Scenario CTA/cache failed for %s: %s", user_id, cta_exc)
 
+    except AggregatedNotPermitted as exc:
+        # I-15 на второй линии: без доказательства живого фетча расчёт не
+        # начинается вовсе — до первого сетевого вызова.
+        logger.error("HYBRID: I-15 отказ в фоне user=%s: %s", user_id, exc.reason)
+        await bot.send_message(
+            chat_id,
+            "🌐 *Агрегированный отчёт невозможен* — живой портфель брокера не "
+            "подтверждён в этом запросе. Запустите отчёт заново из меню /start.",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        await refund("aggregated_not_permitted")
     except RealPortfolioRequired as exc:
         await bot.send_message(
             chat_id,
@@ -4436,6 +4869,10 @@ def build_dispatcher() -> Dispatcher:
     dp.callback_query.register(cb_confirm,          F.data.startswith("confirm:"))
     # Гибрид PR-2: ручной отчёт вместо брокерского (кнопка из сообщения об отказе).
     dp.callback_query.register(cb_fallback_manual,  F.data.startswith("fb:"))
+    # Гибрид PR-3: меню источников (D-9) и подтверждение пересечений (D-5).
+    dp.callback_query.register(cb_report_source,      F.data.startswith("src:"))
+    dp.callback_query.register(cb_report_tier,        F.data.startswith("rpt"))
+    dp.callback_query.register(cb_aggregated_overlap, F.data.startswith("agg:"))
     dp.callback_query.register(cb_scenario_cached,  F.data == "scenario:cached")
     dp.callback_query.register(cb_cancel,           F.data == "cancel")
     # /mandate menu (B1 2026-07-17) — free mandate edits, no billing here.
