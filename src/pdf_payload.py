@@ -216,10 +216,18 @@ def _build_mandate_compliance(perf_df, total_val: float,
             lo, hi = float(bounds[0]), float(bounds[1])
         except (TypeError, ValueError, IndexError):
             continue
-        if lo == 0 and hi == 0:
-            continue   # asset class not part of this mandate — skip
         act = round(actual.get(key, 0.0), 1)
-        if act > hi + 2:
+        if lo == 0 and hi == 0 and act <= 0:
+            continue   # asset class not part of this mandate — skip
+        # `§−127`: класс, ЗАКРЫТЫЙ мандатом (0–0), но в портфеле он есть, —
+        # нарушение, а не «не часть мандата». Прежний skip прятал его целиком:
+        # живой отчёт 02.10 держал XLU 18.3% в закрытом классе GlobalETFs,
+        # панель показала четыре строки на 75.9% NAV и одно нарушение вместо
+        # двух. Допуск ±2 пп к закрытому классу не применяется.
+        if hi == 0 and act > 0:
+            status = "over"
+            breaches += 1
+        elif act > hi + 2:
             status = "over"
             breaches += 1
         elif act < lo - 2:

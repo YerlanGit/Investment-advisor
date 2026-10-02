@@ -3,25 +3,6 @@
   {
    "action": "Trim",
    "buy_zone": null,
-   "currency": null,
-   "delta_w_pp": -2.51,
-   "price": 191.9673,
-   "price_local": null,
-   "qty_delta": -11,
-   "reason": "Score +1.5 · 🔥 Hotspot TRC>20%",
-   "sell_zone": [
-    188.5135,
-    195.2374
-   ],
-   "stop_loss": 190.1098,
-   "stop_loss_local": null,
-   "take_target": null,
-   "take_target_local": null,
-   "ticker": "AAPL"
-  },
-  {
-   "action": "Trim",
-   "buy_zone": null,
    "currency": "KZT",
    "delta_w_pp": -4.47,
    "price": 188.3662,
@@ -56,6 +37,25 @@
    "take_target": null,
    "take_target_local": null,
    "ticker": "TLT"
+  },
+  {
+   "action": "Trim",
+   "buy_zone": null,
+   "currency": null,
+   "delta_w_pp": -2.51,
+   "price": 191.9673,
+   "price_local": null,
+   "qty_delta": -11,
+   "reason": "Score +1.5 · 🔥 Hotspot TRC>20%",
+   "sell_zone": [
+    188.5135,
+    195.2374
+   ],
+   "stop_loss": 190.1098,
+   "stop_loss_local": null,
+   "take_target": null,
+   "take_target_local": null,
+   "ticker": "AAPL"
   },
   {
    "action": "Hold",
@@ -116,9 +116,9 @@
   "KZT": {
    "action": "Hold",
    "credit": 0.0,
-   "credit_applicable": true,
+   "credit_applicable": false,
    "fundamentals": 0.0,
-   "fundamentals_applicable": true,
+   "fundamentals_applicable": false,
    "hotspot": false,
    "technicals": 0.0,
    "total": 0.0,
@@ -138,9 +138,9 @@
   "USD": {
    "action": "Hold",
    "credit": 0.0,
-   "credit_applicable": true,
+   "credit_applicable": false,
    "fundamentals": 0.0,
-   "fundamentals_applicable": true,
+   "fundamentals_applicable": false,
    "hotspot": false,
    "technicals": 0.0,
    "total": 0.0,
@@ -309,9 +309,9 @@
    }
   ],
   "high_priority_tickers": [
-   "AAPL",
    "KSPI",
    "TLT",
+   "AAPL",
    "IEF",
    "EEM"
   ],

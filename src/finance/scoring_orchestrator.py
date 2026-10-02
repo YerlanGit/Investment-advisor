@@ -103,6 +103,13 @@ def _is_credit_not_applicable(ticker: str, sector: Optional[str]) -> bool:
     if s in _CREDIT_NA_SECTORS:
         return True
     stem = str(ticker or "").upper().split(".")[0]
+    # `§−127`: денежная строка — не эмитент. Без этого guard'а кэш `USD`
+    # получал рыночный HY-прокси (C = −2 → «Sell»), и живой ручной отчёт
+    # 02.10 печатал «продать XLU, FTNT, PEP, USD»: модель читает
+    # `asset_scores`/`action_plan` движка, где кэш стоял на продажу.
+    from finance import asset_taxonomy as _tx
+    if _tx.is_cash(stem):
+        return True
     if stem.startswith(_credit_na_prefixes()):
         return True
     try:

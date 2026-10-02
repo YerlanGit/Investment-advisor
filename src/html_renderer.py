@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
@@ -381,6 +381,21 @@ def _jinja_env() -> Environment:
     )
 
 
+#: Часовой пояс подписи отчёта. Казахстан — единый UTC+5 с 01.03.2024.
+#: 🔴 `datetime.now()` без пояса на Cloud Run — это UTC: живой отчёт 02.10
+#: сформирован в 17:01 по Алматы и подписан «12:01 UTC+5» (`§−127`).
+REPORT_TZ = timezone(timedelta(hours=5), "UTC+5")
+
+
+def report_timestamp(now: datetime | None = None) -> str:
+    """Подпись времени отчёта «ДД.ММ.ГГГГ ЧЧ:ММ UTC+5» — В ЭТОМ поясе, а не в
+    поясе сервера. `now` без пояса считается UTC (так его даёт контейнер)."""
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    return now.astimezone(REPORT_TZ).strftime("%d.%m.%Y %H:%M UTC+5")
+
+
 def render_report_html(data_dict: dict | None,
                         user_id:   int | str,
                         report_type: str = "Базовый отчёт",
@@ -408,7 +423,7 @@ def render_report_html(data_dict: dict | None,
     # the v3 branch defaulted it (inside template.render); the premium branch
     # passed the raw `generated_at` (None when the caller omits it, as tg_bot
     # does) straight to the mapper → meta.generated / meta.session rendered '–'.
-    generated_at = generated_at or datetime.now().strftime("%d.%m.%Y %H:%M UTC+5")
+    generated_at = generated_at or report_timestamp()
 
     # ── Routing: Premium V2 (flag) vs classic v3 Jinja ─────────────────────────
     # Feature-flagged so the v3 pipeline below is byte-identical when OFF.  Any
@@ -435,7 +450,7 @@ def render_report_html(data_dict: dict | None,
         data         = payload,
         user_id      = user_id,
         report_type  = report_type,
-        generated_at = generated_at or datetime.now().strftime("%d.%m.%Y %H:%M UTC+5"),
+        generated_at = generated_at or report_timestamp(),
     )
 
 

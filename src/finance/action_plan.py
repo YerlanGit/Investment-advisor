@@ -320,9 +320,14 @@ def build_action_plan(*,
 
     Returns a list of AssetActionRow ready for the PDF Action Plan table.
     The list is sorted: Trim / Sell first (highest priority), then Strong
-    Buy / Buy, then Hold.  Cumulative |delta_w| is capped at 25% of NAV.
+    Buy / Buy, then Hold.  Within Sell and within Trim: hotspots first, then
+    the larger Euler risk share (`§−127` — never the input row order).
+    Cumulative |delta_w| is capped at 25% of NAV.
     """
     rows: list[AssetActionRow] = []
+    # `§−127`: ранг строки ВНУТРИ класса действия — (hotspot, доля в риске).
+    # Читается сортировкой под лимитом оборота ниже.
+    risk_rank: dict[str, tuple[bool, float]] = {}
     bl_by_ticker: dict[str, dict] = {}
     if bl_records:
         bl_by_ticker = {r["ticker"]: r for r in bl_records}
@@ -474,6 +479,15 @@ def build_action_plan(*,
         _ccy, _rate = _local_currency_and_rate(row, fx_rates)
         _loc = (lambda v: None if (v is None or _rate is None) else float(v) / _rate)
 
+        _hot = (sc.get("hotspot") if isinstance(sc, dict)
+                else getattr(sc, "hotspot", False)) if sc else False
+        _trc = row.get("Euler_Risk_Contribution_Pct")
+        try:
+            _trc = float(_trc) if _trc is not None and float(_trc) == float(_trc) else 0.0
+        except (TypeError, ValueError):
+            _trc = 0.0
+        risk_rank[ticker] = (bool(_hot), _trc)
+
         rows.append(AssetActionRow(
             ticker=ticker, action=action, delta_w_pp=delta_w_pp,
             qty_delta=qty_delta, price=price,
@@ -487,8 +501,28 @@ def build_action_plan(*,
         ))
 
     # Order: priority sells first, then buys, then holds.
+    #
+    # `§−127`: ВНУТРИ стороны продаж порядок задаёт РИСК, а не порядок строк
+    # входа. Лимит оборота ниже раздаёт бюджет сверху вниз, а прежняя
+    # стабильная сортировка оставляла строки в порядке фрейма — у ручного
+    # портфеля это порядок, в котором пользователь НАБРАЛ тикеры. Живой отчёт
+    # 02.10: PGR — hotspot и 31.8% всего риска, заголовок «главное — снять
+    # концентрацию PGR», но PGR стоял последним во вводе, бюджет 25% съели
+    # XLU/FTNT/PEP, и PGR ушёл в «отложено: лимит оборота». Переставь строки
+    # ввода — получишь другой план. Теперь внутри КАЖДОГО действия: hotspot
+    # первым (правило движка «концентрация важнее оценки»), затем бóльшая доля
+    # в риске; порядок ввода — только последний тай-брейк. Порядок МЕЖДУ
+    # действиями (Sell → Trim → Buy → Hold) не тронут.
     priority = {"Sell": 0, "Trim": 1, "Strong Buy": 2, "Buy": 3, "Hold": 4}
-    rows.sort(key=lambda r: priority.get(r.action, 5))
+
+    def _order(item: tuple[int, AssetActionRow]) -> tuple:
+        idx, r = item
+        if r.action in _SELL_ACTIONS:
+            hot, trc = risk_rank.get(r.ticker, (False, 0.0))
+            return (priority[r.action], 0 if hot else 1, -trc, idx)
+        return (priority.get(r.action, 5), 0, 0.0, idx)
+
+    rows = [r for _, r in sorted(enumerate(rows), key=_order)]
 
     # Apply cumulative |Δw| cap.
     cumulative = 0.0
