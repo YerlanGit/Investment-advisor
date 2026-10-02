@@ -25,7 +25,7 @@ from typing import Optional
 # SSOT имён эмитентов (§−95).  L1 → импорт вниз разрешён; модуль на импорте
 # тянет только stdlib (chromadb/pymupdf4llm там ленивые).
 import branding
-from env_config import env_float
+from env_config import env_float, env_int
 from agent.rag_engine import (
     BANK_ORDER,
     bank_alias_regex,
@@ -38,6 +38,11 @@ logger = logging.getLogger("AINarrative")
 #: Потолок ожидания ответа Anthropic, секунд (`§−122`). Только через env_config:
 #: голый `float(os.getenv())` на уровне модуля роняет импорт (`§−50`).
 ANTHROPIC_TIMEOUT_S: float = env_float("ANTHROPIC_TIMEOUT_S", 300.0, lo=30.0, hi=1800.0)
+#: `§−126`: повторы SDK. По умолчанию их ДВА, то есть три попытки по
+#: `ANTHROPIC_TIMEOUT_S`: зависшая модель держала «Шаг 4/4» до 15 минут при
+#: обещании «5–10». Одна повторная попытка оставляет защиту от 529/5xx, а
+#: худший случай — 2 × таймаут, после чего отчёт уходит с фолбэк-нарративом.
+ANTHROPIC_MAX_RETRIES: int = env_int("ANTHROPIC_MAX_RETRIES", 1, lo=0, hi=5)
 
 MAX_TOKENS_BASE = 5_000  # 4_500 → 5_000 (BLOCK 1.2): BASE now runs on Sonnet (more verbose than Haiku); headroom so the structured tool output is never truncated → no JSON repair / dropped KPI notes
 MAX_TOKENS_DEEP = 7_000
@@ -2116,7 +2121,8 @@ def generate_narrative(results: dict, tier: str = "base",
         # DEEP укладывается в 1–2 минуты; потолок — env, при истечении отчёт
         # уходит с детерминированным фолбэком, а не ждёт.
         client   = anthropic.Anthropic(api_key=api_key,
-                                       timeout=ANTHROPIC_TIMEOUT_S)
+                                       timeout=ANTHROPIC_TIMEOUT_S,
+                                       max_retries=ANTHROPIC_MAX_RETRIES)
         # Sprint-5: temperature raised from 0.1 (near-deterministic → stale,
         # repeating ideas).  Sprint-5.1: omitted entirely on Opus 4.7/4.8 —
         # those models reject the param with HTTP 400 (§4.2 migration prep).

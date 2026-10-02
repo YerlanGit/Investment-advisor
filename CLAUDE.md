@@ -15,11 +15,11 @@ GCP Cloud Run (long-polling) · Cloud Function (RAG-ингест) · ChromaDB ·
 ## Верификация (обязательна перед каждым пушем)
 
 ```bash
-PYTHONPATH=src python -m pytest tests/ -q          # → 2235 passed, 2 xfailed (+12 skipped без playwright)
+PYTHONPATH=src python -m pytest tests/ -q          # → 2241 passed, 2 xfailed (+12 skipped без playwright)
 ```
 
 - Префикс `PYTHONPATH=src` **ОБЯЗАТЕЛЕН** (`conftest.py`/`pyproject.toml` нет).
-- **Прогонов ДВА.** Второй — зеркало деплой-образа без `design/`: `cp -r src tests SYSTEM_PROMPT.md requirements*.txt <tmp>/ && cd <tmp>`, тот же прогон → 2111 passed, 136 skipped, 2 xfailed.
+- **Прогонов ДВА.** Второй — зеркало деплой-образа без `design/`: `cp -r src tests SYSTEM_PROMPT.md requirements*.txt <tmp>/ && cd <tmp>`, тот же прогон → 2117 passed, 136 skipped, 2 xfailed.
   Зелёный CI ≠ деплой пройдёт: CI видит полный чекаут, Cloud Build — образ; разница — ровно тесты, читающие `design/`, `docs/`, `CLAUDE.md`, `scripts/`, `cloud_function/`.
 - Правил `design/*.jsx` → **обязательно** `bash design/premium_v2/build.sh`.
 - Смоук-рендер тиров: `html_renderer.render_report_html(None, <user_id>, ...)`.
@@ -115,7 +115,7 @@ PYTHONPATH=src python -m pytest tests/ -q          # → 2235 passed, 2 xfailed 
 - **Каждый модуль `src/` — в корзине манифеста** `tests/test_service_boundaries.py` (ядро · бот отчётов · бот данных · инструменты); стрелок между ботами нет, ленивых тоже (`§−121`).
 - **Всё, что ждёт сеть или считает, — в executor: loop у бота ОДИН на всех.** LLM/RAG/рендер/загрузка в GCS шли в loop'е, один DEEP замораживал бота для всех (`§−122`, гейт пишет ПОТОК стадии).
 - **Слот — по пользователю, `MAX_CONCURRENT_REPORTS` — на всех**; лишние ждут и видят место в очереди; гейт отпускается в `finally`. Стадии одного отчёта берут ОДИН `price_source` (`§−122`).
-- **Аренда слота, пережившая процесс, — блок пользователя на TTL**: по SIGTERM инстанс снимает СВОИ аренды (`release_report_locks_for_owner`), чужие — нет (`§−122`).
+- **Аренда слота, пережившая процесс, — блок пользователя на TTL**: по SIGTERM инстанс снимает СВОИ аренды (`release_report_locks_for_owner`), чужие — нет (`§−122`), а владельцам `_INFLIGHT_REPORTS` пишет «прерван» СВОЕЙ сессией (`§−126`).
 - **`aggregated` (брокер + ручной) — только за гейтом I-15**: Tradernet для ручных тикеров — лишь после ЖИВОГО фетча по ключам vault в том же запросе (`portfolio_aggregation.gate`).
   Мок брокера → `ok=False` ДО `pd.concat` (он теряет `attrs`); склейку дублей делает движок, НЕ агрегатор (`§−123`).
 - **Флаг фичи для прода — на строке `--set-env-vars` в `cloudbuild.yaml`** (она заменяет ВЕСЬ набор: флаг из консоли стирается деплоем); раскатка `off`→`admins`→`on`. Портфель отчёта — ЯВНО в callback_data: режим по умолчанию перелечивается в `freedom` при ключах (`§−124`).

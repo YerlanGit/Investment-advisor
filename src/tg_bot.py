@@ -4360,6 +4360,42 @@ async def _send_history_fallback_offer(bot, chat_id: int, user_id: int,
                        user_id, type(exc).__name__)
 
 
+#: `§−126`: расчёты, идущие в ЭТОМ процессе: user_id → (chat_id, tier).
+#: Редеплой убивает процесс посреди расчёта (Cloud Run шлёт SIGTERM, через
+#: 10 с — SIGKILL), и раньше пользователь навсегда оставался с «⏳ Шаг 4/4»:
+#: сообщение о прерывании отправить было некому и не через что.
+_INFLIGHT_REPORTS: dict[int, tuple[int, str]] = {}
+
+_INTERRUPTED_TEXT = (
+    "⚠️ *Отчёт прерван: сервис перезапустился (обновление).*\n\n"
+    "✅ Токен *не списан* — вы платите только за готовый отчёт.\n"
+    "Запустите отчёт заново через минуту."
+)
+
+
+async def notify_interrupted_reports(send) -> int:
+    """Сказать владельцам незавершённых расчётов, что расчёт прерван (`§−126`).
+
+    `send(chat_id, text, reply_markup)` — корутина отправки. Отдельный
+    параметр, потому что на остановке основная сессия Telegram уже закрыта
+    (освобождение getUpdates за 2–3 с — жёсткое правило против 409), и слать
+    приходится через свою, короткую. Сбой одного адресата не мешает другим.
+    → число доставленных уведомлений.
+    """
+    pending = dict(_INFLIGHT_REPORTS)
+    if not pending:
+        return 0
+    kb = kb_nav(_btn("📊 Новый отчёт", "home:report"), new_message=True)
+    results = await asyncio.gather(
+        *(send(chat_id, _INTERRUPTED_TEXT, kb) for chat_id, _tier in pending.values()),
+        return_exceptions=True)
+    for (uid, _), res in zip(pending.items(), results):
+        if isinstance(res, Exception):
+            logger.warning("Уведомление о прерванном отчёте не ушло user=%s: %s",
+                           uid, type(res).__name__)
+    return sum(1 for r in results if not isinstance(r, Exception))
+
+
 async def _run_analysis_background(
     *,
     bot,
@@ -4424,6 +4460,7 @@ async def _run_analysis_background(
             logger.warning("Не удалось отправить уведомление о неспискании для %s: %s", user_id, exc)
 
     _gate_held = False
+    _INFLIGHT_REPORTS[user_id] = (chat_id, tier)
     try:
         # `§−122`: общий потолок одновременных расчётов — ДО первой тяжёлой стадии.
         await _enter_report_gate(bot, chat_id)
@@ -4671,6 +4708,8 @@ async def _run_analysis_background(
         # RuntimeError("report_delivery_failed") if the GCS upload fails, so
         # reaching the next line means the report is genuinely delivered.
         await _send_report(bot, chat_id, user_id, tier, payload)
+        # Отчёт доставлен — прерывание после этой строки уже не «прервало отчёт».
+        _INFLIGHT_REPORTS.pop(user_id, None)
 
         # ── H1 BILLING: deduct the token ONLY now (post-Checkpoint-3) ───────
         # This is the single charge point in the whole flow.  Any earlier
@@ -4839,6 +4878,7 @@ async def _run_analysis_background(
         # Always release the single-flight slot, regardless of success /
         # failure / cancellation.  Without this a single hung task locks
         # the user out forever (they would only see "анализ уже идёт").
+        _INFLIGHT_REPORTS.pop(user_id, None)
         if _gate_held:
             _leave_report_gate()
         await _release_user_slot(user_id)
@@ -5630,13 +5670,36 @@ async def main() -> None:
         #    SQLite ещё до 30 минут — пользователь видел бы «анализ уже идёт»
         #    и не мог повторить. Снимаем только свои (owner = _INSTANCE_ID):
         #    чужие держатели при max-instances>1 не задеваются.
-        try:
-            n = await asyncio.wait_for(
-                release_report_locks_for_owner(_INSTANCE_ID), timeout=3.0)
+        # 4) `§−126`: владельцам незавершённых расчётов — сообщение о
+        #    прерывании, параллельно с (3). Основная сессия уже закрыта,
+        #    поэтому своя, короткая; до SIGKILL у Cloud Run 10 с.
+        async def _release_leases() -> None:
+            n = await release_report_locks_for_owner(_INSTANCE_ID)
             if n:
                 logger.info("Сняты аренды отчётов этого инстанса: %d.", n)
-        except Exception as exc:                   # noqa: BLE001
-            logger.warning("Аренды отчётов при остановке не сняты: %s", exc)
+
+        async def _notify_owners() -> None:
+            if not _INFLIGHT_REPORTS:
+                return
+            notifier = Bot(token=BOT_TOKEN, session=AiohttpSession(timeout=3))
+            try:
+                async def _send(chat_id, text, kb):
+                    return await notifier.send_message(
+                        chat_id, text, parse_mode=ParseMode.MARKDOWN,
+                        reply_markup=kb)
+                n = await notify_interrupted_reports(_send)
+                logger.info("Прерванные редеплоем отчёты: уведомлено %d из %d.",
+                            n, len(_INFLIGHT_REPORTS))
+            finally:
+                await notifier.session.close()
+
+        results = await asyncio.gather(
+            asyncio.wait_for(_release_leases(), timeout=3.0),
+            asyncio.wait_for(_notify_owners(), timeout=4.0),
+            return_exceptions=True)
+        for label, res in zip(("Аренды отчётов", "Уведомления о прерывании"), results):
+            if isinstance(res, Exception):
+                logger.warning("%s при остановке не завершены: %s", label, res)
 
     logger.info("%s Bot запущен.", branding.bot_name())
     watcher = asyncio.create_task(_watch_shutdown())
