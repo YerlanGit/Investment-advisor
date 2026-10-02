@@ -2727,6 +2727,46 @@ def _manual_coverage_note(coverage) -> str:
             ". Эти позиции честно выпадут из расчёта — отчёт об этом скажет.")
 
 
+#: Сколько тикеров с причиной показывать в отказе — остальное «и ещё N».
+_NO_QUOTES_SHOWN = 10
+
+
+def _public_quote_reason(reason: str) -> str:
+    """Причина провайдера → текст для чата. Текст исключения базы (путь к
+    файлу) наружу не идёт (F-6): «недоступна» и всё."""
+    text = str(reason or "").strip() or "нет котировок"
+    if text.startswith("база котировок недоступна"):
+        return "база котировок недоступна"
+    return text
+
+
+def _manual_no_quotes_text(tickers, failed: dict, *, base_down: bool) -> str:
+    """Отказ ручного отчёта на шаге 1: ни одной котировки (`§−125`).
+
+    `tickers` — бумаги портфеля в виде движка, `failed` — причины провайдера
+    по тикеру (`history_result.failed`). Раньше причины уходили только в лог,
+    а пользователь получал «движок упал» и «проверьте подключение к брокеру».
+    """
+    if base_down:
+        head = ("⚠️ *Отчёт не построен: база котировок для ручного портфеля "
+                "сейчас недоступна.*\n\nЭто сбой на нашей стороне, а не в вашем "
+                "портфеле. Повторите позже; если повторяется — /support.")
+    else:
+        head = ("⚠️ *Отчёт не построен: ни по одной бумаге нет котировок.*\n\n"
+                "Ручной портфель оценивается по базе котировок, а не по брокеру. "
+                "Что не нашлось:")
+    lines = [head]
+    shown = list(dict.fromkeys(str(t) for t in tickers))
+    for t in shown[:_NO_QUOTES_SHOWN]:
+        lines.append(f"• `{_md_safe(t)}` — {_md_safe(_public_quote_reason(failed.get(t)))}")
+    if len(shown) > _NO_QUOTES_SHOWN:
+        lines.append(f"• … и ещё {len(shown) - _NO_QUOTES_SHOWN}")
+    if not base_down:
+        lines.append("\nПроверьте написание тикеров (`AAPL`, `MSFT`) или уберите "
+                     "эти позиции в «✏️ Ручной портфель».")
+    return "\n".join(lines)
+
+
 @portfolio_router.message(
     StateFilter(ManualPortfolio.Input, ManualPortfolio.Confirm), F.text)
 async def msg_manual_input(message: Message, state: FSMContext) -> None:
@@ -2973,6 +3013,27 @@ def _mp_entries_sync(text: str):
     return _mp_entries_of(text, _mp_engine())
 
 
+def _mp_coverage_note_sync(text: str) -> str:
+    """Предупреждение экрана портфеля о бумагах БЕЗ котировок (`§−125`).
+
+    Правки `+…` раньше не проверяли покрытие вовсе: бумага, которой нет в базе
+    котировок, сохранялась молча, а узнавал об этом пользователь только по
+    отказу отчёта. Подсказка, а не условие: любой сбой — молчание.
+    """
+    if not str(text or "").strip():
+        return ""
+    try:
+        from finance.manual_portfolio import parse_portfolio_text, preflight_coverage
+        engine = _mp_engine()
+        report = parse_portfolio_text(text, engine)
+        days = env_int("HISTORY_LOOKBACK_DAYS", 1825, lo=90, hi=3650)
+        return _manual_coverage_note(preflight_coverage(report, engine, days=days))
+    except Exception as exc:                           # noqa: BLE001
+        logger.warning("MANUAL STORE: проверка котировок пропущена: %s",
+                       type(exc).__name__)
+        return ""
+
+
 def _mp_apply_sync(text: str, op_line: str):
     return _mp_apply_edit(text, op_line, _mp_engine())
 
@@ -3071,7 +3132,8 @@ def _fmt_exact(value: float) -> str:
     return s.rstrip("0").rstrip(".") if "." in s else s
 
 
-def _format_mp_screen(entries, changes: list[str] | None = None) -> str:
+def _format_mp_screen(entries, changes: list[str] | None = None,
+                      note: str = "") -> str:
     """Экран «Мой ручной портфель». Только вид — числа уже в тексте портфеля."""
     # Счёт — по тому же правилу, что в «Мой портфель» и у лимита: бумаги
     # (`count_positions`), кэш — отдельно (`§−124`).
@@ -3097,6 +3159,8 @@ def _format_mp_screen(entries, changes: list[str] | None = None) -> str:
         if rest > 0:
             body.append(f"… и ещё {rest}")
         lines.append("```\n" + "\n".join(body) + "\n```")
+        if note:
+            lines.append(note)
         lines.append("Правка текстом: `+AAPL 10 150` · `-AAPL 5` · `-AAPL`")
     return _clip_to_telegram_limit("\n".join(lines))
 
@@ -3114,7 +3178,9 @@ async def _show_manual_portfolio(target: Message | CallbackQuery, user_id: int,
         return
     loop = asyncio.get_running_loop()
     entries = await loop.run_in_executor(None, _mp_entries_sync, text) if text else []
-    await _screen(target, _format_mp_screen(entries, changes),
+    note = (await loop.run_in_executor(None, _mp_coverage_note_sync, text)
+            if entries else "")
+    await _screen(target, _format_mp_screen(entries, changes, note),
                   kb_mp_screen(bool(entries), "src:manual"),
                   edit=edit)
 
@@ -4420,6 +4486,25 @@ async def _run_analysis_background(
         portfolio_loaded   = preview.portfolio_loaded
         portfolio_total    = preview.portfolio_total
 
+        # `§−125`: ручной портфель оценивается ТОЛЬКО по базе котировок — цены
+        # брокера у его строк нет. Ни одной котировки → движок выбросит все
+        # бумаги и скажет «стоимость = 0, проверьте подключение к брокеру»,
+        # хотя брокера здесь нет вовсе. Останавливаемся ДО движка и называем
+        # тикеры с причиной, которую уже знает провайдер.
+        if source == "manual" and (loaded_count == 0
+                                   or (portfolio_total and portfolio_loaded == 0)):
+            await bot.send_message(
+                chat_id,
+                _manual_no_quotes_text(resolved_portfolio,
+                                      dict(history_result.failed or {}),
+                                      base_down=loaded_count == 0),
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=kb_nav(_btn("✏️ Ручной портфель", "mp:show"),
+                                    new_message=True),
+            )
+            await refund("manual_no_quotes")
+            raise RuntimeError("manual_no_quotes")
+
         if loaded_count == 0:
             await bot.send_message(
                 chat_id,
@@ -4471,6 +4556,11 @@ async def _run_analysis_background(
                 None, _analyze_existing_portfolio_sync, df, bench_tick, _mandate_name,
                 source,
             )
+        except (RealPortfolioRequired, DataQualityBlocked, AggregatedNotPermitted):
+            # `§−125`: штатный ОТКАЗ движка — не сбой. Причину назовёт внешний
+            # обработчик одним сообщением; раньше перед ней шло «движок упал» +
+            # код поддержки, и пользователь читал два противоречащих ответа.
+            raise
         except Exception as exc:
             # F-6: support-id instead of raw exception text (info disclosure).
             error_id = uuid.uuid4().hex[:12]
@@ -4702,7 +4792,7 @@ async def _run_analysis_background(
         )
         await refund("data_quality_blocked")
     except RuntimeError as exc:
-        if str(exc) == "market_data_subscription_required":
+        if str(exc) in ("market_data_subscription_required", "manual_no_quotes"):
             # Already reported + refunded above.
             pass
         elif str(exc) == "report_generation_failed":
