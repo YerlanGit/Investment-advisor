@@ -80,8 +80,35 @@ telegram-id из env; апдейты от не-вайтлист юзеров д�
 7. → показ меню выбора анализа (`_show_analysis_menu`).
 
 ### 2.2. Вернувшийся пользователь
-`init_user` (no-op, без повторного бонуса) → сразу меню анализа (или контекст
-из deep-link `slug`, если пришёл из промо-канала).
+`init_user` (no-op, без повторного бонуса) → **🏠 Главное меню** (`_show_home`,
+`§−124`) — или контекст из deep-link `slug`, если пришёл из промо-канала.
+Источник не определён → сначала экран подключения (`kb_connect_choice`).
+
+### 2.2a. Главное меню и разделы (`§−124`)
+
+```
+🏠 Главное меню
+💼 Портфель: Freedom Broker ✅        ← что подключено (`_overview_line`)
+💳 Баланс: 10 токенов
+[📊 Новый отчёт]
+[💼 Мой портфель] [🎛 Мандат]
+[💳 Баланс]       [❓ Помощь]
+```
+
+| Кнопка / команда | Callback | Экран |
+|---|---|---|
+| 📊 Новый отчёт · `/report` | `home:report` | `_open_report`: ОДИН настоящий портфель → сразу тиры по нему; несколько (или гибрид) → «По какому портфелю?» |
+| 💼 Мой портфель · `/portfolio` | `home:portfolio` | `_show_portfolio_hub`: Freedom (подключён / нет), ручной (N позиций), демо; карточки `pf:freedom` / `mp:show` / `pf:demo` |
+| 🎛 Мандат · `/mandate` | `home:mandate` | прежнее меню мандата + `[💼 Мой портфель] [🏠 Меню]` |
+| 💳 Баланс · `/balance` | `home:balance` | баланс, тариф, `[💰 Пополнить]` (`home:topup`, он же `/topup`) |
+| ❓ Помощь · `/help` | `home:help` | три шага + токены; строки ручного/гибрида — по флагам |
+
+Правила экранов: у каждого — следующий шаг и `🏠 Меню`; переход по меню
+**правит нажатое сообщение** (`_screen`), а сообщения о готовом отчёте и
+списании не правятся никогда — их кнопка `home:open` присылает меню новым
+сообщением. Портфель отчёта едет **явно** в callback_data (`src:`/`rpt:`/`rptgo:`):
+скрытый «режим по умолчанию» перелечивается в `freedom` при ключах в vault, и
+кнопка «демо» иначе строила бы платный брокерский отчёт.
 
 ### 2.3. Deep-link «Применить идею» → Сценарный анализ (2026-07-09, #3)
 Кнопка **«Применить идею»** в HTML-отчёте (BASE + DEEP) не может списать токен
@@ -102,7 +129,12 @@ telegram-id из env; апдейты от не-вайтлист юзеров д�
 
 ## 3. Выбор тира анализа
 
-`_show_analysis_menu` → `kb_analysis_choice()` — **три тира**:
+Из главного меню — `_show_tiers_for(source)` → `kb_report_tiers(source)`
+(`rpt:<портфель>:<тир>` → экран цены `_price_screen` → `rptgo:…` → `_confirm_flow`).
+Старое меню `_show_analysis_menu` → `kb_analysis_choice(source)` (`analysis:*` →
+`confirm:*`) живёт для deep-link, экранов сразу после подключения и старых кнопок.
+Тиры — **по одному в строке** (парой подпись «Базовый (1 ток…» обрезалась на
+телефоне), цена на кнопке — та, что спишется: **три тира**:
 
 | Тир | Кнопка (callback) | Токены | Что внутри |
 |---|---|---|---|
@@ -115,9 +147,10 @@ telegram-id из env; апдейты от не-вайтлист юзеров д�
 (`_effective_cost(tier, source)` → 0 при source=demo; 2026-07-16), включая
 сценарный отчёт из демо-кэша (маркер `_demo_portfolio` в `_SCENARIO_CACHE`).
 
-`cb_analysis_choice` (`analysis:*`) → показывает предупреждение о списании и
+`cb_analysis_choice` (`analysis:*`) → экран цены по РЕАЛЬНОМУ источнику (демо —
+«Бесплатно»; прежде экран обещал демо-пользователю списать токен) и
 `kb_confirm(tier, slug)` (`confirm:<tier>:<slug>` / `cancel`), состояние
-`AnalysisFlow.awaiting_approval`.
+`AnalysisFlow.awaiting_approval`. Не хватает токенов — сразу `[💰 Пополнить]`.
 
 ---
 
@@ -266,7 +299,9 @@ text-fallback не затронуты. Закрыто тестами
 |---|---|---|
 | `ob:*` (`ob:back`, `ob:uni:*`, `ob:bench:*`, `ob:mandate:*`) | онбординг-роутер | навигация онбординга; в `edit_mode` confirm/back ведут обратно в `/mandate`-саммари |
 | `mandate:*` (`mandate:edit:{bench,universe,profile,requiz}`, `mandate:profile:<score>`, `mandate:back/close/report`) | `cb_mandate_action` | меню мандата (B1 2026-07-17; бесплатно, без биллинга) |
-| `connect:template` / `connect:freedom` | `cb_connect_choice` | выбор источника портфеля |
+| `connect:freedom` / `connect:manual` / `connect:template` | `cb_connect_choice` | подключение: брокер (первым), ручной ввод (по флагу), демо |
+| `home:{menu,open,report,portfolio,mandate,balance,topup,help}` | `cb_home` | главное меню и разделы (`§−124`); `open` — меню новым сообщением |
+| `pf:freedom` / `pf:demo` | `cb_portfolio_card` | карточка портфеля: отчёт по нему (`src:…`), заменить ключи |
 | `analysis:{base,scenario,deep}` | `cb_analysis_choice` | выбор тира |
 | `confirm:<tier>:<slug>` | `cb_confirm` | запуск анализа |
 | `scenario:cached` | `cb_scenario_cached` | сценарный отчёт из кэша |
@@ -274,7 +309,7 @@ text-fallback не затронуты. Закрыто тестами
 | `manual:*` | `cb_manual_action` | ручной ввод: черновик, подтверждение (переносит текст в постоянный портфель), правка, отмена |
 | `mp:{show,add,rmlist,del,delyes,keep,back}`, `mp:rm:<idx>:<хэш версии>` | `cb_manual_portfolio` | экран «Мой ручной портфель»; кнопка удаления несёт хэш версии (старая кнопка не удалит другую позицию); `delyes` работает и без флага (право удалить свои данные) |
 | `fb:manual:<tier>:<причина>` | `cb_fallback_manual` | ручной отчёт ВМЕСТО брокерского, когда Freedom недоступен; проходит весь путь `_confirm_flow` заново |
-| `src:<источник>` → `rpt:<источник>:<tier>` → `rptgo:<источник>:<tier>` | `cb_report_source` / `cb_report_tier` | меню D-9 (источник → тир → цена → запуск); только при `HYBRID_PORTFOLIO_ENABLED` |
+| `src:<портфель>` → `rpt:<портфель>:<tier>` → `rptgo:<портфель>:<tier>` | `cb_report_source` / `cb_report_tier` | тиры → цена → запуск по ЯВНОМУ портфелю; доступность — по портфелю (`_source_refusal`: ключи, флаг ручного, флаг гибрида), а не общим выключателем |
 | `agg:sum:<tier>:<хэш набора>` | `cb_aggregated_overlap` | «это разные счета — суммировать» для пересечений Freedom × ручной (D-5); брокер запрашивается заново |
 
 Все `callback_data` — недоверенный ввод: источник, тир, причина и индекс проверяются
@@ -292,14 +327,18 @@ text-fallback не затронуты. Закрыто тестами
 ## 9a. Гибридный портфель: агрегированный отчёт и fallback (`§−123`)
 
 Код — пакет `src/portfolio_aggregation/` (источники, гейт, агрегатор, правки); бот только
-достаёт ключи/текст и рисует экраны. Флаги — функциями: `MANUAL_PORTFOLIO_ENABLED`
-(ручной ввод, `/portfolio`, fallback-кнопки) и `HYBRID_PORTFOLIO_ENABLED` (меню
-источников и агрегированный отчёт; требует первого). Оба по умолчанию **выключены**;
-выключены — бот ведёт себя ровно как до гибрида (I-9).
+достаёт ключи/текст и рисует экраны. Флаги — функциями и **пофамильно**:
+`MANUAL_PORTFOLIO_ENABLED` (ручной ввод, fallback-кнопки) и `HYBRID_PORTFOLIO_ENABLED`
+(«Freedom + ручной»; требует первого). Значения `off` / `admins` / `on`
+(`§−124`): `admins` — фичу видят только `ADMIN_USER_IDS`. В коде дефолт `off`
+(I-9); в проде значения задаёт `cloudbuild.yaml` (`_MANUAL_PORTFOLIO_ENABLED` /
+`_HYBRID_PORTFOLIO_ENABLED`, сейчас `admins`): `--set-env-vars` заменяет ВЕСЬ набор
+переменных, и флаг, выставленный в консоли, стирается следующим деплоем — именно
+поэтому до `§−124` фичи в проде не появлялись вовсе.
 
 | Сценарий | Что видит пользователь |
 |---|---|
-| `/portfolio` | таблица (≤ 20 строк) + `➕ Добавить` / `➖ Убрать / уменьшить` / `🗑 Удалить портфель` / `⬅️ Назад`; правки текстом в `ManualPortfolio.Edit`, всё-или-ничего, под `user_slot` |
+| `✏️ Ручной портфель` (`mp:show`) | таблица (≤ 20 строк) + `➕ Добавить` / `➖ Убрать` / `📊 Отчёт по ручному портфелю` / `🗑 Удалить портфель` / `⬅️ Мой портфель`; правки текстом в `ManualPortfolio.Edit`, всё-или-ничего, под `user_slot` |
 | `/forget_portfolio` | подтверждение → удаляются `manual_portfolio` и `manual_portfolio_draft` |
 | брокер отдал fallback-мок / таймаут 60 с / ключи отклонены / прочее исключение | прежний отказ по причине (`_broker_outage_advice`) + `📈 Сгенерировать отчёт по ручным активам` (`fb:manual:…`) либо «Ручной портфель пуст…» + `➕ Добавить активы вручную` |
 | Шаг 1 брокерского отчёта упал | после сообщения об ошибке — отдельная кнопка ручного отчёта |
@@ -324,16 +363,19 @@ text-fallback не затронуты. Закрыто тестами
   │                                                                   │
   │                                                            MandateReview
   │                                                                   │
-  │                                         connect:template / connect:freedom
+  │                              connect:freedom / connect:manual / connect:template
   │                                                                   │
-  └─ вернувшийся ─────────────────────────────────────► [Меню выбора анализа]
-                                                                      │
-                          ┌───────────────────┬───────────────────────┤
-                     analysis:base       analysis:scenario       analysis:deep
-                          │                    │                       │
-                          └──────► cb_confirm (single-flight + баланс≥cost, БЕЗ списания)
+  └─ вернувшийся ──► 🏠 Главное меню ──► 💼 Мой портфель · 🎛 Мандат · 💳 Баланс · ❓ Помощь
+                          │
+                    📊 Новый отчёт (home:report · /report)
+                          │
+            один портфель ─┴─ несколько / гибрид ──► «По какому портфелю?» (src:<портфель>)
+                          │
+                 тиры по портфелю: rpt:<портфель>:<тир> ──► экран цены
+                          │
+                 rptgo:<портфель>:<тир> ──► _confirm_flow (single-flight + баланс≥cost, БЕЗ списания)
                                               │
-                                   загрузка портфеля (демо/Freedom)
+                          загрузка портфеля (Freedom / ручной / Freedom + ручной / демо)
                                               │
                              _run_analysis_background (Шаги 1→4)
                                               │
@@ -350,7 +392,10 @@ text-fallback не затронуты. Закрыто тестами
 
 ## 11. Где что менять
 
-- **Кнопки/копирайт меню** → `kb_analysis_choice`, `_show_analysis_menu`, `cmd_start`.
+- **Кнопки/копирайт меню** → навигация `§−124`: `kb_home`, `_show_home`,
+  `_open_report`, `_show_tiers_for`, `_show_portfolio_hub`, `_price_screen`,
+  `_screen` (правка на месте); старое меню — `kb_analysis_choice`, `_show_analysis_menu`.
+- **Команды «меню ⋮»** → `bot_commands()` (`set_my_commands` в `main`).
 - **Меню источников / агрегированный отчёт / fallback** → `_show_source_menu`,
   `_report_source_availability`, `_aggregated_step1`, `_manual_fallback_offer`;
   сборка состава — `src/portfolio_aggregation/` (НЕ в боте).
@@ -360,7 +405,6 @@ text-fallback не затронуты. Закрыто тестами
 - **Меню /mandate** → `cmd_mandate` / `cb_mandate_action` / `_mandate_overview_text`
   / `kb_mandate_menu` / `kb_mandate_profile`; edit-ветвления — в
   `cb_benchmark_confirm`, `cb_universe_confirm`, `cb_back` (флаг `edit_mode`).
-- **Команды в «меню ⋮» Telegram** → `set_my_commands` в `tg_bot.main`.
 - **/help** → `cmd_help` (`tg_bot.py`).
 - **Шаги анализа / прогресс** → `_run_analysis_background`.
 - **Сборка payload по тиру** → `_build_pdf_payload` (base/deep → `pdf_payload`,

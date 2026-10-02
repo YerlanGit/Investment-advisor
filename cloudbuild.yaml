@@ -48,6 +48,20 @@ substitutions:
   # Отчёт статичен: ошибку в уже выпущенном HTML задним числом не поправить.
   _BOT_TOKEN_SECRET: 'RAMP_BOT_TOKEN'
   _BOT_USERNAME:     'KEN_investment_bot'
+  # ── РАСКАТКА ФИЧ ГИБРИДА (§−124) ─────────────────────────────────────────
+  # Ручной портфель и агрегированный отчёт (Freedom + ручной). Значения:
+  #   'off'    — фичи нет ни у кого (бот ровно как до гибрида, I-9);
+  #   'admins' — видят только ADMIN_USER_IDS: владелец проверяет на своей книге;
+  #   'on'     — все пользователи.
+  # 🔴 Почему флаги ЗДЕСЬ, а не в консоли Cloud Run: `--set-env-vars` ЗАМЕНЯЕТ
+  # весь набор переменных, и выставленное руками значение стирается следующим
+  # деплоем — ровно так месяцами «не включался» PREMIUM_REPORT_ENABLED. Без
+  # этих строк прод всегда работал с выключенными фичами (`§−124`).
+  # 🔴 'on' для ручного ввода — по чек-листу OPERATOR_STOOQ §13.1: открыты
+  # пункты 5, 8 (условия использования Stooq), 9, 10. Пункт 9 («отчёт по
+  # своей книге осмотрен глазами») закрывается как раз на ступени 'admins'.
+  _MANUAL_PORTFOLIO_ENABLED: 'admins'
+  _HYBRID_PORTFOLIO_ENABLED: 'admins'
   # Бот-загрузчик котировок (IB-8). ПУСТО ПО УМОЛЧАНИЮ → шаг ниже не делает
   # ничего, и текущий деплой остаётся ровно таким, каким был. Заполните имя
   # сервиса (например `ramp-ingest-bot`), когда будете готовы: понадобятся
@@ -192,7 +206,7 @@ steps:
       # тогда, когда пользователь ждёт портфель.  На одном CPU потоки > 1 — это
       # чистые накладные расходы и для pandas/sklearn тоже, так что кап здесь
       # ничего не замедляет.
-      - --set-env-vars=BOT_USERNAME=${_BOT_USERNAME},REPORT_BUCKET_NAME=ramp-bot-reports,CHROMA_BUCKET=ramp-bot-chroma-db-investadv,TOKENOMICS_DB_PATH=/mnt/state/tokenomics.db,VAULT_DB_PATH=/mnt/state/users_vault.db,REPORTING_CURRENCY=USD,ADMIN_USER_IDS=148046720,PREMIUM_REPORT_ENABLED=true,STATIC_EGRESS=off,STOOQ_DB_PATH=/mnt/state/stooq/prices.sqlite,STOOQ_LOCAL_COPY_DIR=/tmp/ramp-stooq,OMP_NUM_THREADS=1,OPENBLAS_NUM_THREADS=1,TOKENIZERS_PARALLELISM=false,MAX_CONCURRENT_REPORTS=2,ANTHROPIC_TIMEOUT_S=300
+      - --set-env-vars=BOT_USERNAME=${_BOT_USERNAME},REPORT_BUCKET_NAME=ramp-bot-reports,CHROMA_BUCKET=ramp-bot-chroma-db-investadv,TOKENOMICS_DB_PATH=/mnt/state/tokenomics.db,VAULT_DB_PATH=/mnt/state/users_vault.db,REPORTING_CURRENCY=USD,ADMIN_USER_IDS=148046720,PREMIUM_REPORT_ENABLED=true,STATIC_EGRESS=off,STOOQ_DB_PATH=/mnt/state/stooq/prices.sqlite,STOOQ_LOCAL_COPY_DIR=/tmp/ramp-stooq,OMP_NUM_THREADS=1,OPENBLAS_NUM_THREADS=1,TOKENIZERS_PARALLELISM=false,MAX_CONCURRENT_REPORTS=2,ANTHROPIC_TIMEOUT_S=300,MANUAL_PORTFOLIO_ENABLED=${_MANUAL_PORTFOLIO_ENABLED},HYBRID_PORTFOLIO_ENABLED=${_HYBRID_PORTFOLIO_ENABLED}
 
   # ── Step 4b: STATIC EGRESS (2026-07-08 fix for Cloudflare-WAF 403) ──────────
   # The broker's Cloudflare WAF blocks Cloud Run's SHARED egress IP pool (the

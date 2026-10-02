@@ -28,8 +28,9 @@ from .aggregator import (AggregateResult, AggregationRefused, PortfolioAggregato
                          unpriced_positions)
 from .edits import (EditResult, apply_edit, canonical_text, entries_of,
                     remove_at, version_tag)
-from .flags import (HYBRID_PORTFOLIO_ENV, aggregated_max_positions,
-                    broker_fetch_budget_s, hybrid_flag_on, manual_max_positions)
+from .flags import (FLAG_ADMINS, FLAG_OFF, FLAG_ON, HYBRID_PORTFOLIO_ENV,
+                    aggregated_max_positions, broker_fetch_budget_s, hybrid_flag_on,
+                    manual_max_positions, rollout_mode)
 from .gate import (AGGREGATED_SOURCE, AggregatedNotPermitted, aggregated_manager,
                    live_broker_proof_failure, require_live_broker_fetch)
 from .sources import (FAILURE_REASONS, count_positions, KEY_ORIGIN_ADMIN_SERVICE, KEY_ORIGIN_VAULT,
@@ -42,6 +43,9 @@ __all__ = [
     "AggregatedNotPermitted",
     "AggregationRefused",
     "EditResult",
+    "FLAG_ADMINS",
+    "FLAG_OFF",
+    "FLAG_ON",
     "FAILURE_REASONS",
     "FreedomSource",
     "HYBRID_PORTFOLIO_ENV",
@@ -64,6 +68,7 @@ __all__ = [
     "manual_max_positions",
     "remove_at",
     "require_live_broker_fetch",
+    "rollout_mode",
     "unpriced_positions",
     "version_tag",
 ]

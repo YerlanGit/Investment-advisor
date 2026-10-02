@@ -110,8 +110,11 @@ from portfolio_aggregation import (
     broker_fetch_budget_s,
     canonical_text as _mp_canonical_text,
     entries_of as _mp_entries_of,
-    hybrid_flag_on,
+    FLAG_ADMINS,
+    FLAG_ON,
+    HYBRID_PORTFOLIO_ENV,
     manual_max_positions,
+    rollout_mode,
     remove_at as _mp_remove_at,
     version_tag as _mp_version_tag,
 )
@@ -339,8 +342,27 @@ SOURCE_GREETING: dict[str, str] = {
 MANUAL_PORTFOLIO_ENV = "MANUAL_PORTFOLIO_ENABLED"
 
 
-def manual_portfolio_enabled() -> bool:
+def _rollout_enabled(env_name: str, user_id: int | None) -> bool:
+    """Флаг раскатки для КОНКРЕТНОГО пользователя (`§−124`).
+
+    `on` — всем; `admins` — только `ADMIN_USER_IDS`; иначе никому. Без
+    `user_id` (клавиатура без контекста, список команд) видно только `on`:
+    неизвестный пользователь — не администратор.
+    """
+    mode = rollout_mode(env_name)
+    if mode == FLAG_ON:
+        return True
+    if mode == FLAG_ADMINS:
+        return user_id is not None and _is_admin(int(user_id))
+    return False
+
+
+def manual_portfolio_enabled(user_id: int | None = None) -> bool:
     """Флаг отката ручного ввода. По умолчанию — ВЫКЛЮЧЕН.
+
+    Значения: `on` (всем), `admins` (только `ADMIN_USER_IDS` — ступень раскатки,
+    `§−124`), остальное — выключено. Проверка пофамильная, поэтому каждый
+    вызов, у которого есть пользователь, обязан его передать.
 
     Значение читается ФУНКЦИЕЙ, а не константой модуля: константа защёлкнулась
     бы на импорте, и ни один тест не смог бы проверить оба состояния бота
@@ -358,18 +380,18 @@ def manual_portfolio_enabled() -> bool:
     ждать надо разработчика, теперь — что оператора. Устаревшее обоснование
     опаснее отсутствующего, оно убеждает не проверять (`§−97` D-5).
     """
-    return str(os.getenv(MANUAL_PORTFOLIO_ENV, "off")).strip().lower() in (
-        "1", "true", "yes", "on")
+    return _rollout_enabled(MANUAL_PORTFOLIO_ENV, user_id)
 
 
-def hybrid_portfolio_enabled() -> bool:
+def hybrid_portfolio_enabled(user_id: int | None = None) -> bool:
     """Флаг меню источников и агрегированного отчёта (`HYBRID_PORTFOLIO_ENABLED`).
 
     Дефолт — ВЫКЛЮЧЕН (I-9). Требует включённого ручного ввода: агрегированный
     отчёт без ручного портфеля бессмыслен, а ручной портфель без флага ручного
     ввода недоступен. Читается функцией — по той же причине, что и соседний флаг.
     """
-    return manual_portfolio_enabled() and hybrid_flag_on()
+    return (manual_portfolio_enabled(user_id)
+            and _rollout_enabled(HYBRID_PORTFOLIO_ENV, user_id))
 
 
 # ── Pure helpers ──────────────────────────────────────────────────────────────
@@ -1109,38 +1131,45 @@ def kb_mandate_review() -> InlineKeyboardMarkup:
     ]])
 
 
-def kb_connect_choice() -> InlineKeyboardMarkup:
-    rows = [
-        [InlineKeyboardButton(text="📋 Демо-режим (Шаблон)", callback_data="connect:template")],
-        [InlineKeyboardButton(text="🔗 Freedom Broker API",  callback_data="connect:freedom")],
-    ]
+def kb_connect_choice(user_id: int | None = None) -> InlineKeyboardMarkup:
+    """Откуда брать портфель. Брокер — первым: это основной путь (`§−124`)."""
+    rows = [[InlineKeyboardButton(text="🔗 Подключить Freedom Broker",
+                                  callback_data="connect:freedom")]]
     # I-9: при выключенном флаге бот обязан вести себя РОВНО как до Фазы 5 —
     # ни кнопки, ни обработчика (гард дублируется в `cb_connect_choice`, чтобы
     # старое сообщение с кнопкой, отправленное при включённом флаге, не стало
     # обходным путём после выключения).
-    if manual_portfolio_enabled():
+    if manual_portfolio_enabled(user_id):
         rows.append([InlineKeyboardButton(text="✍️ Ввести портфель вручную",
                                           callback_data="connect:manual")])
+    rows.append([InlineKeyboardButton(text="📋 Демо-портфель (бесплатно)",
+                                      callback_data="connect:template")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def kb_analysis_choice() -> InlineKeyboardMarkup:
-    # 3 тира: базовый/сценарный по 1 токену, глубокий 2.  Сценарный — своей
-    # строкой, чтобы кнопка не сжималась и подпись «1 токен» читалась.
+def kb_analysis_choice(source: str | None = None) -> InlineKeyboardMarkup:
+    """Тиры — по одному в строке: парой «Базовый (1 ток…» обрезался на телефоне.
+
+    `source` — портфель отчёта: цена на кнопке та же, что спишется
+    (`_effective_cost`, демо — бесплатно). Без источника — тариф `TIER_COST`.
+    """
+    def _label(tier: str) -> str:
+        cost = _effective_cost(tier, source) if source else TIER_COST[tier]
+        price = "бесплатно" if cost == 0 else _tokens(cost)
+        return f"{_TIER_ICON[tier]} {_TIER_SHORT[tier]} · {price}"
     return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="📊 Базовый (1 токен)",  callback_data="analysis:base"),
-            InlineKeyboardButton(text="🔬 Глубокий (2 токена)", callback_data="analysis:deep"),
-        ],
-        [InlineKeyboardButton(text="🎯 Сценарный анализ (1 токен)",
-                              callback_data="analysis:scenario")],
+        [InlineKeyboardButton(text=_label("base"), callback_data="analysis:base")],
+        [InlineKeyboardButton(text=_label("scenario"), callback_data="analysis:scenario")],
+        [InlineKeyboardButton(text=_label("deep"), callback_data="analysis:deep")],
+        [InlineKeyboardButton(text="💼 Портфель", callback_data="home:portfolio"),
+         InlineKeyboardButton(text="🏠 Меню", callback_data="home:menu")],
     ])
 
 
 def kb_confirm(tier: str, context_slug: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(
-            text="✅ Одобрить",
+            text="✅ Запустить",
             callback_data=f"confirm:{tier}:{context_slug}",
         ),
         InlineKeyboardButton(text="❌ Отмена", callback_data="cancel"),
@@ -1159,8 +1188,10 @@ def kb_mandate_menu() -> InlineKeyboardMarkup:
                               callback_data="mandate:edit:profile")],
         [InlineKeyboardButton(text="🔄 Пройти анкету заново",
                               callback_data="mandate:edit:requiz")],
-        [InlineKeyboardButton(text="⬅️ Закрыть",
-                              callback_data="mandate:close")],
+        # §−124: «Мой мандат и настройки» не вело к портфелю вовсе — источник
+        # нельзя было сменить после онбординга. Портфель — соседним пунктом.
+        [InlineKeyboardButton(text="💼 Мой портфель", callback_data="home:portfolio"),
+         InlineKeyboardButton(text="🏠 Меню", callback_data="home:menu")],
     ])
 
 
@@ -1189,10 +1220,10 @@ def kb_mandate_profile(current: str | None) -> InlineKeyboardMarkup:
 def kb_mandate_changed() -> InlineKeyboardMarkup:
     """CTA после сохранённого изменения мандата."""
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📊 Заказать новый отчёт",
+        [InlineKeyboardButton(text="📊 Новый отчёт",
                               callback_data="mandate:report")],
-        [InlineKeyboardButton(text="🎛 Меню мандата",
-                              callback_data="mandate:back")],
+        [InlineKeyboardButton(text="🎛 Мандат", callback_data="mandate:back"),
+         InlineKeyboardButton(text="🏠 Меню", callback_data="home:menu")],
     ])
 
 
@@ -1245,7 +1276,7 @@ async def _show_mandate_menu(target: Message | CallbackQuery,
     """Показать/обновить экран /mandate (переиспользует _edit_or_answer)."""
     profile = await get_profile(user_id)
     if profile is None:
-        msg = target.message if isinstance(target, CallbackQuery) else target
+        msg = target.message if _is_callback(target) else target
         await msg.answer(
             "⚠️ У вас ещё нет профиля. Используйте /start для регистрации.",
             parse_mode=ParseMode.MARKDOWN,
@@ -1268,7 +1299,7 @@ async def _edit_or_answer(
     data      = await state.get_data()
     ob_msg_id = data.get("ob_message_id")
 
-    if isinstance(target, CallbackQuery) and ob_msg_id:
+    if _is_callback(target) and ob_msg_id:
         try:
             await target.message.edit_text(
                 text, parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup
@@ -1277,7 +1308,7 @@ async def _edit_or_answer(
         except Exception:
             pass
 
-    if isinstance(target, CallbackQuery):
+    if _is_callback(target):
         sent = await target.message.answer(
             text, parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup
         )
@@ -1285,7 +1316,7 @@ async def _edit_or_answer(
         sent = await target.answer(
             text, parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup
         )
-    await state.update_data(ob_message_id=sent.message_id)
+    await state.update_data(ob_message_id=getattr(sent, "message_id", None))
 
 
 async def send_question(
@@ -1312,40 +1343,525 @@ async def send_question(
         )
 
 
-async def _show_analysis_menu(message: Message, slug: str,
-                              user_id: int | None = None) -> None:
-    """Send the final analysis choice, with a deep-link context if slug is set."""
+# ══════════════════════════════════════════════════════════════════════════════
+# НАВИГАЦИЯ (§−124): главное меню, «Мой портфель», один вид экранов
+# ══════════════════════════════════════════════════════════════════════════════
+# Почему так. До `§−124` у вернувшегося пользователя не было ни главного меню,
+# ни пути к смене источника портфеля: экран подключения появлялся только в
+# онбординге и при ошибке, а «Мой мандат и настройки» вёл к мандату и больше
+# никуда. Демо-пользователь не мог подключить брокера, а ручной портфель и
+# агрегированный отчёт не были видны ниоткуда.
+#
+# Правила экранов:
+#   * у каждого экрана есть следующий шаг и путь назад (🏠 Меню);
+#   * навигация по меню ПРАВИТ нажатое сообщение (`_screen`), а не плодит новые;
+#     информационные сообщения (готовый отчёт, списание) не правятся никогда —
+#     их кнопка `home:open` присылает меню НОВЫМ сообщением;
+#   * цена на кнопке — та, что спишется (`_effective_cost`): демо бесплатно.
+
+_TIER_ICON = {"base": "📊", "scenario": "🎯", "deep": "🔬"}
+_TIER_SHORT = {"base": "Базовый", "scenario": "Сценарный", "deep": "Глубокий"}
+_TIER_LINES = (
+    "📊 *Базовый* — риск, доходность, состав, идеи\n"
+    "🎯 *Сценарный* — вклад позиций в риск, 3 макро-сценария\n"
+    "🔬 *Глубокий* — всё из базового + факторы и стресс-тесты"
+)
+#: Портфель отчёта — в тексте (строчными) и на кнопке выбора.
+_PORTFOLIO_LABEL = {
+    "freedom": "Freedom Broker",
+    "manual": "ручной портфель",
+    AGGREGATED_SOURCE: "Freedom + ручной",
+    "demo": "демо-портфель",
+}
+_HOME_ACTIONS = frozenset({"menu", "open", "report", "portfolio", "mandate",
+                           "balance", "topup", "help"})
+_PF_RE = re.compile(r"^pf:(freedom|demo)$")
+
+
+def _plural(n: int, one: str, few: str, many: str) -> str:
+    """Русское склонение по числу: 1 токен · 2 токена · 5 токенов · 11 токенов."""
+    k = abs(int(n))
+    if k % 10 == 1 and k % 100 != 11:
+        return one
+    if k % 10 in (2, 3, 4) and k % 100 not in (12, 13, 14):
+        return few
+    return many
+
+
+def _tokens(n: int) -> str:
+    return f"{n} {_plural(n, 'токен', 'токена', 'токенов')}"
+
+
+def _positions(n: int) -> str:
+    return f"{n} {_plural(n, 'позиция', 'позиции', 'позиций')}"
+
+
+def _portfolio_label(source: str | None) -> str:
+    return _PORTFOLIO_LABEL.get(str(source or ""), "портфель")
+
+
+def _is_callback(target) -> bool:
+    """Нажатие кнопки, а не сообщение: у нажатия есть `data` и `message`.
+
+    Утиная проверка, а не только `isinstance`: экран не должен молча уходить
+    во всплывающее `callback.answer()` из-за обёртки над апдейтом.
+    """
+    return isinstance(target, CallbackQuery) or (
+        hasattr(target, "data") and getattr(target, "message", None) is not None)
+
+
+def _btn(text: str, data: str) -> InlineKeyboardButton:
+    return InlineKeyboardButton(text=text, callback_data=data)
+
+
+def kb_home() -> InlineKeyboardMarkup:
+    """Главное меню: одно главное действие и четыре раздела."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [_btn("📊 Новый отчёт", "home:report")],
+        [_btn("💼 Мой портфель", "home:portfolio"), _btn("🎛 Мандат", "home:mandate")],
+        [_btn("💳 Баланс", "home:balance"), _btn("❓ Помощь", "home:help")],
+    ])
+
+
+def kb_nav(*extra: InlineKeyboardButton, new_message: bool = False) -> InlineKeyboardMarkup:
+    """Строка навигации: дополнительные кнопки + «🏠 Меню».
+
+    `new_message=True` — для сообщений, которые нельзя затирать (готовый
+    отчёт, строка списания): меню придёт отдельным сообщением.
+    """
+    home = _btn("🏠 Меню", "home:open" if new_message else "home:menu")
+    return InlineKeyboardMarkup(inline_keyboard=[[*extra, home]])
+
+
+async def _screen(target: Message | CallbackQuery, text: str,
+                  reply_markup: InlineKeyboardMarkup | None = None, *,
+                  edit: bool = True) -> None:
+    """Показать экран меню: ПРАВКА нажатого сообщения, иначе новое сообщение.
+
+    Правка — только для нажатия кнопки (`CallbackQuery`) и только при
+    `edit=True`. «Сообщение не изменилось» (повторное нажатие) — не повод
+    слать дубль; любая другая ошибка правки (старое сообщение, удалено) —
+    повод прислать экран заново: молчание хуже дубля (`§−104`).
+    """
+    if _is_callback(target) and edit:
+        try:
+            await target.message.edit_text(text, parse_mode=ParseMode.MARKDOWN,
+                                           reply_markup=reply_markup)
+            return
+        except Exception as exc:                       # noqa: BLE001
+            if "not modified" in str(exc).lower():
+                return
+    msg = target.message if _is_callback(target) else target
+    await msg.answer(text, parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup)
+
+
+async def _portfolio_overview(user_id: int) -> dict:
+    """Что подключено у пользователя — для главного меню и «Мой портфель».
+
+    Ни одно чтение не имеет права уронить экран (`§−104`): сбой хранилища
+    показывается как «недоступен», а не как «пуст» — это разные факты.
+    """
+    loop = asyncio.get_running_loop()
+    try:
+        has_keys = _is_admin(user_id) or bool(
+            await loop.run_in_executor(None, _has_vault_keys_sync, user_id))
+    except Exception as exc:                           # noqa: BLE001
+        logger.warning("NAV: vault недоступен user=%s: %s", user_id, type(exc).__name__)
+        has_keys = False
+    manual_on = manual_portfolio_enabled(user_id)
+    # Два счётчика, и это не дубль: `manual_n` — БУМАГИ (то же правило, что у
+    # лимита, `count_positions`), `manual_lines` — строки вместе с кэшем.
+    # «Пуст» — только когда строк нет: портфель из одного кэша не пустой.
+    # None — не прочитан (сбой хранилища), это «недоступен», а не «пуст».
+    manual_n: int | None = None
+    manual_lines: int | None = None
+    if manual_on:
+        try:
+            text, unreadable = await _load_manual_portfolio_text(user_id)
+            if not unreadable:
+                entries = (await loop.run_in_executor(None, _mp_entries_sync, text)
+                           if text.strip() else [])
+                manual_n, manual_lines = count_positions(entries), len(entries)
+        except Exception as exc:                       # noqa: BLE001
+            logger.warning("NAV: ручной портфель не прочитан user=%s: %s",
+                           user_id, type(exc).__name__)
+    try:
+        default, _stored = await _resolve_portfolio_source(user_id)
+    except Exception as exc:                           # noqa: BLE001
+        logger.warning("NAV: источник не определён user=%s: %s", user_id,
+                       type(exc).__name__)
+        default = "undetermined"
+    return {"has_keys": has_keys, "manual_on": manual_on, "manual_n": manual_n,
+            "manual_lines": manual_lines, "default": default,
+            "hybrid": hybrid_portfolio_enabled(user_id)}
+
+
+def _manual_status(ov: dict) -> str:
+    """«3 позиции» · «только кэш» · «пуст» · «недоступен» — одно правило везде."""
+    if ov["manual_lines"] is None:
+        return "недоступен"
+    if not ov["manual_lines"]:
+        return "пуст"
+    return _positions(ov["manual_n"]) if ov["manual_n"] else "только кэш"
+
+
+def _overview_line(ov: dict) -> str:
+    """Одна строка о портфелях для главного меню: что подключено."""
+    parts = []
+    if ov["has_keys"]:
+        parts.append("Freedom Broker ✅")
+    if ov["manual_on"] and (ov["manual_lines"] != 0 or ov["default"] == "manual"):
+        parts.append(f"ручной — {_manual_status(ov)}")
+    if parts:
+        return ("💼 Портфели: " if len(parts) > 1 else "💼 Портфель: ") + " · ".join(parts)
+    if ov["default"] == "demo":
+        return "💼 Портфель: демо — отчёты бесплатны"
+    return "💼 Портфель не подключён — начните с «Мой портфель»"
+
+
+def _report_sources(ov: dict) -> list[str]:
+    """Портфели, по которым есть смысл заказать отчёт, — в порядке показа.
+
+    Демо — всегда последним. По этому списку «📊 Новый отчёт» решает, нужен ли
+    вопрос «По какому портфелю?»: при одном настоящем портфеле — сразу к тирам.
+    """
+    out = []
+    if ov["has_keys"]:
+        out.append("freedom")
+    if ov["manual_on"] and (ov["manual_lines"] or ov["default"] == "manual"):
+        out.append("manual")
+    if ov["hybrid"] and ov["has_keys"] and ov["manual_lines"]:
+        out.append(AGGREGATED_SOURCE)
+    out.append("demo")
+    return out
+
+
+_NEEDS_FREEDOM = "подключите Freedom Broker"
+_NEEDS_FREEDOM_FOR_AGG = "нужен подключённый Freedom Broker"
+_NEEDS_MANUAL = "заполните ручной портфель"
+
+
+def _source_refusal(source: str, ov: dict) -> str | None:
+    """Почему отчёт по этому портфелю сейчас НЕЛЬЗЯ; `None` — можно.
+
+    Проверяется на КАЖДОМ нажатии (S-4): кнопка живёт в чате дольше условий.
+    Каждый портфель проверяется своим условием — ключи, флаг ручного ввода,
+    флаг гибрида; общий выключатель меню не нужен.
+    """
+    if source == "freedom" and not ov["has_keys"]:
+        return _NEEDS_FREEDOM
+    if source == "manual" and not ov["manual_on"]:
+        return "ручной ввод сейчас выключен"
+    if source == AGGREGATED_SOURCE:
+        if not ov["hybrid"]:
+            return "отчёт «Freedom + ручной» сейчас выключен"
+        if not ov["has_keys"]:
+            return _NEEDS_FREEDOM_FOR_AGG
+        if not ov["manual_lines"]:
+            return _NEEDS_MANUAL
+    return None
+
+
+def _kb_refusal(source: str, why: str) -> InlineKeyboardMarkup:
+    """Отказ ведёт туда, где причину можно устранить."""
+    if why in (_NEEDS_FREEDOM, _NEEDS_FREEDOM_FOR_AGG):
+        fix = _btn("🔗 Freedom Broker", "pf:freedom")
+    elif why == _NEEDS_MANUAL:
+        fix = _btn("✏️ Ручной портфель", "mp:show")
+    else:
+        fix = _btn("💼 Мой портфель", "home:portfolio")
+    return kb_nav(fix)
+
+
+async def _require_profile(target: Message | CallbackQuery, user_id: int) -> bool:
+    """Меню без мандата бессмысленно: анкета — первый шаг (`/start`)."""
+    if await get_profile(user_id) is not None:
+        return True
+    msg = target.message if _is_callback(target) else target
+    await msg.answer("👋 Сначала короткая анкета (6 вопросов) — нажмите /start.")
+    return False
+
+
+async def _show_home(target: Message | CallbackQuery, user_id: int, *,
+                     edit: bool = True) -> None:
+    ov = await _portfolio_overview(user_id)
+    balance = await get_balance(user_id)
+    await _screen(target,
+                  "🏠 *Главное меню*\n\n"
+                  f"{_overview_line(ov)}\n"
+                  f"💳 Баланс: *{_tokens(balance)}*",
+                  kb_home(), edit=edit)
+
+
+async def _open_report(target: Message | CallbackQuery, state: FSMContext,
+                       user_id: int, *, edit: bool = True) -> None:
+    """«📊 Новый отчёт».
+
+    Один настоящий портфель — сразу тиры по нему; несколько (или гибрид) —
+    вопрос «По какому портфелю?». Портфель ЯВНО едет в callback_data
+    (`src:`/`rpt:`/`rptgo:`), а не берётся из скрытого «режима по умолчанию»:
+    тот сам себя перелечивает в `freedom` при ключах в vault, и кнопка «демо»
+    молча строила бы платный брокерский отчёт.
+    """
+    await state.clear()
+    ov = await _portfolio_overview(user_id)
+    real = [s for s in _report_sources(ov) if s != "demo"]
+    if ov["hybrid"] or len(real) >= 2:
+        await _show_source_menu(target, user_id, edit=edit, ov=ov)
+    elif real:
+        await _show_tiers_for(target, state, user_id, real[0], ov=ov, edit=edit)
+    elif ov["default"] == "demo":
+        await _show_tiers_for(target, state, user_id, "demo", ov=ov, edit=edit)
+    else:
+        await _screen(target, "📡 *Сначала выберите портфель.*\n\n"
+                              "Откуда брать позиции для отчёта?",
+                      kb_connect_choice(user_id), edit=edit)
+
+
+async def _show_tiers_for(target: Message | CallbackQuery, state: FSMContext,
+                          user_id: int, source: str, *, ov: dict | None = None,
+                          edit: bool = True) -> None:
+    """Тиры по КОНКРЕТНОМУ портфелю. Пустой ручной портфель — сразу к вводу."""
+    ov = ov or await _portfolio_overview(user_id)
+    why = _source_refusal(source, ov)
+    if why is not None:
+        await _screen(target, f"ℹ️ Портфель недоступен: {why}.",
+                      _kb_refusal(source, why), edit=edit)
+        return
+    if source == "manual" and not ov["manual_lines"]:
+        draft = await get_manual_draft(user_id)
+        if not str((draft or {}).get("text") or "").strip():
+            msg = target.message if _is_callback(target) else target
+            await _manual_ask_for_input(msg, state)
+            return
+    multi = ov["hybrid"] or len([s for s in _report_sources(ov) if s != "demo"]) >= 2
+    await _screen(target,
+                  f"📊 *Выберите тип анализа* · {_portfolio_label(source)}\n\n"
+                  f"{_TIER_LINES}\n\n"
+                  + ("📋 Отчёты по демо-портфелю бесплатны." if source == "demo"
+                     else "💳 Токен списывается только за готовый отчёт."),
+                  kb_report_tiers(source, multi=multi), edit=edit)
+
+
+async def _show_analysis_menu(target: Message | CallbackQuery, slug: str,
+                              user_id: int | None = None, *,
+                              edit: bool = False) -> None:
+    """Выбор тира. При гибриде — сначала выбор портфеля (D-9).
+
+    Портфель отчёта назван в шапке, цены на кнопках — по нему: прежняя шапка
+    молчала об источнике, а демо-пользователю обещала списать токен.
+    """
+    msg = target.message if _is_callback(target) else target
+    uid = user_id if user_id is not None else getattr(
+        getattr(msg, "chat", None), "id", None)
     # Гибрид D-9: меню двухшаговое (источник → тир). Только при включённом
     # флаге (I-9): без него меню ровно прежнее. Чат с ботом личный, поэтому
     # id чата — это id пользователя, когда вызывающий его не передал.
-    if hybrid_portfolio_enabled():
-        uid = user_id if user_id is not None else getattr(
-            getattr(message, "chat", None), "id", None)
-        if uid is not None:
-            await _show_source_menu(message, int(uid))
-            return
+    if uid is not None and hybrid_portfolio_enabled(int(uid)):
+        await _show_source_menu(target, int(uid), edit=edit)
+        return
+    source = None
+    if uid is not None:
+        try:
+            source, _stored = await _resolve_portfolio_source(int(uid))
+        except Exception as exc:                       # noqa: BLE001
+            logger.warning("NAV: источник не определён user=%s: %s", uid,
+                           type(exc).__name__)
+    priced = source if source in ("freedom", "manual", "demo") else None
     if slug:
-        await message.answer(
-            f"👋 Кстати, вы пришли из нашего канала _{_source_label(slug)}_.\n\n"
-            "Хотите узнать, как эта новость влияет на ваш портфель?\n\n"
-            "💰 *Базовый отчёт:* 1 токен\n"
-            "🎯 *Сценарный анализ:* 1 токен\n"
-            "🔬 *Глубокий анализ:* 2 токена",
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=kb_analysis_choice(),
-        )
+        text = (f"👋 Вы пришли из нашего канала _{_md_safe(_source_label(slug))}_.\n\n"
+                "Посмотрим, как эта новость влияет на ваш портфель. "
+                "Выберите тип анализа:")
     else:
-        await message.answer(
-            "🚀 *Выберите тип анализа вашего портфеля:*\n\n"
-            "📊 *Базовый* (1 токен) — риск-профиль, CVaR/Sharpe, состав, идеи.\n"
-            "🎯 *Сценарный* (1 токен) — вклад позиций в риск (Euler-MCTR), "
-            "выживаемость в 3 макро-режимах, слабые звенья, бэктест правила.\n"
-            "🔬 *Глубокий* (2 токена) — всё из базового + факторное разложение, "
-            "4-Pillar, стресс-сценарии, режим, банковская аналитика.\n\n"
-            "ℹ️ Демо-отчёты бесплатны · мандат и бенчмарк: /mandate · помощь: /help",
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=kb_analysis_choice(),
-        )
+        head = "📊 *Выберите тип анализа*"
+        if priced:
+            head += f" · {_portfolio_label(priced)}"
+        text = (f"{head}\n\n{_TIER_LINES}\n\n"
+                + ("📋 Отчёты по демо-портфелю бесплатны." if priced == "demo"
+                   else "💳 Токен списывается только за готовый отчёт."))
+    await _screen(target, text, kb_analysis_choice(priced), edit=edit)
+
+
+def _price_screen(tier: str, source: str | None, cost: int, balance: int,
+                  go_data: str) -> tuple[str, InlineKeyboardMarkup]:
+    """Экран цены перед запуском — одинаковый для обоих меню."""
+    head = f"{_TIER_ICON[tier]} *{TIER_LABEL[tier]}*"
+    if source:
+        head += f" · {_portfolio_label(source)}"
+    if cost > balance:
+        return (f"{head}\n\n❌ Не хватает токенов: нужно *{_tokens(cost)}*, "
+                f"на балансе *{_tokens(balance)}*.",
+                InlineKeyboardMarkup(inline_keyboard=[[
+                    _btn("💰 Пополнить", "home:topup"), _btn("🏠 Меню", "home:menu")]]))
+    price = ("📋 Бесплатно — демо-портфель." if cost == 0 else
+             f"💳 Стоимость: *{_tokens(cost)}* — спишется только после готового отчёта.")
+    return (f"{head}\n\n{price}\nБаланс: *{_tokens(balance)}*.",
+            InlineKeyboardMarkup(inline_keyboard=[[
+                _btn("✅ Запустить", go_data), _btn("❌ Отмена", "cancel")]]))
+
+
+async def _show_portfolio_hub(target: Message | CallbackQuery, user_id: int, *,
+                              edit: bool = True) -> None:
+    """«💼 Мой портфель»: что подключено и куда нажать, чтобы поменять."""
+    ov = await _portfolio_overview(user_id)
+    lines = ["💼 *Мой портфель*", "",
+             "🔗 Freedom Broker — " + ("подключён ✅" if ov["has_keys"] else "не подключён")]
+    if ov["manual_on"]:
+        lines.append(f"✏️ Ручной портфель — {_manual_status(ov)}")
+    lines.append("📋 Демо — шаблонный портфель, бесплатно")
+    lines.append("")
+    lines.append("Нажмите на портфель, чтобы управлять им или заказать отчёт.")
+    rows = [[_btn("🔗 Freedom Broker", "pf:freedom")]]
+    if ov["manual_on"]:
+        rows.append([_btn("✏️ Ручной портфель", "mp:show")])
+    rows.append([_btn("📋 Демо-портфель", "pf:demo")])
+    rows.append([_btn("🏠 Меню", "home:menu")])
+    await _screen(target, "\n".join(lines),
+                  InlineKeyboardMarkup(inline_keyboard=rows), edit=edit)
+
+
+async def _start_key_entry(target: Message | CallbackQuery, state: FSMContext,
+                           slug: str = "") -> None:
+    """Подключение Freedom Broker: три шага, отмена — в один тап."""
+    await state.update_data(slug=slug)
+    await state.set_state(PortfolioConnection.Login)
+    await _screen(target,
+                  "🔗 *Подключение Freedom Broker* · шаг 1 из 3\n\n"
+                  f"{branding.project_name()} получает доступ только на ЧТЕНИЕ — "
+                  "сделки бот совершать не может. Ключи хранятся зашифрованными; "
+                  "сообщения с ними потом удалите из чата.\n\n"
+                  "Введите *логин* Freedom Broker:",
+                  InlineKeyboardMarkup(inline_keyboard=[[_btn("❌ Отмена", "cancel")]]))
+
+
+async def _show_balance(target: Message | CallbackQuery, user_id: int, *,
+                        edit: bool = True) -> None:
+    balance = await get_balance(user_id)
+    price_str = f"{TOKEN_PRICE_KZT:,}".replace(",", " ")
+    pack_str = f"{TOKEN_PACK_PRICE_KZT:,}".replace(",", " ")
+    await _screen(target,
+                  f"💳 *Баланс: {_tokens(balance)}*\n\n"
+                  f"1 токен = {price_str} ₸ · пакет {_tokens(TOKEN_PACK_TOKENS)} = "
+                  f"{pack_str} ₸\n"
+                  "Токен списывается только за готовый отчёт; демо — бесплатно.",
+                  kb_nav(_btn("💰 Пополнить", "home:topup")), edit=edit)
+
+
+async def _show_topup(target: Message | CallbackQuery, *, edit: bool = True) -> None:
+    price_str = f"{TOKEN_PRICE_KZT:,}".replace(",", " ")
+    pack_str = f"{TOKEN_PACK_PRICE_KZT:,}".replace(",", " ")
+    await _screen(target,
+                  "💰 *Пополнение*\n\n"
+                  f"Пакет {_tokens(TOKEN_PACK_TOKENS)} — *{pack_str} ₸* "
+                  f"(1 токен = {price_str} ₸).\n"
+                  f"Оплата пока через поддержку: {md_safe(branding.support_contact())}.",
+                  kb_nav(), edit=edit)
+
+
+async def _show_help(target: Message | CallbackQuery, user_id: int, *,
+                     edit: bool = True) -> None:
+    """Короткая карта бота: три шага, затем справка по ручному вводу/токенам."""
+    base_c, scn_c, deep_c = (TIER_COST["base"], TIER_COST["scenario"],
+                             TIER_COST["deep"])
+    price_str = f"{TOKEN_PRICE_KZT:,}".replace(",", " ")
+    pack_str = f"{TOKEN_PACK_PRICE_KZT:,}".replace(",", " ")
+    lines = [
+        f"❓ *Как пользоваться {branding.bot_name()}*",
+        "",
+        "1️⃣ *Мой портфель* — /portfolio: подключите Freedom Broker (только "
+        "чтение)"
+        + (", введите портфель вручную" if manual_portfolio_enabled(user_id) else "")
+        + " или возьмите демо.",
+        "2️⃣ *Новый отчёт* — /report:",
+        f"   📊 Базовый · {_tokens(base_c)} — риск, доходность, состав, идеи",
+        f"   🎯 Сценарный · {_tokens(scn_c)} — вклад позиций в риск, 3 сценария",
+        f"   🔬 Глубокий · {_tokens(deep_c)} — + факторы, стресс-тесты, "
+        "аналитика банков",
+        "3️⃣ *Мандат* — /mandate: риск-профиль, бенчмарк, классы активов. "
+        "Бесплатно.",
+        "",
+    ]
+    # I-9: строки ручного портфеля — только при включённом ручном вводе.
+    if manual_portfolio_enabled(user_id):
+        lines.append("✏️ *Ручной портфель*: правки сообщением `+AAPL 10 150`, "
+                     "`-AAPL 5`, `-AAPL`. Удалить всё — /forget\\_portfolio.")
+    if hybrid_portfolio_enabled(user_id):
+        lines.append("🌐 *Freedom + ручной* — один отчёт по обоим портфелям; "
+                     "котировки Tradernet.")
+    lines.append(f"💳 *Токены* — /balance: 1 токен = {price_str} ₸, "
+                 f"пакет {TOKEN_PACK_TOKENS} = {pack_str} ₸. Списание — только за "
+                 "готовый отчёт; демо бесплатно.")
+    lines.append("🛟 *Поддержка* — /support")
+    await _screen(target, "\n".join(lines), kb_nav(), edit=edit)
+
+
+async def cb_home(callback: CallbackQuery, state: FSMContext) -> None:
+    """`home:<раздел>` — главное меню и его разделы. callback_data — по allowlist."""
+    await callback.answer()
+    action = str(callback.data or "").split(":", 1)[-1]
+    user_id = callback.from_user.id
+    if action not in _HOME_ACTIONS:
+        logger.warning("NAV: подделанный callback user=%s", user_id)
+        return
+    if not await _require_profile(callback, user_id):
+        return
+    if action in ("menu", "open"):
+        await state.clear()
+        await _show_home(callback, user_id, edit=(action == "menu"))
+    elif action == "report":
+        await _open_report(callback, state, user_id)
+    elif action == "portfolio":
+        await state.clear()
+        await _show_portfolio_hub(callback, user_id)
+    elif action == "mandate":
+        # Меню мандата правит «своё» сообщение (`_edit_or_answer`) — отдаём ему
+        # нажатое, чтобы переход был на месте, а не новым сообщением.
+        await state.update_data(ob_message_id=getattr(callback.message, "message_id", None))
+        await _show_mandate_menu(callback, state, user_id)
+    elif action == "balance":
+        await _show_balance(callback, user_id)
+    elif action == "topup":
+        await _show_topup(callback)
+    elif action == "help":
+        await _show_help(callback, user_id)
+
+
+async def cb_portfolio_card(callback: CallbackQuery, state: FSMContext) -> None:
+    """`pf:freedom` / `pf:demo` — карточка портфеля в «💼 Мой портфель»."""
+    await callback.answer()
+    m = _PF_RE.match(str(callback.data or ""))
+    user_id = callback.from_user.id
+    if not m:
+        logger.warning("NAV: подделанный callback user=%s", user_id)
+        return
+    if not await _require_profile(callback, user_id):
+        return
+    back = _btn("⬅️ Мой портфель", "home:portfolio")
+    if m.group(1) == "freedom":
+        ov = await _portfolio_overview(user_id)
+        if not ov["has_keys"]:
+            await _start_key_entry(callback, state)
+            return
+        await _screen(callback,
+                      "🔗 *Freedom Broker* — подключён ✅\n"
+                      "Доступ только на чтение; ключи хранятся зашифрованными.",
+                      InlineKeyboardMarkup(inline_keyboard=[
+                          [_btn("📊 Отчёт по Freedom", "src:freedom")],
+                          [_btn("🔑 Заменить ключи", "connect:freedom")],
+                          [back]]))
+        return
+    await _screen(callback,
+                  "📋 *Демо-портфель*\n"
+                  "Шаблонный портфель, чтобы посмотреть, как выглядят отчёты. "
+                  "Бесплатно.",
+                  InlineKeyboardMarkup(inline_keyboard=[
+                      [_btn("📊 Демо-отчёт", "src:demo")], [back]]))
+
+
+async def cmd_report(message: Message, state: FSMContext) -> None:
+    """/report — сразу к заказу отчёта."""
+    if await _require_profile(message, message.from_user.id):
+        await _open_report(message, state, message.from_user.id, edit=False)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1410,7 +1926,7 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
         elif slug:
             await state.update_data(context_slug=slug)
             await message.answer(
-                f"👋 Привет! Я вижу, вы пришли из нашего канала _{_source_label(slug)}_.\n\n"
+                f"👋 Привет! Я вижу, вы пришли из нашего канала _{_md_safe(_source_label(slug))}_.\n\n"
                 "Я могу проанализировать, как эта новость повлияет на ваш портфель.\n\n"
                 "💰 *Базовый отчёт:* 1 токен\n"
                 "🎯 *Сценарный анализ:* 1 токен\n"
@@ -1437,26 +1953,13 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
                     "Похоже, подключение не завершено или было сброшено. "
                     "Выберите, как анализировать ваш портфель:",
                     parse_mode=ParseMode.MARKDOWN,
-                    reply_markup=kb_connect_choice(),
+                    reply_markup=kb_connect_choice(user_id),
                 )
                 return
-            balance = await get_balance(user_id)
-            if hybrid_portfolio_enabled():
-                # D-9: сначала источник, потом тир (I-9: только под флагом).
-                await message.answer(
-                    f"📊 *{branding.project_name()} — Risk & Asset Management Platform*\n\n"
-                    f"Ваш баланс: *{balance} токен(а)*",
-                    parse_mode=ParseMode.MARKDOWN,
-                )
-                await _show_source_menu(message, user_id)
-                return
-            await message.answer(
-                f"📊 *{branding.project_name()} — Risk & Asset Management Platform*\n\n"
-                f"Ваш баланс: *{balance} токен(а)*\n\n"
-                "Выберите тип анализа вашего портфеля:",
-                parse_mode=ParseMode.MARKDOWN,
-                reply_markup=kb_analysis_choice(),
-            )
+            # §−124: вернувшийся пользователь попадает в ГЛАВНОЕ МЕНЮ, а не
+            # сразу в тиры: иначе разделы «Мой портфель», «Мандат», «Баланс»
+            # были бы видны только тем, кто знает команды.
+            await _show_home(message, user_id, edit=False)
 
 
 # ── Q1–Q6 answer handler ──────────────────────────────────────────────────────
@@ -1732,16 +2235,11 @@ async def cb_mandate_approve(callback: CallbackQuery, state: FSMContext) -> None
 
     balance = await get_balance(user_id)
     await callback.message.answer(
-        f"🎉 *Мандат утверждён! Добро пожаловать в {branding.project_name()}.*\n\n"
-        f"Ваш профиль: *{prof['name']}*\n"
-        f"На ваш счёт зачислено *{balance} токен(а)*.\n\n"
-        "Последний шаг: подключите источник данных о вашем портфеле.",
+        f"🎉 *Мандат утверждён — добро пожаловать в {branding.project_name()}!*\n"
+        f"Профиль: *{prof['name']}* · на счёте *{_tokens(balance)}*.\n\n"
+        "Последний шаг — откуда брать портфель?",
         parse_mode=ParseMode.MARKDOWN,
-    )
-    await callback.message.answer(
-        "📡 *Как вы хотите подключить ваш портфель?*",
-        parse_mode=ParseMode.MARKDOWN,
-        reply_markup=kb_connect_choice(),
+        reply_markup=kb_connect_choice(user_id),
     )
 
 
@@ -1781,10 +2279,8 @@ async def cb_connect_choice(callback: CallbackQuery, state: FSMContext) -> None:
     if mode == "template":
         await save_connection_mode(user_id, "template")
         await callback.message.edit_text(
-            "✅ *Демо-режим активирован.*\n\n"
-            "Для анализа будет использоваться шаблонный институциональный "
-            "портфель.\n\n"
-            "📋 Отчёты по демо-портфелю *бесплатны* — токены не списываются.",
+            "✅ *Демо-портфель выбран* — отчёты по нему бесплатны.\n"
+            "Подключить свой портфель можно в любой момент: «💼 Мой портфель».",
             parse_mode=ParseMode.MARKDOWN,
         )
         await state.clear()
@@ -1794,13 +2290,13 @@ async def cb_connect_choice(callback: CallbackQuery, state: FSMContext) -> None:
         # I-9, второй гард: кнопки при выключенном флаге нет, но СТАРОЕ
         # сообщение с кнопкой живёт в чате вечно.  Без проверки здесь выключение
         # флага не выключало бы фичу — а флаг существует ровно ради отката.
-        if not manual_portfolio_enabled():
+        if not manual_portfolio_enabled(user_id):
             logger.info("MANUAL: нажата кнопка при выключенном флаге user=%s", user_id)
             await callback.message.answer(
                 "ℹ️ Ручной ввод портфеля пока недоступен. "
                 "Выберите демо-режим или подключите брокера.",
                 parse_mode=ParseMode.MARKDOWN,
-                reply_markup=kb_connect_choice(),
+                reply_markup=kb_connect_choice(user_id),
             )
             return
         await save_connection_mode(user_id, "manual")
@@ -1821,17 +2317,7 @@ async def cb_connect_choice(callback: CallbackQuery, state: FSMContext) -> None:
         await _manual_ask_for_input(callback.message, state)
 
     elif mode == "freedom":
-        await state.update_data(slug=slug)
-        await state.set_state(PortfolioConnection.Login)
-        await callback.message.edit_text(
-            f"⚠️ *Важно:* {branding.project_name()} использует API исключительно для режима ЧТЕНИЯ (Read-Only) "
-            "сырых данных для глубокого квантового анализа. "
-            "Мы не имеем права совершать сделки. "
-            "В целях безопасности, после ввода ключей, пожалуйста, "
-            "удалите свои сообщения из истории чата.\n\n"
-            "🔐 Введите ваш *Логин* в Freedom Broker:",
-            parse_mode=ParseMode.MARKDOWN,
-        )
+        await _start_key_entry(callback, state, slug)
 
 
 @portfolio_router.message(StateFilter(PortfolioConnection.Login))
@@ -1839,7 +2325,7 @@ async def msg_login(message: Message, state: FSMContext) -> None:
     await state.update_data(connect_login=message.text.strip())
     await state.set_state(PortfolioConnection.ApiKey)
     await message.answer(
-        "🔑 Введите ваш *API Key*:",
+        "🔑 Шаг 2 из 3 — введите *API Key*:",
         parse_mode=ParseMode.MARKDOWN,
     )
 
@@ -1866,7 +2352,7 @@ async def msg_api_key(message: Message, state: FSMContext) -> None:
             parse_mode=ParseMode.MARKDOWN,
         )
     await message.answer(
-        "🔑 Введите ваш *Secret Key* (приватный ключ):",
+        "🔑 Шаг 3 из 3 — введите *Secret Key*:",
         parse_mode=ParseMode.MARKDOWN,
     )
 
@@ -1901,10 +2387,8 @@ async def msg_secret_key(message: Message, state: FSMContext) -> None:
     # user's message in a 1:1 chat, so the reminder below is shown regardless
     # (it IS the mitigation — ask the user to delete their key message now).
     ack_text = (
-        "✅ Ваши ключи успешно привязаны и зашифрованы. Мы не храним их в "
-        "открытом виде.\n\n"
-        "⚠️ Ради вашей безопасности, пожалуйста, удалите своё предыдущее "
-        "сообщение с ключами из этого чата прямо сейчас."
+        "✅ *Freedom Broker подключён.* Ключи хранятся только в зашифрованном виде.\n\n"
+        "⚠️ Удалите из чата сообщения с ключами — у бота нет права сделать это за вас."
     )
     await message.answer(ack_text, parse_mode=ParseMode.MARKDOWN)
     await _show_analysis_menu(message, slug)
@@ -2265,14 +2749,14 @@ async def msg_manual_input(message: Message, state: FSMContext) -> None:
     # пустое FSM.  При переезде на Redis состояние переживёт рестарт, и
     # выключение флага перестанет выключать фичу — то есть флаг отката
     # перестанет откатывать.  Гард ставится сейчас, пока цена ошибки нулевая.
-    if not manual_portfolio_enabled():
+    if not manual_portfolio_enabled(user_id):
         logger.info("MANUAL: ввод при выключенном флаге user=%s", user_id)
         await state.clear()
         await message.answer(
             "ℹ️ Ручной ввод портфеля пока недоступен. "
             "Выберите демо-режим или подключите брокера.",
             parse_mode=ParseMode.MARKDOWN,
-            reply_markup=kb_connect_choice(),
+            reply_markup=kb_connect_choice(user_id),
         )
         return
 
@@ -2352,13 +2836,13 @@ async def cb_manual_action(callback: CallbackQuery, state: FSMContext) -> None:
     user_id = callback.from_user.id
     data = await state.get_data()
 
-    if not manual_portfolio_enabled():
+    if not manual_portfolio_enabled(user_id):
         # Тот же гард, что и на входе: сообщение с кнопками переживает
         # выключение флага.
         await state.clear()
         await callback.message.answer(
             "ℹ️ Ручной ввод портфеля пока недоступен.",
-            reply_markup=kb_connect_choice(),
+            reply_markup=kb_connect_choice(user_id),
         )
         return
 
@@ -2425,7 +2909,7 @@ async def cb_manual_action(callback: CallbackQuery, state: FSMContext) -> None:
             "❌ Ручной ввод отменён. Токены не списаны.\n\n"
             "Выберите источник портфеля:",
             parse_mode=ParseMode.MARKDOWN,
-            reply_markup=kb_connect_choice(),
+            reply_markup=kb_connect_choice(user_id),
         )
         return
 
@@ -2520,7 +3004,7 @@ async def _persist_manual_portfolio(user_id: int, text: str) -> str:
             # первым, поэтому при включённом гибриде и уже сохранённом портфеле
             # этот ввод в расчёт НЕ пойдёт — так и говорим.
             prev_text, _unreadable = await _load_manual_portfolio_text(user_id)
-            if hybrid_portfolio_enabled() and prev_text.strip():
+            if hybrid_portfolio_enabled(user_id) and prev_text.strip():
                 return (f"ℹ️ В этом вводе {n_ok} бумаг при пределе {limit} — он "
                         "*не сохранён*, и отчёты из меню строятся по прежнему "
                         "сохранённому портфелю (/portfolio). Сократите ввод, "
@@ -2547,14 +3031,15 @@ async def _load_manual_portfolio_text(user_id: int) -> tuple[str, bool]:
     return str((stored or {}).get("text") or ""), False
 
 
-def kb_mp_screen(has_positions: bool) -> InlineKeyboardMarkup:
-    rows = [[InlineKeyboardButton(text="➕ Добавить", callback_data="mp:add")]]
+def kb_mp_screen(has_positions: bool, report_data: str | None = None) -> InlineKeyboardMarkup:
+    """Экран ручного портфеля: правка, отчёт по нему, удаление, назад к портфелям."""
+    rows = [[_btn("➕ Добавить", "mp:add")]]
     if has_positions:
-        rows[0].append(InlineKeyboardButton(text="➖ Убрать / уменьшить",
-                                            callback_data="mp:rmlist"))
-        rows.append([InlineKeyboardButton(text="🗑 Удалить портфель",
-                                          callback_data="mp:del")])
-    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="mp:back")])
+        rows[0].append(_btn("➖ Убрать", "mp:rmlist"))
+        if report_data:
+            rows.append([_btn("📊 Отчёт по ручному портфелю", report_data)])
+        rows.append([_btn("🗑 Удалить портфель", "mp:del")])
+    rows.append([_btn("⬅️ Мой портфель", "mp:back")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -2588,7 +3073,13 @@ def _fmt_exact(value: float) -> str:
 
 def _format_mp_screen(entries, changes: list[str] | None = None) -> str:
     """Экран «Мой ручной портфель». Только вид — числа уже в тексте портфеля."""
-    lines = [f"✏️ *Мой ручной портфель* · позиций: {len(entries)}", ""]
+    # Счёт — по тому же правилу, что в «Мой портфель» и у лимита: бумаги
+    # (`count_positions`), кэш — отдельно (`§−124`).
+    n_sec = count_positions(entries)
+    has_cash = any(e.is_cash for e in entries)
+    count = (_positions(n_sec) + (" + кэш" if has_cash else "") if n_sec
+             else ("только кэш" if has_cash else "пуст"))
+    lines = [f"✏️ *Мой ручной портфель* · {count}", ""]
     if changes:
         lines.append("*Что изменилось:*")
         lines += [f"  • {_md_safe(c)}" for c in changes]
@@ -2610,28 +3101,29 @@ def _format_mp_screen(entries, changes: list[str] | None = None) -> str:
     return _clip_to_telegram_limit("\n".join(lines))
 
 
-async def _show_manual_portfolio(message: Message, user_id: int,
-                                 changes: list[str] | None = None) -> None:
+async def _show_manual_portfolio(target: Message | CallbackQuery, user_id: int,
+                                 changes: list[str] | None = None, *,
+                                 edit: bool = True) -> None:
+    """Экран «✏️ Ручной портфель». Нажатие кнопки — правка на месте."""
     text, unreadable = await _load_manual_portfolio_text(user_id)
     if unreadable:
-        await message.answer(
-            "🔐 *Сохранённый портфель недоступен* — ключ шифрования был обновлён.\n\n"
-            "Введите портфель заново: /forget\\_portfolio удалит старую запись.",
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=kb_mp_screen(False),
-        )
+        await _screen(target,
+                      "🔐 *Сохранённый портфель недоступен* — ключ шифрования был обновлён.\n\n"
+                      "Введите портфель заново: /forget\\_portfolio удалит старую запись.",
+                      kb_mp_screen(False), edit=edit)
         return
     loop = asyncio.get_running_loop()
     entries = await loop.run_in_executor(None, _mp_entries_sync, text) if text else []
-    await message.answer(_format_mp_screen(entries, changes),
-                         parse_mode=ParseMode.MARKDOWN,
-                         reply_markup=kb_mp_screen(bool(entries)))
+    await _screen(target, _format_mp_screen(entries, changes),
+                  kb_mp_screen(bool(entries), "src:manual"),
+                  edit=edit)
 
 
-async def _manual_flag_refusal(message: Message, state: FSMContext) -> None:
+async def _manual_flag_refusal(message: Message, state: FSMContext,
+                               user_id: int | None = None) -> None:
     await state.clear()
     await message.answer("ℹ️ Ручной ввод портфеля пока недоступен.",
-                         reply_markup=kb_connect_choice())
+                         reply_markup=kb_connect_choice(user_id))
 
 
 async def _mp_error(message: Message, user_id: int, exc: Exception) -> None:
@@ -2645,14 +3137,16 @@ async def _mp_error(message: Message, user_id: int, exc: Exception) -> None:
 
 
 async def cmd_portfolio(message: Message, state: FSMContext) -> None:
-    """/portfolio — экран сохранённого ручного портфеля."""
-    if not manual_portfolio_enabled():
-        await _manual_flag_refusal(message, state)
+    """/portfolio — «💼 Мой портфель»: брокер, ручной ввод, демо (`§−124`).
+
+    Раньше команда открывала ТОЛЬКО ручной портфель и только при включённом
+    флаге; сменить источник после онбординга было негде вовсе.
+    """
+    user_id = message.from_user.id
+    if not await _require_profile(message, user_id):
         return
-    try:
-        await _show_manual_portfolio(message, message.from_user.id)
-    except Exception as exc:                           # noqa: BLE001
-        await _mp_error(message, message.from_user.id, exc)
+    await state.clear()
+    await _show_portfolio_hub(message, user_id, edit=False)
 
 
 async def cmd_forget_portfolio(message: Message, state: FSMContext) -> None:
@@ -2706,33 +3200,34 @@ async def _cb_manual_portfolio(callback: CallbackQuery, state: FSMContext) -> No
                 "⏳ Секунду — идёт другая обработка. Нажмите ещё раз.")
             return
         await state.clear()
-        await callback.message.answer(
-            "🗑 Ручной портфель и черновик удалены.")
+        await _screen(callback, "🗑 Ручной портфель и черновик удалены.",
+                      kb_nav(_btn("💼 Мой портфель", "home:portfolio")))
         return
     if action == "keep":
-        await callback.message.answer("Хорошо, ничего не удаляю.")
+        await _screen(callback, "👌 Ничего не удалено.",
+                      kb_nav(_btn("💼 Мой портфель", "home:portfolio")))
         return
 
     # S-4: старая кнопка живёт в чате вечно — флаг проверяется на КАЖДОМ нажатии.
-    if not manual_portfolio_enabled():
-        await _manual_flag_refusal(callback.message, state)
+    if not manual_portfolio_enabled(user_id):
+        await _manual_flag_refusal(callback.message, state, user_id)
         return
 
     if action == "show":
-        await _show_manual_portfolio(callback.message, user_id)
+        await state.clear()
+        await _show_manual_portfolio(callback, user_id)
         return
     if action == "back":
         await state.clear()
-        await _show_analysis_menu(callback.message, "", user_id=user_id)
+        await _show_portfolio_hub(callback, user_id)
         return
     if action == "add":
         await state.set_state(ManualPortfolio.Edit)
         await callback.message.answer(_MP_EDIT_HELP, parse_mode=ParseMode.MARKDOWN)
         return
     if action == "del":
-        await callback.message.answer(
-            "🗑 *Удалить ручной портфель?*\n\nОтменить удаление нельзя.",
-            parse_mode=ParseMode.MARKDOWN, reply_markup=kb_mp_forget())
+        await _screen(callback, "🗑 *Удалить ручной портфель?*\n\nОтменить удаление нельзя.",
+                      kb_mp_forget())
         return
 
     text, unreadable = await _load_manual_portfolio_text(user_id)
@@ -2740,14 +3235,13 @@ async def _cb_manual_portfolio(callback: CallbackQuery, state: FSMContext) -> No
         loop = asyncio.get_running_loop()
         entries = await loop.run_in_executor(None, _mp_entries_sync, text) if text else []
         if not entries:
-            await _show_manual_portfolio(callback.message, user_id)
+            await _show_manual_portfolio(callback, user_id)
             return
         await state.set_state(ManualPortfolio.Edit)
-        await callback.message.answer(
-            "➖ *Что убрать?* Кнопка удаляет позицию целиком; чтобы уменьшить, "
-            "пришлите `-ТИКЕР КОЛИЧЕСТВО`.",
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=kb_mp_remove(entries, _mp_version_tag(text)))
+        await _screen(callback,
+                      "➖ *Что убрать?* Кнопка удаляет позицию целиком; чтобы уменьшить, "
+                      "пришлите `-ТИКЕР КОЛИЧЕСТВО`.",
+                      kb_mp_remove(entries, _mp_version_tag(text)))
         return
 
     # action == "rm": индекс + версия, правка под слотом.
@@ -2766,7 +3260,7 @@ async def _cb_manual_portfolio(callback: CallbackQuery, state: FSMContext) -> No
     if not res.ok:
         await callback.message.answer(f"⚠️ {_md_safe(res.error)}")
         return
-    await _show_manual_portfolio(callback.message, user_id, changes=res.applied)
+    await _show_manual_portfolio(callback, user_id, changes=res.applied)
 
 
 @portfolio_router.message(StateFilter(ManualPortfolio.Edit), F.text,
@@ -2774,8 +3268,8 @@ async def _cb_manual_portfolio(callback: CallbackQuery, state: FSMContext) -> No
 async def msg_manual_edit(message: Message, state: FSMContext) -> None:
     """Текстовые правки `+…`/`-…` сохранённого портфеля (D-4)."""
     user_id = message.from_user.id
-    if not manual_portfolio_enabled():
-        await _manual_flag_refusal(message, state)
+    if not manual_portfolio_enabled(user_id):
+        await _manual_flag_refusal(message, state, user_id)
         return
     ops = message.text or ""
     if len(ops.encode("utf-8")) > MANUAL_DRAFT_MAX_BYTES:
@@ -2815,7 +3309,7 @@ async def msg_manual_edit(message: Message, state: FSMContext) -> None:
             "Портфель не изменился — исправьте строку и пришлите снова.")
         return
     logger.info("MANUAL STORE: правка user=%s операций=%d", user_id, len(res.applied))
-    await _show_manual_portfolio(message, user_id, changes=res.applied)
+    await _show_manual_portfolio(message, user_id, changes=res.applied, edit=False)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2895,23 +3389,38 @@ async def _send_report(
 
 
 async def cb_analysis_choice(callback: CallbackQuery, state: FSMContext) -> None:
+    """Экран цены перед запуском (старое меню тиров, `analysis:<тир>`).
+
+    §−124: цена — по РЕАЛЬНОМУ источнику. Прежде экран обещал демо-пользователю
+    «будет списано 1 токен», хотя демо бесплатно (`_effective_cost`).
+    """
     await callback.answer()
-    _, tier  = callback.data.split(":", 1)
-    cost     = TIER_COST[tier]
-    balance  = await get_balance(callback.from_user.id)
-    ctx      = await state.get_data()
+    _, tier = str(callback.data or "").split(":", 1)
+    if tier not in TIER_COST:
+        logger.warning("NAV: подделанный callback user=%s", callback.from_user.id)
+        return
+    user_id = callback.from_user.id
+    try:
+        source, _stored = await _resolve_portfolio_source(user_id)
+    except Exception as exc:                           # noqa: BLE001
+        logger.warning("NAV: источник не определён user=%s: %s", user_id,
+                       type(exc).__name__)
+        source = None
+    if source == "undetermined":
+        await _screen(callback, "📡 *Сначала выберите портфель.*\n\n"
+                                "Откуда брать позиции для отчёта?",
+                      kb_connect_choice(user_id))
+        return
+    priced = source if source in ("freedom", "manual", "demo") else None
+    cost = _effective_cost(tier, priced) if priced else TIER_COST[tier]
+    balance = await get_balance(user_id)
+    ctx = await state.get_data()
     context_slug = ctx.get("context_slug", "menu")
 
     await state.update_data(tier=tier)
-    await callback.message.edit_text(
-        f"⚠️ *Внимание:*\n\n"
-        f"Данный анализ потребует сложных нейросетевых и квантовых вычислений.\n\n"
-        f"С вашего баланса будет списано *{cost} токен(а)*.\n"
-        f"Текущий баланс: *{balance} токен(а)*.\n\n"
-        "Одобрить?",
-        parse_mode=ParseMode.MARKDOWN,
-        reply_markup=kb_confirm(tier, context_slug),
-    )
+    text, kb = _price_screen(tier, priced, cost, balance,
+                             f"confirm:{tier}:{context_slug}")
+    await _screen(callback, text, kb)
     await state.set_state(AnalysisFlow.awaiting_approval)
 
 
@@ -2953,7 +3462,7 @@ async def _manual_fallback_offer(user_id: int, tier: str,
     «пуст» и кнопка ввода; флаг ручного ввода выключен → ничего (I-9: текст и
     клавиатура ровно прежние).
     """
-    if not manual_portfolio_enabled():
+    if not manual_portfolio_enabled(user_id):
         return "", None
     reason = reason if reason in FALLBACK_REASON_TEXT else "error"
     try:
@@ -3000,9 +3509,9 @@ async def cb_fallback_manual(callback: CallbackQuery, state: FSMContext) -> None
     if not m or m.group(1) not in TIER_COST or m.group(2) not in FALLBACK_REASON_TEXT:
         logger.warning("FALLBACK: подделанный callback user=%s", callback.from_user.id)
         return
-    if not manual_portfolio_enabled():
+    if not manual_portfolio_enabled(callback.from_user.id):
         await callback.message.answer("ℹ️ Ручной ввод портфеля пока недоступен.",
-                                      reply_markup=kb_connect_choice())
+                                      reply_markup=kb_connect_choice(callback.from_user.id))
         return
     await _confirm_flow(callback, state, m.group(1), source_override="manual",
                         fallback_reason=m.group(2))
@@ -3016,11 +3525,12 @@ async def cb_fallback_manual(callback: CallbackQuery, state: FSMContext) -> None
 
 #: Источники, которые можно выбрать КНОПКОЙ (callback_data — недоверенный ввод).
 REPORT_SOURCES = ("freedom", "manual", AGGREGATED_SOURCE, "demo")
-_REPORT_SOURCE_LABEL = {
-    "freedom": "📊 Отчёт: Freedom Broker",
-    "manual": "✏️ Отчёт: Ручной портфель",
-    AGGREGATED_SOURCE: "🌐 Отчёт: Агрегированный портфель",
-    "demo": "📋 Демо",
+#: Кнопки выбора портфеля в «📊 Новый отчёт» (шаг 1 из 2).
+_SOURCE_BUTTON = {
+    "freedom": "📊 Freedom Broker",
+    "manual": "✏️ Ручной портфель",
+    AGGREGATED_SOURCE: "🌐 Freedom + ручной",
+    "demo": "📋 Демо · бесплатно",
 }
 _SRC_RE = re.compile(r"^src:([a-z]{1,12})$")
 _RPT_RE = re.compile(r"^(rpt|rptgo):([a-z]{1,12}):([a-z]{1,12})$")
@@ -3201,107 +3711,70 @@ async def _aggregated_step1(callback: CallbackQuery, state: FSMContext, tier: st
     return merged.frame, merged.composition(), freedom
 
 
-async def _report_source_availability(user_id: int) -> dict[str, str | None]:
-    """Источник → `None` (доступен) либо причина, почему нет (D-9)."""
-    loop = asyncio.get_running_loop()
-    try:
-        has_keys = _is_admin(user_id) or await loop.run_in_executor(
-            None, _has_vault_keys_sync, user_id)
-    except Exception as exc:                           # noqa: BLE001
-        logger.warning("HYBRID: vault недоступен user=%s: %s", user_id,
-                       type(exc).__name__)
-        has_keys = False
-    try:
-        manual_text, _unreadable = await _load_manual_portfolio_text(user_id)
-    except Exception as exc:                           # noqa: BLE001
-        # Меню не имеет права пропасть из-за сбоя хранилища (`§−104`).
-        logger.warning("HYBRID: ручной портфель не прочитан user=%s: %s",
-                       user_id, type(exc).__name__)
-        manual_text = ""
-    has_manual = bool(manual_text.strip())
-    return {
-        "freedom": None if has_keys else "подключите брокера: /start → 🔗 Freedom Broker API",
-        "manual": None if manual_portfolio_enabled() else "ручной ввод выключен",
-        AGGREGATED_SOURCE: (None if has_keys and has_manual else
-                            "подключите брокера" if not has_keys else
-                            "заполните ручной портфель (/portfolio)"),
-        "demo": None,
-    }
+async def _show_source_menu(target: Message | CallbackQuery, user_id: int, *,
+                            edit: bool = False, ov: dict | None = None) -> None:
+    """«📊 Новый отчёт» · шаг 1 из 2 (D-9): по какому портфелю.
+
+    Кнопки — только доступные портфели; недоступные названы строкой с причиной,
+    чтобы было ясно, что сделать, а не куда пропал пункт. Выключенная фича
+    (ручной ввод / «Freedom + ручной») не упоминается вовсе (I-9).
+    """
+    ov = ov or await _portfolio_overview(user_id)
+    rows, closed = [], []
+    for src in REPORT_SOURCES:
+        if (src == AGGREGATED_SOURCE and not ov["hybrid"]) or (
+                src == "manual" and not ov["manual_on"]):
+            continue
+        why = _source_refusal(src, ov)
+        if why is None:
+            rows.append([_btn(_SOURCE_BUTTON[src], f"src:{src}")])
+        else:
+            closed.append(f"• {_SOURCE_BUTTON[src]} — {why}")
+    rows.append([_btn("💼 Мой портфель", "home:portfolio"), _btn("🏠 Меню", "home:menu")])
+    text = "📊 *Новый отчёт* · шаг 1 из 2\nПо какому портфелю?"
+    if ov["hybrid"] and _source_refusal(AGGREGATED_SOURCE, ov) is None:
+        text += "\n\n🌐 — один отчёт по счёту Freedom и ручному портфелю вместе."
+    if closed:
+        text += "\n\n*Недоступно:*\n" + "\n".join(closed)
+    await _screen(target, text, InlineKeyboardMarkup(inline_keyboard=rows), edit=edit)
 
 
-async def _show_source_menu(message: Message, user_id: int) -> None:
-    """Шаг 1 из 2 (D-9): источник. Показаны только доступные, остальные — с причиной."""
-    avail = await _report_source_availability(user_id)
-    rows = [[InlineKeyboardButton(text=_REPORT_SOURCE_LABEL[src],
-                                  callback_data=f"src:{src}")]
-            for src in REPORT_SOURCES if avail[src] is None]
-    rows.append([InlineKeyboardButton(text="✏️ Мой ручной портфель",
-                                      callback_data="mp:show")])
-    closed = [f"  • {_REPORT_SOURCE_LABEL[src]} — {avail[src]}"
-              for src in REPORT_SOURCES if avail[src] is not None]
-    await message.answer(
-        "🧭 *Шаг 1 из 2 — источник портфеля*\n\n"
-        "📊 *Freedom Broker* — живой счёт брокера.\n"
-        "✏️ *Ручной портфель* — ваш ввод; котировки из независимого источника.\n"
-        "🌐 *Агрегированный* — счёт Freedom + ручной ввод; котировки Tradernet "
-        "для всех позиций.\n"
-        "📋 *Демо* — шаблонный портфель, бесплатно."
-        + ("\n\n*Сейчас недоступно:*\n" + "\n".join(closed) if closed else ""),
-        parse_mode=ParseMode.MARKDOWN,
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
-    )
+def kb_report_tiers(source: str, *, multi: bool = True) -> InlineKeyboardMarkup:
+    """Тиры по портфелю, по одному в строке. Тарифы — `TIER_COST` (D-10, I-4).
 
-
-def kb_report_tiers(source: str) -> InlineKeyboardMarkup:
-    """Шаг 2 из 2: тир. Тарифы — те же `TIER_COST` (D-10, I-4)."""
-    def _cost(tier: str) -> str:
-        c = _effective_cost(tier, source)
-        return "бесплатно" if c == 0 else f"{c} токен" + ("а" if c in (2, 3, 4) else "")
+    `multi` — у пользователя несколько портфелей: «назад» ведёт к выбору
+    портфеля; иначе — в «Мой портфель» (выбирать там не из чего).
+    """
+    def _label(tier: str) -> str:
+        cost = _effective_cost(tier, source)
+        price = "бесплатно" if cost == 0 else _tokens(cost)
+        return f"{_TIER_ICON[tier]} {_TIER_SHORT[tier]} · {price}"
+    nav = (_btn("⬅️ Другой портфель", "home:report") if multi
+           else _btn("💼 Мой портфель", "home:portfolio"))
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"📊 Базовый ({_cost('base')})",
-                              callback_data=f"rpt:{source}:base"),
-         InlineKeyboardButton(text=f"🔬 Глубокий ({_cost('deep')})",
-                              callback_data=f"rpt:{source}:deep")],
-        [InlineKeyboardButton(text=f"🎯 Сценарный анализ ({_cost('scenario')})",
-                              callback_data=f"rpt:{source}:scenario")],
+        [_btn(_label("base"), f"rpt:{source}:base")],
+        [_btn(_label("scenario"), f"rpt:{source}:scenario")],
+        [_btn(_label("deep"), f"rpt:{source}:deep")],
+        [nav, _btn("🏠 Меню", "home:menu")],
     ])
 
 
 async def _hybrid_menu_refusal(message: Message, state: FSMContext) -> None:
     await state.clear()
-    await message.answer("ℹ️ Выбор источника отчёта сейчас недоступен — "
-                         "откройте меню заново: /start")
+    await message.answer("ℹ️ Этот пункт сейчас недоступен — откройте меню заново.",
+                         reply_markup=kb_nav())
 
 
 async def cb_report_source(callback: CallbackQuery, state: FSMContext) -> None:
-    """`src:<источник>` → шаг 2 (тир). Флаг и доступность — заново (S-4)."""
+    """`src:<портфель>` → тиры. Доступность — заново на каждом нажатии (S-4)."""
     await callback.answer()
     m = _SRC_RE.match(str(callback.data or ""))
     user_id = callback.from_user.id
     if not m or m.group(1) not in REPORT_SOURCES:
         logger.warning("HYBRID: подделанный callback user=%s", user_id)
         return
-    if not hybrid_portfolio_enabled():
-        await _hybrid_menu_refusal(callback.message, state)
-        return
-    source = m.group(1)
-    why = (await _report_source_availability(user_id))[source]
-    if source == "manual" and why is None:
-        text, _unreadable = await _load_manual_portfolio_text(user_id)
-        if not text.strip():
-            await _manual_ask_for_input(callback.message, state)   # пустой → ввод
-            return
-    if why is not None:
-        await callback.message.answer(f"ℹ️ Источник недоступен: {why}.")
-        return
-    await callback.message.answer(
-        f"🧭 *Шаг 2 из 2 — тип анализа* · {_REPORT_SOURCE_LABEL[source]}\n\n"
-        "📊 *Базовый* — риск-профиль, CVaR/Sharpe, состав, идеи.\n"
-        "🎯 *Сценарный* — вклад позиций в риск, 3 макро-режима, бэктест.\n"
-        "🔬 *Глубокий* — + факторное разложение, 4-Pillar, стресс-сценарии.",
-        parse_mode=ParseMode.MARKDOWN,
-        reply_markup=kb_report_tiers(source),
-    )
+    await state.clear()
+    await _show_tiers_for(callback, state, user_id, m.group(1))
 
 
 async def cb_report_tier(callback: CallbackQuery, state: FSMContext) -> None:
@@ -3313,24 +3786,16 @@ async def cb_report_tier(callback: CallbackQuery, state: FSMContext) -> None:
         logger.warning("HYBRID: подделанный callback user=%s", user_id)
         return
     kind, source, tier = m.groups()
-    if not hybrid_portfolio_enabled():
-        await _hybrid_menu_refusal(callback.message, state)
+    why = _source_refusal(source, await _portfolio_overview(user_id))
+    if why is not None:
+        await _screen(callback, f"ℹ️ Портфель недоступен: {why}.",
+                      _kb_refusal(source, why))
         return
     if kind == "rpt":
         cost = _effective_cost(tier, source)
         balance = await get_balance(user_id)
-        await callback.message.answer(
-            f"⚠️ *Внимание:* {_REPORT_SOURCE_LABEL[source]} · {TIER_LABEL[tier]}\n\n"
-            + (f"С вашего баланса будет списано *{cost} токен(а)* — только после "
-               "готового отчёта.\n" if cost else "Отчёт *бесплатный*.\n")
-            + f"Текущий баланс: *{balance} токен(а)*.\n\nОдобрить?",
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-                InlineKeyboardButton(text="✅ Одобрить",
-                                     callback_data=f"rptgo:{source}:{tier}"),
-                InlineKeyboardButton(text="❌ Отмена", callback_data="cancel"),
-            ]]),
-        )
+        text, kb = _price_screen(tier, source, cost, balance, f"rptgo:{source}:{tier}")
+        await _screen(callback, text, kb)
         return
     await _confirm_flow(callback, state, tier, source_override=source)
 
@@ -3346,7 +3811,7 @@ async def cb_aggregated_overlap(callback: CallbackQuery, state: FSMContext) -> N
     if not m or m.group(1) not in TIER_COST:
         logger.warning("HYBRID: подделанный callback user=%s", callback.from_user.id)
         return
-    if not hybrid_portfolio_enabled():
+    if not hybrid_portfolio_enabled(callback.from_user.id):
         await _hybrid_menu_refusal(callback.message, state)
         return
     await _confirm_flow(callback, state, m.group(1), source_override=AGGREGATED_SOURCE,
@@ -3424,11 +3889,11 @@ async def _confirm_flow(callback: CallbackQuery, state: FSMContext, tier: str, *
             "Выберите источник прямо здесь:\n\n"
             "✅ Токен *не списан*.",
             parse_mode=ParseMode.MARKDOWN,
-            reply_markup=kb_connect_choice(),
+            reply_markup=kb_connect_choice(user_id),
         )
         await state.clear()
         return
-    if source == "manual" and not manual_portfolio_enabled():
+    if source == "manual" and not manual_portfolio_enabled(user_id):
         # 🔴 ФЛАГ ОТКАТА, и проверяться он обязан ЗДЕСЬ, а не только на входе
         # в ручной ввод. Режим `manual` хранится в профиле: пользователь, уже
         # выбравший его, приходит сюда напрямую из меню тиров — мимо
@@ -3444,11 +3909,11 @@ async def _confirm_flow(callback: CallbackQuery, state: FSMContext, tier: str, *
             "Можно выбрать другой источник:\n\n"
             "✅ Токен *не списан*.",
             parse_mode=ParseMode.MARKDOWN,
-            reply_markup=kb_connect_choice(),
+            reply_markup=kb_connect_choice(user_id),
         )
         await state.clear()
         return
-    if source == AGGREGATED_SOURCE and not hybrid_portfolio_enabled():
+    if source == AGGREGATED_SOURCE and not hybrid_portfolio_enabled(user_id):
         # S-4: кнопка агрегированного отчёта переживает выключение флага.
         logger.info("HYBRID: расчёт запрошен при выключенном флаге user=%s", user_id)
         await _release_user_slot(user_id)
@@ -3644,7 +4109,7 @@ async def _confirm_flow(callback: CallbackQuery, state: FSMContext, tier: str, *
             "минуту.\n\n"
             "✅ Токен *не списан*.",
             parse_mode=ParseMode.MARKDOWN,
-            reply_markup=kb_connect_choice(),
+            reply_markup=kb_connect_choice(user_id),
         )
         await state.clear()
         return
@@ -4170,11 +4635,12 @@ async def _run_analysis_background(
         )
         await bot.send_message(
             chat_id,
-            "✅ *Расчёты успешно завершены.* Мы подготовили детальную "
-            "аналитику и нашли перспективные точки роста для вашего "
-            "портфеля. Все подробности доступны по ссылке выше 👆\n\n"
+            "✅ *Расчёты успешно завершены.* Отчёт — по ссылке выше 👆\n\n"
             f"{billing_line}",
             parse_mode=ParseMode.MARKDOWN,
+            # Под BASE/DEEP навигацию несёт следующее сообщение (CTA сценария).
+            # Меню — НОВЫМ сообщением: строку списания затирать нельзя.
+            reply_markup=None if tier in (TIER_BASE, TIER_DEEP) else kb_nav(new_message=True),
         )
 
         # Follow-up CTA: предложить сценарную диагностику ОДНИМ тапом.  Сценарный
@@ -4189,14 +4655,12 @@ async def _run_analysis_background(
                     # по демо-портфелю тоже бесплатен (консистентность Fix C).
                     results["_demo_portfolio"] = True
                 _cache_results_for_scenario(user_id, results)
-                scenario_price = "*бесплатно* (демо-портфель)" if is_demo else "*1 токен*"
+                scenario_price = "*бесплатно* (демо)" if is_demo else "*1 токен*"
                 await bot.send_message(
                     chat_id,
-                    "🎯 *Хотите сценарную диагностику этого же портфеля?*\n\n"
-                    "Вклад каждой позиции в риск (Euler-MCTR), выживаемость в "
-                    "3 макро-режимах, слабые звенья для ребаланса и бэктест "
-                    f"трендового правила — {scenario_price}, считается мгновенно "
-                    "из уже загруженных данных.",
+                    "🎯 *Сценарный анализ этого же портфеля* — вклад позиций в "
+                    "риск, 3 макро-сценария, бэктест. "
+                    f"{scenario_price}, мгновенно: данные уже загружены.",
                     parse_mode=ParseMode.MARKDOWN,
                     reply_markup=_kb_scenario_cta(free=is_demo),
                 )
@@ -4293,34 +4757,18 @@ async def _run_analysis_background(
 async def cb_cancel(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     await state.clear()
-    await callback.message.edit_text("❌ Анализ отменён. Токены не списаны.")
+    await callback.message.edit_text("❌ Отменено — токены не списаны.",
+                                     reply_markup=kb_nav())
 
 
 # ── Utility commands ──────────────────────────────────────────────────────────
 
 async def cmd_balance(message: Message) -> None:
-    balance   = await get_balance(message.from_user.id)
-    price_str = f"{TOKEN_PRICE_KZT:,}".replace(",", " ")
-    pack_str  = f"{TOKEN_PACK_PRICE_KZT:,}".replace(",", " ")
-    await message.answer(
-        f"💳 *Ваш баланс:* {balance} токен(а)\n\n"
-        "Пополнить: /topup\n"
-        f"Тариф: {TOKEN_PACK_TOKENS} токенов = {pack_str} ₸ "
-        f"(1 токен = {price_str} ₸)",
-        parse_mode=ParseMode.MARKDOWN,
-    )
+    await _show_balance(message, message.from_user.id, edit=False)
 
 
 async def cmd_topup(message: Message) -> None:
-    price_str = f"{TOKEN_PRICE_KZT:,}".replace(",", " ")
-    pack_str  = f"{TOKEN_PACK_PRICE_KZT:,}".replace(",", " ")
-    await message.answer(
-        "💰 *Пополнение баланса*\n\n"
-        f"Тариф: *{TOKEN_PACK_TOKENS} токенов за {pack_str} ₸* "
-        f"(1 токен = {price_str} ₸)\n\n"
-        "Для оплаты обратитесь к администратору или используйте платёжный шлюз (скоро).",
-        parse_mode=ParseMode.MARKDOWN,
-    )
+    await _show_topup(message, edit=False)
 
 
 async def cmd_grant(message: Message) -> None:
@@ -4339,8 +4787,7 @@ async def cmd_grant(message: Message) -> None:
     caller = message.from_user.id
     if not _is_admin(caller):
         # Stay invisible to non-admins.
-        await message.answer(
-            "Неизвестная команда. Доступные: /balance /topup /mandate /help /support")
+        await message.answer("Неизвестная команда. Откройте меню: /start")
         return
 
     parts = (message.text or "").split()
@@ -4397,9 +4844,9 @@ async def msg_text_fallback(message: Message, state: FSMContext) -> None:
     except Exception:
         pass
     await message.answer(
-        f"🔘 {branding.bot_name()} управляется кнопками — печатать ничего не нужно.\n\n"
-        "Нажмите /start, чтобы открыть меню анализа портфеля.",
+        f"🔘 {branding.bot_name()} работает через кнопки — печатать ничего не нужно.",
         parse_mode=ParseMode.MARKDOWN,
+        reply_markup=kb_nav(),
     )
 
 
@@ -4418,7 +4865,7 @@ async def _start_requiz(target: Message | CallbackQuery, state: FSMContext) -> N
     await state.clear()
     await state.set_state(Onboarding.Q1)
     q   = QUESTIONS[0]
-    msg = target.message if isinstance(target, CallbackQuery) else target
+    msg = target.message if _is_callback(target) else target
     sent = await msg.answer(
         "🔄 *Обновление инвестиционного мандата*\n\n"
         "Пройдите анкетирование заново, чтобы обновить ваш профиль.\n\n"
@@ -4436,13 +4883,13 @@ async def cb_mandate_action(callback: CallbackQuery, state: FSMContext) -> None:
     user_id = callback.from_user.id
 
     if action == "mandate:close":
+        # Кнопка «Закрыть» из прошлых сообщений: теперь это «🏠 Меню».
         await state.clear()
-        await _show_analysis_menu(callback.message, "")
+        await _show_home(callback, user_id)
         return
 
     if action == "mandate:report":
-        await state.clear()
-        await _show_analysis_menu(callback.message, "")
+        await _open_report(callback, state, user_id)
         return
 
     if action == "mandate:back":
@@ -4544,39 +4991,8 @@ async def cb_mandate_action(callback: CallbackQuery, state: FSMContext) -> None:
 
 
 async def cmd_help(message: Message) -> None:
-    """B1 (2026-07-17): короткая карта возможностей бота."""
-    base_c, scn_c, deep_c = (TIER_COST["base"], TIER_COST["scenario"],
-                             TIER_COST["deep"])
-    price_str = f"{TOKEN_PRICE_KZT:,}".replace(",", " ")       # «2 500»
-    pack_str  = f"{TOKEN_PACK_PRICE_KZT:,}".replace(",", " ")  # «25 000»
-    await message.answer(
-        f"🧭 *Помощь по {branding.bot_name()}*\n\n"
-        "*Отчёты (тиры):*\n"
-        f"  📊 Базовый — {base_c} токен: риск-профиль, CVaR/Sharpe, состав, идеи.\n"
-        f"  🎯 Сценарный — {scn_c} токен: вклад позиций в риск, 3 макро-режима, "
-        "бэктест.\n"
-        f"  🔬 Глубокий — {deep_c} токена: + факторное разложение, 4-Pillar, "
-        "стресс-сценарии, банковская аналитика.\n"
-        "  📋 Отчёты по демо-портфелю — *бесплатны*.\n\n"
-        "*Токены:*\n"
-        f"  1 токен = *{price_str} ₸* · пакет {TOKEN_PACK_TOKENS} токенов = "
-        f"*{pack_str} ₸*\n"
-        "  Баланс: /balance · пополнение: /topup. Списание — только после "
-        "готового отчёта.\n\n"
-        "*Мандат и бенчмарк:*\n"
-        "  /mandate — посмотреть и изменить: бенчмарк (2 тапа, без анкеты), "
-        "классы активов, риск-профиль.\n"
-        "  Изменения бесплатны и действуют со следующего отчёта.\n\n"
-        "*Портфель:*\n"
-        "  /start → 🔗 Freedom Broker API (read-only ключи) или 📋 Демо-режим.\n"
-        # I-9: строки ручного портфеля — только при включённом ручном вводе.
-        + ("  /portfolio — мой ручной портфель (правки `+AAPL 10 150` / `-AAPL`).\n"
-           "  /forget\\_portfolio — удалить ручной портфель и черновик.\n"
-           if manual_portfolio_enabled() else "")
-        + "\n"
-        "*Поддержка:* /support",
-        parse_mode=ParseMode.MARKDOWN,
-    )
+    """Короткая карта бота (`§−124`): три шага + токены + поддержка."""
+    await _show_help(message, message.from_user.id, edit=False)
 
 
 # ── Beta-access middleware ────────────────────────────────────────────────────
@@ -4854,12 +5270,14 @@ def _get_cached_results(user_id: int) -> dict | None:
 
 
 def _kb_scenario_cta(free: bool = False) -> InlineKeyboardMarkup:
-    """Inline-кнопка «Сценарный анализ» под готовым BASE/DEEP отчётом."""
+    """Inline-кнопка «Сценарный анализ» под готовым BASE/DEEP отчётом + меню."""
     price = "бесплатно" if free else "1 токен"
-    return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text=f"🎯 Сценарный анализ этого портфеля ({price})",
-                             callback_data="scenario:cached"),
-    ]])
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"🎯 Сценарный анализ · {price}",
+                              callback_data="scenario:cached")],
+        # Меню — НОВЫМ сообщением: это сообщение — часть истории отчёта.
+        [InlineKeyboardButton(text="🏠 Меню", callback_data="home:open")],
+    ])
 
 
 async def cb_scenario_cached(callback: CallbackQuery, state: FSMContext) -> None:
@@ -4940,6 +5358,32 @@ async def cb_scenario_cached(callback: CallbackQuery, state: FSMContext) -> None
 
 # ── Dispatcher assembly ───────────────────────────────────────────────────────
 
+def bot_commands() -> list:
+    """Команды «меню ⋮» Telegram — разделы главного меню, тем же языком (`§−124`).
+
+    Список ОДИН на всех (команды не знают пользователя), поэтому
+    `/forget_portfolio` в нём — только при ручном вводе «для всех» (`on`); на
+    ступени `admins` администратор найдёт удаление в «✏️ Ручной портфель» и в
+    /help. `/topup` из меню убран — пополнение открывается из «💳 Баланс»,
+    сама команда по-прежнему работает.
+    """
+    from aiogram.types import BotCommand
+
+    commands = [
+        BotCommand(command="start",     description="Главное меню"),
+        BotCommand(command="report",    description="Новый отчёт"),
+        BotCommand(command="portfolio", description="Мой портфель: брокер, ручной ввод, демо"),
+        BotCommand(command="mandate",   description="Мандат: риск-профиль и бенчмарк"),
+        BotCommand(command="balance",   description="Баланс и пополнение"),
+        BotCommand(command="help",      description="Как пользоваться"),
+        BotCommand(command="support",   description="Поддержка"),
+    ]
+    if rollout_mode(MANUAL_PORTFOLIO_ENV) == FLAG_ON:
+        commands.append(BotCommand(command="forget_portfolio",
+                                   description="Удалить ручной портфель"))
+    return commands
+
+
 def build_dispatcher() -> Dispatcher:
     dp = Dispatcher(storage=MemoryStorage())
 
@@ -4965,6 +5409,8 @@ def build_dispatcher() -> Dispatcher:
     # Гибрид PR-1: сохранённый ручной портфель (экран + удаление по запросу).
     dp.message.register(cmd_portfolio,        F.text == "/portfolio")
     dp.message.register(cmd_forget_portfolio, F.text == "/forget_portfolio")
+    # §−124: навигация — главное меню, «Мой портфель», прямой вход в отчёт.
+    dp.message.register(cmd_report,           F.text == "/report")
 
     # Analysis flow callbacks
     dp.callback_query.register(cb_analysis_choice, F.data.startswith("analysis:"))
@@ -4975,6 +5421,8 @@ def build_dispatcher() -> Dispatcher:
     dp.callback_query.register(cb_report_source,      F.data.startswith("src:"))
     dp.callback_query.register(cb_report_tier,        F.data.startswith("rpt"))
     dp.callback_query.register(cb_aggregated_overlap, F.data.startswith("agg:"))
+    dp.callback_query.register(cb_home,             F.data.startswith("home:"))
+    dp.callback_query.register(cb_portfolio_card,   F.data.startswith("pf:"))
     dp.callback_query.register(cb_scenario_cached,  F.data == "scenario:cached")
     dp.callback_query.register(cb_cancel,           F.data == "cancel")
     # /mandate menu (B1 2026-07-17) — free mandate edits, no billing here.
@@ -5047,20 +5495,7 @@ async def main() -> None:
     # B1 (2026-07-17): регистрируем команды в «меню ⋮» Telegram-клиента.
     # Non-fatal: сбой сети здесь не должен ронять бота на старте.
     try:
-        from aiogram.types import BotCommand
-        await bot.set_my_commands([
-            BotCommand(command="start",   description="Начать / меню анализа"),
-            BotCommand(command="mandate", description="Мой мандат и настройки"),
-            BotCommand(command="balance", description="Баланс токенов"),
-            BotCommand(command="topup",   description="Пополнить токены"),
-            BotCommand(command="help",    description="Помощь"),
-            BotCommand(command="support", description="Поддержка"),
-        ] + ([
-            # Гибрид PR-1 — только при включённом ручном вводе (I-9).
-            BotCommand(command="portfolio", description="Мой ручной портфель"),
-            BotCommand(command="forget_portfolio",
-                       description="Удалить ручной портфель"),
-        ] if manual_portfolio_enabled() else []))
+        await bot.set_my_commands(bot_commands())
     except Exception as exc:                           # noqa: BLE001
         logger.warning("set_my_commands failed: %s", exc)
 

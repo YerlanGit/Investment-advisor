@@ -304,8 +304,10 @@ class FeatureFlagTest(unittest.IsolatedAsyncioTestCase):
         for value in ("off", "0", "", "false"):
             with self.subTest(value=value):
                 os.environ["MANUAL_PORTFOLIO_ENABLED"] = value
+                # §−124: брокер — первым (основной путь), демо — последним;
+                # пин стережёт ОТСУТСТВИЕ ручного ввода, порядок — осознанный.
                 self.assertEqual(self._buttons(),
-                                 ["connect:template", "connect:freedom"])
+                                 ["connect:freedom", "connect:template"])
 
     async def test_flag_defaults_to_off(self) -> None:
         """Дефолт «выключено»: провайдера цен для manual нет до Фазы 9."""
