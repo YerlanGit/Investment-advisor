@@ -423,8 +423,12 @@ def _make_insider_stub(real_fn):
     return _stub
 
 
-def run_analyze_all(scenario: str = "base") -> dict:
+def run_analyze_all(scenario: str = "base", *,
+                    sec_frame: "pd.DataFrame | None" = None) -> dict:
     """Прогнать `analyze_all` в полностью изолированном окружении.
+
+    `sec_frame` — ответ SEC-скана вместо пустого (эталоны идут БЕЗ отчётности;
+    тест, которому нужна отчётность конкретной бумаги, подаёт её сюда).
 
     `scenario` выбирает книгу: «base» — здоровая, «leveraged_fx» — с плечом,
     плечевым ETP и позицией в тенге. Второй сценарий добавлен потому, что
@@ -468,7 +472,8 @@ def run_analyze_all(scenario: str = "base") -> dict:
         else:
             portfolio = pd.DataFrame(cfg["rows"])
         with mock.patch("finance.sec_edgar.batch_fundamental_scan",
-                        return_value=pd.DataFrame()), \
+                        return_value=(sec_frame if sec_frame is not None
+                                      else pd.DataFrame())), \
              mock.patch("finance.cds_feed.make_lookup", _fake_cds_lookup), \
              mock.patch("finance.smart_money.build_insider_signals",
                         _make_insider_stub(_real_insiders)):

@@ -304,7 +304,8 @@ def _sec_status(results: dict, today: date) -> list[dict]:
             name   = "Фундамент (SEC EDGAR): Z-scores · Altman-Z / Piotroski-F / Coverage",
             source = "SEC EDGAR CompanyFacts",
             method = "10-K FY · sector-normalised MAD (Group B) ⊕ разностный "
-                     "расчёт по балансу и P&L (Altman-Z · Piotroski-F · Interest Coverage)",
+                     "расчёт по балансу и P&L (Piotroski-F · Interest Coverage) · "
+                     "Altman-Z классический: X4 = рыночная капитализация / обязательства",
             status = status,
             note   = note_str,
         ),

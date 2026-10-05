@@ -881,8 +881,14 @@ identity_gap_pct = |wᵀΣw − (bᵀFb + wᵀDw)|/wᵀΣw·100   (float-шум 
 | P/B | Price·Shares/BookEquity | **equity > 0** |
 | FCF yield | FCF/(Price·Shares) | mcap > 0 (МОЖЕТ быть <0 — легитимно) |
 
-**Altman Z** (public-firm): `Z = 1.2·WC/TA + 1.4·RE/TA + 3.3·EBIT/TA +
-0.6·BE/TL + 1.0·Rev/TA`; зоны: >2.99 Safe · 1.81–2.99 Grey · <1.81 Distress.
+**Altman Z — классическая (1968), H-4 `§−132`:** `Z = 1.2·WC/TA + 1.4·RE/TA +
+3.3·EBIT/TA + 0.6·MV/TL + 1.0·Rev/TA`, MV = цена × акции (рыночная капитализация);
+зоны: >2.99 Safe · 1.81–2.99 Grey · <1.81 Distress. `sec_edgar` отдаёт часть без
+X4 (`altman_ex_x4`) и обязательства, Z и зону собирает движок там, где цена
+известна (`apply_market_altman`, стадия риск-модели); цена — в валюте отчёта,
+поэтому MV переводится в USD. Нет MV → Z нет (балансовый суррогат — ДРУГАЯ модель
+Z′). Банки (`Finance`) — «н/д». До `§−132` в X4 стоял балансовый капитал BE/TL при
+классических коэффициентах: компания с выкупами (BE ≈ 0) падала в «Distress».
 **Piotroski F (0–9):** 9 бинарных проверок (NI>0, CFO>0, ΔROA>0, accruals,
 Δleverage, Δliquidity, отсутствие размытия, ΔGross margin, Δasset turnover).
 

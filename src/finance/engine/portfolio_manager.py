@@ -772,6 +772,23 @@ class UniversalPortfolioManager:
                 df = df.join(sec_df)
         except Exception as e:
             logger.warning(f"SEC EDGAR scan пропущен: {e}")
+        # H-4 (`§−132`): Altman Z — классическая формула с РЫНОЧНОЙ
+        # капитализацией в X4.  Цена известна только здесь; она в валюте
+        # ОТЧЁТА, отчётность SEC — в USD, поэтому капитализация переводится
+        # обратно (нет курса → Z пуст, а не балансовый суррогат).
+        try:
+            from finance.sec_edgar import apply_market_altman
+            _rep = self.engine.reporting_currency.value
+            if _rep == "USD":
+                _usd_per_unit = 1.0
+            else:
+                _usd_rate = self.engine.fx_rate_to_base("USD")
+                _usd_per_unit = (1.0 / _usd_rate
+                                 if _usd_rate and np.isfinite(_usd_rate) and _usd_rate > 0
+                                 else None)
+            df = apply_market_altman(df, usd_per_price_unit=_usd_per_unit)
+        except Exception as e:
+            logger.warning(f"Altman Z по капитализации пропущен: {e}")
         
         # Джойним факторы к общему DF
         df = df.join(factor_df)

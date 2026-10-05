@@ -19,6 +19,7 @@ Performance notes (2026-05):
 """
 import functools
 import logging
+import math
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -355,6 +356,87 @@ def get_critical_fundamentals(ticker: str) -> dict:
 
 
 # ═══════════════════════════════════════════════════════════
+# 1a.  ALTMAN Z — классическая формула (1968) с РЫНОЧНОЙ капитализацией
+# ═══════════════════════════════════════════════════════════
+# H-4 (`§−132`, решение владельца «классическая формула с капитализацией»).
+
+ALTMAN_X4_COEF:       float = 0.6
+ALTMAN_SAFE_ABOVE:    float = 2.99     # Z > 2.99   → Safe
+ALTMAN_DISTRESS_BELOW: float = 1.81    # Z < 1.81   → Distress; между — Grey
+#: Секторы, к которым Altman НЕПРИМЕНИМ: обязательства банка — депозиты, и при
+#: любой капитализации Z ≈ 0.5 → ложное «Distress».  Ключ — словарь секторов
+#: движка (`TICKER_SECTOR`); страховые вне словаря ловятся только с GICS (D-6).
+ALTMAN_NA_SECTORS: frozenset[str] = frozenset({"Finance"})
+
+
+def altman_zone_of(z: float) -> str:
+    """Зона по классическим порогам Altman (1968)."""
+    if z > ALTMAN_SAFE_ABOVE:
+        return "Safe"
+    if z >= ALTMAN_DISTRESS_BELOW:
+        return "Grey"
+    return "Distress"
+
+
+def altman_z_classic(ex_x4, market_cap, total_liabilities) -> float | None:
+    """Z = (1.2·X1 + 1.4·X2 + 3.3·X3 + 1.0·X5) + 0.6 · (капитализация / обязательства).
+
+    `ex_x4` — часть формулы без X4 (`get_extended_fundamentals`), все суммы —
+    в ОДНОЙ валюте (USD отчётности SEC).  Любой вход неконечен, капитализация
+    ≤ 0 или обязательства ≤ 0 → None: без рыночной стоимости классической Z нет
+    (балансовый суррогат — ДРУГАЯ модель, Z′, со своими коэффициентами).
+    """
+    try:
+        ex = float(ex_x4)
+        mc = float(market_cap)
+        tl = float(total_liabilities)
+    except (TypeError, ValueError):
+        return None
+    if not (math.isfinite(ex) and math.isfinite(mc) and math.isfinite(tl)):
+        return None
+    if mc <= 0 or tl <= 0:
+        return None
+    return ex + ALTMAN_X4_COEF * mc / tl
+
+
+def apply_market_altman(df: pd.DataFrame, *,
+                        usd_per_price_unit: float | None) -> pd.DataFrame:
+    """Заполнить `SEC_Altman_Z` / `SEC_Altman_Zone` по РЫНОЧНОЙ капитализации.
+
+    Вызывается движком там, где цена уже известна (стадия риск-модели, после
+    SEC-скана).  Капитализация = `Current_Price` × `SEC_Shares_Outstanding` ×
+    `usd_per_price_unit`: цена позиции — в валюте ОТЧЁТА, отчётность SEC — в
+    USD, и при отчёте в ₸ без обратного курса X4 вырос бы в ~500 раз.  Нет
+    курса (`None`), цены, числа акций или частей формулы → Z и зона пусты.
+    Банки (`ALTMAN_NA_SECTORS`) — пусто всегда.  Фрейм без SEC-колонок
+    возвращается нетронутым.
+    """
+    if df is None or df.empty or "SEC_Altman_Ex_X4" not in df.columns:
+        return df
+    zs: list[float | None] = []
+    zones: list[str | None] = []
+    for _, row in df.iterrows():
+        z = None
+        sector = row.get("Fundamental_Sector")
+        if usd_per_price_unit is not None and not (
+                isinstance(sector, str) and sector in ALTMAN_NA_SECTORS):
+            try:
+                mcap = (float(row.get("Current_Price"))
+                        * float(row.get("SEC_Shares_Outstanding"))
+                        * float(usd_per_price_unit))
+            except (TypeError, ValueError):
+                mcap = None
+            if mcap is not None and math.isfinite(mcap):
+                z = altman_z_classic(row.get("SEC_Altman_Ex_X4"), mcap,
+                                     row.get("SEC_Total_Liabilities"))
+        zs.append(z)
+        zones.append(altman_zone_of(z) if z is not None else None)
+    df["SEC_Altman_Z"] = pd.Series(zs, index=df.index, dtype="float64")
+    df["SEC_Altman_Zone"] = pd.Series(zones, index=df.index, dtype="object")
+    return df
+
+
+# ═══════════════════════════════════════════════════════════
 # 1b.  EXTENDED FUNDAMENTALS — Altman-Z, Piotroski-F, IntCov,
 #      FCF margin, Long-term debt.  All from the same JSON
 #      payload as get_critical_fundamentals (no extra requests).
@@ -368,8 +450,10 @@ def get_extended_fundamentals(ticker: str) -> dict:
     scan, so the marginal cost for an existing ticker is one dict lookup.
 
     Returns (subset of keys when data is missing):
-        altman_z         : float | None
-        altman_zone      : 'Safe' | 'Grey' | 'Distress' | None
+        altman_ex_x4     : float | None  (1.2·X1 + 1.4·X2 + 3.3·X3 + 1.0·X5 —
+                           классическая Z без X4; X4 = капитализация /
+                           обязательства добавляет движок, `apply_market_altman`)
+        total_liabilities: float | None
         piotroski_f      : int  (0..9) | None
         interest_coverage: float | None  (EBIT / InterestExpense)
         fcf_margin       : float | None  (FCF / Revenue)
@@ -466,13 +550,21 @@ def get_extended_fundamentals(ticker: str) -> dict:
     if op_income[0] is not None and interest_exp[0] and interest_exp[0] > 0:
         out["interest_coverage"] = op_income[0] / interest_exp[0]
 
-    # ── Altman Z-Score (public-firm formula) ────────────────────────────────
+    # ── Altman Z-Score — КЛАССИЧЕСКАЯ формула (1968), H-4 (`§−132`) ─────────
     # Z = 1.2·X1 + 1.4·X2 + 3.3·X3 + 0.6·X4 + 1.0·X5
     # X1 = Working Capital / Total Assets
     # X2 = Retained Earnings / Total Assets
     # X3 = EBIT / Total Assets
-    # X4 = Market Cap / Total Liabilities  (proxy: BookEquity / Liab if no MV)
+    # X4 = РЫНОЧНАЯ капитализация / Total Liabilities
     # X5 = Revenue / Total Assets
+    #
+    # 🔴 Цены у этого модуля нет, поэтому здесь считается всё, КРОМЕ X4
+    # (`altman_ex_x4`), а Z и зону собирает движок, когда цена известна
+    # (`apply_market_altman`).  До H-4 в X4 стоял БАЛАНСОВЫЙ капитал при
+    # коэффициентах и порогах классической формулы — смесь двух моделей: у
+    # компании с крупными выкупами капитал по балансу ≈ 0, и Z падал в
+    # «Distress» при капитализации, многократно превышающей долги (FTNT в
+    # живом отчёте 02.10: Z = 1.43, C-пиллар −1).
     try:
         ta = total_assets[0]
         tl = total_liabs[0]
@@ -487,18 +579,9 @@ def get_extended_fundamentals(ticker: str) -> dict:
             x1  = wc / ta
             x2  = re_val / ta
             x3  = ebit / ta
-            # Use book-equity proxy when no market price is available here.
-            be  = ta - tl
-            x4  = be / tl if tl > 0 else 0.0
             x5  = rev0 / ta
-            z = 1.2 * x1 + 1.4 * x2 + 3.3 * x3 + 0.6 * x4 + 1.0 * x5
-            out["altman_z"] = float(z)
-            if z > 2.99:
-                out["altman_zone"] = "Safe"
-            elif z >= 1.81:
-                out["altman_zone"] = "Grey"
-            else:
-                out["altman_zone"] = "Distress"
+            out["altman_ex_x4"]      = float(1.2 * x1 + 1.4 * x2 + 3.3 * x3 + 1.0 * x5)
+            out["total_liabilities"] = float(tl)
     except Exception:
         pass  # missing tags → no Z
 
@@ -709,8 +792,10 @@ def batch_fundamental_scan(
                 # Phase 2.4 extensions for the Credit pillar.
                 "SEC_FCF_Margin":         ext.get("fcf_margin"),
                 "SEC_Interest_Coverage":  ext.get("interest_coverage"),
-                "SEC_Altman_Z":           ext.get("altman_z"),
-                "SEC_Altman_Zone":        ext.get("altman_zone"),
+                # H-4 (`§−132`): Z и зону собирает движок по рыночной
+                # капитализации (`apply_market_altman`); здесь — части формулы.
+                "SEC_Altman_Ex_X4":       ext.get("altman_ex_x4"),
+                "SEC_Total_Liabilities":  ext.get("total_liabilities"),
                 "SEC_Piotroski_F":        ext.get("piotroski_f"),
                 # 4-Pillar #3 — YoY margin-trend momentum for the F-pillar bonus.
                 "SEC_Fundamental_Momentum": ext.get("fundamental_momentum"),
