@@ -244,21 +244,15 @@ def _map_deep(p: dict, meta: dict) -> dict:
                "rec": (f"{_num(s, 'recovery_months')} мес" if _g(s, "recovery_months") else DASH)}
               for s in _list(p, "stress_scenarios")]
 
-    # expected effect → 8 cards
+    # expected effect → 7 cards
     ee = _g(p, "expected_effect", default={}) or {}
-    # R-3 (2026-08-02): «Ожид. доходность» существует в отчёте ДВАЖДЫ и это
-    # РАЗНЫЕ величины: на обложке — форвардная оценка факторной модели
-    # (Σwᵢ·E[rᵢ], ключ `expected_return_annual`), здесь — Σw·μ постериора
-    # Black-Litterman (`simulate._expected_return_from_bl`) либо реализованная
-    # оценка-фолбэк.  В живом отчёте 30.07 это дало 14.9% на обложке против
-    # 2.4% в панели под ОДНИМ ярлыком — разница в 6 раз без объяснения.
-    # Классический v3 подписывает «(год.)» и даёт сноску «из Black-Litterman»,
-    # Premium терял и то, и другое.  Ярлык теперь называет ИСТОЧНИК.
-    _er_label = ("Ожид. доходность (год., BL)" if _g(p, "expected_effect_uses_bl")
-                 else "Ожид. доходность (год., реализ.)")
+    # Q-3 (`§−128`): строки «Ожид. доходность» больше нет. Прежде (R-3) её
+    # ярлык называл источник — BL-постериор или повтор истории, — потому что
+    # обложка показывала ДРУГОЙ форвард; теперь на обложке факт за 12 мес, а
+    # прогноз доходности на целевых весах отчёт не печатает вовсе.
     _ELABELS = [("risk_index", "Индекс риска"), ("vol", "Волатильность"), ("cvar_95", "CVaR 95%"),
                 ("max_drawdown", "Max Drawdown"), ("sharpe", "Sharpe"), ("max_erc_pct", "Max TRC"),
-                ("it_share", "Доля IT"), ("expected_return", _er_label)]
+                ("it_share", "Доля IT")]
     effect = []
     for key, label in _ELABELS:
         cell = _g(ee, key, default={}) or {}
@@ -453,10 +447,9 @@ def _map_deep(p: dict, meta: dict) -> dict:
         "meta": {**meta, "tier": "DEEP", "engine": "MAC3"},
         "verdict": {"headline": _txt(p, "ai_verdict"), "sub": _txt(p, "ai_plain_summary"),
                     "riskIndex": round(_num(p, "risk_pct")), "riskTier": _txt(p, "risk_label"),
-                    # BLOCK 5 — portfolio FORWARD expected annual return shown
-                    # next to the risk index ("доходность относительно риска").
-                    "expReturn": _txt(p, "expected_return_annual"),
-                    "expSharpe": _txt(p, "expected_sharpe"),
+                    # D-5 (`§−128`): рядом с индексом риска — ФАКТ за 12 мес
+                    # текущего состава, а не форвард (прежние expReturn/expSharpe).
+                    "return12m": _txt(p, "return_12m"),
                     "summary": _txt(p, "ai_plain_summary"), "bullets": bullets},
         "mandate": mandate,
         "heroStats": [
@@ -564,9 +557,8 @@ def _map_base(p: dict, meta: dict) -> dict:
         "verdict": {"headline": _txt(p, "ai_verdict"), "sub": _txt(p, "ai_plain_summary"),
                     "riskIndex": round(_num(p, "risk_pct")),
                     "riskTier": _txt(p, "risk_label"),   # real tier for the AI-insight card
-                    # BLOCK 5 — portfolio FORWARD expected annual return + Sharpe.
-                    "expReturn": _txt(p, "expected_return_annual"),
-                    "expSharpe": _txt(p, "expected_sharpe"),
+                    # D-5 (`§−128`): факт за 12 мес вместо форварда.
+                    "return12m": _txt(p, "return_12m"),
                     "riskTrendDelta": _g(p, "risk_score_delta", default=0), "nav": _txt(p, "total_value_usd")},
         # Аудит 2026-08-12 вернул этот блок на обложку BASE (в бандле слова
         # `kpis` не было ни разу — четыре главные риск-метрики считались и не
@@ -683,7 +675,7 @@ def _base_factor_pills(p: dict, assets: list, sectors: list, wf: dict) -> list:
 
 # Expected-effect cards: which metric keys are stored as FRACTIONS (×100 = %).
 # risk_index → integer points; sharpe → bare ratio; everything else → percent.
-_EFFECT_PCT = {"vol", "cvar_95", "max_drawdown", "it_share", "expected_return", "max_erc_pct"}
+_EFFECT_PCT = {"vol", "cvar_95", "max_drawdown", "it_share", "max_erc_pct"}
 
 
 def _eff_to_num(v: Any):

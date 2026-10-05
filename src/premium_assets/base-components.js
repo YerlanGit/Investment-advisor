@@ -1018,7 +1018,7 @@ const HeroRiskGauge = ({
 // волатильность) приезжал в BASE-payload с самого начала, но в бандле
 // `base-components.js` слова `kpis` не было НИ РАЗУ — четыре главные
 // риск-метрики считались движком и не показывались никому.  То же с
-// `verdict.expReturn` / `verdict.expSharpe` (BLOCK 5): в DEEP они на обложке,
+// `verdict.expReturn` / `verdict.expSharpe` (BLOCK 5; с `§−128` — `verdict.return12m`, факт за 12 мес): в DEEP они на обложке,
 // в BASE их не рендерил никто.  Полоса ниже возвращает всё это на обложку.
 //
 // 🔴 Правка 2026-08-18 (`§−97`): собственная урезанная карточка BASE удалена.
@@ -1036,13 +1036,13 @@ const RiskKpiStrip = ({
   // там, а не здесь — иначе он был бы вторым местом, где живёт состав полосы.
   const cards = Array.isArray(kpis) ? kpis.filter(Boolean) : [];
   if (!cards.length) return null;
-  const fwd = [verdict.expReturn && verdict.expReturn !== '–' ? {
-    label: 'Ожид. доходность (год.)',
-    value: verdict.expReturn
-  } : null, verdict.expSharpe && verdict.expSharpe !== '–' ? {
-    label: 'Ожид. Sharpe',
-    value: verdict.expSharpe
-  } : null].filter(Boolean);
+  // D-5 (`§−128`): строка под карточками — ФАКТ за 12 мес текущего состава
+  // (то же число, что строка 12М таблицы периодов), а не прогноз модели.
+  const r12 = verdict.return12m;
+  const fwd = r12 && r12 !== '–' && r12 !== '—' ? [{
+    label: 'Доходность за 12 мес',
+    value: r12
+  }] : [];
   return /*#__PURE__*/React.createElement("div", {
     className: "mb-10"
   }, /*#__PURE__*/React.createElement("div", {
@@ -1054,7 +1054,7 @@ const RiskKpiStrip = ({
     className: "mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-2xl bg-cream-50/80 border border-ink-900/5 px-4 py-2.5"
   }, /*#__PURE__*/React.createElement("span", {
     className: "text-[10px] tracking-widest uppercase text-ink-400 font-mono"
-  }, "Прогноз модели"), fwd.map((f, i) => /*#__PURE__*/React.createElement("span", {
+  }, "Факт · текущий состав · без дивидендов"), fwd.map((f, i) => /*#__PURE__*/React.createElement("span", {
     key: i,
     className: "text-[11.5px] text-ink-600 min-w-0"
   }, f.label, ": ", /*#__PURE__*/React.createElement("span", {

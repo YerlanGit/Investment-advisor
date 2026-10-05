@@ -153,66 +153,66 @@
    "Benchmark_Ann_Return": 0.09866090337,
    "Benchmark_Return": 0.6242111591,
    "Excess_Return": -0.3988303825,
-   "Excess_Return_Ann": 0.0203222159,
-   "Information_Ratio": 0.2809543396,
-   "Portfolio_Ann_Return": 0.1189831193,
+   "Excess_Return_Ann": 0.006677048884,
+   "Information_Ratio": 0.09537032756,
+   "Portfolio_Ann_Return": 0.1053379523,
    "Portfolio_Return": 0.2253807767,
-   "Tracking_Error": 0.06523574631
+   "Tracking_Error": 0.06353181187
   },
   "MSCI EM": {
    "Beating_Benchmark": false,
    "Benchmark_Ann_Return": 0.1140132231,
    "Benchmark_Return": 0.7446510192,
    "Excess_Return": -0.5192702426,
-   "Excess_Return_Ann": 0.004969896166,
-   "Information_Ratio": 0.06758848208,
-   "Portfolio_Ann_Return": 0.1189831193,
+   "Excess_Return_Ann": -0.00867527085,
+   "Information_Ratio": -0.1218700383,
+   "Portfolio_Ann_Return": 0.1053379523,
    "Portfolio_Return": 0.2253807767,
-   "Tracking_Error": 0.06585933228
+   "Tracking_Error": 0.0641493522
   },
   "Nasdaq 100": {
    "Beating_Benchmark": false,
    "Benchmark_Ann_Return": 0.1404675907,
    "Benchmark_Return": 0.9690149191,
    "Excess_Return": -0.7436341425,
-   "Excess_Return_Ann": -0.02148447142,
-   "Information_Ratio": -0.3005351623,
-   "Portfolio_Ann_Return": 0.1189831193,
+   "Excess_Return_Ann": -0.03512963844,
+   "Information_Ratio": -0.5046686546,
+   "Portfolio_Ann_Return": 0.1053379523,
    "Portfolio_Return": 0.2253807767,
-   "Tracking_Error": 0.06328045536
+   "Tracking_Error": 0.06199556471
   },
   "Russell 2000": {
    "Beating_Benchmark": false,
    "Benchmark_Ann_Return": 0.1190889938,
    "Benchmark_Return": 0.7860166568,
    "Excess_Return": -0.5606358801,
-   "Excess_Return_Ann": -0.0001058745719,
-   "Information_Ratio": -0.001435051688,
-   "Portfolio_Ann_Return": 0.1189831193,
+   "Excess_Return_Ann": -0.01375104159,
+   "Information_Ratio": -0.1921156307,
+   "Portfolio_Ann_Return": 0.1053379523,
    "Portfolio_Return": 0.2253807767,
-   "Tracking_Error": 0.06592953967
+   "Tracking_Error": 0.06435618259
   },
   "S&P 500": {
    "Beating_Benchmark": false,
    "Benchmark_Ann_Return": 0.1289118562,
    "Benchmark_Return": 0.8683143007,
    "Excess_Return": -0.6429335241,
-   "Excess_Return_Ann": -0.009928736952,
-   "Information_Ratio": -0.1361930063,
-   "Portfolio_Ann_Return": 0.1189831193,
+   "Excess_Return_Ann": -0.02357390397,
+   "Information_Ratio": -0.3341132976,
+   "Portfolio_Ann_Return": 0.1053379523,
    "Portfolio_Return": 0.2253807767,
-   "Tracking_Error": 0.0648628462
+   "Tracking_Error": 0.06316145596
   },
   "Профильный бенчмарк": {
    "Beating_Benchmark": false,
    "Benchmark_Ann_Return": 0.1289118562,
    "Benchmark_Return": 0.8683143007,
    "Excess_Return": -0.6429335241,
-   "Excess_Return_Ann": -0.009928736952,
-   "Information_Ratio": -0.1361930063,
-   "Portfolio_Ann_Return": 0.1189831193,
+   "Excess_Return_Ann": -0.02357390397,
+   "Information_Ratio": -0.3341132976,
+   "Portfolio_Ann_Return": 0.1053379523,
    "Portfolio_Return": 0.2253807767,
-   "Tracking_Error": 0.0648628462
+   "Tracking_Error": 0.06316145596
   }
  },
  "benchmark_factor_profile": {
@@ -915,38 +915,38 @@
    "periods": [
     {
      "bm_pct": 0.00504201966,
-     "excess_pp": -0.01230825974,
+     "excess_pp": -0.01145744593,
      "n_days": 21,
      "period": "1m",
-     "port_pct": -0.00726624008
+     "port_pct": -0.006415426266
     },
     {
      "bm_pct": 0.09248178773,
-     "excess_pp": 0.005160643097,
+     "excess_pp": -0.006142744739,
      "n_days": 63,
      "period": "3m",
-     "port_pct": 0.09764243083
+     "port_pct": 0.08633904299
     },
     {
      "bm_pct": 0.1172580792,
-     "excess_pp": -0.006411790531,
+     "excess_pp": -0.01922600159,
      "n_days": 126,
      "period": "6m",
-     "port_pct": 0.1108462887
+     "port_pct": 0.09803207765
     },
     {
      "bm_pct": 0.2855190686,
-     "excess_pp": 0.08455357045,
+     "excess_pp": 0.03743206668,
      "n_days": 252,
      "period": "12m",
-     "port_pct": 0.3700726391
+     "port_pct": 0.3229511353
     },
     {
      "bm_pct": 0.2874895265,
-     "excess_pp": 0.08651161223,
+     "excess_pp": 0.03883586521,
      "n_days": 256,
      "period": "YTD",
-     "port_pct": 0.3740011387
+     "port_pct": 0.3263253917
     }
    ],
    "window_end": "2027-12-24",
@@ -957,38 +957,38 @@
    "periods": [
     {
      "bm_pct": -0.02832669224,
-     "excess_pp": 0.02106045216,
+     "excess_pp": 0.02191126597,
      "n_days": 21,
      "period": "1m",
-     "port_pct": -0.00726624008
+     "port_pct": -0.006415426266
     },
     {
      "bm_pct": 0.04719672883,
-     "excess_pp": 0.050445702,
+     "excess_pp": 0.03914231416,
      "n_days": 63,
      "period": "3m",
-     "port_pct": 0.09764243083
+     "port_pct": 0.08633904299
     },
     {
      "bm_pct": 0.02742251491,
-     "excess_pp": 0.0834237738,
+     "excess_pp": 0.07060956274,
      "n_days": 126,
      "period": "6m",
-     "port_pct": 0.1108462887
+     "port_pct": 0.09803207765
     },
     {
      "bm_pct": 0.2413768242,
-     "excess_pp": 0.1286958149,
+     "excess_pp": 0.08157431111,
      "n_days": 252,
      "period": "12m",
-     "port_pct": 0.3700726391
+     "port_pct": 0.3229511353
     },
     {
      "bm_pct": 0.2494923925,
-     "excess_pp": 0.1245087462,
+     "excess_pp": 0.07683299922,
      "n_days": 256,
      "period": "YTD",
-     "port_pct": 0.3740011387
+     "port_pct": 0.3263253917
     }
    ],
    "window_end": "2027-12-24",
@@ -999,38 +999,38 @@
    "periods": [
     {
      "bm_pct": -0.01717754616,
-     "excess_pp": 0.009911306078,
+     "excess_pp": 0.01076211989,
      "n_days": 21,
      "period": "1m",
-     "port_pct": -0.00726624008
+     "port_pct": -0.006415426266
     },
     {
      "bm_pct": 0.1362945028,
-     "excess_pp": -0.03865207196,
+     "excess_pp": -0.0499554598,
      "n_days": 63,
      "period": "3m",
-     "port_pct": 0.09764243083
+     "port_pct": 0.08633904299
     },
     {
      "bm_pct": 0.1483949299,
-     "excess_pp": -0.03754864121,
+     "excess_pp": -0.05036285227,
      "n_days": 126,
      "period": "6m",
-     "port_pct": 0.1108462887
+     "port_pct": 0.09803207765
     },
     {
      "bm_pct": 0.292319406,
-     "excess_pp": 0.07775323305,
+     "excess_pp": 0.03063172928,
      "n_days": 252,
      "period": "12m",
-     "port_pct": 0.3700726391
+     "port_pct": 0.3229511353
     },
     {
      "bm_pct": 0.2867062519,
-     "excess_pp": 0.08729488685,
+     "excess_pp": 0.03961913983,
      "n_days": 256,
      "period": "YTD",
-     "port_pct": 0.3740011387
+     "port_pct": 0.3263253917
     }
    ],
    "window_end": "2027-12-24",
@@ -1041,38 +1041,38 @@
    "periods": [
     {
      "bm_pct": -0.01213862049,
-     "excess_pp": 0.004872380406,
+     "excess_pp": 0.005723194219,
      "n_days": 21,
      "period": "1m",
-     "port_pct": -0.00726624008
+     "port_pct": -0.006415426266
     },
     {
      "bm_pct": 0.1021554174,
-     "excess_pp": -0.004512986529,
+     "excess_pp": -0.01581637436,
      "n_days": 63,
      "period": "3m",
-     "port_pct": 0.09764243083
+     "port_pct": 0.08633904299
     },
     {
      "bm_pct": 0.1397742634,
-     "excess_pp": -0.02892797468,
+     "excess_pp": -0.04174218574,
      "n_days": 126,
      "period": "6m",
-     "port_pct": 0.1108462887
+     "port_pct": 0.09803207765
     },
     {
      "bm_pct": 0.3143698819,
-     "excess_pp": 0.05570275721,
+     "excess_pp": 0.008581253439,
      "n_days": 252,
      "period": "12m",
-     "port_pct": 0.3700726391
+     "port_pct": 0.3229511353
     },
     {
      "bm_pct": 0.3126075199,
-     "excess_pp": 0.06139361886,
+     "excess_pp": 0.01371787184,
      "n_days": 256,
      "period": "YTD",
-     "port_pct": 0.3740011387
+     "port_pct": 0.3263253917
     }
    ],
    "window_end": "2027-12-24",
@@ -1083,38 +1083,38 @@
    "periods": [
     {
      "bm_pct": -0.009520295299,
-     "excess_pp": 0.002254055219,
+     "excess_pp": 0.003104869033,
      "n_days": 21,
      "period": "1m",
-     "port_pct": -0.00726624008
+     "port_pct": -0.006415426266
     },
     {
      "bm_pct": 0.05879893947,
-     "excess_pp": 0.03884349136,
+     "excess_pp": 0.02754010353,
      "n_days": 63,
      "period": "3m",
-     "port_pct": 0.09764243083
+     "port_pct": 0.08633904299
     },
     {
      "bm_pct": 0.01689517749,
-     "excess_pp": 0.09395111122,
+     "excess_pp": 0.08113690016,
      "n_days": 126,
      "period": "6m",
-     "port_pct": 0.1108462887
+     "port_pct": 0.09803207765
     },
     {
      "bm_pct": 0.3303916076,
-     "excess_pp": 0.03968103151,
+     "excess_pp": -0.007440472257,
      "n_days": 252,
      "period": "12m",
-     "port_pct": 0.3700726391
+     "port_pct": 0.3229511353
     },
     {
      "bm_pct": 0.3163445346,
-     "excess_pp": 0.05765660416,
+     "excess_pp": 0.009980857136,
      "n_days": 256,
      "period": "YTD",
-     "port_pct": 0.3740011387
+     "port_pct": 0.3263253917
     }
    ],
    "window_end": "2027-12-24",
@@ -1125,38 +1125,38 @@
    "periods": [
     {
      "bm_pct": -0.009520295299,
-     "excess_pp": 0.002254055219,
+     "excess_pp": 0.003104869033,
      "n_days": 21,
      "period": "1m",
-     "port_pct": -0.00726624008
+     "port_pct": -0.006415426266
     },
     {
      "bm_pct": 0.05879893947,
-     "excess_pp": 0.03884349136,
+     "excess_pp": 0.02754010353,
      "n_days": 63,
      "period": "3m",
-     "port_pct": 0.09764243083
+     "port_pct": 0.08633904299
     },
     {
      "bm_pct": 0.01689517749,
-     "excess_pp": 0.09395111122,
+     "excess_pp": 0.08113690016,
      "n_days": 126,
      "period": "6m",
-     "port_pct": 0.1108462887
+     "port_pct": 0.09803207765
     },
     {
      "bm_pct": 0.3303916076,
-     "excess_pp": 0.03968103151,
+     "excess_pp": -0.007440472257,
      "n_days": 252,
      "period": "12m",
-     "port_pct": 0.3700726391
+     "port_pct": 0.3229511353
     },
     {
      "bm_pct": 0.3163445346,
-     "excess_pp": 0.05765660416,
+     "excess_pp": 0.009980857136,
      "n_days": 256,
      "period": "YTD",
-     "port_pct": 0.3740011387
+     "port_pct": 0.3263253917
     }
    ],
    "window_end": "2027-12-24",
@@ -1197,6 +1197,7 @@
   "Max_Drawdown": -0.08020541928,
   "Max_Euler_Risk_Pct": 44.25853326,
   "Positive_Days_Pct": 53.42571209,
+  "Return_12M": 0.3229511353,
   "Sharpe_Ratio": 0.779670269,
   "Sortino_Ratio": 1.170157011,
   "Total_Volatility_Ann": 0.07738906388,

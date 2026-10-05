@@ -2055,12 +2055,14 @@ class ExpectedEffectRemapTest(unittest.TestCase):
             "expected_return": cell(0.142, 0.126, -0.016, False, -1.6),
         }, "weight_changes": []}
 
-    def test_remap_produces_eight_template_keys(self) -> None:
+    def test_remap_produces_seven_template_keys(self) -> None:
+        # Q-3 (`§−128`): движок по-прежнему отдаёт `expected_return` (база
+        # дельты Sharpe), но в отчёт строка не идёт.
         from pdf_payload import _build_expected_effect
         ee = _build_expected_effect(self._engine_ee())
         self.assertEqual(set(ee), {
             "risk_index", "cvar_95", "sharpe", "max_drawdown",
-            "vol", "max_erc_pct", "it_share", "expected_return"})
+            "vol", "max_erc_pct", "it_share"})
 
     def test_card_name_skew_bridged(self) -> None:
         """Template `vol`/`max_erc_pct` map to engine `volatility_ann`/`max_trc`."""
@@ -2074,7 +2076,7 @@ class ExpectedEffectRemapTest(unittest.TestCase):
         from pdf_payload import _build_expected_effect
         ee = _build_expected_effect(self._engine_ee())
         self.assertIs(ee["risk_index"]["favourable"], True)
-        self.assertIs(ee["expected_return"]["favourable"], False)
+        self.assertNotIn("expected_return", ee)
 
     def test_delta_pp_fallback_for_non_as_pp_metrics(self) -> None:
         """risk_index/sharpe get raw delta; max_trc is already in pp."""

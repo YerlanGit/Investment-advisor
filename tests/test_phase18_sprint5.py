@@ -472,10 +472,12 @@ class RoundedZeroDeltaNeutralTest(unittest.TestCase):
 
     def test_tiny_delta_pp_is_neutral(self):
         from pdf_payload import _build_expected_effect
-        ee = _build_expected_effect({"metrics": {"expected_return": {
-            "before": 0.05, "after": 0.0504, "delta": 0.0004,
+        # `§−128`: строка `expected_return` ушла из отчёта (Q-3) — гейт
+        # округления проверяется на другой метрике в пп.
+        ee = _build_expected_effect({"metrics": {"cvar_95": {
+            "before": -0.05, "after": -0.0496, "delta": 0.0004,
             "delta_pp": 0.04, "improved": True}}})
-        self.assertIsNone(ee["expected_return"]["favourable"])
+        self.assertIsNone(ee["cvar_95"]["favourable"])
 
     def test_real_delta_keeps_flag(self):
         from pdf_payload import _build_expected_effect

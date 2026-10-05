@@ -1240,17 +1240,17 @@ const HeroGaugeCard = ({
   className: "text-base font-semibold tracking-tight text-ink-900 leading-tight"
 }, "Сводный 0–100")), v.riskTier && v.riskTier !== '–' && /*#__PURE__*/React.createElement("span", {
   className: "px-2 py-0.5 rounded-full bg-gold-400/25 text-gold-700 text-[9px] font-mono font-bold tracking-wider uppercase"
-}, v.riskTier)), v.expReturn && v.expReturn !== '–' && /*#__PURE__*/React.createElement("div", {
+}, v.riskTier)), v.return12m && v.return12m !== '–' && v.return12m !== '—' && /*#__PURE__*/React.createElement("div", {
   className: "flex items-center flex-wrap gap-x-4 gap-y-2 min-w-0"
-}, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+}, /*#__PURE__*/React.createElement("div", {
+  className: "min-w-0"
+}, /*#__PURE__*/React.createElement("div", {
   className: "text-[9px] text-ink-500 font-medium uppercase tracking-wider"
-}, "Ожид. дох. (год.)"), /*#__PURE__*/React.createElement("div", {
-  className: "num text-lg font-light text-sage-600 leading-none mt-0.5"
-}, v.expReturn)), v.expSharpe && v.expSharpe !== '–' && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-  className: "text-[9px] text-ink-500 font-medium uppercase tracking-wider"
-}, "Фвд-Sharpe"), /*#__PURE__*/React.createElement("div", {
+}, "Доходность за 12 мес"), /*#__PURE__*/React.createElement("div", {
   className: "num text-lg font-light text-ink-900 leading-none mt-0.5"
-}, v.expSharpe)))));
+}, v.return12m), /*#__PURE__*/React.createElement("div", {
+  className: "text-[9px] text-ink-400 font-mono mt-1"
+}, "текущий состав · без дивидендов")))));
 
 // Verdict / AI summary dark card with bullets
 const VerdictCard = ({

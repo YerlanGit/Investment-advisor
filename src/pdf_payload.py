@@ -641,7 +641,10 @@ def _build_expected_effect(raw: Optional[dict]) -> dict:
         ("vol",             "volatility_ann"),
         ("max_erc_pct",     "max_trc"),
         ("it_share",        "it_share"),
-        ("expected_return", "expected_return"),
+        # Q-3 (`§−128`): строки «Ожид. доходность» в панели больше нет —
+        # прогноз на целевых весах либо BL-постериор, либо повтор истории
+        # новыми весами (подглядывание в прошлое). Движок по-прежнему считает
+        # её как базу дельты Sharpe (H-8 открыт), но в отчёт она не идёт.
     )
     out: dict = {}
     for tpl_key, eng_key in _KEYMAP:
@@ -884,20 +887,22 @@ def build_payload(results: dict, tier: str,
     mdd_str     = f"{mdd_raw * 100:.1f}%"
     vol_str     = f"{vol_raw * 100:.1f}%"
 
-    # BLOCK 5: portfolio-level FORWARD expected annual return + ex-ante Sharpe.
-    # Σ w_i·E[r_i] + cash·rfr, computed in the engine (investment_logic) — the
-    # forward expectation implied by today's factor betas, NOT the trailing
-    # realised CAGR.  Surfaced here so both the v3 template and the Premium
-    # mapper render the same authoritative number against risk.
-    exp_ret_raw  = metrics.get("Expected_Return_Annual")
-    exp_shrp_raw = metrics.get("Expected_Sharpe")
-    exp_ret_num  = (exp_ret_raw * 100
-                    if isinstance(exp_ret_raw, (int, float))
-                    and not math.isnan(float(exp_ret_raw)) else None)
-    exp_ret_str  = f"{exp_ret_num:.1f}%" if exp_ret_num is not None else "—"
-    exp_sharpe_str = (f"{exp_shrp_raw:.2f}"
-                      if isinstance(exp_shrp_raw, (int, float))
-                      and not math.isnan(float(exp_shrp_raw)) else "—")
+    # D-5 (`§−128`, решение владельца): рядом с индексом риска — ФАКТ, а не
+    # прогноз. Прежде здесь стоял форвард факторной модели (BLOCK 5) и
+    # форвардный Sharpe: живой DEEP 02.10 печатал «Ожид. дох. 12.4%», тогда как
+    # «Эффект» рядом давал BL 5.5% — две «ожидаемые» доходности на странице
+    # (`§−121-C`), а сам форвард удваивал рыночную премию через очищенные
+    # стилевые факторы (H-1, `REVIEW_2026-10-05`). Теперь — накопленная
+    # доходность ТЕКУЩЕГО состава за последние 252 торговых дня по ряду
+    # обложки (`Return_12M`); то же число стоит в строке 12М таблицы периодов.
+    # Короче года — «—». Цены без дивидендов (ось не измерена) — подпись в виде.
+    r12_raw = metrics.get("Return_12M")
+    r12_num = (round(float(r12_raw) * 100, 2)
+               if isinstance(r12_raw, (int, float))
+               and math.isfinite(float(r12_raw)) else None)
+    # Строка — из СЫРОГО числа: двойное округление (до 0.01, потом до 0.1)
+    # могло бы разойтись на 0.1 пп со строкой 12М таблицы периодов.
+    r12_str = f"{float(r12_raw) * 100:+.1f}%" if r12_num is not None else "—"
 
     # Risk-free rate the engine used to compute Sharpe / Sortino.
     # Surfaced in the payload so the report's KPI commentary shows the
@@ -1369,18 +1374,11 @@ def build_payload(results: dict, tier: str,
         "var_95_daily_num":  round(var_raw * 100, 2),
         "max_drawdown_num":  round(mdd_raw * 100, 2),
         "volatility_num":    round(vol_raw * 100, 2),
-        # BLOCK 5 — portfolio FORWARD expected annual return & ex-ante Sharpe.
-        "expected_return_annual": exp_ret_str,
+        # D-5 (`§−128`) — ФАКТИЧЕСКАЯ доходность текущего состава за 12 мес.
+        "return_12m":        r12_str,
+        "return_12m_num":    r12_num,                    # numeric (chart-safe)
         # R-8: годовая волатильность профильного бенчмарка (0 = «ряда нет»).
         "benchmark_vol_pct": round(benchmark_vol_pct, 1),
-        # R-3: источник «Ожид. доходности» ПАНЕЛИ — BL-постериор или
-        # реализованная оценка-фолбэк.  На обложке живёт ДРУГАЯ величина
-        # (форвард факторной модели), и без подписи 14.9% против 2.4%
-        # читаются как противоречие.  Флаг лежит на уровне payload, а НЕ
-        # внутри `expected_effect`: тот словарь несёт ровно 8 строк-метрик
-        # и обязан быть `{}` на пустом входе (контракт `test_phase4`).
-        "expected_effect_uses_bl": bool(
-            (results.get("expected_effect") or {}).get("uses_bl_returns")),
         # R-20 (2026-08-02): при отрицательной премии за риск (er < rf) Sharpe
         # перестаёт упорядочивать портфели — снижение волатильности МЕХАНИЧЕСКИ
         # ухудшает коэффициент.  Движок в этом случае гасит дельту, а строку
@@ -1395,8 +1393,6 @@ def build_payload(results: dict, tier: str,
             (results.get("model_uncovered") or {}).get("names") or []),
         "expected_effect_sharpe_note": str(
             (results.get("expected_effect") or {}).get("sharpe_note") or ""),
-        "expected_return_pct_num": exp_ret_num,          # numeric (chart-safe)
-        "expected_sharpe":        exp_sharpe_str,
         # Аудит 2026-08-12: ВЕРДИКТ KPI-карточек.  Прежде статус и цвет каждой
         # карточки приезжали в premium-маппер литералами дизайн-макета и от
         # значения НЕ зависели: Sharpe 0.56 нёс бейдж «good» рядом с ИИ-текстом
@@ -2471,10 +2467,6 @@ PAYLOAD_CONTRACT: dict[str, str] = {
     "data_quality": "map",
     "expected_effect": "map",
     "expected_effect_sharpe_note": "text",
-    "expected_effect_uses_bl": "flag",
-    "expected_return_annual": "text",
-    "expected_return_pct_num": "num",
-    "expected_sharpe": "text",
     "factor_variance": "map",
     "fundamental_layer": "list",
     "holdings_count": "num",
@@ -2507,6 +2499,8 @@ PAYLOAD_CONTRACT: dict[str, str] = {
     "regime_confirmation": "map",
     "regime_consistency": "map",
     "regime_rag_confirm": "list",
+    "return_12m": "text",
+    "return_12m_num": "num",
     "return_series_coverage": "map",
     "risk_free_rate": "text",
     "risk_label": "text",

@@ -349,9 +349,9 @@ NAV % из `holdings[].weight` — он включает плечо и не су
     `stress_scenarios[]`, capped per-asset цифры из `top_assets[]`.
   * `ai_risk_comment` (top-of-report): trailing-метрики (Sharpe,
     Sortino, CVaR, MDD, vol) — **всегда** с тегом «(trailing
-    {12M|YTD|…})»; форвардная ожидаемая доходность — «(forward,
-    BL prior)». Никогда не сравнивай trailing-Sharpe с
-    forward-expected_return как «парные» числа.
+    {12M|YTD|…})». Прогнозной («ожидаемой») доходности в отчёте
+    НЕТ (решение владельца, `§−128`): не называй её и не выводи сам —
+    рядом с индексом риска стоит факт «доходность за 12 мес».
 
 ### 6. Уверенность режима — единый источник
 В `summary.regime.confidence` лежит уверенность модели в режиме (0..1).
