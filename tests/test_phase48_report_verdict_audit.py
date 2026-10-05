@@ -154,11 +154,14 @@ class BaseRendersItsKpisTest(unittest.TestCase):
                       "считаются и не показываются (регресс A-2)")
         self.assertIn("RiskKpiStrip", bundle)
 
-    def test_bundle_shows_forward_estimates(self) -> None:
+    def test_bundle_shows_the_12m_fact(self) -> None:
+        # `§−128` (D-5): вместо форварда `expReturn`/`expSharpe` полоса
+        # показывает факт за 12 мес. Проверяется ВЫЗОВ в коде бандла, а не
+        # слово в комментарии: старый тест проходил бы и по комментарию.
         bundle = (_ASSETS / "base-components.js").read_text(encoding="utf-8")
-        for key in ("expReturn", "expSharpe"):
-            self.assertIn(key, bundle,
-                          f"`verdict.{key}` снова не рендерится в BASE")
+        self.assertIn("verdict.return12m", bundle,
+                      "`verdict.return12m` снова не рендерится в BASE")
+        self.assertIn("Доходность за 12 мес", bundle)
 
     def test_mapper_still_emits_all_four_metrics(self) -> None:
         kpis = pp.build_design_data({"cvar": "-3.4", "sharpe": "0.56",

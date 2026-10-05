@@ -1199,6 +1199,10 @@ class MAC3RiskEngine:
         # (no data / no factors / short history / zero weights) must never
         # leave a STALE decomposition from a previous call on the engine.
         self._last_factor_decomposition = {}
+        # `§−128`: ряд книги — тоже. С D-5 его читает стадия бенчмарков (TE/IR,
+        # таблица периодов), и ранний выход ниже не вправе оставить ей ряд
+        # ПРОШЛОГО вызова на том же движке.
+        self._last_port_log_returns = None
         # F-1: reset the orthogonalization betas alongside — a stale map from a
         # previous call would residualize stress shocks that were fitted on
         # different data (or when this run skips orthogonalization entirely).
@@ -1628,6 +1632,15 @@ class MAC3RiskEngine:
         # `exp(mean_log·252) - 1` is the exact equivalent simple return.
         ann_return = float(np.exp(np.mean(port_returns_daily) * self.trading_days) - 1.0)
 
+        # D-5 (`§−128`): ТЕКУЩАЯ годовая доходность — ФАКТ, а не прогноз:
+        # накопленная простая доходность за последние 252 торговых дня по ТОМУ
+        # ЖЕ ряду книги, что и обложка (кэш 0%, маржа по rf, композит F-22).
+        # Короче торгового года — None: годовую цифру с неполного окна не
+        # печатаем (тот же принцип, что гейт F-14 у форварда).
+        return_12m = (
+            float(np.expm1(np.sum(port_returns_daily[-self.trading_days:])))
+            if len(port_returns_daily) >= self.trading_days else None)
+
         var_95 = np.percentile(port_returns_daily, 5) if len(port_returns_daily)>0 else 0
         cvar_95 = port_returns_daily[port_returns_daily <= var_95].mean() if len(port_returns_daily)>0 else 0
 
@@ -1708,6 +1721,7 @@ class MAC3RiskEngine:
         portfolio_metrics = {
             "Total_Volatility_Ann":  port_volatility,
             "Annualised_Return":     ann_return,            # H1: geometric simple return
+            "Return_12M":            return_12m,            # D-5: факт за 252 торг. дня
             "Sharpe_Ratio":          sharpe,
             "Sortino_Ratio":         sortino,
             "VaR_95_Daily":          var_95,

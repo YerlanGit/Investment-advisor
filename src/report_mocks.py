@@ -37,7 +37,6 @@ MOCK_EXPECTED_EFFECT = {
     "max_drawdown":    {"before": -0.128,"after": -0.104,"delta_pp": 2.4,   "favourable": True},
     "vol":             {"before": 0.148, "after": 0.126, "delta_pp": -2.2,  "favourable": True},
     "max_erc_pct":     {"before": 0.244, "after": 0.168, "delta_pp": -7.6,  "favourable": True},
-    "expected_return": {"before": 0.142, "after": 0.126, "delta_pp": -1.6,  "favourable": False},
     "it_share":        {"before": 0.62,  "after": 0.50,  "delta_pp": -12.0, "favourable": True},
 }
 

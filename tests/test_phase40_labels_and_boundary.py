@@ -21,42 +21,29 @@ import unittest
 
 
 class ExpectedReturnLabelNamesItsSourceTest(unittest.TestCase):
-    """R-3: одинаковый ярлык на разных величинах — это противоречие."""
+    """R-3 → Q-3 (`§−128`). Прежде ярлык строки «Ожид. доходность» в «Эффекте»
+    называл источник (BL / реализ.), потому что обложка показывала ДРУГОЙ
+    форвард. Решением владельца строка убрана вовсе: прогноз доходности на
+    целевых весах отчёт не печатает. Противоречие закрыто устранением одной из
+    двух величин — тест стережёт, что вторая не вернулась под старым ярлыком."""
 
-    def _labels(self, uses_bl):
+    def _labels(self):
         from premium_payload import build_design_data
-        d = build_design_data({"expected_effect_uses_bl": uses_bl,
-                               "expected_effect": {
+        d = build_design_data({"expected_effect": {
             "expected_return": {"before": "2.4%", "after": "2.2%"}}}, "deep")
         return [e["name"] for e in d["effect"]]
 
-    def test_bl_source_is_named(self):
-        lbl = [x for x in self._labels(True) if "оходность" in x]
-        self.assertEqual(lbl, ["Ожид. доходность (год., BL)"])
+    def test_no_return_row_in_effect(self):
+        self.assertFalse([x for x in self._labels() if "оходность" in x])
 
-    def test_realised_fallback_is_named(self):
-        lbl = [x for x in self._labels(False) if "оходность" in x]
-        self.assertEqual(lbl, ["Ожид. доходность (год., реализ.)"])
-
-    def test_horizon_is_always_stated(self):
-        """Классический v3 подписывает «(год.)»; Premium терял горизонт."""
-        for flag in (True, False):
-            lbl = next(x for x in self._labels(flag) if "оходность" in x)
-            self.assertIn("год.", lbl)
-
-    def test_label_differs_from_cover_metric(self):
-        """Ярлык панели обязан ОТЛИЧАТЬСЯ от обложечного, иначе смысл тот же."""
-        lbl = next(x for x in self._labels(True) if "оходность" in x)
-        self.assertNotEqual(lbl, "Ожид. доходность")
-
-    def test_flag_survives_the_payload_adapter(self):
+    def test_bl_flag_left_the_payload(self):
         from pdf_payload import build_payload
         pl = build_payload({"expected_effect": {"uses_bl_returns": True},
                             "portfolio_metrics": {}}, "deep", {})
-        self.assertTrue(pl["expected_effect_uses_bl"])
+        self.assertNotIn("expected_effect_uses_bl", pl)
 
     def test_metric_dict_contract_is_untouched(self):
-        """`expected_effect` обязан нести ровно 8 строк-метрик и {} на пустом."""
+        """`expected_effect` обязан быть {} на пустом входе."""
         from pdf_payload import _build_expected_effect
         self.assertEqual(_build_expected_effect({"metrics": {}}), {})
 

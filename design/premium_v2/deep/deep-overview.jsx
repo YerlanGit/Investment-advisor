@@ -23,20 +23,16 @@ const HeroGaugeCard = ({ v }) => (
         {(v.riskTier && v.riskTier !== '–') &&
           <span className="px-2 py-0.5 rounded-full bg-gold-400/25 text-gold-700 text-[9px] font-mono font-bold tracking-wider uppercase">{v.riskTier}</span>}
       </div>
-      {/* Замер 2026-08-12: на 320px пара «Ожид. дох. + Фвд-Sharpe» не помещалась
-          в колонку и вылезала за экран — ряду нужен перенос. */}
-      {(v.expReturn && v.expReturn !== '–') && (
+      {/* D-5 (`§−128`): рядом с индексом — ФАКТ за 12 мес текущего состава,
+          а не прогноз (прежние «Ожид. дох.» и «Фвд-Sharpe»). Ряд переносится:
+          замер 2026-08-12 — на 320px строка вылезала за экран. */}
+      {(v.return12m && v.return12m !== '–' && v.return12m !== '—') && (
         <div className="flex items-center flex-wrap gap-x-4 gap-y-2 min-w-0">
-          <div>
-            <div className="text-[9px] text-ink-500 font-medium uppercase tracking-wider">Ожид. дох. (год.)</div>
-            <div className="num text-lg font-light text-sage-600 leading-none mt-0.5">{v.expReturn}</div>
+          <div className="min-w-0">
+            <div className="text-[9px] text-ink-500 font-medium uppercase tracking-wider">Доходность за 12 мес</div>
+            <div className="num text-lg font-light text-ink-900 leading-none mt-0.5">{v.return12m}</div>
+            <div className="text-[9px] text-ink-400 font-mono mt-1">текущий состав · без дивидендов</div>
           </div>
-          {(v.expSharpe && v.expSharpe !== '–') && (
-            <div>
-              <div className="text-[9px] text-ink-500 font-medium uppercase tracking-wider">Фвд-Sharpe</div>
-              <div className="num text-lg font-light text-ink-900 leading-none mt-0.5">{v.expSharpe}</div>
-            </div>
-          )}
         </div>
       )}
     </div>

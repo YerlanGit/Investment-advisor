@@ -1920,12 +1920,11 @@
         <span class="kpi-value">{{ data.sharpe }}</span>
         <span class="kpi-sub">(Sortino {{ data.sortino }})</span>
       </div>
-      {# BLOCK 5 — portfolio FORWARD expected annual return (Σ wᵢ·E[rᵢ] + cash·rfr)
-         shown against realised risk: forward-looking complement to the trailing
-         Sharpe above. #}
-      {% if data.expected_return_annual and data.expected_return_annual != '—' %}
+      {# D-5 (§−128): ФАКТ за 12 мес текущего состава (то же число, что строка
+         12М таблицы периодов) вместо прежнего форварда BLOCK 5. #}
+      {% if data.return_12m and data.return_12m != '—' %}
       <div class="kpi-value-row" style="margin-top:4px">
-        <span class="kpi-sub">Ожид. доходность (год.): <b>{{ data.expected_return_annual }}</b>{% if data.expected_sharpe and data.expected_sharpe != '—' %} · фвд-Sharpe {{ data.expected_sharpe }}{% endif %}</span>
+        <span class="kpi-sub">Доходность за 12 мес: <b>{{ data.return_12m }}</b> · текущий состав, без дивидендов</span>
       </div>
       {% endif %}
 {# Спарклайн метрики — срезы за последний год, каждый по скользящему
@@ -3486,7 +3485,6 @@
          favourable}).  Formatters depend on metric type:
            · risk_index, max_erc_pct, it_share          → integer/% as-is
            · cvar_95, sharpe, max_drawdown, vol         → 2 dp with %/raw
-           · expected_return                            → +X.X% with sign
          "favourable" flag toggles green (good) / red (bad) on the delta. #}
     {% set _ee = data.expected_effect or {} %}
     {% macro _ef_card(key, label, fmt='pct', unit_lbl='пп') -%}
@@ -3535,23 +3533,9 @@
       {{ _ef_card('vol',            'Волатильность (год.)',        fmt='pct') }}
       {{ _ef_card('max_erc_pct',    'Max TRC (одной позиции)',     fmt='pct') }}
       {{ _ef_card('it_share',       'Доля IT-сектора',             fmt='pct') }}
-      {{ _ef_card('expected_return','Ожид. доходность (год.)',     fmt='pct') }}
-    </div>
-
-    {# Temporal axis disambiguation: Sharpe is computed on trailing daily
-       log-returns, expected_return is a forward Black-Litterman equilibrium.
-       Keeping them next to each other without a label is what produced the
-       "Sharpe 1.49 vs expected 4.0%" confusion. #}
-    <div style="margin-top:8px; padding:6px 10px;
-                background:rgba(74,144,217,0.05);
-                border-left:3px solid rgba(74,144,217,0.5);
-                font-size:9px; color:var(--ink-70); line-height:1.45;">
-      <b style="color:var(--ink-90);">Временные оси.</b>
-      Sharpe / CVaR / MaxDD / Vol — <b>исторические</b> метрики (trailing,
-      окно ≈ 500 торговых дней, до сегодняшней даты).
-      «Ожид. доходность» — <b>форвардная</b> оценка из Black-Litterman
-      (equilibrium prior + RAG-views, без учёта реализованной траектории).
-      Сравнивать эти две числа напрямую нельзя.
+      {# Q-3 (§−128): карточки «Ожид. доходность» больше нет — прогноз доходности
+         на целевых весах отчёт не печатает; вместе с ней ушла и сноска
+         «Временные оси», объяснявшая разницу двух величин. #}
     </div>
 
     {# Composite verdict for the rebalance: tradeoff vs improvement vs

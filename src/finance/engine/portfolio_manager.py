@@ -1034,6 +1034,18 @@ class UniversalPortfolioManager:
                         len(return_coverage["dropped"]),
                         ", ".join(return_coverage["dropped"]),
                         return_coverage["covered_weight"] * 100)
+        # H-3 / D-5 (`§−128`): ЧИСЛА сравнения с рынком (TE/IR, таблица
+        # периодов) — из ТОГО ЖЕ ряда книги, что и обложка
+        # (`_last_port_log_returns`: кэш 0%, маржа по rf, композит F-22).
+        # Ряд выше перенормирует веса на 100% инвестированной книги: кэш не
+        # разбавлял, плечо не увеличивало — эталон `base` давал 12М +36.4% в
+        # таблице против +30.7% по ряду обложки, `leveraged_fx` +33.8% против
+        # +36.7%. «Доходность за 12 мес» на обложке и строка 12М таблицы
+        # обязаны быть одним числом. `return_coverage` остаётся от ряда выше:
+        # это телеметрия выпавших имён, а не база чисел.
+        _book_series = getattr(self.engine, "_last_port_log_returns", None)
+        if isinstance(_book_series, pd.Series) and len(_book_series.dropna()) >= 2:
+            port_log_series = _book_series.dropna()
 
         # Benchmark log-returns — one Series per benchmark (per-pair join).
         bm_logs: dict[str, pd.Series] = {}
