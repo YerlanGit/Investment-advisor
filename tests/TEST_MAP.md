@@ -25,7 +25,7 @@
 > импорт), то есть когда карта действительно врёт.
 
 
-**Замер:** 98 тест-файлов · 62 модулей `src/` имеют хотя бы один адресный тест-импорт.
+**Замер:** 99 тест-файлов · 62 модулей `src/` имеют хотя бы один адресный тест-импорт.
 
 ## Модуль → тесты
 
@@ -39,7 +39,7 @@
 | `entrypoint` | 1 | `test_phase22_rag_boot.py` |
 | `env_config` | 1 | `test_phase46_p2_maintainability.py` |
 | `finance` | 16 | `test_manual_freedom_parity.py` · `test_manual_preflight_and_locals.py` · `test_phase23_scenario.py` · `test_phase35_data_checks.py` · `test_phase39_report_consistency.py` · `test_phase42_instrument_ssot.py` · `test_phase45_data_checks_wiring.py` · `test_phase46_p2_maintainability.py` · `test_phase47_cove_and_fx_honesty.py` · `test_phase48_report_verdict_audit.py` · `test_phase49_contract_reaches_eyes.py` · `test_phase51_ingest_bot.py` · `test_portfolio_aggregation.py` · `test_stooq_price_store.py` · `test_stooq_provider.py` · `test_stooq_topup.py` |
-| `finance.action_plan` | 7 | `test_phase18_sprint5.py` · `test_phase27_composite_metrics.py` · `test_phase36_report_audit_fixes.py` · `test_phase39_report_consistency.py` · `test_phase3_modules.py` · `test_phase48_report_verdict_audit.py` · `test_phase60_math_audit.py` |
+| `finance.action_plan` | 8 | `test_phase18_sprint5.py` · `test_phase27_composite_metrics.py` · `test_phase36_report_audit_fixes.py` · `test_phase39_report_consistency.py` · `test_phase3_modules.py` · `test_phase48_report_verdict_audit.py` · `test_phase60_math_audit.py` · `test_phase64_manual_live_report.py` |
 | `finance.asset_taxonomy` | 3 | `test_phase15_phase3.py` · `test_phase32_report_logic_fixes.py` · `test_phase42_instrument_ssot.py` |
 | `finance.black_litterman` | 3 | `test_phase18_sprint5.py` · `test_phase20_sprint_refactor.py` · `test_phase3_modules.py` |
 | `finance.broker_api` | 11 | `test_broker_fallback.py` · `test_hybrid_bot_flow.py` · `test_manual_no_quotes.py` · `test_phase13_security.py` · `test_phase34_broker_outage_honesty.py` · `test_phase41_fx_base_currency.py` · `test_phase42_instrument_ssot.py` · `test_phase46_p2_maintainability.py` · `test_phase51_broker_outage_diagnosis.py` · `test_portfolio_aggregation.py` · `test_stooq_provider.py` |
@@ -61,7 +61,7 @@
 | `finance.scenario_engine` | 1 | `test_phase46_p2_maintainability.py` |
 | `finance.scenario_report` | 1 | `test_phase24_scenario_report.py` |
 | `finance.scoring` | 12 | `test_phase14_refactor.py` · `test_phase15_phase3.py` · `test_phase16_sprint2.py` · `test_phase18_sprint5.py` · `test_phase19_block_audit.py` · `test_phase21_recos.py` · `test_phase2_modules.py` · `test_phase32_report_logic_fixes.py` · `test_phase39_report_consistency.py` · `test_phase42_instrument_ssot.py` · `test_phase48_report_verdict_audit.py` · `test_phase4_reporting.py` |
-| `finance.scoring_orchestrator` | 7 | `test_phase10_pillar_chip.py` · `test_phase18_sprint5.py` · `test_phase28_risk_methodology_audit.py` · `test_phase42_instrument_ssot.py` · `test_phase7_logic_wiring.py` · `test_phase8_report_fixes.py` · `test_phase9_fpillar_stress.py` |
+| `finance.scoring_orchestrator` | 8 | `test_phase10_pillar_chip.py` · `test_phase18_sprint5.py` · `test_phase28_risk_methodology_audit.py` · `test_phase42_instrument_ssot.py` · `test_phase64_manual_live_report.py` · `test_phase7_logic_wiring.py` · `test_phase8_report_fixes.py` · `test_phase9_fpillar_stress.py` |
 | `finance.sec_edgar` | 2 | `test_phase42_instrument_ssot.py` · `test_phase4_reporting.py` |
 | `finance.security` | 2 | `test_manual_portfolio_store.py` · `test_phase29_multiuser_connection.py` |
 | `finance.simulate` | 14 | `test_phase14_refactor.py` · `test_phase18_sprint5.py` · `test_phase19_block_audit.py` · `test_phase32_report_logic_fixes.py` · `test_phase33_effect_reinvest_quality.py` · `test_phase36_report_audit_fixes.py` · `test_phase42_instrument_ssot.py` · `test_phase44_live_report_fixes.py` · `test_phase46_p2_maintainability.py` · `test_phase48_report_verdict_audit.py` · `test_phase4_reporting.py` · `test_phase50_report_layer_parity.py` · `test_phase60_math_audit.py` · `test_phase7_logic_wiring.py` |
@@ -75,23 +75,23 @@
 | `freedom_portfolio.client` | 7 | `test_broker_fallback.py` · `test_freedom_client.py` · `test_freedom_history.py` · `test_hybrid_bot_flow.py` · `test_phase34_broker_outage_honesty.py` · `test_phase51_broker_outage_diagnosis.py` · `test_portfolio_aggregation.py` |
 | `freedom_portfolio.history` | 3 | `test_freedom_history.py` · `test_stooq_price_store.py` · `test_stooq_provider.py` |
 | `freedom_portfolio.models` | 1 | `test_freedom_models.py` |
-| `html_renderer` | 7 | `test_phase18_sprint5.py` · `test_phase19_block_audit.py` · `test_phase21_recos.py` · `test_phase24_scenario_report.py` · `test_phase55_mobile_and_dom_gates.py` · `test_phase61_report_layer_audit.py` · `test_phase62_mobile_real_payloads.py` |
+| `html_renderer` | 8 | `test_phase18_sprint5.py` · `test_phase19_block_audit.py` · `test_phase21_recos.py` · `test_phase24_scenario_report.py` · `test_phase55_mobile_and_dom_gates.py` · `test_phase61_report_layer_audit.py` · `test_phase62_mobile_real_payloads.py` · `test_phase64_manual_live_report.py` |
 | `ingest_access` | 1 | `test_phase51_ingest_bot.py` |
 | `ingest_bot` | 1 | `test_phase51_ingest_bot.py` |
 | `ingest_entrypoint` | 1 | `test_phase51_ingest_bot.py` |
 | `pdf_charts` | 2 | `test_phase4_reporting.py` · `test_phase5_rag_quality.py` |
-| `pdf_payload` | 30 | `test_factor_decomposition.py` · `test_phase10_pillar_chip.py` · `test_phase14_refactor.py` · `test_phase16_sprint2.py` · `test_phase18_sprint5.py` · `test_phase19_block_audit.py` · `test_phase25_math_sprint1.py` · `test_phase28_risk_methodology_audit.py` · `test_phase31_benchmark_factor_propagation.py` · `test_phase33_effect_reinvest_quality.py` · `test_phase36_illiquid_proxy.py` · `test_phase36_report_audit_fixes.py` · `test_phase37_position_contract.py` · `test_phase39_report_consistency.py` · `test_phase40_labels_and_boundary.py` · `test_phase41_fx_base_currency.py` · `test_phase44_live_report_fixes.py` · `test_phase47_cove_and_fx_honesty.py` · `test_phase49_contract_reaches_eyes.py` · `test_phase4_reporting.py` · `test_phase50_report_layer_parity.py` · `test_phase52_bank_identity_ssot.py` · `test_phase54_rag_chunking_and_provenance.py` · `test_phase56_payload_schema.py` · `test_phase5_rag_quality.py` · `test_phase61_report_layer_audit.py` · `test_phase62_mobile_real_payloads.py` · `test_phase7_logic_wiring.py` · `test_phase8_report_fixes.py` · `test_phase9_fpillar_stress.py` |
+| `pdf_payload` | 31 | `test_factor_decomposition.py` · `test_phase10_pillar_chip.py` · `test_phase14_refactor.py` · `test_phase16_sprint2.py` · `test_phase18_sprint5.py` · `test_phase19_block_audit.py` · `test_phase25_math_sprint1.py` · `test_phase28_risk_methodology_audit.py` · `test_phase31_benchmark_factor_propagation.py` · `test_phase33_effect_reinvest_quality.py` · `test_phase36_illiquid_proxy.py` · `test_phase36_report_audit_fixes.py` · `test_phase37_position_contract.py` · `test_phase39_report_consistency.py` · `test_phase40_labels_and_boundary.py` · `test_phase41_fx_base_currency.py` · `test_phase44_live_report_fixes.py` · `test_phase47_cove_and_fx_honesty.py` · `test_phase49_contract_reaches_eyes.py` · `test_phase4_reporting.py` · `test_phase50_report_layer_parity.py` · `test_phase52_bank_identity_ssot.py` · `test_phase54_rag_chunking_and_provenance.py` · `test_phase56_payload_schema.py` · `test_phase5_rag_quality.py` · `test_phase61_report_layer_audit.py` · `test_phase62_mobile_real_payloads.py` · `test_phase64_manual_live_report.py` · `test_phase7_logic_wiring.py` · `test_phase8_report_fixes.py` · `test_phase9_fpillar_stress.py` |
 | `portfolio_aggregation` | 5 | `test_bot_navigation.py` · `test_broker_fallback.py` · `test_hybrid_bot_flow.py` · `test_manual_portfolio_store.py` · `test_portfolio_aggregation.py` |
 | `portfolio_aggregation.edits` | 1 | `test_portfolio_aggregation.py` |
 | `premium_payload` | 19 | `test_factor_decomposition.py` · `test_phase19_block_audit.py` · `test_phase21_recos.py` · `test_phase26_report_fixes.py` · `test_phase31_benchmark_factor_propagation.py` · `test_phase33_effect_reinvest_quality.py` · `test_phase36_illiquid_proxy.py` · `test_phase37_base_holdings_ai.py` · `test_phase39_report_consistency.py` · `test_phase40_labels_and_boundary.py` · `test_phase44_live_report_fixes.py` · `test_phase47_cove_and_fx_honesty.py` · `test_phase48_report_verdict_audit.py` · `test_phase49_contract_reaches_eyes.py` · `test_phase50_report_layer_parity.py` · `test_phase52_bank_identity_ssot.py` · `test_phase53_kpi_card_parity.py` · `test_phase57_mockup_literal_guard.py` · `test_phase61_report_layer_audit.py` |
 | `premium_renderer` | 2 | `test_phase49_contract_reaches_eyes.py` · `test_phase55_mobile_and_dom_gates.py` |
 | `profile_manager` | 1 | `test_phase18_sprint5.py` |
 | `report_charts` | 1 | `test_phase53_kpi_card_parity.py` |
-| `services` | 1 | `test_phase51_ingest_bot.py` |
+| `services` | 2 | `test_phase51_ingest_bot.py` · `test_phase64_manual_live_report.py` |
 | `services.fx_feed` | 2 | `test_phase25_math_sprint1.py` · `test_phase6_fx_feed.py` |
 | `services.macro_data` | 3 | `test_phase21_recos.py` · `test_phase4_reporting.py` · `test_phase50_report_layer_parity.py` |
 | `services.quote_publisher` | 1 | `test_phase51_ingest_bot.py` |
-| `services.report_storage` | 2 | `test_phase14_refactor.py` · `test_phase46_p2_maintainability.py` |
+| `services.report_storage` | 3 | `test_phase14_refactor.py` · `test_phase46_p2_maintainability.py` · `test_phase64_manual_live_report.py` |
 | `tg_bot` | 19 | `test_bot_navigation.py` · `test_interrupted_reports.py` · `test_manual_fsm_flow.py` · `test_manual_no_quotes.py` · `test_phase12_beta_safety.py` · `test_phase16_sprint2.py` · `test_phase17_admin_grant.py` · `test_phase1_fixes.py` · `test_phase23_rag_inventory.py` · `test_phase24_scenario_report.py` · `test_phase26_report_fixes.py` · `test_phase29_multiuser_connection.py` · `test_phase31_benchmark_factor_propagation.py` · `test_phase43_report_lock.py` · `test_phase51_broker_outage_diagnosis.py` · `test_phase52_bank_identity_ssot.py` · `test_phase59_brand_rename.py` · `test_phase5_rag_quality.py` · `test_phase63_multiuser_readiness.py` |
 
 ## Модули без прямого тест-импорта

@@ -105,9 +105,9 @@
   "KZT": {
    "action": "Hold",
    "credit": 0.0,
-   "credit_applicable": true,
+   "credit_applicable": false,
    "fundamentals": 0.0,
-   "fundamentals_applicable": true,
+   "fundamentals_applicable": false,
    "hotspot": false,
    "technicals": 0.0,
    "total": 0.0,
@@ -138,9 +138,9 @@
   "USD": {
    "action": "Hold",
    "credit": 0.0,
-   "credit_applicable": true,
+   "credit_applicable": false,
    "fundamentals": 0.0,
-   "fundamentals_applicable": true,
+   "fundamentals_applicable": false,
    "hotspot": false,
    "technicals": 0.0,
    "total": 0.0,

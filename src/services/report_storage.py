@@ -19,8 +19,13 @@ Design constraints
     `inline; filename=...`, so opening the URL in the user's browser
     renders the report directly (no download prompt).
   • TTL configurable via REPORT_URL_TTL_HOURS (default 168h = 7 days).
-  • Object names are user/date keyed so re-running the same report on
-    the same day overwrites cleanly: `r/<user_id>/<YYYY-MM-DD>/<tier>.html`.
+  • Object names are UNIQUE per report (`§−127`):
+    `r/<user_id>/<YYYY-MM-DD>/<tier>-<HHMMSS>-<8 hex>.html`.  The old key
+    `r/<user_id>/<YYYY-MM-DD>/<tier>.html` was one object per tier per day,
+    so a second same-day report OVERWROTE the first one and the earlier
+    link — still valid for 48 h — silently showed the NEW report (live
+    test 02.10: DEEP #1 link opened DEEP #2).  A link is a promise about
+    ONE report; the random tail also ends the enumerability noted in L-8.
 
 Environment variables
 ─────────────────────
@@ -34,6 +39,7 @@ from __future__ import annotations
 
 import logging
 import os
+import secrets
 
 from env_config import env_int
 from datetime import datetime, timedelta, timezone
@@ -59,10 +65,17 @@ CONTENT_TYPE      = "text/html; charset=utf-8"
 CACHE_CONTROL     = "private, no-store, max-age=0"
 
 
-def _object_path(user_id: int | str, tier: str, today: Optional[str] = None) -> str:
-    """Compose the GCS object key (also used as the URL path suffix)."""
-    today = today or datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    return f"r/{user_id}/{today}/{tier}.html"
+def _object_path(user_id: int | str, tier: str,
+                 now: Optional[datetime] = None) -> str:
+    """Compose the GCS object key (also used as the URL path suffix).
+
+    One report — one object (`§−127`): the key carries the UTC time and a
+    random tail, so two reports of the same tier on the same day never share
+    an object and an already-sent link keeps showing ITS report.
+    """
+    now = now or datetime.now(timezone.utc)
+    return (f"r/{user_id}/{now:%Y-%m-%d}/"
+            f"{tier}-{now:%H%M%S}-{secrets.token_hex(4)}.html")
 
 
 def _signed_url(blob, credentials, ttl_hours: int) -> str:
