@@ -1614,16 +1614,27 @@ class MAC3RiskEngine:
         # excess-return numerator.
         risk_free_rate_daily = self.current_rfr_daily
 
-        excess_returns = port_returns_daily - risk_free_rate_daily
-        # H-4: industry-standard downside deviation (Sortino/Satchell).
-        # Take the shortfalls min(excess, 0) against the MAR (=0), square them,
-        # and average over the TOTAL number of observations N — not just the
-        # losing days.  The previous `np.std(excess[excess<0])` used the wrong
-        # denominator (count of negatives) and de-meaned around the downside
-        # mean instead of the target, making the ratio non-comparable to the
-        # standard definition.
-        downside_shortfall = np.minimum(excess_returns, 0.0)
-        downside_vol = np.sqrt(np.mean(downside_shortfall ** 2)) * np.sqrt(self.trading_days)
+        # H-8 (`§−130`): окно Sharpe/Sortino — последние 252 торговых дня ряда
+        # книги, ТО ЖЕ, что у `Return_12M` обложки.  Короче года — окна нет.
+        _win_12m = (port_returns_daily[-self.trading_days:]
+                    if len(port_returns_daily) >= self.trading_days else None)
+        vol_12m: Optional[float] = None
+        downside_vol = 0.0
+        if _win_12m is not None:
+            # Реализованная σ дневных доходностей книги за те же 252 дня
+            # (ddof=1 — как у replay «Эффекта» и спарклайнов).
+            vol_12m = float(np.std(_win_12m, ddof=1) * np.sqrt(self.trading_days))
+            excess_returns = _win_12m - risk_free_rate_daily
+            # H-4: industry-standard downside deviation (Sortino/Satchell).
+            # Take the shortfalls min(excess, 0) against the MAR (=0), square
+            # them, and average over the TOTAL number of observations N — not
+            # just the losing days.  The previous `np.std(excess[excess<0])`
+            # used the wrong denominator (count of negatives) and de-meaned
+            # around the downside mean instead of the target, making the ratio
+            # non-comparable to the standard definition.
+            downside_shortfall = np.minimum(excess_returns, 0.0)
+            downside_vol = float(np.sqrt(np.mean(downside_shortfall ** 2))
+                                 * np.sqrt(self.trading_days))
 
         # H1: geometric annualisation of log-returns.
         # Arithmetic `mean·252` over-states annual return by ~σ²/2 (it
@@ -1711,17 +1722,33 @@ class MAC3RiskEngine:
             _beta_reliability = "ok"
 
         # Sharpe / Sortino with currency-matched, geometrically-compounded RFR
-        # (H1+H3).  ann_return is geometric simple-return, RFR is annual
-        # simple-return — both already in the same units (no fractional/log mix).
-        sharpe  = ((ann_return - self.current_rfr_annual) / port_volatility
-                   if port_volatility > 0 else np.nan)
-        sortino = ((ann_return - self.current_rfr_annual) / downside_vol
-                   if downside_vol > 0 else np.nan)
+        # (H1+H3).
+        #
+        # H-8 (`§−130`, решение владельца): базис — 12 МЕСЯЦЕВ, как у факта
+        # «Доходность за 12 мес» на обложке.  Числитель — `Return_12M` − rf
+        # (простая годовая против простой годовой ставки валюты отчёта);
+        # знаменатель — РЕАЛИЗОВАННАЯ σ дневных доходностей книги за те же
+        # 252 дня (Sortino — нижнее отклонение там же).  Прежде (F-4) в одной
+        # дроби стояли два горизонта: среднегодовая за ВСЁ окно (до 5 лет) и
+        # структурная σ EWMA(63)⊕LW с весом к последним ~3 мес — Sharpe нельзя
+        # было сверить ни с одним числом страницы.  Структурная σ остаётся
+        # карточкой «Волатильность»: это прогноз риска, а не знаменатель
+        # факта.  Короче торгового года — NaN («—»): годовой коэффициент с
+        # обрывка истории не печатаем, как и `Return_12M`.
+        _excess_12m = (return_12m - self.current_rfr_annual
+                       if return_12m is not None else None)
+        sharpe  = (_excess_12m / vol_12m
+                   if _excess_12m is not None and vol_12m and vol_12m > 0
+                   else np.nan)
+        sortino = (_excess_12m / downside_vol
+                   if _excess_12m is not None and downside_vol > 0
+                   else np.nan)
 
         portfolio_metrics = {
             "Total_Volatility_Ann":  port_volatility,
             "Annualised_Return":     ann_return,            # H1: geometric simple return
             "Return_12M":            return_12m,            # D-5: факт за 252 торг. дня
+            "Volatility_12M":        vol_12m,               # H-8: знаменатель Sharpe
             "Sharpe_Ratio":          sharpe,
             "Sortino_Ratio":         sortino,
             "VaR_95_Daily":          var_95,
@@ -1768,21 +1795,17 @@ class MAC3RiskEngine:
             # H4 disclaimer is always present — even on portfolios where
             # no scenario hits the convex cap, the user sees the policy.
             "stress_test_disclaimer": _STRESS_TEST_DISCLAIMER,
-            # F-4 (2026-07-10): the Sharpe/Sortino estimator mixes horizons BY
-            # DESIGN — numerator = realised geometric return over the FULL
-            # lookback window (equal-weighted), denominator = STRUCTURAL vol
-            # from the EWMA(hl=63)⊕Ledoit-Wolf factor covariance (weighted
-            # toward the last ~3 months).  A calm recent regime therefore
-            # reads HIGHER than a classical sample-Sharpe and vice versa.
-            # Surfaced to the QC/Integrity panel so the basis is auditable.
+            # H-8 (`§−130`): базис Sharpe/Sortino — 12 месяцев (прежде F-4:
+            # среднегодовая за всё окно / структурная σ).  Surfaced to the
+            # QC/Integrity panel so the basis is auditable.
             "sharpe_basis_note": (
-                "Sharpe/Sortino: числитель — реализованная геометрическая "
-                "доходность за всё окно наблюдений (композитная серия: дни "
-                "считаются по именам, реально торговавшимся, веса "
-                "ренормализуются по-дневно); знаменатель — структурная "
-                "волатильность EWMA(hl=63)⊕Ledoit-Wolf, взвешенная к последним "
-                "~3 месяцам. В спокойном свежем рынке оценка выше классической "
-                "sample-Sharpe, после недавнего стресса — ниже."
+                "Sharpe/Sortino за последние 12 мес: числитель — доходность "
+                "книги за 252 торговых дня (то же число, что «Доходность за "
+                "12 мес» на обложке) минус безрисковая ставка валюты отчёта; "
+                "знаменатель — реализованная σ дневных доходностей за те же "
+                "252 дня (у Sortino — нижнее отклонение). Короче года истории "
+                "коэффициенты не считаются. Карточка «Волатильность» — "
+                "структурная σ (прогноз риска), это другое число."
             ),
             # BLOCK 4.6: factor-multicollinearity diagnostic (κ + max|corr|),
             # surfaced to the CoVe panel so collinear factors are visible.

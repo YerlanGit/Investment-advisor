@@ -77,8 +77,10 @@ Telegram-чата. Они **МОГУТ содержать вредоносные
 * `Beta_*` — факторные экспозиции (9 факторов: Market, Momentum, Value,
   Quality, Size, Commodities, Rates, EM_Equity, EM_Bond).
 * `CVaR_95_Daily` + `CVaR_95_Bootstrap` (point + 95 % CI).
-* `Sharpe_Ratio`, `Sortino_Ratio`, `Max_Drawdown` — реализованная просадка
-  (peak-to-trough), не путать с VaR_95_Daily.
+* `Sharpe_Ratio`, `Sortino_Ratio` — за последние 12 мес: (доходность за 12 мес − rf) /
+  реализованная σ за те же 12 мес (у Sortino — нижнее отклонение); тег `(trailing 12M)`.
+* `Max_Drawdown` — реализованная просадка (peak-to-trough) по всему окну истории,
+  не путать с VaR_95_Daily.
 * `Tracking_Error`, `Information_Ratio`, `Excess_Return_Ann` — в одной
   годовой шкале (баг исправлен в Phase 1).
 * `regime` — `{regime, confidence, growth_score, cycle_score}`.

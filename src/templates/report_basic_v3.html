@@ -1324,7 +1324,7 @@
       <div class="kpi-name">Sharpe Ratio</div>
       <div class="kpi-value-row">
         <span class="kpi-value">{{ data.sharpe }}</span>
-        <span class="kpi-sub">(Sortino {{ data.sortino }})</span>
+        <span class="kpi-sub">(за 12 мес · Sortino {{ data.sortino }})</span>
       </div>
       {# D-5 (§−128): ФАКТ за 12 мес текущего состава вместо форварда BLOCK 5. #}
       {% if data.return_12m and data.return_12m != '—' %}

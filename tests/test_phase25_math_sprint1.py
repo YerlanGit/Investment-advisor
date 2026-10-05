@@ -263,12 +263,15 @@ class GbxCurrencyTest(unittest.TestCase):
 class SharpeBasisNoteTest(unittest.TestCase):
 
     def test_engine_emits_note(self) -> None:
+        """`§−130` (H-8): базис сменился — 12 мес вместо смешанного F-4
+        (средняя за всё окно / структурная σ EWMA).  Заметка обязана назвать
+        окно и знаменатель, иначе Sharpe не сверить."""
         eng, data = _build_engine_data(n_days=300)
         _, _, metrics = eng.calculate_structural_risk(
             data, ["AAA.US"], {"AAA.US": 1.0})
         note = metrics.get("sharpe_basis_note", "")
-        self.assertIn("EWMA", note)
-        self.assertIn("геометрическая", note)
+        self.assertIn("12 мес", note)
+        self.assertIn("реализованная σ", note)
 
     def test_integrity_panel_row(self) -> None:
         from pdf_payload import _build_integrity_checks
