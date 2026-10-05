@@ -261,7 +261,8 @@
   "checked": 3,
   "enabled": true,
   "gated_out": 3,
-  "loaded": 0
+  "loaded": 0,
+  "market_only": 0
  },
  "data_quality": {
   "findings": [],

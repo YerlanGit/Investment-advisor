@@ -63,8 +63,10 @@ def _credit_na_prefixes() -> tuple[str, ...]:
 
     Из SSOT `finance.asset_taxonomy`: суверенный долг РАЗВИТЫХ рынков +
     сырьевые ETF.  Осознанно НЕ вся долговая корзина: у `LQD`/`HYG`/`EMB`/
-    `VWOB` кредитный риск реален и C-пиллар обязан работать — именно поэтому
-    один общий словарь «тикер → класс» шесть классификаторов не заменяет.
+    `VWOB` кредитный риск реален — именно поэтому один общий словарь «тикер →
+    класс» шесть классификаторов не заменяет.  (C у этих фондов всё равно
+    «н/д», но по ДРУГОЙ причине: словарь секторов даёт им `Bonds`, а у фонда
+    нет эмитента, чью отчётность или CDS можно оценить — `§−129` V-4.)
 
     Сопоставление остаётся ПРЕФИКСНЫМ (`startswith`), как было: так
     `BNDX`/`TLTW` и прочие производные от суверенных фондов тоже попадают
@@ -89,6 +91,11 @@ def _is_credit_not_applicable(ticker: str, sector: Optional[str]) -> bool:
         корпоративной отчётности; без этого guard'а F-пиллар деградировал к
         макро-тилту сектора 'Other' и печатал фантомный фундаментальный
         вердикт (реестр: finance/leveraged.py, dependency-light).
+      • C-1 (`§−129`): фонд АКЦИЙ (`asset_taxonomy.is_equity_etf`: широкий
+        рынок, факторный, отраслевой).  У фонда нет эмитента — ни кредита,
+        ни собственной отчётности.  До C-1 его C стоял на рыночном индексе HY
+        (−2), а F — на наклоне режима: оба числа выдавали вердикт там, где
+        оценивать нечего.
 
     NaN-safe: a missing sector can arrive as float('nan') (pandas fills
     unmapped Fundamental_Sector cells with NaN, and `NaN or ""` returns NaN
@@ -109,6 +116,8 @@ def _is_credit_not_applicable(ticker: str, sector: Optional[str]) -> bool:
     # `asset_scores`/`action_plan` движка, где кэш стоял на продажу.
     from finance import asset_taxonomy as _tx
     if _tx.is_cash(stem):
+        return True
+    if _tx.is_equity_etf(stem):
         return True
     if stem.startswith(_credit_na_prefixes()):
         return True
@@ -655,9 +664,18 @@ def _score_one_asset(out, row, ticker, sector, perf, technicals,
     # denominator of the user-facing total.
     credit_applicable = not _is_credit_not_applicable(ticker, sector)
     if credit_applicable:
-        cds_info = cds_lookup(ticker) if cds_lookup else {}
-        bps      = cds_info.get("bps")
-        change7  = cds_info.get("change_7d")
+        cds_info = (cds_lookup(ticker) if cds_lookup else {}) or {}
+        # C-1 (`§−129`): в оценку ЭМИТЕНТА идёт только чтение с охватом
+        # эмитента или его страны.  Рыночный индекс HY (FRED) один на все
+        # бумаги США и стоит выше порога 150 б.п. всегда — до C-1 он давал
+        # КАЖДОЙ бумаге C = −2, то есть сдвиг к «Sell», а не оценку эмитента.
+        # Он остаётся контекстом режима (`services.macro_data`).
+        from finance.cds_feed import enters_issuer_score
+        if enters_issuer_score(cds_info):
+            bps     = cds_info.get("bps")
+            change7 = cds_info.get("change_7d")
+        else:
+            bps = change7 = None
         c_score = credit_score(
             cds_bps          = bps,
             cds_change_7d    = change7,

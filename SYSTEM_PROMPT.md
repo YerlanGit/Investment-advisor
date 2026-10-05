@@ -130,8 +130,10 @@ Hotspot, рекомендация Trim. Marginal VaR помогает оцени
 * Volume confirmation (если доступно): vol_20/vol_60 > 1.3 → +0.25
 
 **D. CREDIT (−2…+1)** — асимметричный, плюсы ограничены:
-* CDS 5Y (только если QualityGate прошёл — sanity 1–3000 bps,
-  ≤ 3 trading days, cross-source disagreement ≤ 25 %):
+* CDS 5Y — только CDS САМОГО эмитента или его страны (суверенный, KZ).
+  Рыночный индекс HY в C не входит: это контекст режима, не оценка эмитента.
+  Только если QualityGate прошёл — sanity 1–3000 bps, ≤ 7 календарных дней,
+  cross-source disagreement ≤ 25 %:
   * < 40 bps → +1 Safe Haven
   * 40–90 bps → 0 neutral
   * 90–150 bps → −1 elevated

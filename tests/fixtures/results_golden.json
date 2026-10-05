@@ -296,7 +296,8 @@
   "checked": 5,
   "enabled": true,
   "gated_out": 5,
-  "loaded": 0
+  "loaded": 0,
+  "market_only": 0
  },
  "data_quality": {
   "findings": [],

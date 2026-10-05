@@ -315,31 +315,47 @@ def _cds_status(results: dict) -> dict:
     """
     Read the CDS coverage summary attached by analyze_all.
 
-    `cds_summary` shape: {enabled, checked, loaded, gated_out}.
+    `cds_summary` shape: {enabled, checked, loaded, market_only, gated_out}.
       • enabled=False           → CDS_DISABLED=1 or feed import failed
-      • enabled=True, loaded=0  → all tickers gated out (or no coverage)
-      • loaded>0, gated_out>0   → partial coverage (warn)
-      • loaded>0, gated_out=0   → full coverage (ok)
+      • enabled=True, loaded=0  → nothing entered the issuer score
+      • loaded>0, rest>0        → partial coverage (warn)
+      • loaded == checked       → full coverage (ok)
+
+    C-1 (`§−129`): `loaded` считает только чтения, ВОШЕДШИЕ в C-пиллар
+    эмитента (охват issuer/sovereign, `cds_feed.enters_issuer_score`).
+    Рыночный индекс HY считается отдельно (`market_only`) и подписывается как
+    контекст режима.  До C-1 строка писала «ok 5/5», когда у всех бумаг было
+    одно и то же рыночное число — провенанс заявлял покрытие, которого нет.
     """
+    source = "CDS эмитента: нет бесплатного · WGB суверенный KZ · FRED HY — контекст режима"
+    # `MAX_STALE_DAYS` гейта — 7 КАЛЕНДАРНЫХ дней (расширено ради понедельников:
+    # HY OAS публикуется с лагом 1–2 рабочих дня); текст «≤ 3 trading days»
+    # расходился с кодом.
+    method = "QualityGate: sanity 1–3000 bps · ≤ 7 calendar days"
     cds_summary = results.get("cds_summary") or {}
     if not cds_summary or cds_summary.get("enabled") is False:
         return _row(
             name   = "CDS spreads (credit signal)",
-            source = "FRED HY proxy + WGB sovereign",
-            method = "QualityGate: sanity 1–3000 bps · ≤ 3 trading days",
+            source = source,
+            method = method,
             status = "missing",
             note   = "CDS_DISABLED=1" if cds_summary.get("enabled") is False
                      else "no CDS summary attached",
         )
-    n_loaded  = int(cds_summary.get("loaded",    0) or 0)
-    n_gated   = int(cds_summary.get("gated_out", 0) or 0)
-    n_checked = int(cds_summary.get("checked",   0) or 0)
+    n_loaded  = int(cds_summary.get("loaded",      0) or 0)
+    n_market  = int(cds_summary.get("market_only", 0) or 0)
+    n_gated   = int(cds_summary.get("gated_out",   0) or 0)
+    n_checked = int(cds_summary.get("checked",     0) or 0)
+    market_note = (f" · HY index on {n_market}: regime context, not in score"
+                   if n_market else "")
     if n_loaded == 0 and n_checked > 0:
         status = "missing"
-        note   = f"0/{n_checked} tickers cleared the gate"
-    elif n_gated > 0:
+        note   = f"0/{n_checked} tickers in score{market_note}"
+    elif n_gated > 0 or n_market > 0:
         status = "warn"
-        note   = f"{n_loaded}/{n_checked} loaded · {n_gated} gated out"
+        note   = (f"{n_loaded}/{n_checked} in score"
+                  + (f" · {n_gated} gated out" if n_gated else "")
+                  + market_note)
     elif n_loaded > 0:
         status = "ok"
         note   = f"{n_loaded}/{n_checked} tickers"
@@ -348,8 +364,8 @@ def _cds_status(results: dict) -> dict:
         note   = "no tickers checked"
     return _row(
         name   = "CDS spreads (credit signal)",
-        source = "FRED HY proxy + WGB sovereign",
-        method = "QualityGate: sanity 1–3000 bps · ≤ 3 trading days",
+        source = source,
+        method = method,
         status = status,
         note   = note,
     )

@@ -1318,16 +1318,27 @@ class UniversalPortfolioManager:
         # Tally CDS coverage so the CoVe lineage row reflects reality
         # (instead of the silent "no per-ticker CDS attached" placeholder).
         # Single extra pass over the cache — microseconds for ≤20 tickers.
+        # C-1 (`§−129`): `loaded` — только чтения, ВОШЕДШИЕ в C-пиллар
+        # эмитента; рыночный индекс HY считается отдельно (`market_only`).
+        # Прежде любой непустой ответ шёл в `loaded`, и строка CoVe писала
+        # «ok N/N», когда у всех бумаг было одно рыночное число.
         cds_summary: dict = {"enabled": cds_lookup is not None,
-                              "checked": 0, "loaded": 0, "gated_out": 0}
+                              "checked": 0, "loaded": 0, "market_only": 0,
+                              "gated_out": 0}
         if cds_lookup is not None:
             try:
+                from finance.cds_feed import enters_issuer_score
                 checked = list(actual_risky)
-                n_loaded = sum(1 for t in checked if cds_lookup(t))
+                readings = [cds_lookup(t) for t in checked]
+                n_loaded = sum(1 for r in readings if enters_issuer_score(r))
+                n_market = sum(1 for r in readings
+                               if r and r.get("bps") is not None
+                               and not enters_issuer_score(r))
                 cds_summary.update({
-                    "checked":   len(checked),
-                    "loaded":    n_loaded,
-                    "gated_out": len(checked) - n_loaded,
+                    "checked":     len(checked),
+                    "loaded":      n_loaded,
+                    "market_only": n_market,
+                    "gated_out":   len(checked) - n_loaded - n_market,
                 })
             except Exception as exc:
                 logger.info("CDS coverage tally skipped: %s", exc)
