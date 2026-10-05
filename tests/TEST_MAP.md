@@ -55,7 +55,7 @@
 | `finance.leveraged` | 1 | `test_phase28_risk_methodology_audit.py` |
 | `finance.manual_portfolio` | 4 | `test_manual_fsm_flow.py` · `test_manual_portfolio_identity.py` · `test_manual_portfolio_parser.py` · `test_manual_preflight_and_locals.py` |
 | `finance.period_returns` | 4 | `test_phase26_report_fixes.py` · `test_phase28_risk_methodology_audit.py` · `test_phase4_reporting.py` · `test_phase60_math_audit.py` |
-| `finance.portfolio_series` | 4 | `test_phase20_sprint_refactor.py` · `test_phase27_composite_metrics.py` · `test_phase30_benchmark_equity_curve.py` · `test_phase53_kpi_card_parity.py` |
+| `finance.portfolio_series` | 5 | `test_phase20_sprint_refactor.py` · `test_phase27_composite_metrics.py` · `test_phase30_benchmark_equity_curve.py` · `test_phase53_kpi_card_parity.py` · `test_phase67_sharpe_12m.py` |
 | `finance.price_providers` | 6 | `test_manual_fsm_flow.py` · `test_phase35_price_providers.py` · `test_phase40_labels_and_boundary.py` · `test_phase4_reporting.py` · `test_stooq_price_store.py` · `test_stooq_provider.py` |
 | `finance.regime` | 10 | `test_phase10_pillar_chip.py` · `test_phase19_block_audit.py` · `test_phase21_recos.py` · `test_phase2_modules.py` · `test_phase36_report_audit_fixes.py` · `test_phase48_report_verdict_audit.py` · `test_phase50_report_layer_parity.py` · `test_phase66_credit_pillar_c1.py` · `test_phase7_logic_wiring.py` · `test_phase8_report_fixes.py` |
 | `finance.scenario_engine` | 1 | `test_phase46_p2_maintainability.py` |

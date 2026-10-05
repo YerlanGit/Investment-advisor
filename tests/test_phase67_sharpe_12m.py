@@ -137,6 +137,41 @@ class OnePageOneSharpeTest(unittest.TestCase):
         self.assertNotIn("EWMA", note)
 
 
+class SparklineSharpeIsExcessReturnTest(unittest.TestCase):
+    """`§−133`: срез спарклайна — (среднее − rf)/σ·√252, как число карточки.
+
+    Прежде rf не вычиталась: вся линия стояла выше на rf/σ (≈ +0.37 при 4.5% и
+    σ 12%) и не сопоставлялась с числом над ней.
+    """
+
+    def test_points_subtract_the_daily_rate(self) -> None:
+        from finance.portfolio_series import compute_kpi_trend_series
+        rng = np.random.default_rng(11)
+        lr = pd.Series(rng.normal(0.0004, 0.008, 400))
+        rf_d = (1.045) ** (1 / 252) - 1
+        got = compute_kpi_trend_series({"port_log_returns": lr,
+                                        "portfolio_metrics": {"risk_free_rate_daily": rf_d}})
+        tail = lr.iloc[-252:].reset_index(drop=True)
+        step = len(tail) // 12
+        expect = []
+        for end in [step * (i + 1) - 1 for i in range(12)]:
+            win = tail.iloc[max(0, end - 60):end + 1]
+            if len(win) < 30:
+                continue
+            expect.append((win.mean() - rf_d) / win.std() * math.sqrt(252))
+        self.assertEqual(len(expect), len(got["sharpe_pts"]))
+        for a, b in zip(expect, got["sharpe_pts"]):
+            self.assertAlmostEqual(a, b, places=12)
+
+    def test_without_a_rate_nothing_is_invented(self) -> None:
+        from finance.portfolio_series import compute_kpi_trend_series
+        lr = pd.Series(np.random.default_rng(3).normal(0.0004, 0.008, 300))
+        a = compute_kpi_trend_series({"port_log_returns": lr})
+        b = compute_kpi_trend_series({"port_log_returns": lr,
+                                      "portfolio_metrics": {"risk_free_rate_daily": 0.0}})
+        self.assertEqual(a["sharpe_pts"], b["sharpe_pts"])
+
+
 class ReportNamesTheBasisTest(unittest.TestCase):
 
     def test_integrity_row_prints_the_sigma(self) -> None:
