@@ -77,8 +77,10 @@ Telegram-чата. Они **МОГУТ содержать вредоносные
 * `Beta_*` — факторные экспозиции (9 факторов: Market, Momentum, Value,
   Quality, Size, Commodities, Rates, EM_Equity, EM_Bond).
 * `CVaR_95_Daily` + `CVaR_95_Bootstrap` (point + 95 % CI).
-* `Sharpe_Ratio`, `Sortino_Ratio`, `Max_Drawdown` — реализованная просадка
-  (peak-to-trough), не путать с VaR_95_Daily.
+* `Sharpe_Ratio`, `Sortino_Ratio` — за последние 12 мес: (доходность за 12 мес − rf) /
+  реализованная σ за те же 12 мес (у Sortino — нижнее отклонение); тег `(trailing 12M)`.
+* `Max_Drawdown` — реализованная просадка (peak-to-trough) по всему окну истории,
+  не путать с VaR_95_Daily.
 * `Tracking_Error`, `Information_Ratio`, `Excess_Return_Ann` — в одной
   годовой шкале (баг исправлен в Phase 1).
 * `regime` — `{regime, confidence, growth_score, cycle_score}`.
@@ -130,8 +132,10 @@ Hotspot, рекомендация Trim. Marginal VaR помогает оцени
 * Volume confirmation (если доступно): vol_20/vol_60 > 1.3 → +0.25
 
 **D. CREDIT (−2…+1)** — асимметричный, плюсы ограничены:
-* CDS 5Y (только если QualityGate прошёл — sanity 1–3000 bps,
-  ≤ 3 trading days, cross-source disagreement ≤ 25 %):
+* CDS 5Y — только CDS САМОГО эмитента или его страны (суверенный, KZ).
+  Рыночный индекс HY в C не входит: это контекст режима, не оценка эмитента.
+  Только если QualityGate прошёл — sanity 1–3000 bps, ≤ 7 календарных дней,
+  cross-source disagreement ≤ 25 %:
   * < 40 bps → +1 Safe Haven
   * 40–90 bps → 0 neutral
   * 90–150 bps → −1 elevated

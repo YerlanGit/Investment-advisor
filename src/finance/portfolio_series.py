@@ -215,6 +215,20 @@ def compute_kpi_trend_series(results: dict) -> Optional[dict]:
             return None
         snap_indices = [step * (i + 1) - 1 for i in range(12) if step * (i + 1) - 1 < n]
 
+        # `§−133`: Sharpe среза — ИЗБЫТОЧНАЯ доходность над rf, как у числа
+        # карточки (`risk_engine`: (R − rf)/σ).  Прежде среднее делилось на σ
+        # без вычета ставки, и вся линия спарклайна стояла выше на rf/σ
+        # (≈ 0.045/0.12 ≈ +0.37 при USD-ставке) — «динамика» не сопоставлялась
+        # с числом над ней.  Ставка — та же дневная геометрическая, что у
+        # движка; её нет (старые results) → 0.0, прежнее поведение.
+        try:
+            rf_d = float((results.get("portfolio_metrics") or {})
+                         .get("risk_free_rate_daily") or 0.0)
+            if not np.isfinite(rf_d):
+                rf_d = 0.0
+        except (TypeError, ValueError):
+            rf_d = 0.0
+
         cvar_pts, sharpe_pts, mdd_pts, vol_pts = [], [], [], []
         for end in snap_indices:
             win = port_lr.iloc[max(0, end - 60):end + 1]
@@ -223,7 +237,8 @@ def compute_kpi_trend_series(results: dict) -> Optional[dict]:
             cutoff = max(1, int(len(win) * 0.05))
             cvar_pts.append(float(win.sort_values().iloc[:cutoff].mean()))
             std = float(win.std())
-            sharpe_pts.append(float(win.mean()) / std * (252 ** 0.5) if std > 0 else 0.0)
+            sharpe_pts.append((float(win.mean()) - rf_d) / std * (252 ** 0.5)
+                              if std > 0 else 0.0)
             # Annualised σ of the very same window — the Sharpe denominator,
             # surfaced as its own series rather than recomputed elsewhere.
             vol_pts.append(std * (252 ** 0.5))

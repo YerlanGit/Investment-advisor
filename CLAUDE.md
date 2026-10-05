@@ -15,11 +15,11 @@ GCP Cloud Run (long-polling) · Cloud Function (RAG-ингест) · ChromaDB ·
 ## Верификация (обязательна перед каждым пушем)
 
 ```bash
-PYTHONPATH=src python -m pytest tests/ -q          # → 2262 passed, 2 xfailed (+12 skipped без playwright)
+PYTHONPATH=src python -m pytest tests/ -q          # → 2319 passed, 2 xfailed (+12 skipped без playwright)
 ```
 
 - Префикс `PYTHONPATH=src` **ОБЯЗАТЕЛЕН** (`conftest.py`/`pyproject.toml` нет).
-- **Прогонов ДВА.** Второй — зеркало деплой-образа без `design/`: `cp -r src tests SYSTEM_PROMPT.md requirements*.txt <tmp>/ && cd <tmp>`, тот же прогон → 2138 passed, 136 skipped, 2 xfailed.
+- **Прогонов ДВА.** Второй — зеркало деплой-образа без `design/`: `cp -r src tests SYSTEM_PROMPT.md requirements*.txt <tmp>/ && cd <tmp>`, тот же прогон → 2195 passed, 136 skipped, 2 xfailed.
   Зелёный CI ≠ деплой пройдёт: CI видит полный чекаут, Cloud Build — образ; разница — ровно тесты, читающие `design/`, `docs/`, `CLAUDE.md`, `scripts/`, `cloud_function/`.
 - Правил `design/*.jsx` → **обязательно** `bash design/premium_v2/build.sh`.
 - Смоук-рендер тиров: `html_renderer.render_report_html(None, <user_id>, ...)`.
@@ -108,7 +108,7 @@ PYTHONPATH=src python -m pytest tests/ -q          # → 2262 passed, 2 xfailed 
   модели. Обратное тоже — правила вне промпта модель не исполняет (`§−97` E-7).
 - **Разность двух чисел модель не считает** — наклон против бенчмарка приезжает
   готовой строкой `summary.factor_tilt_text` (`§−97` E-5).
-- **Книга сворачивается ТОЛЬКО `period_returns.aggregate_log_returns` = ln(1 + Σw·R)**: Σw·ln(1+R) — средний рост бумаг, минус доходность диверсификации (демо −3.9 пп, `§−121`). Гейт — капитал деньгами. Обложка (факт 12 мес), периоды и TE/IR — ОДИН ряд `port_log_returns` (`§−128`).
+- **Книга сворачивается ТОЛЬКО `period_returns.aggregate_log_returns` = ln(1 + Σw·R)**: Σw·ln(1+R) — средний рост бумаг, минус доходность диверсификации (демо −3.9 пп, `§−121`). Гейт — капитал деньгами. Факт 12 мес, Sharpe (`§−130`), периоды, TE/IR — ОДИН ряд `port_log_returns` (`§−128`).
 - **BL-μ — ИЗБЫТОЧНАЯ доходность**: полная = `simulate._bl_total_return`, rf вычитается ОДИН раз (`§−121`). Свободный кэш — 0%, маржа (кэш < 0) — по rf и в панели, и в форварде.
 - **Стоп Action Plan меряется от ВХОДА**: стоп лонга ниже зоны и рынка, зона покупки не выше рынка, монотонность по мандату (`§−121`, гейт на 3000 геометрий).
 - **Плечо/долг — только при кэше < 0, в ПРОЗЕ тоже** (правило §−13): факта нет в промпте, `ai_leverage_warning` гасит движок, `strip_account_leverage` режет предложения о займе счёта (`§−121`).

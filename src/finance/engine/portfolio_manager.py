@@ -39,6 +39,7 @@ from finance.period_returns import (
     compute_benchmark_stats as _compute_benchmark_stats,
 )
 from finance.stress import run_stress_scenarios as _run_stress_scenarios
+from finance.stress import residualize_shocks as _residualize_factor_vector
 from finance.simulate import simulate_after_plan as _simulate_after_plan
 from services.macro_data import MacroFeed as _MacroFeed
 
@@ -54,6 +55,33 @@ from .risk_engine import (
 from .market_preview import MarketDataPreview
 
 logger = logging.getLogger("Antigravity_RiskEngine")
+
+
+def factor_premia_daily(all_data: pd.DataFrame,
+                        factor_tickers: dict[str, str],
+                        ortho_betas: dict[str, dict[str, float]]) -> dict[str, float]:
+    """Дневная ожидаемая лог-доходность каждого фактора — в пространстве БЕТ.
+
+    Среднее дневной лог-доходности фонда-фактора за всю историю (F-2: в
+    дневном лог-пространстве, аннуализация — одна, на итоговом прогнозе
+    бумаги).  H-1 (`§−134`): беты бумаги к стилю/EM живут в ОЧИЩЕННОМ от
+    родителя пространстве (BLOCK 3.5), поэтому премия ребёнка —
+    рыночно-нейтральная: μ_ребёнка − Σ β̂·μ_родителя.  Та же линейная карта
+    F-1, что переводит шоки стресса (`stress.residualize_shocks`).  Прежде
+    сырое μ(MTUM) несло в себе премию рынка, уже вошедшую через бету рынка —
+    прогноз бумаги завышался на Σ β_стиль · β̂(стиль→рынок) · μ_рынка
+    (живой DEEP 02.10: ожидаемая 12.4% против BL 5.5%).  Без ортогонализации
+    (`ortho_betas` пуст) — сырые средние, как и беты.
+    """
+    keys = [k for k, v in factor_tickers.items() if v in all_data.columns]
+    if not keys:
+        return {}
+    etfs = [factor_tickers[k] for k in keys]
+    f_data = all_data[etfs]
+    daily_log = np.log(f_data / f_data.shift(1)).dropna()
+    means = daily_log.mean()
+    raw = {k: float(means.get(v, 0.0)) for k, v in zip(keys, etfs)}
+    return _residualize_factor_vector(raw, ortho_betas or {})
 
 
 @dataclass
@@ -772,6 +800,23 @@ class UniversalPortfolioManager:
                 df = df.join(sec_df)
         except Exception as e:
             logger.warning(f"SEC EDGAR scan пропущен: {e}")
+        # H-4 (`§−132`): Altman Z — классическая формула с РЫНОЧНОЙ
+        # капитализацией в X4.  Цена известна только здесь; она в валюте
+        # ОТЧЁТА, отчётность SEC — в USD, поэтому капитализация переводится
+        # обратно (нет курса → Z пуст, а не балансовый суррогат).
+        try:
+            from finance.sec_edgar import apply_market_altman
+            _rep = self.engine.reporting_currency.value
+            if _rep == "USD":
+                _usd_per_unit = 1.0
+            else:
+                _usd_rate = self.engine.fx_rate_to_base("USD")
+                _usd_per_unit = (1.0 / _usd_rate
+                                 if _usd_rate and np.isfinite(_usd_rate) and _usd_rate > 0
+                                 else None)
+            df = apply_market_altman(df, usd_per_price_unit=_usd_per_unit)
+        except Exception as e:
+            logger.warning(f"Altman Z по капитализации пропущен: {e}")
         
         # Джойним факторы к общему DF
         df = df.join(factor_df)
@@ -819,24 +864,10 @@ class UniversalPortfolioManager:
             logger.warning("LETF sigma map skipped: %s", _exc)
             letf_sigma_map = {}
 
-        present_factor_keys = [
-            k for k, v in self.engine.factor_tickers.items() if v in all_data.columns
-        ]
-        present_factor_etfs = [self.engine.factor_tickers[k] for k in present_factor_keys]
-        f_data = all_data[present_factor_etfs] if present_factor_etfs else pd.DataFrame()
-
-        if not f_data.empty:
-            factor_daily_log = np.log(f_data / f_data.shift(1)).dropna()
-            factor_mean_daily = factor_daily_log.mean()       # index = ETF tickers
-            # Keep the per-factor expectations in DAILY LOG space — the single
-            # geometric annualisation happens once, on the combined per-asset
-            # expected log return below (F-2 fix).
-            factor_mu_daily_by_key = pd.Series({
-                k: factor_mean_daily.get(v, 0.0)
-                for k, v in zip(present_factor_keys, present_factor_etfs)
-            })
-        else:
-            factor_mu_daily_by_key = pd.Series(dtype=float)
+        # H-1 (`§−134`): премии факторов — в ТОМ ЖЕ пространстве, что и беты.
+        factor_mu_daily_by_key = pd.Series(factor_premia_daily(
+            all_data, self.engine.factor_tickers,
+            getattr(self.engine, "_last_ortho_betas", {}) or {}), dtype=float)
 
         beta_cols = [c for c in df.columns if str(c).startswith('Beta_')]
         if beta_cols and not factor_mu_daily_by_key.empty:
@@ -1318,16 +1349,27 @@ class UniversalPortfolioManager:
         # Tally CDS coverage so the CoVe lineage row reflects reality
         # (instead of the silent "no per-ticker CDS attached" placeholder).
         # Single extra pass over the cache — microseconds for ≤20 tickers.
+        # C-1 (`§−129`): `loaded` — только чтения, ВОШЕДШИЕ в C-пиллар
+        # эмитента; рыночный индекс HY считается отдельно (`market_only`).
+        # Прежде любой непустой ответ шёл в `loaded`, и строка CoVe писала
+        # «ok N/N», когда у всех бумаг было одно рыночное число.
         cds_summary: dict = {"enabled": cds_lookup is not None,
-                              "checked": 0, "loaded": 0, "gated_out": 0}
+                              "checked": 0, "loaded": 0, "market_only": 0,
+                              "gated_out": 0}
         if cds_lookup is not None:
             try:
+                from finance.cds_feed import enters_issuer_score
                 checked = list(actual_risky)
-                n_loaded = sum(1 for t in checked if cds_lookup(t))
+                readings = [cds_lookup(t) for t in checked]
+                n_loaded = sum(1 for r in readings if enters_issuer_score(r))
+                n_market = sum(1 for r in readings
+                               if r and r.get("bps") is not None
+                               and not enters_issuer_score(r))
                 cds_summary.update({
-                    "checked":   len(checked),
-                    "loaded":    n_loaded,
-                    "gated_out": len(checked) - n_loaded,
+                    "checked":     len(checked),
+                    "loaded":      n_loaded,
+                    "market_only": n_market,
+                    "gated_out":   len(checked) - n_loaded - n_market,
                 })
             except Exception as exc:
                 logger.info("CDS coverage tally skipped: %s", exc)

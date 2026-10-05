@@ -128,7 +128,8 @@ def beta_shrinkage_enabled() -> bool:
 # counted twice.  The hierarchical residualisation below is the effective math
 # solution (chosen over PCA precisely BECAUSE it preserves the named factors the
 # report depends on): it removes only the redundant shared beta, dropping κ
-# below the 30 collinearity threshold while every factor keeps its name + mean.
+# below the 30 collinearity threshold while every factor keeps its name (and,
+# since H-1 `§−134`, its OWN market-neutral premium rather than the raw mean).
 # The env var now ONLY exists as an escape hatch — set FACTOR_ORTHOGONALIZE=0 to
 # restore the legacy raw-factor decomposition; any other value (incl. unset)
 # orthogonalises.
@@ -270,10 +271,16 @@ def orthogonalize_factors_hierarchical(f_data: "pd.DataFrame",
     Residualize each style/EM factor against its core macro parent(s).
 
     Pure + deterministic.  Returns a NEW DataFrame with identical columns/index:
-    core factors pass through untouched; each child factor is replaced by
-    (child − OLS_fit_on_parents) + child_mean, so its level/scale is preserved
-    while the shared parent beta is removed.  Falls back to the input unchanged
-    when the core parents are absent or history is too short (<10 rows).
+    core factors pass through untouched; each child factor is replaced by the
+    HEDGED series child − Σ β̂·parent (H-1, `§−134`): the shared parent beta is
+    removed and the series keeps only its OWN, market-neutral premium — its
+    mean is the OLS intercept.  Before H-1 the RAW child mean was added back
+    (`resid + mean(child)`), so the parent's premium stayed inside the child:
+    the forward counted it twice — once through the asset's parent beta, once
+    through the child's.  Betas are unaffected (the asset regression has an
+    intercept, a constant shift of a regressor only moves that intercept).
+    Falls back to the input unchanged when the core parents are absent or
+    history is too short (<10 rows).
 
     F-1 (2026-07-10): with ``return_betas=True`` the function ALSO returns the
     fitted child→parent OLS coefficients ``{child: {parent: beta}}``.  The
@@ -300,7 +307,11 @@ def orthogonalize_factors_hierarchical(f_data: "pd.DataFrame",
         try:
             beta, *_ = np.linalg.lstsq(X, y, rcond=None)
             resid = y - X @ beta
-            out[child] = resid + float(np.mean(y))   # keep the factor's own mean
+            # H-1 (`§−134`): хеджированный ряд ребёнок − Σβ̂·родитель = остаток
+            # + интерсепт; его среднее — СОБСТВЕННАЯ (рыночно-нейтральная)
+            # премия фактора.  Прежнее `resid + mean(child)` оставляло внутри
+            # премию родителя, и форвард считал её второй раз.
+            out[child] = resid + float(beta[0])
             # beta[0] is the intercept; beta[1:] align with `par`.
             ortho_betas[child] = {p: float(b) for p, b in zip(par, beta[1:])}
         except Exception:
@@ -1614,16 +1625,27 @@ class MAC3RiskEngine:
         # excess-return numerator.
         risk_free_rate_daily = self.current_rfr_daily
 
-        excess_returns = port_returns_daily - risk_free_rate_daily
-        # H-4: industry-standard downside deviation (Sortino/Satchell).
-        # Take the shortfalls min(excess, 0) against the MAR (=0), square them,
-        # and average over the TOTAL number of observations N — not just the
-        # losing days.  The previous `np.std(excess[excess<0])` used the wrong
-        # denominator (count of negatives) and de-meaned around the downside
-        # mean instead of the target, making the ratio non-comparable to the
-        # standard definition.
-        downside_shortfall = np.minimum(excess_returns, 0.0)
-        downside_vol = np.sqrt(np.mean(downside_shortfall ** 2)) * np.sqrt(self.trading_days)
+        # H-8 (`§−130`): окно Sharpe/Sortino — последние 252 торговых дня ряда
+        # книги, ТО ЖЕ, что у `Return_12M` обложки.  Короче года — окна нет.
+        _win_12m = (port_returns_daily[-self.trading_days:]
+                    if len(port_returns_daily) >= self.trading_days else None)
+        vol_12m: Optional[float] = None
+        downside_vol = 0.0
+        if _win_12m is not None:
+            # Реализованная σ дневных доходностей книги за те же 252 дня
+            # (ddof=1 — как у replay «Эффекта» и спарклайнов).
+            vol_12m = float(np.std(_win_12m, ddof=1) * np.sqrt(self.trading_days))
+            excess_returns = _win_12m - risk_free_rate_daily
+            # H-4: industry-standard downside deviation (Sortino/Satchell).
+            # Take the shortfalls min(excess, 0) against the MAR (=0), square
+            # them, and average over the TOTAL number of observations N — not
+            # just the losing days.  The previous `np.std(excess[excess<0])`
+            # used the wrong denominator (count of negatives) and de-meaned
+            # around the downside mean instead of the target, making the ratio
+            # non-comparable to the standard definition.
+            downside_shortfall = np.minimum(excess_returns, 0.0)
+            downside_vol = float(np.sqrt(np.mean(downside_shortfall ** 2))
+                                 * np.sqrt(self.trading_days))
 
         # H1: geometric annualisation of log-returns.
         # Arithmetic `mean·252` over-states annual return by ~σ²/2 (it
@@ -1711,17 +1733,33 @@ class MAC3RiskEngine:
             _beta_reliability = "ok"
 
         # Sharpe / Sortino with currency-matched, geometrically-compounded RFR
-        # (H1+H3).  ann_return is geometric simple-return, RFR is annual
-        # simple-return — both already in the same units (no fractional/log mix).
-        sharpe  = ((ann_return - self.current_rfr_annual) / port_volatility
-                   if port_volatility > 0 else np.nan)
-        sortino = ((ann_return - self.current_rfr_annual) / downside_vol
-                   if downside_vol > 0 else np.nan)
+        # (H1+H3).
+        #
+        # H-8 (`§−130`, решение владельца): базис — 12 МЕСЯЦЕВ, как у факта
+        # «Доходность за 12 мес» на обложке.  Числитель — `Return_12M` − rf
+        # (простая годовая против простой годовой ставки валюты отчёта);
+        # знаменатель — РЕАЛИЗОВАННАЯ σ дневных доходностей книги за те же
+        # 252 дня (Sortino — нижнее отклонение там же).  Прежде (F-4) в одной
+        # дроби стояли два горизонта: среднегодовая за ВСЁ окно (до 5 лет) и
+        # структурная σ EWMA(63)⊕LW с весом к последним ~3 мес — Sharpe нельзя
+        # было сверить ни с одним числом страницы.  Структурная σ остаётся
+        # карточкой «Волатильность»: это прогноз риска, а не знаменатель
+        # факта.  Короче торгового года — NaN («—»): годовой коэффициент с
+        # обрывка истории не печатаем, как и `Return_12M`.
+        _excess_12m = (return_12m - self.current_rfr_annual
+                       if return_12m is not None else None)
+        sharpe  = (_excess_12m / vol_12m
+                   if _excess_12m is not None and vol_12m and vol_12m > 0
+                   else np.nan)
+        sortino = (_excess_12m / downside_vol
+                   if _excess_12m is not None and downside_vol > 0
+                   else np.nan)
 
         portfolio_metrics = {
             "Total_Volatility_Ann":  port_volatility,
             "Annualised_Return":     ann_return,            # H1: geometric simple return
             "Return_12M":            return_12m,            # D-5: факт за 252 торг. дня
+            "Volatility_12M":        vol_12m,               # H-8: знаменатель Sharpe
             "Sharpe_Ratio":          sharpe,
             "Sortino_Ratio":         sortino,
             "VaR_95_Daily":          var_95,
@@ -1768,21 +1806,17 @@ class MAC3RiskEngine:
             # H4 disclaimer is always present — even on portfolios where
             # no scenario hits the convex cap, the user sees the policy.
             "stress_test_disclaimer": _STRESS_TEST_DISCLAIMER,
-            # F-4 (2026-07-10): the Sharpe/Sortino estimator mixes horizons BY
-            # DESIGN — numerator = realised geometric return over the FULL
-            # lookback window (equal-weighted), denominator = STRUCTURAL vol
-            # from the EWMA(hl=63)⊕Ledoit-Wolf factor covariance (weighted
-            # toward the last ~3 months).  A calm recent regime therefore
-            # reads HIGHER than a classical sample-Sharpe and vice versa.
-            # Surfaced to the QC/Integrity panel so the basis is auditable.
+            # H-8 (`§−130`): базис Sharpe/Sortino — 12 месяцев (прежде F-4:
+            # среднегодовая за всё окно / структурная σ).  Surfaced to the
+            # QC/Integrity panel so the basis is auditable.
             "sharpe_basis_note": (
-                "Sharpe/Sortino: числитель — реализованная геометрическая "
-                "доходность за всё окно наблюдений (композитная серия: дни "
-                "считаются по именам, реально торговавшимся, веса "
-                "ренормализуются по-дневно); знаменатель — структурная "
-                "волатильность EWMA(hl=63)⊕Ledoit-Wolf, взвешенная к последним "
-                "~3 месяцам. В спокойном свежем рынке оценка выше классической "
-                "sample-Sharpe, после недавнего стресса — ниже."
+                "Sharpe/Sortino за последние 12 мес: числитель — доходность "
+                "книги за 252 торговых дня (то же число, что «Доходность за "
+                "12 мес» на обложке) минус безрисковая ставка валюты отчёта; "
+                "знаменатель — реализованная σ дневных доходностей за те же "
+                "252 дня (у Sortino — нижнее отклонение). Короче года истории "
+                "коэффициенты не считаются. Карточка «Волатильность» — "
+                "структурная σ (прогноз риска), это другое число."
             ),
             # BLOCK 4.6: factor-multicollinearity diagnostic (κ + max|corr|),
             # surfaced to the CoVe panel so collinear factors are visible.

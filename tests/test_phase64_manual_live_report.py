@@ -116,7 +116,9 @@ class CashIsNeverSellTest(unittest.TestCase):
             self.assertEqual(sc.action, "Hold", cash)
         # Акция по-прежнему проходит кредитный пиллар — guard узкий.
         self.assertTrue(scores["PEP"].credit_applicable)
-        self.assertEqual(scores["PEP"].credit, -2.0)
+        # C-1 (`§−129`): рыночный индекс HY в оценку эмитента больше не входит,
+        # поэтому без данных SEC у PEP нейтральный C, а не прежний −2.
+        self.assertEqual(scores["PEP"].credit, 0.0)
 
 
 # ──────────────────────────────────────────────────────────────────────────

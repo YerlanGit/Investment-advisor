@@ -296,7 +296,8 @@
   "checked": 5,
   "enabled": true,
   "gated_out": 5,
-  "loaded": 0
+  "loaded": 0,
+  "market_only": 0
  },
  "data_quality": {
   "findings": [],
@@ -385,8 +386,8 @@
     "improved": null
    },
    "sharpe": {
-    "after": 0.7510831206,
-    "before": 0.739494895,
+    "after": 3.56062246,
+    "before": 3.549034234,
     "delta": 0.01158822563,
     "improved": true
    },
@@ -433,7 +434,7 @@
  "factor_scores": {
   "AAPL.US": {
    "group_a_style": {
-    "Alpha_Specific": 8.623786583,
+    "Alpha_Specific": 14.51964935,
     "Beta_Commodities": 0.1275336855,
     "Beta_EM_Bond": 0.08320452049,
     "Beta_EM_Equity": 0.0804981544,
@@ -445,15 +446,15 @@
     "Beta_Value": 0.03873998497,
     "Beta_Volatility": 0.1450794973,
     "Euler_Risk_Contribution_Pct": 40.12769821,
-    "Expected_Return": 0.1684503838,
+    "Expected_Return": 0.1094917561,
     "Residual_Vol_Ann": 0.05918236406,
-    "Specific_Alpha_Daily": -0.0001114458415
+    "Specific_Alpha_Daily": 9.401598197e-05
    },
    "group_b_fundamental": {}
   },
   "FFSPC6.1028.AIX": {
    "group_a_style": {
-    "Alpha_Specific": -16.6561418,
+    "Alpha_Specific": -10.86011695,
     "Beta_Commodities": 0.09592245965,
     "Beta_EM_Bond": 0.1226595433,
     "Beta_EM_Equity": 0.08733370446,
@@ -465,15 +466,15 @@
     "Beta_Value": 0.07639412947,
     "Beta_Volatility": 0.07545894113,
     "Euler_Risk_Contribution_Pct": 4.727399869,
-    "Expected_Return": 0.166561418,
+    "Expected_Return": 0.1086011695,
     "Residual_Vol_Ann": 0.06061122907,
-    "Specific_Alpha_Daily": -0.0002077876463
+    "Specific_Alpha_Daily": -5.559671429e-06
    },
    "group_b_fundamental": {}
   },
   "MSFT.US": {
    "group_a_style": {
-    "Alpha_Specific": -41.25379751,
+    "Alpha_Specific": -35.30205763,
     "Beta_Commodities": 0.07627567856,
     "Beta_EM_Bond": 0.1290691325,
     "Beta_EM_Equity": 0.1233925739,
@@ -485,15 +486,15 @@
     "Beta_Value": 0.05019900461,
     "Beta_Volatility": 0.0681883565,
     "Euler_Risk_Contribution_Pct": 16.98805023,
-    "Expected_Return": 0.1681727428,
+    "Expected_Return": 0.108655344,
     "Residual_Vol_Ann": 0.05899604159,
-    "Specific_Alpha_Daily": 1.816304011e-05
+    "Specific_Alpha_Daily": 0.0002256745106
    },
    "group_b_fundamental": {}
   },
   "TLT.US": {
    "group_a_style": {
-    "Alpha_Specific": 31.51325478,
+    "Alpha_Specific": 37.65716682,
     "Beta_Commodities": 0.06807670738,
     "Beta_EM_Bond": 0.0889566267,
     "Beta_EM_Equity": 0.1169894367,
@@ -505,9 +506,9 @@
     "Beta_Value": 0.08615352566,
     "Beta_Volatility": 0.07699156319,
     "Euler_Risk_Contribution_Pct": 38.15685169,
-    "Expected_Return": 0.1698054644,
+    "Expected_Return": 0.1083663441,
     "Residual_Vol_Ann": 0.05777191575,
-    "Specific_Alpha_Daily": -0.0003562598811
+    "Specific_Alpha_Daily": -0.0001421714045
    },
    "group_b_fundamental": {}
   },
@@ -782,13 +783,13 @@
     0.1397474367,
     0.0804981544,
     0.08320452049,
-    -0.0001114458415,
+    9.401598197e-05,
     0.05918236406,
     33.18264372,
     40.12769821,
     0.003425341607,
-    0.1684503838,
-    8.623786583,
+    0.1094917561,
+    14.51964935,
     0.0,
     0.0,
     1.5,
@@ -819,13 +820,13 @@
     0.1885138972,
     0.1233925739,
     0.1290691325,
-    1.816304011e-05,
+    0.0002256745106,
     0.05899604159,
     15.67389383,
     16.98805023,
     -0.002448057848,
-    0.1681727428,
-    -41.25379751,
+    0.108655344,
+    -35.30205763,
     0.0,
     0.0,
     1.5,
@@ -856,13 +857,13 @@
     0.1450501993,
     0.1169894367,
     0.0889566267,
-    -0.0003562598811,
+    -0.0001421714045,
     0.05777191575,
     32.51280124,
     38.15685169,
     -0.002732012045,
-    0.1698054644,
-    31.51325478,
+    0.1083663441,
+    37.65716682,
     0.0,
     0.0,
     1.5,
@@ -893,13 +894,13 @@
     0.1778021499,
     0.08733370446,
     0.1226595433,
-    -0.0002077876463,
+    -5.559671429e-06,
     0.06061122907,
     4.6786278,
     4.727399869,
     0.003736297672,
-    0.166561418,
-    -16.6561418,
+    0.1086011695,
+    -10.86011695,
     0.0,
     0.0,
     0.0,
@@ -1281,18 +1282,19 @@
   },
   "CVaR_95_Daily": -0.009109204265,
   "Composite_Risk_Score": 30,
-  "Expected_Return_Annual": 0.1452568098,
+  "Expected_Return_Annual": 0.09367676117,
   "Expected_Return_Cash_Weight": 0.0,
   "Expected_Return_Invested_Weight": 1.0,
-  "Expected_Sharpe": 1.347756902,
+  "Expected_Sharpe": 0.6543639377,
   "Max_Drawdown": -0.07746913973,
   "Max_Euler_Risk_Pct": 40.12769821,
   "Positive_Days_Pct": 53.34872979,
   "Return_12M": 0.3065885879,
-  "Sharpe_Ratio": 0.739494895,
-  "Sortino_Ratio": 1.106153268,
+  "Sharpe_Ratio": 3.549034234,
+  "Sortino_Ratio": 6.035250595,
   "Total_Volatility_Ann": 0.07438790307,
   "VaR_95_Daily": -0.00702557526,
+  "Volatility_12M": 0.0737069779,
   "beta_reliability": "ok",
   "beta_shrinkage_applied": false,
   "beta_standard_errors": {
@@ -1705,7 +1707,7 @@
   "risk_free_rate_annual": 0.045,
   "risk_free_rate_daily": 0.0001746854359,
   "risk_free_rate_source": "fixture[USD]=0.045",
-  "sharpe_basis_note": "Sharpe/Sortino: числитель — реализованная геометрическая доходность за всё окно наблюдений (композитная серия: дни считаются по именам, реально торговавшимся, веса ренормализуются по-дневно); знаменатель — структурная волатильность EWMA(hl=63)⊕Ledoit-Wolf, взвешенная к последним ~3 месяцам. В спокойном свежем рынке оценка выше классической sample-Sharpe, после недавнего стресса — ниже.",
+  "sharpe_basis_note": "Sharpe/Sortino за последние 12 мес: числитель — доходность книги за 252 торговых дня (то же число, что «Доходность за 12 мес» на обложке) минус безрисковая ставка валюты отчёта; знаменатель — реализованная σ дневных доходностей за те же 252 дня (у Sortino — нижнее отклонение). Короче года истории коэффициенты не считаются. Карточка «Волатильность» — структурная σ (прогноз риска), это другое число.",
   "stress_test_disclaimer": "Стресс-сценарии используют линейное приближение β-факторов, стабильное для шоков до ±20%. Для активов, чья модельная просадка превышает 20%, применяется выпуклое сглаживание с асимптотой ±35% — это компенсирует нестабильность бет в хвостах, но в реальном тейл-событии возможны более глубокие потери. Сценарии — иллюстративный stress-test, не прогноз.",
   "var_reliability": "ok",
   "volatility_ci": {
@@ -1976,37 +1978,37 @@
   {
    "by_asset": [
     {
-     "asset_delta_pct": -0.79,
-     "asset_delta_raw": -0.79,
-     "contrib_dollar": -223.97,
-     "contrib_pct": -0.258,
+     "asset_delta_pct": -0.78,
+     "asset_delta_raw": -0.78,
+     "contrib_dollar": -220.01,
+     "contrib_pct": -0.254,
      "path_dependent": false,
      "ticker": "TLT.US",
      "weight_pct": 32.51
     },
     {
-     "asset_delta_pct": -0.64,
-     "asset_delta_raw": -0.64,
-     "contrib_dollar": -185.32,
-     "contrib_pct": -0.214,
+     "asset_delta_pct": -0.63,
+     "asset_delta_raw": -0.63,
+     "contrib_dollar": -181.36,
+     "contrib_pct": -0.209,
      "path_dependent": false,
      "ticker": "AAPL.US",
      "weight_pct": 33.18
     },
     {
-     "asset_delta_pct": -0.98,
-     "asset_delta_raw": -0.98,
-     "contrib_dollar": -133.22,
-     "contrib_pct": -0.154,
+     "asset_delta_pct": -0.96,
+     "asset_delta_raw": -0.96,
+     "contrib_dollar": -130.93,
+     "contrib_pct": -0.151,
      "path_dependent": false,
      "ticker": "MSFT.US",
      "weight_pct": 15.67
     },
     {
-     "asset_delta_pct": -0.98,
-     "asset_delta_raw": -0.98,
-     "contrib_dollar": -39.81,
-     "contrib_pct": -0.046,
+     "asset_delta_pct": -0.96,
+     "asset_delta_raw": -0.96,
+     "contrib_dollar": -39.17,
+     "contrib_pct": -0.045,
      "path_dependent": false,
      "ticker": "FFSPC6.1028.AIX",
      "weight_pct": 4.68
@@ -2042,26 +2044,26 @@
     "Rates"
    ],
    "letf_path_n": 0,
-   "max_dd_pct": -0.0439,
+   "max_dd_pct": -0.0438,
    "name": "Credit blow-out (+200 bps HY)",
-   "note": "HY OAS +200 bps → IEF -2% from rate spike; quality bid; EM credit hit hardest (2008/2020/2023 analogues)",
-   "port_dollar": -582.32,
-   "port_pct": -0.0067,
-   "recovery_months": 5.7,
+   "note": "HY OAS +200 bps; flight to quality: UST 7-10y −30 bps → IEF +2.2%; quality bid; EM credit hit hardest (2008/2020/2023 analogues)",
+   "port_dollar": -571.47,
+   "port_pct": -0.0066,
+   "recovery_months": 5.6,
    "residualized": true,
    "shocks": {
     "EM_Bond": -0.08,
     "Market": -0.05,
     "Quality": 0.03,
-    "Rates": 0.02
+    "Rates": 0.021579
    },
    "shocks_applied": {
-    "EM_Bond": -0.092646,
+    "EM_Bond": -0.093644,
     "EM_Equity": 0.032362,
     "Market": -0.05,
     "Momentum": 0.032933,
     "Quality": 0.06424,
-    "Rates": 0.02,
+    "Rates": 0.021579,
     "Size": 0.032469,
     "Value": 0.034471,
     "Volatility": 0.033445
@@ -2070,37 +2072,37 @@
   {
    "by_asset": [
     {
-     "asset_delta_pct": -0.16,
-     "asset_delta_raw": -0.16,
-     "contrib_dollar": -45.8,
-     "contrib_pct": -0.053,
+     "asset_delta_pct": -0.52,
+     "asset_delta_raw": -0.52,
+     "contrib_dollar": -145.33,
+     "contrib_pct": -0.167,
      "path_dependent": false,
      "ticker": "TLT.US",
      "weight_pct": 32.51
     },
     {
-     "asset_delta_pct": -0.15,
-     "asset_delta_raw": -0.15,
-     "contrib_dollar": -43.83,
-     "contrib_pct": -0.051,
+     "asset_delta_pct": -0.5,
+     "asset_delta_raw": -0.5,
+     "contrib_dollar": -143.51,
+     "contrib_pct": -0.165,
      "path_dependent": false,
      "ticker": "AAPL.US",
      "weight_pct": 33.18
     },
     {
-     "asset_delta_pct": -0.15,
-     "asset_delta_raw": -0.15,
-     "contrib_dollar": -19.88,
-     "contrib_pct": -0.023,
+     "asset_delta_pct": -0.57,
+     "asset_delta_raw": -0.57,
+     "contrib_dollar": -77.64,
+     "contrib_pct": -0.089,
      "path_dependent": false,
      "ticker": "MSFT.US",
      "weight_pct": 15.67
     },
     {
-     "asset_delta_pct": -0.16,
-     "asset_delta_raw": -0.16,
-     "contrib_dollar": -6.34,
-     "contrib_pct": -0.007,
+     "asset_delta_pct": -0.55,
+     "asset_delta_raw": -0.55,
+     "contrib_dollar": -22.51,
+     "contrib_pct": -0.026,
      "path_dependent": false,
      "ticker": "FFSPC6.1028.AIX",
      "weight_pct": 4.68
@@ -2134,24 +2136,24 @@
     "Rates"
    ],
    "letf_path_n": 0,
-   "max_dd_pct": -0.0385,
+   "max_dd_pct": -0.0417,
    "name": "Fed +50 bps surprise",
-   "note": "single hawkish surprise; IEF -0.5%, equity wobble -2%",
-   "port_dollar": -115.86,
-   "port_pct": -0.0013,
-   "recovery_months": 4.9,
+   "note": "single hawkish surprise; curve +50 bps parallel → IEF -3.5%, equity wobble -2%",
+   "port_dollar": -389.0,
+   "port_pct": -0.0045,
+   "recovery_months": 5.4,
    "residualized": true,
    "shocks": {
     "Market": -0.02,
-    "Rates": 0.005
+    "Rates": -0.034725
    },
    "shocks_applied": {
-    "EM_Bond": -0.003161,
+    "EM_Bond": 0.021956,
     "EM_Equity": 0.012945,
     "Market": -0.02,
     "Momentum": 0.013173,
     "Quality": 0.013696,
-    "Rates": 0.005,
+    "Rates": -0.034725,
     "Size": 0.012988,
     "Value": 0.013788,
     "Volatility": 0.013378
@@ -2254,37 +2256,37 @@
   {
    "by_asset": [
     {
-     "asset_delta_pct": 0.27,
-     "asset_delta_raw": 0.27,
-     "contrib_dollar": 74.97,
-     "contrib_pct": 0.086,
+     "asset_delta_pct": 0.63,
+     "asset_delta_raw": 0.63,
+     "contrib_dollar": 178.38,
+     "contrib_pct": 0.206,
      "path_dependent": false,
      "ticker": "TLT.US",
      "weight_pct": 32.51
     },
     {
-     "asset_delta_pct": 0.25,
-     "asset_delta_raw": 0.25,
-     "contrib_dollar": 72.02,
-     "contrib_pct": 0.083,
+     "asset_delta_pct": 0.61,
+     "asset_delta_raw": 0.61,
+     "contrib_dollar": 175.59,
+     "contrib_pct": 0.202,
      "path_dependent": false,
      "ticker": "AAPL.US",
      "weight_pct": 33.18
     },
     {
-     "asset_delta_pct": 0.25,
-     "asset_delta_raw": 0.25,
-     "contrib_dollar": 33.46,
-     "contrib_pct": 0.039,
+     "asset_delta_pct": 0.69,
+     "asset_delta_raw": 0.69,
+     "contrib_dollar": 93.47,
+     "contrib_pct": 0.108,
      "path_dependent": false,
      "ticker": "MSFT.US",
      "weight_pct": 15.67
     },
     {
-     "asset_delta_pct": 0.26,
-     "asset_delta_raw": 0.26,
-     "contrib_dollar": 10.53,
-     "contrib_pct": 0.012,
+     "asset_delta_pct": 0.67,
+     "asset_delta_raw": 0.67,
+     "contrib_dollar": 27.33,
+     "contrib_pct": 0.031,
      "path_dependent": false,
      "ticker": "FFSPC6.1028.AIX",
      "weight_pct": 4.68
@@ -2320,22 +2322,22 @@
    "letf_path_n": 0,
    "max_dd_pct": 0.0,
    "name": "Fed cut surprise (−50 bps)",
-   "note": "dovish surprise: rate-sensitive rally; IEF +0.5%, equity +3%",
-   "port_dollar": 190.98,
-   "port_pct": 0.0022,
+   "note": "dovish surprise: rate-sensitive rally; curve −50 bps → IEF +3.6%, equity +3%",
+   "port_dollar": 474.77,
+   "port_pct": 0.0055,
    "recovery_months": null,
    "residualized": true,
    "shocks": {
     "Market": 0.03,
-    "Rates": -0.005
+    "Rates": 0.036275
    },
    "shocks_applied": {
-    "EM_Bond": 0.003161,
+    "EM_Bond": -0.022936,
     "EM_Equity": -0.019417,
     "Market": 0.03,
     "Momentum": -0.01976,
     "Quality": -0.020544,
-    "Rates": -0.005,
+    "Rates": 0.036275,
     "Size": -0.019482,
     "Value": -0.020683,
     "Volatility": -0.020067
@@ -2430,37 +2432,37 @@
   {
    "by_asset": [
     {
-     "asset_delta_pct": -0.09,
-     "asset_delta_raw": -0.09,
-     "contrib_dollar": -24.62,
-     "contrib_pct": -0.028,
+     "asset_delta_pct": -1.08,
+     "asset_delta_raw": -1.08,
+     "contrib_dollar": -311.98,
+     "contrib_pct": -0.36,
      "path_dependent": false,
      "ticker": "AAPL.US",
      "weight_pct": 33.18
     },
     {
-     "asset_delta_pct": -0.04,
-     "asset_delta_raw": -0.04,
-     "contrib_dollar": -5.26,
-     "contrib_pct": -0.006,
-     "path_dependent": false,
-     "ticker": "MSFT.US",
-     "weight_pct": 15.67
-    },
-    {
-     "asset_delta_pct": 0.0,
-     "asset_delta_raw": 0.0,
-     "contrib_dollar": -1.3,
-     "contrib_pct": -0.001,
+     "asset_delta_pct": -1.02,
+     "asset_delta_raw": -1.02,
+     "contrib_dollar": -288.24,
+     "contrib_pct": -0.332,
      "path_dependent": false,
      "ticker": "TLT.US",
      "weight_pct": 32.51
     },
     {
-     "asset_delta_pct": -0.01,
-     "asset_delta_raw": -0.01,
-     "contrib_dollar": -0.26,
-     "contrib_pct": 0.0,
+     "asset_delta_pct": -1.26,
+     "asset_delta_raw": -1.26,
+     "contrib_dollar": -171.79,
+     "contrib_pct": -0.198,
+     "path_dependent": false,
+     "ticker": "MSFT.US",
+     "weight_pct": 15.67
+    },
+    {
+     "asset_delta_pct": -1.15,
+     "asset_delta_raw": -1.15,
+     "contrib_dollar": -46.87,
+     "contrib_pct": -0.054,
      "path_dependent": false,
      "ticker": "FFSPC6.1028.AIX",
      "weight_pct": 4.68
@@ -2495,25 +2497,25 @@
     "Value"
    ],
    "letf_path_n": 0,
-   "max_dd_pct": -0.0376,
+   "max_dd_pct": -0.0466,
    "name": "CPI shock (+1 пп surprise)",
-   "note": "PROXY (no direct Inflation factor): rates spike +150 bps, equity sell-off, value rotates in. Would benefit from TIP.US.",
-   "port_dollar": -31.44,
-   "port_pct": -0.0004,
-   "recovery_months": 4.8,
+   "note": "PROXY (no direct Inflation factor): rates spike +150 bps → IEF -10.0%, equity sell-off, value rotates in. Would benefit from TIP.US.",
+   "port_dollar": -818.88,
+   "port_pct": -0.0094,
+   "recovery_months": 6.0,
    "residualized": true,
    "shocks": {
     "Market": -0.03,
-    "Rates": 0.015,
+    "Rates": -0.099525,
     "Value": 0.02
    },
    "shocks_applied": {
-    "EM_Bond": -0.009484,
+    "EM_Bond": 0.062929,
     "EM_Equity": 0.019417,
     "Market": -0.03,
     "Momentum": 0.01976,
     "Quality": 0.020544,
-    "Rates": 0.015,
+    "Rates": -0.099525,
     "Size": 0.019482,
     "Value": 0.040683,
     "Volatility": 0.020067

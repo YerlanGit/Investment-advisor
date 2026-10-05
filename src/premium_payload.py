@@ -459,8 +459,10 @@ def _map_deep(p: dict, meta: dict) -> dict:
         ],
         "kpis": [
             _kpi(p, "cvar", "CVaR 95%", "cvar", "ai_cvar_note", "cvar_svg", "normal", "#5d7c5c", _cvar_sub(p)),
+            # H-8 (`§−130`): Sharpe и Sortino — за последние 12 мес; окно
+            # названо у числа, иначе оно читается как «за всю историю».
             _kpi(p, "sharpe", "Sharpe Ratio", "sharpe", "ai_sharpe_note", "sharpe_svg", "good", "#caa01a",
-                 f"Sortino {_txt(p, 'sortino')}"),
+                 f"12 мес · Sortino {_txt(p, 'sortino')}"),
             _kpi(p, "dd", "Max Drawdown", "max_drawdown", "ai_mdd_note", "mdd_svg", "watch", "#c47358", _txt(p, "mdd_dollar")),
         ],
         "concentration": conc, "riskDecomp": riskDecomp,
@@ -571,7 +573,7 @@ def _map_base(p: dict, meta: dict) -> dict:
             _kpi(p, "cvar", "CVaR 95%", "cvar", "ai_cvar_note", "cvar_svg",
                  "normal", "#5d7c5c", _cvar_sub(p)),
             _kpi(p, "sharpe", "Sharpe Ratio", "sharpe", "ai_sharpe_note", "sharpe_svg",
-                 "good", "#caa01a", f"Sortino {_txt(p, 'sortino')}"),
+                 "good", "#caa01a", f"12 мес · Sortino {_txt(p, 'sortino')}"),
             _kpi(p, "dd", "Max Drawdown", "max_drawdown", "ai_mdd_note", "mdd_svg",
                  "watch", "#c47358", _txt(p, "mdd_dollar")),
             _kpi(p, "vol", "Волатильность", "volatility", "ai_vol_note", "vol_svg",

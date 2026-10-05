@@ -117,6 +117,36 @@ def _convex_cap(x: float,
     return math.copysign(threshold + saturated, x)
 
 
+# ── H-2 (`§−131`): ставочные шоки — в ЦЕНОВОМ пространстве фактора `Rates` ──
+#
+# Фактор `Rates` движка — это ЦЕНА фонда IEF (UST 7–10 лет, `risk_engine.
+# factor_tickers`), а каталог описывает ставочные сценарии ИЗМЕНЕНИЕМ
+# ДОХОДНОСТИ.  До H-2 б.п. клали в шок как есть: «Fed +50 bps» → `Rates:
+# +0.005`, то есть IEF РОС на 0.5% при росте ставок — знак обратный, а масштаб
+# занижен ~в 7 раз (дюрация IEF ≈ 7).  Книга с TLT в сценарии повышения ставок
+# получала по облигациям ПРИБЫЛЬ.
+#
+# Перевод — стандартное приближение второго порядка:
+#     ΔP/P ≈ −D·Δy + ½·C·Δy²
+# D — эффективная дюрация IEF в годах; C — выпуклость.  Эмитент (iShares)
+# публикует выпуклость в нотации «на Δy в процентных пунктах» (≈ 0.6 у IEF),
+# то есть в долях Δy она в 100 раз больше.  Константы — справочные и меняются
+# медленно; перекалибровка — здесь, в одном месте.
+RATES_FACTOR_DURATION:  float = 7.1     # лет, эффективная дюрация IEF
+RATES_FACTOR_CONVEXITY: float = 0.62    # нотация эмитента (Δy в п.п.)
+
+
+def rates_price_shock(dy_bp: float) -> float:
+    """Изменение цены фонда-фактора `Rates` (IEF) при сдвиге доходности на `dy_bp` б.п.
+
+    Рост ставок → цена ПАДАЕТ; выпуклость смягчает падение и усиливает рост:
+    +50 б.п. ≈ −3.5%, −50 б.п. ≈ +3.6%, +150 б.п. ≈ −10%.
+    """
+    dy = float(dy_bp) / 10_000.0
+    return (-RATES_FACTOR_DURATION * dy
+            + 0.5 * RATES_FACTOR_CONVEXITY * 100.0 * dy * dy)
+
+
 # ── Default scenario catalog ────────────────────────────────────────────────
 # Each scenario declares a shock vector (period decimal returns) keyed by
 # factor name.  Factor names MUST match `engine.factor_tickers` keys, which
@@ -124,10 +154,16 @@ def _convex_cap(x: float,
 #
 # Magnitudes calibrated against realised historical analogues:
 #   • Tech sell-off Q2 2022: SPX -16% / NDX -22% → Market -10%, Momentum -15%
-#   • Credit blow-out 2008 / 2020 / 2023: HY OAS +200-400 bps → IEF -2%
-#   • Fed +50bps surprise: typical equity wobble -2%
+#   • Credit blow-out 2008 / 2020 / 2023: HY OAS +200-400 bps, бегство в
+#     качество — UST 7–10 лет −30 б.п. → IEF ≈ +2.2% (H-2: прежняя заметка
+#     «IEF −2%» противоречила самому шоку +0.02)
+#   • Fed +50bps surprise: typical equity wobble -2%; кривая +50 б.п.
+#     ПАРАЛЛЕЛЬНО (консервативно: длинный конец на сюрпризе ФРС обычно
+#     движется меньше) → IEF ≈ −3.5%
 #   • Geopolitical risk-off: EM hit hardest (-12%), broad market -7%
-#   • Fed cut surprise: equity rally +3%, IEF rally +0.5%
+#   • Fed cut surprise: equity rally +3%, кривая −50 б.п. → IEF ≈ +3.6%
+#   Ставочный шок задаётся в б.п. (`rates_dy_bp`), а в вектор шоков идёт
+#   изменение ЦЕНЫ фонда-фактора — `rates_price_shock` (H-2, `§−131`).
 # Magnitudes are documented inline so they can be re-calibrated by hand
 # against new historical events.
 
@@ -138,6 +174,10 @@ class ScenarioSpec:
     coverage:  str          = "direct"        # "direct" | "proxy"
     note:      str          = ""              # human-readable rationale / source
     category:  str          = "equity"        # "equity" | "rates" | "credit" | "macro" | "geo"
+    # H-2 (`§−131`): сдвиг доходности UST 7–10 лет в б.п., из которого получен
+    # шок `Rates` (цена IEF, `rates_price_shock`).  None — сценарий ставки не
+    # двигает.  Гейт: шок `Rates` без этого поля в каталоге запрещён.
+    rates_dy_bp: Optional[float] = None
 
 
 DEFAULT_SCENARIOS: list[ScenarioSpec] = [
@@ -151,16 +191,21 @@ DEFAULT_SCENARIOS: list[ScenarioSpec] = [
     ScenarioSpec(
         name     = "Credit blow-out (+200 bps HY)",
         category = "credit",
-        shocks   = {"Rates": +0.02, "Market": -0.05, "Quality": +0.03,
-                    "EM_Bond": -0.08},
-        note     = "HY OAS +200 bps → IEF -2% from rate spike; quality bid; "
-                   "EM credit hit hardest (2008/2020/2023 analogues)",
+        rates_dy_bp = -30.0,
+        shocks   = {"Rates": rates_price_shock(-30.0), "Market": -0.05,
+                    "Quality": +0.03, "EM_Bond": -0.08},
+        note     = (f"HY OAS +200 bps; flight to quality: UST 7-10y −30 bps → "
+                    f"IEF {rates_price_shock(-30.0) * 100:+.1f}%; quality bid; "
+                    "EM credit hit hardest (2008/2020/2023 analogues)"),
     ),
     ScenarioSpec(
         name     = "Fed +50 bps surprise",
         category = "rates",
-        shocks   = {"Rates": +0.005, "Market": -0.02},
-        note     = "single hawkish surprise; IEF -0.5%, equity wobble -2%",
+        rates_dy_bp = +50.0,
+        shocks   = {"Rates": rates_price_shock(+50.0), "Market": -0.02},
+        note     = (f"single hawkish surprise; curve +50 bps parallel → "
+                    f"IEF {rates_price_shock(+50.0) * 100:+.1f}%, "
+                    "equity wobble -2%"),
     ),
     ScenarioSpec(
         name     = "Geopolitical risk-off",
@@ -173,8 +218,10 @@ DEFAULT_SCENARIOS: list[ScenarioSpec] = [
     ScenarioSpec(
         name     = "Fed cut surprise (−50 bps)",
         category = "rates",
-        shocks   = {"Rates": -0.005, "Market": +0.03},
-        note     = "dovish surprise: rate-sensitive rally; IEF +0.5%, equity +3%",
+        rates_dy_bp = -50.0,
+        shocks   = {"Rates": rates_price_shock(-50.0), "Market": +0.03},
+        note     = (f"dovish surprise: rate-sensitive rally; curve −50 bps → "
+                    f"IEF {rates_price_shock(-50.0) * 100:+.1f}%, equity +3%"),
     ),
     # The next two are PROXY scenarios — they would be more accurate with a
     # dedicated USD factor (UUP.US) and Inflation factor (TIP.US) added to
@@ -190,10 +237,13 @@ DEFAULT_SCENARIOS: list[ScenarioSpec] = [
     ScenarioSpec(
         name     = "CPI shock (+1 пп surprise)",
         category = "macro",
-        shocks   = {"Rates": +0.015, "Market": -0.03, "Value": +0.02},
+        rates_dy_bp = +150.0,
+        shocks   = {"Rates": rates_price_shock(+150.0), "Market": -0.03,
+                    "Value": +0.02},
         coverage = "proxy",
-        note     = "PROXY (no direct Inflation factor): rates spike +150 bps, "
-                   "equity sell-off, value rotates in. Would benefit from TIP.US.",
+        note     = (f"PROXY (no direct Inflation factor): rates spike +150 bps → "
+                    f"IEF {rates_price_shock(+150.0) * 100:+.1f}%, equity sell-off, "
+                    "value rotates in. Would benefit from TIP.US."),
     ),
 ]
 
@@ -511,6 +561,9 @@ __all__ = [
     "DEFAULT_SCENARIOS",
     "apply_scenario",
     "residualize_shocks",
+    "rates_price_shock",
+    "RATES_FACTOR_DURATION",
+    "RATES_FACTOR_CONVEXITY",
     "run_stress_scenarios",
     "_convex_cap",
 ]

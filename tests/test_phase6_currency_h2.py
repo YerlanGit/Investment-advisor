@@ -232,7 +232,7 @@ class SharpeGeometricAnnualisationTest(unittest.TestCase):
     """
     End-to-end check on calculate_structural_risk:
       • Annualised_Return present and equals exp(mean_log·252)−1.
-      • Sharpe = (ann_return − annual_rfr) / vol_ann.
+      • Sharpe = (return_12m − annual_rfr) / vol_12m  (`§−130`, H-8).
       • Reporting metadata populated.
     """
 
@@ -302,8 +302,11 @@ class SharpeGeometricAnnualisationTest(unittest.TestCase):
                                m_kzt["Total_Volatility_Ann"], places=8)
         self.assertAlmostEqual(m_usd["Annualised_Return"],
                                m_kzt["Annualised_Return"], places=8)
-        # Sharpe gap = (RFR_KZT − RFR_USD) / vol  (with sign)
-        gap_expected = (0.14 - 0.045) / m_usd["Total_Volatility_Ann"]
+        # Sharpe gap = (RFR_KZT − RFR_USD) / vol  (with sign).  `§−130` (H-8):
+        # знаменатель Sharpe — реализованная σ за 12 мес, а не структурная.
+        self.assertAlmostEqual(m_usd["Volatility_12M"], m_kzt["Volatility_12M"],
+                               places=10)
+        gap_expected = (0.14 - 0.045) / m_usd["Volatility_12M"]
         gap_actual   = m_usd["Sharpe_Ratio"] - m_kzt["Sharpe_Ratio"]
         self.assertAlmostEqual(gap_actual, gap_expected, places=6)
 

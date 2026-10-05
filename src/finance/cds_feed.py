@@ -5,16 +5,19 @@ Provides per-ticker credit-spread readings used by pillar D (Credit) of the
 4-pillar scoring model.  The free layer relies on official, no-key data:
 
   • FRED — BAMLH0A0HYM2 (ICE BofA US High Yield Index Option-Adjusted Spread)
-           used as a market-wide HY proxy when issuer-level CDS is missing.
-  • FRED — BAMLC0A0CM   (ICE BofA US Corporate Master Option-Adjusted Spread)
-           used as Investment-Grade proxy.
+           — a market-wide index.  C-1 (`§−129`): its scope is `market`, so it
+           is NOT scored as any issuer's credit (see `cds_scope`).
   • worldgovernmentbonds.com — sovereign CDS table (light HTML scrape) for
-           sovereign exposure (KZ_GOV_5Y for Kazakhstani names).
+           sovereign exposure (KZ_GOV_5Y for Kazakhstani names); scope
+           `sovereign`, scored as the issuer's country ceiling.
+
+(The IG index BAMLC0A0CM was listed here as a second proxy but was never
+wired — there is no such provider in `CDSFeed`.)
 
 A QualityGate validates every reading before it is consumed by scoring:
 
   1. Sanity range — 1 ≤ bps ≤ 3000.
-  2. Staleness — timestamp not older than 3 trading days.
+  2. Staleness — timestamp not older than 7 calendar days (`MAX_STALE_DAYS`).
   3. Cross-source consistency — when two sources agree to within 25%, accept;
      otherwise downgrade quality letter (A → B → C).
 
@@ -44,6 +47,56 @@ import requests
 logger = logging.getLogger("CDSFeed")
 
 
+# ── Охват чтения: ЧЬЮ кредитоспособность меряет число (C-1, `§−129`) ─────────
+#
+#   issuer    — собственный CDS эмитента (платные источники, качество A/B);
+#   sovereign — CDS СТРАНЫ эмитента (WGB, KZ 5Y).  Потолок суверена: эмитент
+#               страны редко торгуется дешевле её долга, поэтому число
+#               различает бумаги KZ и США по существу;
+#   market    — индекс ВСЕГО рынка (FRED: ICE BofA US HY OAS).  Одно число на
+#               все бумаги — об эмитенте оно не говорит ничего.
+#
+# 🔴 До C-1 скоринг брал любое чтение.  Индекс HY (живой отчёт 02.10: 312 б.п.)
+# стоит выше порога 150 б.п. всегда, и КАЖДАЯ бумага США получала C = −2 —
+# постоянный сдвиг к «Sell» вместо оценки эмитента; сам промпт при этом
+# требует «не подменяй прокси».  Рыночный охват остаётся контекстом РЕЖИМА
+# (драйвер «US HY OAS» в `services.macro_data`), в оценку эмитента не входит.
+CDS_SCOPE_ISSUER    = "issuer"
+CDS_SCOPE_SOVEREIGN = "sovereign"
+CDS_SCOPE_MARKET    = "market"
+#: Охваты, которые вправе войти в C-пиллар ЭМИТЕНТА.
+ISSUER_SCORE_SCOPES = frozenset({CDS_SCOPE_ISSUER, CDS_SCOPE_SOVEREIGN})
+
+
+def cds_scope(source: Optional[str]) -> str:
+    """Охват чтения по его источнику.
+
+    FRED single-name CDS не публикует вовсе — любой его ряд рыночный; WGB —
+    суверенный.  Всё прочее (платные поставщики) — эмитент.  Охват выводится
+    из источника, а не хранится отдельно: кэш (`_CDSCache`) уже держит
+    `source`, и схема таблицы не меняется.
+    """
+    s = str(source or "").strip().upper()
+    if s.startswith("FRED:"):
+        return CDS_SCOPE_MARKET
+    if s.startswith("WGB:"):
+        return CDS_SCOPE_SOVEREIGN
+    return CDS_SCOPE_ISSUER
+
+
+def enters_issuer_score(reading: Optional[dict]) -> bool:
+    """True, если чтение (`make_lookup`) вправе войти в C-пиллар эмитента.
+
+    Пустое чтение и чтение без `bps` — нет.  Охват берётся из `scope`, а при
+    его отсутствии — из `source` (чтения, собранные до C-1, и синтетика тестов
+    без источника считаются эмитентскими).
+    """
+    if not reading or reading.get("bps") is None:
+        return False
+    scope = reading.get("scope") or cds_scope(reading.get("source"))
+    return scope in ISSUER_SCORE_SCOPES
+
+
 # ── Public dataclass ────────────────────────────────────────────────────────
 
 @dataclass(frozen=True)
@@ -56,11 +109,17 @@ class CDSPoint:
     quality:   str               # 'A' | 'B' | 'C'
     change_7d: Optional[float]   # fractional change vs 7d ago, e.g. +0.18
 
+    @property
+    def scope(self) -> str:
+        """`issuer` / `sovereign` / `market` — см. `cds_scope`."""
+        return cds_scope(self.source)
+
     def as_dict(self) -> dict:
         return {
             "ticker":    self.ticker,
             "bps":       round(self.bps, 1),
             "source":    self.source,
+            "scope":     self.scope,
             "timestamp": self.timestamp.isoformat(),
             "quality":   self.quality,
             "change_7d": round(self.change_7d, 4) if self.change_7d is not None else None,
@@ -402,6 +461,10 @@ class CDSFeed:
         Use the FRED HY OAS as a coarse credit proxy for any US-listed
         corporate ticker that has no dedicated CDS data.  Returned quality
         is 'C' because this is a market-wide proxy, not issuer-level data.
+
+        C-1 (`§−129`): охват такого чтения — `market` (`cds_scope`), и в
+        C-пиллар эмитента оно НЕ входит (`enters_issuer_score`).  Провайдер
+        остаётся: чтение видно в провенансе как рыночный контекст.
         """
         if "." in ticker and not ticker.endswith(".US"):
             return None
@@ -455,6 +518,7 @@ def make_lookup(feed: Optional[CDSFeed] = None) -> Callable[[str], dict]:
             "bps":       point.bps,
             "change_7d": point.change_7d,
             "source":    point.source,
+            "scope":     point.scope,
             "quality":   point.quality,
         }
     return _lookup
@@ -466,4 +530,10 @@ __all__ = [
     "CDSQualityGate",
     "make_lookup",
     "SOVEREIGN_PROXY",
+    "CDS_SCOPE_ISSUER",
+    "CDS_SCOPE_SOVEREIGN",
+    "CDS_SCOPE_MARKET",
+    "ISSUER_SCORE_SCOPES",
+    "cds_scope",
+    "enters_issuer_score",
 ]

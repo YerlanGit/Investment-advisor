@@ -423,8 +423,12 @@ def _make_insider_stub(real_fn):
     return _stub
 
 
-def run_analyze_all(scenario: str = "base") -> dict:
+def run_analyze_all(scenario: str = "base", *,
+                    sec_frame: "pd.DataFrame | None" = None) -> dict:
     """Прогнать `analyze_all` в полностью изолированном окружении.
+
+    `sec_frame` — ответ SEC-скана вместо пустого (эталоны идут БЕЗ отчётности;
+    тест, которому нужна отчётность конкретной бумаги, подаёт её сюда).
 
     `scenario` выбирает книгу: «base» — здоровая, «leveraged_fx» — с плечом,
     плечевым ETP и позицией в тенге. Второй сценарий добавлен потому, что
@@ -468,7 +472,8 @@ def run_analyze_all(scenario: str = "base") -> dict:
         else:
             portfolio = pd.DataFrame(cfg["rows"])
         with mock.patch("finance.sec_edgar.batch_fundamental_scan",
-                        return_value=pd.DataFrame()), \
+                        return_value=(sec_frame if sec_frame is not None
+                                      else pd.DataFrame())), \
              mock.patch("finance.cds_feed.make_lookup", _fake_cds_lookup), \
              mock.patch("finance.smart_money.build_insider_signals",
                         _make_insider_stub(_real_insiders)):
@@ -616,3 +621,52 @@ def fixture_json(results: dict | None = None, scenario: str = "base") -> str:
 
 def fixture_sha256(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+#: Допуск сверки снимка (`§−133`).  Совпал текст — быстрый путь; не совпал —
+#: числа сверяются с допуском, а всё прочее (строки, дайджесты, ключи, длины
+#: списков) — точно.
+#:
+#: Зачем: округление до 10 значащих цифр (`FLOAT_SIGNIFICANT_DIGITS`) не спасает
+#: величину, полученную ВЫЧИТАНИЕМ близких чисел.  В эталоне «manual» excess
+#: YTD против Russell 2000 = 0.3136 − 0.3126 = 0.00097: относительный шум
+#: разности в ~300 раз больше шума слагаемых, и значение легло в 2.6e-16
+#: (абсолютных) от границы округления.  CI-машины с другим SIMD-путём numpy
+#: (последний разряд `log`/`exp`) перебрасывали его через границу — снимок
+#: падал через раз на ОДНОМ И ТОМ ЖЕ коде (прогоны 339 и 341 красные, 338 и
+#: 340 зелёные).  Тот же класс, что `§−62` у дайджестов.
+#:
+#: Чувствительность сохраняется: один квант 10-й значащей цифры ≤ 1e-9
+#: относительных, а ошибка разреза (переставленная стадия, чужие веса, пустые
+#: беты) двигает числа на проценты.
+GOLDEN_REL_TOL = 1e-9
+GOLDEN_ABS_TOL = 1e-12
+
+
+def snapshot_diff(got: Any, want: Any, path: str = "") -> list[str]:
+    """Пути, где снимки расходятся: числа — сверх допуска, прочее — точно."""
+    def _num_like(x: Any) -> bool:
+        return isinstance(x, (int, float)) and not isinstance(x, bool)
+
+    if isinstance(got, dict) and isinstance(want, dict):
+        out: list[str] = []
+        for k in sorted(set(got) | set(want)):
+            sub = f"{path}.{k}" if path else str(k)
+            if k not in got or k not in want:
+                out.append(sub)
+            else:
+                out.extend(snapshot_diff(got[k], want[k], sub))
+        return out
+    if isinstance(got, list) and isinstance(want, list):
+        if len(got) != len(want):
+            return [f"{path}[len {len(got)}≠{len(want)}]"]
+        out = []
+        for i, (a, b) in enumerate(zip(got, want)):
+            out.extend(snapshot_diff(a, b, f"{path}[{i}]"))
+        return out
+    if _num_like(got) and _num_like(want):
+        ok = math.isclose(float(got), float(want),
+                          rel_tol=GOLDEN_REL_TOL, abs_tol=GOLDEN_ABS_TOL)
+        return [] if ok else [path]
+    # Флаг — не число: `True == 1` в Python истинно, а в снимке это разные факты.
+    return [] if (type(got) is type(want) and got == want) else [path]

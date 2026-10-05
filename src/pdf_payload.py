@@ -644,7 +644,8 @@ def _build_expected_effect(raw: Optional[dict]) -> dict:
         # Q-3 (`§−128`): строки «Ожид. доходность» в панели больше нет —
         # прогноз на целевых весах либо BL-постериор, либо повтор истории
         # новыми весами (подглядывание в прошлое). Движок по-прежнему считает
-        # её как базу дельты Sharpe (H-8 открыт), но в отчёт она не идёт.
+        # её как базу ДЕЛЬТЫ Sharpe (уровень «до» — Sharpe карточки за 12 мес,
+        # `§−130`), но в отчёт она не идёт.
     )
     out: dict = {}
     for tpl_key, eng_key in _KEYMAP:
@@ -2275,18 +2276,22 @@ def _build_integrity_checks(results: dict,
                        "SE(β) > 50% |β| — беты статистически шумные"),
         })
 
-    # 5b. F-4 (2026-07-10): Sharpe/Sortino estimator basis — the numerator is
-    # the realised geometric return over the FULL window while the denominator
-    # is the recency-weighted STRUCTURAL vol (EWMA(63)⊕Ledoit-Wolf).  The
-    # mixed horizons are deliberate; the panel makes the basis auditable so
-    # the headline Sharpe can be compared против классического sample-оценщика.
+    # 5b. Базис Sharpe/Sortino.  H-8 (`§−130`): 12 месяцев — числитель тот же,
+    # что «Доходность за 12 мес» на обложке, знаменатель — реализованная σ за
+    # те же 252 дня.  Прежде (F-4) здесь объяснялся смешанный базис (средняя
+    # за всё окно / структурная σ EWMA⊕LW).  σ печатается ЧИСЛОМ: без него
+    # Sharpe не сверить — на странице рядом стоит другая σ (структурная).
     if metrics.get("sharpe_basis_note"):
+        _v12 = metrics.get("Volatility_12M")
+        _v12_txt = (f" ({float(_v12) * 100:.1f}%)"
+                    if isinstance(_v12, (int, float)) and math.isfinite(float(_v12))
+                    else "")
         checks.append({
             "status": "✓",
             "label":  "Базис Sharpe/Sortino",
-            "detail": ("числитель: геом. доходность за всё окно · "
-                       "знаменатель: структурная σ EWMA(63)⊕LW "
-                       "(взвешена к последним ~3 мес)"),
+            "detail": ("за последние 12 мес: (доходность 12 мес − rf) / "
+                       f"реализованная σ за те же 12 мес{_v12_txt}; "
+                       "Sortino — нижнее отклонение"),
         })
 
     # 6. RAG (bank research retrieval) — 3-state status from the backend so the

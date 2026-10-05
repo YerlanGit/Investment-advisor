@@ -109,8 +109,10 @@ BOND_ETFS = frozenset({
 
 # Государственные/квази-государственные бумаги РАЗВИТЫХ рынков: у них нет
 # корпоративного кредитного риска, поэтому C-пиллар к ним неприменим.
-# EM-суверенный долг (`EMB`, `VWOB`) сюда НЕ входит намеренно — там кредитный
-# риск реален и пиллар обязан работать.
+# EM-суверенный долг (`EMB`, `VWOB`) сюда НЕ входит намеренно — кредитный риск
+# там реален.  Но C-пиллар у этих фондов всё равно «н/д»: словарь секторов
+# движка (`TICKER_SECTOR`) даёт им сектор `Bonds`, а у фонда нет эмитента, чью
+# отчётность или CDS можно оценить (`§−129` V-4).
 SOVEREIGN_BOND_ETFS = frozenset({"TLT", "IEF", "SHY", "SHV", "AGG", "BND",
                                  "BIL", "GOVT", "TIP"})
 
@@ -192,6 +194,13 @@ def is_sovereign_bond(ticker: str) -> bool:
 def is_etf(ticker: str) -> bool:
     """Известная ETF-обёртка (у неё нет собственной отчётности эмитента)."""
     return ticker_base(ticker) in ETF_BASES
+
+
+def is_equity_etf(ticker: str) -> bool:
+    """Фонд АКЦИЙ (широкий рынок, факторный, отраслевой): у него нет одного
+    эмитента — ни кредитного риска эмитента, ни собственной отчётности
+    (C-1, `§−129`)."""
+    return ticker_base(ticker) in EQUITY_ETFS
 
 
 def is_kz_listed(ticker: str) -> bool:
@@ -316,5 +325,5 @@ __all__ = [
     # …и предикаты
     "ticker_base", "ticker_suffix", "is_cash", "is_crypto", "is_commodity",
     "is_structured_note", "is_bond_like", "is_sovereign_bond", "is_etf",
-    "is_kz_listed",
+    "is_equity_etf", "is_kz_listed",
 ]

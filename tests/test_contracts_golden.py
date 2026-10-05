@@ -67,15 +67,23 @@ class GoldenResultsTest(unittest.TestCase):
                 if produced == expected:
                     continue
 
-                # Расхождение: показать ИМЕННО те ключи, которые разошлись, —
-                # иначе разбор 50 KB диффа превращается в археологию.
+                # Текст не совпал — числа сверяются с допуском (`§−133`):
+                # последний разряд log/exp зависит от SIMD-пути numpy на
+                # машине CI, и разность близких чисел перескакивала границу
+                # округления 10-й цифры.  Строки и дайджесты — точно.
                 import json
                 got, want = json.loads(produced), json.loads(expected)
-                changed = sorted(k for k in set(got) | set(want)
-                                 if got.get(k) != want.get(k))
+                paths = gs.snapshot_diff(got, want)
+                if not paths:
+                    continue
+
+                # Расхождение: показать ИМЕННО те ключи, которые разошлись, —
+                # иначе разбор 50 KB диффа превращается в археологию.
+                changed = sorted({p.split(".")[0].split("[")[0] for p in paths})
                 self.fail(
                     f"сценарий «{scenario}» разошёлся с эталоном.\n"
                     f"расходятся ключи ({len(changed)}): {changed}\n"
+                    f"первые пути: {paths[:5]}\n"
                     f"sha256 получено={gs.fixture_sha256(produced)[:16]} "
                     f"ожидалось={gs.fixture_sha256(expected)[:16]}\n"
                     "🔴 В фазе Арх-3 это ОШИБКА РАЗРЕЗА, а не повод обновить снимок."
@@ -107,6 +115,28 @@ class GoldenResultsTest(unittest.TestCase):
             with self.subTest(scenario=scenario):
                 self.assertEqual(gs.fixture_json(scenario=scenario),
                                  gs.fixture_json(scenario=scenario))
+
+
+class SnapshotToleranceTest(unittest.TestCase):
+    """`§−133`: допуск ловит шум последнего разряда, но не ошибку разреза."""
+
+    def test_rounding_flip_of_a_difference_passes(self) -> None:
+        """Реальный случай CI: excess YTD 0.0009723336045 ↔ …044 (один квант)."""
+        self.assertEqual(gs.snapshot_diff(
+            {"prt": {"R": [{"excess_pp": 0.0009723336045}]}},
+            {"prt": {"R": [{"excess_pp": 0.0009723336044}]}}), [])
+
+    def test_real_change_still_fails(self) -> None:
+        self.assertEqual(gs.snapshot_diff({"m": {"Sharpe": 0.739494895}},
+                                          {"m": {"Sharpe": 0.739495895}}),
+                         ["m.Sharpe"])
+
+    def test_non_numbers_and_shapes_are_exact(self) -> None:
+        self.assertEqual(gs.snapshot_diff({"d": "sha:abc"}, {"d": "sha:abd"}), ["d"])
+        self.assertEqual(gs.snapshot_diff({"a": 1}, {"a": 1, "b": 2}), ["b"])
+        self.assertEqual(gs.snapshot_diff({"l": [1, 2]}, {"l": [1]}), ["l[len 2≠1]"])
+        self.assertEqual(gs.snapshot_diff({"f": True}, {"f": 1}), ["f"])
+        self.assertEqual(gs.snapshot_diff({"x": "<NaN>"}, {"x": 0.0}), ["x"])
 
 
 class GoldenIsolationTest(unittest.TestCase):

@@ -267,8 +267,8 @@ RESULTS_KEYS: frozenset[str] = frozenset(AnalyzeResults.__annotations__)
 #: Ключи `results["portfolio_metrics"]` — отдельным множеством, потому что блок
 #: собирается в другой функции и на части путей приходит ПУСТЫМ.
 PORTFOLIO_METRICS_KEYS: frozenset[str] = frozenset({
-    "Total_Volatility_Ann", "Annualised_Return", "Return_12M", "Sharpe_Ratio",
-    "Sortino_Ratio",
+    "Total_Volatility_Ann", "Annualised_Return", "Return_12M", "Volatility_12M",
+    "Sharpe_Ratio", "Sortino_Ratio",
     "VaR_95_Daily", "CVaR_95_Daily", "CVaR_95_Bootstrap", "Max_Drawdown",
     "Max_Euler_Risk_Pct", "Composite_Risk_Score", "Positive_Days_Pct",
     "realized_window_days", "var_reliability", "volatility_ci",
