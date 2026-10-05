@@ -128,7 +128,8 @@ def beta_shrinkage_enabled() -> bool:
 # counted twice.  The hierarchical residualisation below is the effective math
 # solution (chosen over PCA precisely BECAUSE it preserves the named factors the
 # report depends on): it removes only the redundant shared beta, dropping κ
-# below the 30 collinearity threshold while every factor keeps its name + mean.
+# below the 30 collinearity threshold while every factor keeps its name (and,
+# since H-1 `§−134`, its OWN market-neutral premium rather than the raw mean).
 # The env var now ONLY exists as an escape hatch — set FACTOR_ORTHOGONALIZE=0 to
 # restore the legacy raw-factor decomposition; any other value (incl. unset)
 # orthogonalises.
@@ -270,10 +271,16 @@ def orthogonalize_factors_hierarchical(f_data: "pd.DataFrame",
     Residualize each style/EM factor against its core macro parent(s).
 
     Pure + deterministic.  Returns a NEW DataFrame with identical columns/index:
-    core factors pass through untouched; each child factor is replaced by
-    (child − OLS_fit_on_parents) + child_mean, so its level/scale is preserved
-    while the shared parent beta is removed.  Falls back to the input unchanged
-    when the core parents are absent or history is too short (<10 rows).
+    core factors pass through untouched; each child factor is replaced by the
+    HEDGED series child − Σ β̂·parent (H-1, `§−134`): the shared parent beta is
+    removed and the series keeps only its OWN, market-neutral premium — its
+    mean is the OLS intercept.  Before H-1 the RAW child mean was added back
+    (`resid + mean(child)`), so the parent's premium stayed inside the child:
+    the forward counted it twice — once through the asset's parent beta, once
+    through the child's.  Betas are unaffected (the asset regression has an
+    intercept, a constant shift of a regressor only moves that intercept).
+    Falls back to the input unchanged when the core parents are absent or
+    history is too short (<10 rows).
 
     F-1 (2026-07-10): with ``return_betas=True`` the function ALSO returns the
     fitted child→parent OLS coefficients ``{child: {parent: beta}}``.  The
@@ -300,7 +307,11 @@ def orthogonalize_factors_hierarchical(f_data: "pd.DataFrame",
         try:
             beta, *_ = np.linalg.lstsq(X, y, rcond=None)
             resid = y - X @ beta
-            out[child] = resid + float(np.mean(y))   # keep the factor's own mean
+            # H-1 (`§−134`): хеджированный ряд ребёнок − Σβ̂·родитель = остаток
+            # + интерсепт; его среднее — СОБСТВЕННАЯ (рыночно-нейтральная)
+            # премия фактора.  Прежнее `resid + mean(child)` оставляло внутри
+            # премию родителя, и форвард считал её второй раз.
+            out[child] = resid + float(beta[0])
             # beta[0] is the intercept; beta[1:] align with `par`.
             ortho_betas[child] = {p: float(b) for p, b in zip(par, beta[1:])}
         except Exception:

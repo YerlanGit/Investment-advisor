@@ -434,7 +434,7 @@
  "factor_scores": {
   "AAPL.US": {
    "group_a_style": {
-    "Alpha_Specific": 8.623786583,
+    "Alpha_Specific": 14.51964935,
     "Beta_Commodities": 0.1275336855,
     "Beta_EM_Bond": 0.08320452049,
     "Beta_EM_Equity": 0.0804981544,
@@ -446,15 +446,15 @@
     "Beta_Value": 0.03873998497,
     "Beta_Volatility": 0.1450794973,
     "Euler_Risk_Contribution_Pct": 40.12769821,
-    "Expected_Return": 0.1684503838,
+    "Expected_Return": 0.1094917561,
     "Residual_Vol_Ann": 0.05918236406,
-    "Specific_Alpha_Daily": -0.0001114458415
+    "Specific_Alpha_Daily": 9.401598197e-05
    },
    "group_b_fundamental": {}
   },
   "FFSPC6.1028.AIX": {
    "group_a_style": {
-    "Alpha_Specific": -16.6561418,
+    "Alpha_Specific": -10.86011695,
     "Beta_Commodities": 0.09592245965,
     "Beta_EM_Bond": 0.1226595433,
     "Beta_EM_Equity": 0.08733370446,
@@ -466,15 +466,15 @@
     "Beta_Value": 0.07639412947,
     "Beta_Volatility": 0.07545894113,
     "Euler_Risk_Contribution_Pct": 4.727399869,
-    "Expected_Return": 0.166561418,
+    "Expected_Return": 0.1086011695,
     "Residual_Vol_Ann": 0.06061122907,
-    "Specific_Alpha_Daily": -0.0002077876463
+    "Specific_Alpha_Daily": -5.559671429e-06
    },
    "group_b_fundamental": {}
   },
   "MSFT.US": {
    "group_a_style": {
-    "Alpha_Specific": -41.25379751,
+    "Alpha_Specific": -35.30205763,
     "Beta_Commodities": 0.07627567856,
     "Beta_EM_Bond": 0.1290691325,
     "Beta_EM_Equity": 0.1233925739,
@@ -486,15 +486,15 @@
     "Beta_Value": 0.05019900461,
     "Beta_Volatility": 0.0681883565,
     "Euler_Risk_Contribution_Pct": 16.98805023,
-    "Expected_Return": 0.1681727428,
+    "Expected_Return": 0.108655344,
     "Residual_Vol_Ann": 0.05899604159,
-    "Specific_Alpha_Daily": 1.816304011e-05
+    "Specific_Alpha_Daily": 0.0002256745106
    },
    "group_b_fundamental": {}
   },
   "TLT.US": {
    "group_a_style": {
-    "Alpha_Specific": 31.51325478,
+    "Alpha_Specific": 37.65716682,
     "Beta_Commodities": 0.06807670738,
     "Beta_EM_Bond": 0.0889566267,
     "Beta_EM_Equity": 0.1169894367,
@@ -506,9 +506,9 @@
     "Beta_Value": 0.08615352566,
     "Beta_Volatility": 0.07699156319,
     "Euler_Risk_Contribution_Pct": 38.15685169,
-    "Expected_Return": 0.1698054644,
+    "Expected_Return": 0.1083663441,
     "Residual_Vol_Ann": 0.05777191575,
-    "Specific_Alpha_Daily": -0.0003562598811
+    "Specific_Alpha_Daily": -0.0001421714045
    },
    "group_b_fundamental": {}
   },
@@ -783,13 +783,13 @@
     0.1397474367,
     0.0804981544,
     0.08320452049,
-    -0.0001114458415,
+    9.401598197e-05,
     0.05918236406,
     33.18264372,
     40.12769821,
     0.003425341607,
-    0.1684503838,
-    8.623786583,
+    0.1094917561,
+    14.51964935,
     0.0,
     0.0,
     1.5,
@@ -820,13 +820,13 @@
     0.1885138972,
     0.1233925739,
     0.1290691325,
-    1.816304011e-05,
+    0.0002256745106,
     0.05899604159,
     15.67389383,
     16.98805023,
     -0.002448057848,
-    0.1681727428,
-    -41.25379751,
+    0.108655344,
+    -35.30205763,
     0.0,
     0.0,
     1.5,
@@ -857,13 +857,13 @@
     0.1450501993,
     0.1169894367,
     0.0889566267,
-    -0.0003562598811,
+    -0.0001421714045,
     0.05777191575,
     32.51280124,
     38.15685169,
     -0.002732012045,
-    0.1698054644,
-    31.51325478,
+    0.1083663441,
+    37.65716682,
     0.0,
     0.0,
     1.5,
@@ -894,13 +894,13 @@
     0.1778021499,
     0.08733370446,
     0.1226595433,
-    -0.0002077876463,
+    -5.559671429e-06,
     0.06061122907,
     4.6786278,
     4.727399869,
     0.003736297672,
-    0.166561418,
-    -16.6561418,
+    0.1086011695,
+    -10.86011695,
     0.0,
     0.0,
     0.0,
@@ -1282,10 +1282,10 @@
   },
   "CVaR_95_Daily": -0.009109204265,
   "Composite_Risk_Score": 30,
-  "Expected_Return_Annual": 0.1452568098,
+  "Expected_Return_Annual": 0.09367676117,
   "Expected_Return_Cash_Weight": 0.0,
   "Expected_Return_Invested_Weight": 1.0,
-  "Expected_Sharpe": 1.347756902,
+  "Expected_Sharpe": 0.6543639377,
   "Max_Drawdown": -0.07746913973,
   "Max_Euler_Risk_Pct": 40.12769821,
   "Positive_Days_Pct": 53.34872979,

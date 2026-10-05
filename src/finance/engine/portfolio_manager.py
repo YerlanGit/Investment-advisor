@@ -39,6 +39,7 @@ from finance.period_returns import (
     compute_benchmark_stats as _compute_benchmark_stats,
 )
 from finance.stress import run_stress_scenarios as _run_stress_scenarios
+from finance.stress import residualize_shocks as _residualize_factor_vector
 from finance.simulate import simulate_after_plan as _simulate_after_plan
 from services.macro_data import MacroFeed as _MacroFeed
 
@@ -54,6 +55,33 @@ from .risk_engine import (
 from .market_preview import MarketDataPreview
 
 logger = logging.getLogger("Antigravity_RiskEngine")
+
+
+def factor_premia_daily(all_data: pd.DataFrame,
+                        factor_tickers: dict[str, str],
+                        ortho_betas: dict[str, dict[str, float]]) -> dict[str, float]:
+    """Дневная ожидаемая лог-доходность каждого фактора — в пространстве БЕТ.
+
+    Среднее дневной лог-доходности фонда-фактора за всю историю (F-2: в
+    дневном лог-пространстве, аннуализация — одна, на итоговом прогнозе
+    бумаги).  H-1 (`§−134`): беты бумаги к стилю/EM живут в ОЧИЩЕННОМ от
+    родителя пространстве (BLOCK 3.5), поэтому премия ребёнка —
+    рыночно-нейтральная: μ_ребёнка − Σ β̂·μ_родителя.  Та же линейная карта
+    F-1, что переводит шоки стресса (`stress.residualize_shocks`).  Прежде
+    сырое μ(MTUM) несло в себе премию рынка, уже вошедшую через бету рынка —
+    прогноз бумаги завышался на Σ β_стиль · β̂(стиль→рынок) · μ_рынка
+    (живой DEEP 02.10: ожидаемая 12.4% против BL 5.5%).  Без ортогонализации
+    (`ortho_betas` пуст) — сырые средние, как и беты.
+    """
+    keys = [k for k, v in factor_tickers.items() if v in all_data.columns]
+    if not keys:
+        return {}
+    etfs = [factor_tickers[k] for k in keys]
+    f_data = all_data[etfs]
+    daily_log = np.log(f_data / f_data.shift(1)).dropna()
+    means = daily_log.mean()
+    raw = {k: float(means.get(v, 0.0)) for k, v in zip(keys, etfs)}
+    return _residualize_factor_vector(raw, ortho_betas or {})
 
 
 @dataclass
@@ -836,24 +864,10 @@ class UniversalPortfolioManager:
             logger.warning("LETF sigma map skipped: %s", _exc)
             letf_sigma_map = {}
 
-        present_factor_keys = [
-            k for k, v in self.engine.factor_tickers.items() if v in all_data.columns
-        ]
-        present_factor_etfs = [self.engine.factor_tickers[k] for k in present_factor_keys]
-        f_data = all_data[present_factor_etfs] if present_factor_etfs else pd.DataFrame()
-
-        if not f_data.empty:
-            factor_daily_log = np.log(f_data / f_data.shift(1)).dropna()
-            factor_mean_daily = factor_daily_log.mean()       # index = ETF tickers
-            # Keep the per-factor expectations in DAILY LOG space — the single
-            # geometric annualisation happens once, on the combined per-asset
-            # expected log return below (F-2 fix).
-            factor_mu_daily_by_key = pd.Series({
-                k: factor_mean_daily.get(v, 0.0)
-                for k, v in zip(present_factor_keys, present_factor_etfs)
-            })
-        else:
-            factor_mu_daily_by_key = pd.Series(dtype=float)
+        # H-1 (`§−134`): премии факторов — в ТОМ ЖЕ пространстве, что и беты.
+        factor_mu_daily_by_key = pd.Series(factor_premia_daily(
+            all_data, self.engine.factor_tickers,
+            getattr(self.engine, "_last_ortho_betas", {}) or {}), dtype=float)
 
         beta_cols = [c for c in df.columns if str(c).startswith('Beta_')]
         if beta_cols and not factor_mu_daily_by_key.empty:

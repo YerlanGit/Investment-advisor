@@ -408,7 +408,7 @@
  "factor_scores": {
   "AAPL.US": {
    "group_a_style": {
-    "Alpha_Specific": 11.13316308,
+    "Alpha_Specific": 17.02902585,
     "Beta_Commodities": 0.1275336855,
     "Beta_EM_Bond": 0.08320452049,
     "Beta_EM_Equity": 0.0804981544,
@@ -420,15 +420,15 @@
     "Beta_Value": 0.03873998497,
     "Beta_Volatility": 0.1450794973,
     "Euler_Risk_Contribution_Pct": 23.04264999,
-    "Expected_Return": 0.1684503838,
+    "Expected_Return": 0.1094917561,
     "Residual_Vol_Ann": 0.05918236406,
-    "Specific_Alpha_Daily": -0.0001114458415
+    "Specific_Alpha_Daily": 9.401598197e-05
    },
    "group_b_fundamental": {}
   },
   "CONL.US": {
    "group_a_style": {
-    "Alpha_Specific": 318.2911451,
+    "Alpha_Specific": 324.300205,
     "Beta_Commodities": 0.08378849531,
     "Beta_EM_Bond": 0.1130891051,
     "Beta_EM_Equity": 0.07950307563,
@@ -440,9 +440,9 @@
     "Beta_Value": 0.1213717823,
     "Beta_Volatility": 0.1316331428,
     "Euler_Risk_Contribution_Pct": 51.91654223,
-    "Expected_Return": 0.1542148268,
+    "Expected_Return": 0.09412422774,
     "Residual_Vol_Ann": 0.05898906053,
-    "Specific_Alpha_Daily": -0.0004112562101
+    "Specific_Alpha_Daily": -0.0001990893135
    },
    "group_b_fundamental": {}
   },
@@ -468,7 +468,7 @@
   },
   "TLT.US": {
    "group_a_style": {
-    "Alpha_Specific": 31.51325478,
+    "Alpha_Specific": 37.65716682,
     "Beta_Commodities": 0.06807670738,
     "Beta_EM_Bond": 0.0889566267,
     "Beta_EM_Equity": 0.1169894367,
@@ -480,9 +480,9 @@
     "Beta_Value": 0.08615352566,
     "Beta_Volatility": 0.07699156319,
     "Euler_Risk_Contribution_Pct": 25.04080778,
-    "Expected_Return": 0.1698054644,
+    "Expected_Return": 0.1083663441,
     "Residual_Vol_Ann": 0.05777191575,
-    "Specific_Alpha_Daily": -0.0003562598811
+    "Specific_Alpha_Daily": -0.0001421714045
    },
    "group_b_fundamental": {}
   },
@@ -732,13 +732,13 @@
     0.1397474367,
     0.0804981544,
     0.08320452049,
-    -0.0001114458415,
+    9.401598197e-05,
     0.05918236406,
     26.40455456,
     23.04264999,
     0.005235729497,
-    0.1684503838,
-    11.13316308,
+    0.1094917561,
+    17.02902585,
     0.0,
     0.0,
     1.5,
@@ -769,13 +769,13 @@
     0.1914845976,
     0.07950307563,
     0.1130891051,
-    -0.0004112562101,
+    -0.0001990893135,
     0.05898906053,
     53.69034075,
     51.91654223,
     -0.004892969026,
-    0.1542148268,
-    318.2911451,
+    0.09412422774,
+    324.300205,
     0.0,
     0.0,
     1.5,
@@ -806,13 +806,13 @@
     0.1450501993,
     0.1169894367,
     0.0889566267,
-    -0.0003562598811,
+    -0.0001421714045,
     0.05777191575,
     29.10548046,
     25.04080778,
     0.001673962669,
-    0.1698054644,
-    31.51325478,
+    0.1083663441,
+    37.65716682,
     0.0,
     0.0,
     1.5,
@@ -1193,10 +1193,10 @@
   },
   "CVaR_95_Daily": -0.0120433938,
   "Composite_Risk_Score": 38,
-  "Expected_Return_Annual": 0.1711290763,
+  "Expected_Return_Annual": 0.1054163148,
   "Expected_Return_Cash_Weight": 0.0,
   "Expected_Return_Invested_Weight": 1.0,
-  "Expected_Sharpe": 1.322584863,
+  "Expected_Sharpe": 0.633523258,
   "Max_Drawdown": -0.1273853722,
   "Max_Euler_Risk_Pct": 51.91654223,
   "Positive_Days_Pct": 52.57890685,
