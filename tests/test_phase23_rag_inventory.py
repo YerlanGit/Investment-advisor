@@ -158,13 +158,17 @@ class RagSourceLabelTest(unittest.TestCase):
         self.assertIn("Jefferies", label)
         self.assertNotIn("HSBC", label)
 
-    def test_empty_roster_falls_back_to_historic_literal(self) -> None:
-        """Сводки, снятые до §−93, поля `rag_kb_banks` не несут — строка
-        обязана остаться прежней, а не превратиться в «ChromaDB ·  PDF»."""
+    def test_empty_roster_names_nobody(self) -> None:
+        """Q-8 (DQ-7): литерал «GS / MS / JPM» был фолбэком пустого реестра —
+        отчёт называл банки, которых в базе нет. Пустой реестр — без имён,
+        пустая база — «база пуста»; ни «ChromaDB ·  PDF», ни выдуманных банков."""
         from finance.data_lineage import _rag_source_label
         for empty in (None, [], ["", "  "]):
-            self.assertEqual(_rag_source_label(empty),
-                             "ChromaDB · GS / MS / JPM PDF reports")
+            self.assertEqual(_rag_source_label(empty), "ChromaDB · PDF reports")
+            self.assertEqual(_rag_source_label(empty, kb_empty=True),
+                             "ChromaDB · база пуста")
+        self.assertEqual(_rag_source_label(["Citi"], kb_empty=True),
+                         "ChromaDB · база пуста")
 
     def test_row_uses_the_dynamic_label(self) -> None:
         from finance.data_lineage import _rag_status

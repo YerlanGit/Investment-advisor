@@ -236,6 +236,24 @@ def _data_quality_status(results: dict) -> Optional[dict]:
     )
 
 
+def _book_share_note(results: dict, perf, tickers: list[str]) -> str:
+    """« (N% книги по весу)» для подмножества бумаг; без стоимостей — пусто.
+
+    P-8 (audit E4/M-5): покрытие в % ВЕСА книги, не только в штуках —
+    «3 тикера без покрытия» может значить и 5%, и 60% портфеля."""
+    try:
+        total_v = float(results.get("total_value") or 0.0)
+        if perf is None or perf.empty or total_v <= 0 \
+                or "Current_Value" not in perf.columns:
+            return ""
+        mask = perf["Ticker"].astype(str).isin(tickers) \
+            if "Ticker" in perf.columns else perf.index.astype(str).isin(tickers)
+        share_v = float(perf.loc[mask, "Current_Value"].fillna(0.0).sum())
+        return f" ({share_v / total_v * 100:.0f}% книги по весу)"
+    except Exception:
+        return ""
+
+
 def _sec_status(results: dict, today: date) -> list[dict]:
     """
     ONE merged row (2026-07-09) covering both fundamental Z-scores and
@@ -245,9 +263,17 @@ def _sec_status(results: dict, today: date) -> list[dict]:
     Status downgrades based on:
       - number of skipped tickers (default/EM_Proxy sector)
       - age of the OLDEST 10-K filing in the universe
+      - Q-8 (DQ-5): бумаги, которые ЖДУТ 10-K (`sec_edgar.expects_annual_filing`),
+        а даты отчётности нет.  Ни одной даты при таких бумагах — сбой SEC,
+        `missing` (раньше строка была зелёной: пустые поля `SEC_*` не давали
+        ни «пропущенных», ни «устаревших»); у части бумаг нет — `warn`.
     """
+    from finance.sec_edgar import expects_annual_filing
+
     perf = results.get("performance_table")
     skipped: list[str] = []
+    expected: list[str] = []
+    dated: set[str] = set()
     oldest_age_m: Optional[int] = None
     oldest_ticker: Optional[str] = None
 
@@ -255,12 +281,16 @@ def _sec_status(results: dict, today: date) -> list[dict]:
         if "Fundamental_Sector" in perf.columns:
             mask = perf["Fundamental_Sector"].astype(str).isin(["default", "EM_Proxy"])
             skipped = perf.loc[mask, "Ticker"].astype(str).tolist()
+        if "Ticker" in perf.columns:
+            expected = [t for t in dict.fromkeys(perf["Ticker"].astype(str))
+                        if t.strip() and expects_annual_filing(t)]
         if "SEC_Filing_Date" in perf.columns:
             for _, row in perf.iterrows():
                 fd = row.get("SEC_Filing_Date")
                 age_m = _months_between(fd, today)
                 if age_m is None:
                     continue
+                dated.add(str(row.get("Ticker")))
                 if oldest_age_m is None or age_m > oldest_age_m:
                     oldest_age_m = age_m
                     oldest_ticker = str(row.get("Ticker"))
@@ -269,22 +299,21 @@ def _sec_status(results: dict, today: date) -> list[dict]:
     notes: list[str] = []
     status = "ok"
     if skipped:
-        # P-8 (audit E4/M-5): покрытие в % ВЕСА книги, не только в штуках —
-        # «3 тикера без покрытия» может значить и 5%, и 60% портфеля.
-        _w_note = ""
-        try:
-            total_v = float(results.get("total_value") or 0.0)
-            if perf is not None and not perf.empty and total_v > 0 \
-                    and "Current_Value" in perf.columns:
-                mask_cv = perf["Ticker"].astype(str).isin(skipped) \
-                    if "Ticker" in perf.columns else \
-                    perf.index.astype(str).isin(skipped)
-                skipped_v = float(perf.loc[mask_cv, "Current_Value"]
-                                  .fillna(0.0).sum())
-                _w_note = f" ({skipped_v / total_v * 100:.0f}% книги по весу)"
-        except Exception:
-            _w_note = ""
-        notes.append(f"{len(skipped)} тикеров без SEC покрытия{_w_note}")
+        notes.append(f"{len(skipped)} тикеров без SEC покрытия"
+                     f"{_book_share_note(results, perf, skipped)}")
+        status = "warn"
+    # Бумага с сектором «default» уже названа «без покрытия» — второй раз не считаем.
+    known = dated | set(skipped)
+    undated = [t for t in expected if t not in known]
+    if expected and not dated:
+        notes.append(f"SEC не вернул отчётность ни по одной из {len(expected)} "
+                     f"бумаг с 10-K{_book_share_note(results, perf, expected)} — "
+                     "фундамент не рассчитан")
+        status = "missing"
+    elif undated:
+        shown = ", ".join(undated[:4]) + (f" +{len(undated) - 4}" if len(undated) > 4 else "")
+        notes.append(f"{len(undated)} из {len(expected)} бумаг без отчётности SEC: "
+                     f"{shown}{_book_share_note(results, perf, undated)}")
         status = "warn"
     if oldest_age_m is not None:
         if oldest_age_m >= SEC_FILING_STALE_MONTHS:
@@ -503,19 +532,25 @@ def _stress_status(results: dict) -> dict:
 # §−93: the retrieval row named «GS / MS / JPM» as a FROZEN literal.  Ten new
 # Citi / Jefferies / Barclays notes could land in ChromaDB and the отчёт still
 # advertised three banks — the label described the KB of 2026-07, not the one
-# actually queried.  Name the issuers the store really holds; the literal
-# survives ONLY as the fallback for summaries that predate `rag_kb_banks`.
-_RAG_SOURCE_FALLBACK = "ChromaDB · GS / MS / JPM PDF reports"
+# actually queried.  Name the issuers the store really holds.
+# Q-8 (DQ-7): литерал оставался фолбэком и при ПУСТОЙ базе — строка «база:
+# 0 отчётов» стояла под подписью «GS / MS / JPM».  Отчёт не называет источник,
+# которого нет в базе: пустая база так и подписывается, а база без
+# распознанных эмитентов — без имён.
+_RAG_SOURCE_EMPTY = "ChromaDB · база пуста"
+_RAG_SOURCE_UNNAMED = "ChromaDB · PDF reports"
 _RAG_SOURCE_MAX_BANKS = 5
 
 
-def _rag_source_label(banks) -> str:
+def _rag_source_label(banks, *, kb_empty: bool = False) -> str:
     """«ChromaDB · <issuers> PDF reports» from the KB inventory (most-covered
     first).  Long rosters are truncated with «+N» so the CoVe cell stays one
-    line; an empty/absent roster keeps the historical literal."""
+    line; an empty KB says so, and a roster without names names nobody."""
+    if kb_empty:
+        return _RAG_SOURCE_EMPTY
     names = [str(b).strip() for b in (banks or []) if str(b or "").strip()]
     if not names:
-        return _RAG_SOURCE_FALLBACK
+        return _RAG_SOURCE_UNNAMED
     shown, rest = names[:_RAG_SOURCE_MAX_BANKS], len(names) - _RAG_SOURCE_MAX_BANKS
     label = " / ".join(shown) + (f" +{rest}" if rest > 0 else "")
     return f"ChromaDB · {label} PDF reports"
@@ -568,7 +603,8 @@ def _rag_status(ai_summary: Optional[dict]) -> dict:
                   if chunks == 0 else f"{kb} · RAG не запрашивался")
     return _row(
         name   = "Bank RAG (выдержки)",
-        source = _rag_source_label(a.get("rag_kb_banks")),
+        source = _rag_source_label(a.get("rag_kb_banks"),
+                                   kb_empty=(rag_status != "used" and chunks == 0)),
         method = rag_ranking_method(),
         status = status,
         note   = note,
@@ -630,6 +666,17 @@ def _ai_status(ai_summary: Optional[dict]) -> dict:
         model_disp = model_display_name(model_id) or model_id
     except Exception:
         model_disp = model_id
+    # Q-8 (DQ-6): детерминированный фолбэк тоже несёт вердикт и тезисы, и
+    # строка была зелёной, хотя модель не отвечала.  Фолбэк — `warn` с причиной.
+    if str(model_id).strip().lower().startswith("fallback"):
+        return _row(
+            name   = "AI verdict · bullets",
+            source = "Quant Engine · детерминированный текст",
+            method = "advisory only; verdict + plain summary + bullets",
+            status = "warn",
+            note   = ("модель недоступна — вердикт и тезисы собраны движком "
+                      "по правилам, без ИИ · не является ИИР"),
+        )
     return _row(
         name   = "AI verdict · bullets",
         source = ("Anthropic · " + model_disp) if model_disp else "Anthropic Claude",
