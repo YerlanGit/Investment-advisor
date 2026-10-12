@@ -269,6 +269,18 @@ def _should_skip(ticker: str) -> bool:
     return False
 
 
+def expects_annual_filing(ticker: str) -> bool:
+    """Ждёт ли движок от SEC годовую отчётность этой бумаги — то же решение,
+    по которому `batch_fundamental_scan` идёт в SEC.
+
+    Панели происхождения (Q-8, DQ-5) нужен ЗНАМЕНАТЕЛЬ: «нет ни одной даты
+    10-K» — это сбой SEC, только если хоть одна бумага её ждала.  Сектор
+    (`Fundamental_Sector`) для этого не годится: ETF и облигации получают
+    реальный сектор из таксономии, а 10-K у них нет.
+    """
+    return not _should_skip(ticker)
+
+
 # ═══════════════════════════════════════════════════════════
 # 1. LIGHTWEIGHT FUNDAMENTAL SCAN (CompanyFacts JSON API)
 # ═══════════════════════════════════════════════════════════

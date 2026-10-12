@@ -25,7 +25,7 @@
 > импорт), то есть когда карта действительно врёт.
 
 
-**Замер:** 105 тест-файлов · 64 модулей `src/` имеют хотя бы один адресный тест-импорт.
+**Замер:** 106 тест-файлов · 64 модулей `src/` имеют хотя бы один адресный тест-импорт.
 
 ## Модуль → тесты
 
@@ -33,7 +33,7 @@
 |---|---|---|
 | `agent.gatekeeper` | 5 | `test_phase18_sprint5.py` · `test_phase32_report_logic_fixes.py` · `test_phase33_effect_reinvest_quality.py` · `test_phase42_instrument_ssot.py` · `test_phase44_live_report_fixes.py` |
 | `agent.rag_engine` | 5 | `test_phase21_recos.py` · `test_phase22_rag_boot.py` · `test_phase23_rag_inventory.py` · `test_phase52_bank_identity_ssot.py` · `test_phase54_rag_chunking_and_provenance.py` |
-| `ai_narrative` | 24 | `test_factor_decomposition.py` · `test_interrupted_reports.py` · `test_phase13_security.py` · `test_phase15_phase3.py` · `test_phase18_sprint5.py` · `test_phase19_block_audit.py` · `test_phase23_rag_inventory.py` · `test_phase31_benchmark_factor_propagation.py` · `test_phase32_report_logic_fixes.py` · `test_phase33_effect_reinvest_quality.py` · `test_phase36_report_audit_fixes.py` · `test_phase40_labels_and_boundary.py` · `test_phase44_live_report_fixes.py` · `test_phase46_p2_maintainability.py` · `test_phase48_report_verdict_audit.py` · `test_phase4_reporting.py` · `test_phase52_bank_identity_ssot.py` · `test_phase54_rag_chunking_and_provenance.py` · `test_phase5_rag_quality.py` · `test_phase61_report_layer_audit.py` · `test_phase63_multiuser_readiness.py` · `test_phase7_logic_wiring.py` · `test_phase8_report_fixes.py` · `test_phase9_fpillar_stress.py` |
+| `ai_narrative` | 25 | `test_factor_decomposition.py` · `test_interrupted_reports.py` · `test_phase13_security.py` · `test_phase15_phase3.py` · `test_phase18_sprint5.py` · `test_phase19_block_audit.py` · `test_phase23_rag_inventory.py` · `test_phase31_benchmark_factor_propagation.py` · `test_phase32_report_logic_fixes.py` · `test_phase33_effect_reinvest_quality.py` · `test_phase36_report_audit_fixes.py` · `test_phase40_labels_and_boundary.py` · `test_phase44_live_report_fixes.py` · `test_phase46_p2_maintainability.py` · `test_phase48_report_verdict_audit.py` · `test_phase4_reporting.py` · `test_phase52_bank_identity_ssot.py` · `test_phase54_rag_chunking_and_provenance.py` · `test_phase5_rag_quality.py` · `test_phase61_report_layer_audit.py` · `test_phase63_multiuser_readiness.py` · `test_phase71_cove_honest.py` · `test_phase7_logic_wiring.py` · `test_phase8_report_fixes.py` · `test_phase9_fpillar_stress.py` |
 | `branding` | 1 | `test_phase59_brand_rename.py` |
 | `db_tokenomics` | 6 | `test_manual_fsm_flow.py` · `test_phase12_beta_safety.py` · `test_phase20_sprint_refactor.py` · `test_phase29_multiuser_connection.py` · `test_phase43_report_lock.py` · `test_phase63_multiuser_readiness.py` |
 | `entrypoint` | 1 | `test_phase22_rag_boot.py` |
@@ -47,7 +47,7 @@
 | `finance.contracts` | 3 | `test_contracts_golden.py` · `test_contracts_results.py` · `test_stooq_provider.py` |
 | `finance.currency` | 3 | `test_phase25_math_sprint1.py` · `test_phase6_currency_h2.py` · `test_phase6_fx_feed.py` |
 | `finance.data_checks` | 4 | `test_manual_freedom_parity.py` · `test_phase35_data_checks.py` · `test_stooq_price_store.py` · `test_stooq_provider.py` |
-| `finance.data_lineage` | 14 | `test_broker_fallback.py` · `test_hybrid_bot_flow.py` · `test_manual_preflight_and_locals.py` · `test_phase18_sprint5.py` · `test_phase19_block_audit.py` · `test_phase23_rag_inventory.py` · `test_phase28_risk_methodology_audit.py` · `test_phase36_illiquid_proxy.py` · `test_phase45_data_checks_wiring.py` · `test_phase47_cove_and_fx_honesty.py` · `test_phase4_reporting.py` · `test_phase54_rag_chunking_and_provenance.py` · `test_phase66_credit_pillar_c1.py` · `test_portfolio_aggregation.py` |
+| `finance.data_lineage` | 15 | `test_broker_fallback.py` · `test_hybrid_bot_flow.py` · `test_manual_preflight_and_locals.py` · `test_phase18_sprint5.py` · `test_phase19_block_audit.py` · `test_phase23_rag_inventory.py` · `test_phase28_risk_methodology_audit.py` · `test_phase36_illiquid_proxy.py` · `test_phase45_data_checks_wiring.py` · `test_phase47_cove_and_fx_honesty.py` · `test_phase4_reporting.py` · `test_phase54_rag_chunking_and_provenance.py` · `test_phase66_credit_pillar_c1.py` · `test_phase71_cove_honest.py` · `test_portfolio_aggregation.py` |
 | `finance.demo_portfolio` | 7 | `test_broker_fallback.py` · `test_phase35_demo_showcase.py` · `test_phase36_illiquid_proxy.py` · `test_phase45_data_checks_wiring.py` · `test_phase46_p2_maintainability.py` · `test_phase47_cove_and_fx_honesty.py` · `test_portfolio_aggregation.py` |
 | `finance.engine.portfolio_manager` | 1 | `test_phase70_forward_premia.py` |
 | `finance.engine.risk_engine` | 1 | `test_phase70_forward_premia.py` |
