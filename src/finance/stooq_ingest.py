@@ -1216,8 +1216,54 @@ class PruneResult:
     removed: list[str] = field(default_factory=list)
     kept: int = 0
     bars_removed: int = 0
+    #: Порог и самая полная бумага — у КРУПНЕЙШЕГО рынка базы (для сводки);
+    #: по каждому рынку — в `thresholds`.
     min_bars_used: int = 0
     busiest_bars: int = 0
+    #: `{рынок: (порог, баров у самой полной бумаги рынка)}`.
+    thresholds: dict = field(default_factory=dict)
+
+
+def plan_prune(conn, *, min_bars: Optional[int] = None,
+               keep: Iterable[str] = ()) -> tuple["PruneResult", list[int]]:
+    """Кого чистить — без записи: `(сводка, id обречённых бумаг)`.
+
+    Отдельно от исполнения, потому что писателей двое: SQLite-файл и Postgres
+    (OMBRI Ф5). Порог и защита ядра у них обязаны быть ОДНИМ решением, а SQL
+    здесь переносим — соединение Postgres говорит на диалекте `sqlite3`.
+    """
+    counts = {int(r["id"]): (str(r["sym"]), str(r["market"]), int(r["n"]))
+              for r in conn.execute(
+        "SELECT i.id AS id, i.source_symbol AS sym, i.market AS market, "
+        "       COUNT(b.trade_date) AS n "
+        "FROM instruments i LEFT JOIN daily_bars b ON b.instrument_id = i.id "
+        "WHERE i.source = ? GROUP BY i.id", (SOURCE_NAME,)).fetchall()}
+    out = PruneResult()
+    if not counts:
+        return out, []
+
+    # 🔴 Порог — ПО РЫНКУ бумаги. Крипта торгуется 7/7 и за то же окно набирает
+    # ≈ 1.45× баров акций США; общий «90% самой полной» поднимал порог выше
+    # всей истории США, и одна монета в базе отправляла под нож ВСЕ акции,
+    # кроме ядра (найдено тестом бота над Postgres, OMBRI Ф5).
+    busiest: dict[str, int] = {}
+    population: dict[str, int] = {}
+    for _sym, market, n in counts.values():
+        busiest[market] = max(busiest.get(market, 0), n)
+        population[market] = population.get(market, 0) + 1
+    for market, top in busiest.items():
+        out.thresholds[market] = (int(min_bars) if min_bars
+                                  else int(top * _MIN_HISTORY_FRACTION), top)
+    main = max(population, key=lambda m: (population[m], m))
+    out.min_bars_used, out.busiest_bars = out.thresholds[main]
+    protected = {str(s).upper() for s in keep}
+
+    doomed = [(iid, sym, n) for iid, (sym, market, n) in counts.items()
+              if n < out.thresholds[market][0] and sym.upper() not in protected]
+    out.kept = len(counts) - len(doomed)
+    out.removed = sorted(sym for _iid, sym, _n in doomed)
+    out.bars_removed = sum(n for _iid, _sym, n in doomed)
+    return out, [iid for iid, _sym, _n in doomed]
 
 
 def prune_thin_instruments(conn: sqlite3.Connection, *,
@@ -1240,29 +1286,11 @@ def prune_thin_instruments(conn: sqlite3.Connection, *,
     фактор с обрезанной историей лучше вычистить ре-бутстрапом, чем потерять
     молча вместе с допуском C-1.
     """
-    counts = {int(r["id"]): (str(r["sym"]), int(r["n"])) for r in conn.execute(
-        "SELECT i.id AS id, i.source_symbol AS sym, "
-        "       COUNT(b.trade_date) AS n "
-        "FROM instruments i LEFT JOIN daily_bars b ON b.instrument_id = i.id "
-        "WHERE i.source = ? GROUP BY i.id", (SOURCE_NAME,))}
-    out = PruneResult()
-    if not counts:
-        return out
-
-    out.busiest_bars = max(n for _sym, n in counts.values())
-    out.min_bars_used = (int(min_bars) if min_bars
-                         else int(out.busiest_bars * _MIN_HISTORY_FRACTION))
-    protected = {str(s).upper() for s in keep}
-
-    doomed = [(iid, sym, n) for iid, (sym, n) in counts.items()
-              if n < out.min_bars_used and sym.upper() not in protected]
-    out.kept = len(counts) - len(doomed)
-    out.removed = sorted(sym for _iid, sym, _n in doomed)
-    out.bars_removed = sum(n for _iid, _sym, n in doomed)
+    out, doomed = plan_prune(conn, min_bars=min_bars, keep=keep)
     if dry_run or not doomed:
         return out
 
-    ids = [(iid,) for iid, _sym, _n in doomed]
+    ids = [(iid,) for iid in doomed]
     conn.executemany("DELETE FROM daily_bars WHERE instrument_id = ?", ids)
     conn.executemany("DELETE FROM symbol_map WHERE instrument_id = ?", ids)
     conn.executemany("DELETE FROM instruments WHERE id = ?", ids)

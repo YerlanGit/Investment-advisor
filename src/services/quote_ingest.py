@@ -1268,6 +1268,7 @@ class PruneOutcome:
     published: bool = False
     conflict: bool = False
     generation: Optional[int] = None
+    thresholds: dict = field(default_factory=dict)
 
 
 def _probe(conn: sqlite3.Connection, ticker: str, *,
@@ -1401,7 +1402,8 @@ def prune(*, dry_run: bool, actor: str,
         common = dict(removed=tuple(report.removed), kept=report.kept,
                       bars_removed=report.bars_removed,
                       min_bars_used=report.min_bars_used,
-                      busiest_bars=report.busiest_bars)
+                      busiest_bars=report.busiest_bars,
+                      thresholds=dict(report.thresholds))
         if dry_run or not report.removed:
             return PruneOutcome(ok=True, dry_run=dry_run, **common)
 
@@ -1571,10 +1573,13 @@ def format_prune(outcome: PruneOutcome) -> str:
     if not outcome.ok:
         return f"🔴 чистка не выполнена\n   {outcome.reason}"
     lines = [f"  порог истории ......... {outcome.min_bars_used} баров "
-             f"(у самой полной бумаги базы — {outcome.busiest_bars})",
-             f"  под нож ............... {len(outcome.removed)} бумаг, "
-             f"{outcome.bars_removed} баров",
-             f"  остаётся .............. {outcome.kept} бумаг"]
+             f"(у самой полной бумаги рынка — {outcome.busiest_bars})"]
+    if len(outcome.thresholds) > 1:
+        lines.append("  по рынкам ............. " + " · ".join(
+            f"{m} {lo}/{top}" for m, (lo, top) in sorted(outcome.thresholds.items())))
+    lines += [f"  под нож ............... {len(outcome.removed)} бумаг, "
+              f"{outcome.bars_removed} баров",
+              f"  остаётся .............. {outcome.kept} бумаг"]
     lines += [f"    − {s}" for s in outcome.removed[:15]]
     if len(outcome.removed) > 15:
         lines.append(f"    … и ещё {len(outcome.removed) - 15}")

@@ -255,7 +255,10 @@ def cmd_prune(args) -> int:
                                        keep=keep, dry_run=args.dry_run)
     conn.close()
     print(f"  порог истории ......... {report.min_bars_used} баров "
-          f"(у самой полной бумаги базы — {report.busiest_bars})")
+          f"(у самой полной бумаги рынка — {report.busiest_bars})")
+    if len(report.thresholds) > 1:
+        print("  по рынкам ............. " + " · ".join(
+            f"{m} {lo}/{top}" for m, (lo, top) in sorted(report.thresholds.items())))
     print(f"  под нож ............... {len(report.removed)} бумаг, "
           f"{report.bars_removed} баров")
     print(f"  остаётся .............. {report.kept} бумаг")
