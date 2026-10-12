@@ -225,6 +225,11 @@ _ANOMALY_LOG_RETURN = 0.4          # |log-доходность| > 0.4 ≈ ±49%
 _ANOMALY_SHARE = 0.001             # >0.1% дней
 _STALE_TRADING_DAYS = 5
 _GAP_TRADING_DAYS = 10
+#: B-7 (DQ-8): одиночный выброс — скачок от ≈ ±16% с возвратом на следующий день.
+_SPIKE_LOG_RETURN = 0.15
+#: «Вернулся»: остаток после двух дней — не больше четверти самого скачка.
+_SPIKE_REVERT_SHARE = 0.25
+_SPIKE_SHOWN = 3
 
 
 def _b_index_sane(series: pd.Series, ticker: str, **_):
@@ -299,6 +304,39 @@ def _b_anomalies(series: pd.Series, ticker: str, **_):
     return None
 
 
+def _b_spike_reversal(series: pd.Series, ticker: str, **_):
+    """B-7 (DQ-8): одиночный битый тик — скачок, который на следующий день вернулся.
+
+    B-6 его не видит по построению: один такой день из ≈ 1 250 — это 0.08%, ниже
+    порога доли 0.1%, а скачок на 30–40% ниже порога величины ±49%. При этом он
+    раздувает σ и корреляции: живой отчёт сайта показал σ₁₂ ≈ 43% при
+    доходности −0.2% (план миграции OMBRI §1.1). Признак — форма, а не величина:
+    цена ушла и на следующий день вернулась туда, откуда ушла.
+
+    Проверка называет ДАТУ и цены, вердикта не выносит: реальный день отчётности
+    тоже бывает «туда и обратно».
+    """
+    vals = series.to_numpy(dtype=float)
+    if len(vals) < 3 or np.any(vals <= 0):
+        return None
+    lr = np.diff(np.log(vals))
+    jump, back = lr[:-1], lr[1:]
+    hits = np.flatnonzero((np.abs(jump) >= _SPIKE_LOG_RETURN)
+                          & (np.sign(jump) == -np.sign(back))
+                          & (np.abs(jump + back) <= _SPIKE_REVERT_SHARE * np.abs(jump)))
+    if not len(hits):
+        return None
+    shown = []
+    for i in hits[:_SPIKE_SHOWN]:
+        day = pd.Timestamp(series.index[i + 1]).date().isoformat()
+        before, spike, after = vals[i], vals[i + 1], vals[i + 2]
+        shown.append(f"{day}: {before:.4g} → {spike:.4g} → {after:.4g}")
+    tail = f" и ещё {len(hits) - _SPIKE_SHOWN}" if len(hits) > _SPIKE_SHOWN else ""
+    return (f"скачок с возвратом на следующий день — {'; '.join(shown)}{tail}. "
+            "Так выглядит битый тик, он завышает волатильность; если это реальное "
+            "движение (отчётность), всё в порядке")
+
+
 _SERIES_CHECKS: tuple[CheckSpec, ...] = (
     CheckSpec("B-1", _b_index_sane,   _uniform(CheckLevel.BLOCK)),
     CheckSpec("B-2", _b_values_finite, _uniform(CheckLevel.BLOCK)),
@@ -306,6 +344,7 @@ _SERIES_CHECKS: tuple[CheckSpec, ...] = (
     CheckSpec("B-4", _b_fresh,        _uniform(CheckLevel.DEGRADE)),
     CheckSpec("B-5", _b_gaps,         _uniform(CheckLevel.DEGRADE)),
     CheckSpec("B-6", _b_anomalies,    _uniform(CheckLevel.DEGRADE)),
+    CheckSpec("B-7", _b_spike_reversal, _uniform(CheckLevel.DEGRADE)),
 )
 
 
